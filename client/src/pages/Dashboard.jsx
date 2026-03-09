@@ -1,0 +1,417 @@
+import { useState, useEffect, useRef } from 'react';
+import { useTranslation } from 'react-i18next';
+import { useAuth } from '../context/AuthContext';
+import { db } from '../services/firebase';
+import { doc, getDoc, updateDoc, collection, getDocs } from 'firebase/firestore';
+import { Link, useNavigate } from 'react-router-dom';
+import { getExerciseVideo } from '../data/exerciseVideos';
+import YouTubeEmbed from '../components/YouTubeEmbed';
+
+const LOCATIONS = [
+  { key: 'home', icon: '\uD83C\uDFE0' },
+  { key: 'yard', icon: '\uD83C\uDF33' },
+  { key: 'field', icon: '\u26BD' },
+  { key: 'gym', icon: '\uD83C\uDFCB\uFE0F' }
+];
+
+const EQUIPMENT = [
+  { key: 'none', icon: '\uD83E\uDDBE' },
+  { key: 'dumbbells', icon: '\uD83C\uDFCB\uFE0F' },
+  { key: 'resistance_bands', icon: '\uD83E\uDD3C' }
+];
+
+export default function Dashboard() {
+  const { t } = useTranslation();
+  const { user, userProfile } = useAuth();
+  const navigate = useNavigate();
+
+  const [trainingPlan, setTrainingPlan] = useState(null);
+  const [generating, setGenerating] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [error, setError] = useState('');
+  const [activeWeek, setActiveWeek] = useState(0);
+  const [currentLocation, setCurrentLocation] = useState('field');
+  const [currentEquipment, setCurrentEquipment] = useState('none');
+  const [workoutCount, setWorkoutCount] = useState(0);
+  const generatingRef = useRef(false);
+
+  const name = userProfile?.name || '';
+  const sport = userProfile?.sport;
+  const goals = userProfile?.goals;
+  const setupComplete = sport && goals?.length > 0 && name;
+
+  useEffect(() => {
+    if (userProfile?.trainingLocation) setCurrentLocation(userProfile.trainingLocation);
+    if (userProfile?.equipment) setCurrentEquipment(userProfile.equipment);
+  }, [userProfile]);
+
+  // Load workout count
+  useEffect(() => {
+    async function loadCount() {
+      if (!user) return;
+      try {
+        const snap = await getDocs(collection(db, 'users', user.uid, 'workouts'));
+        setWorkoutCount(snap.size);
+      } catch {}
+    }
+    loadCount();
+  }, [user]);
+
+  // Load existing plan
+  useEffect(() => {
+    async function loadPlan() {
+      if (!user) return;
+      const snap = await getDoc(doc(db, 'users', user.uid));
+      if (!snap.exists()) return;
+      const data = snap.data();
+      if (data.trainingPlan?.weeks?.length > 0) {
+        setTrainingPlan(data.trainingPlan);
+      }
+      if (data.currentLocation) setCurrentLocation(data.currentLocation);
+    }
+    loadPlan();
+  }, [user]);
+
+  // Auto-generate only once when setup completes and no plan exists
+  useEffect(() => {
+    if (setupComplete && !trainingPlan && !generatingRef.current) {
+      generatePlan();
+    }
+  }, [setupComplete]); // intentionally only depend on setupComplete
+
+  function getPayload(loc) {
+    return {
+      profile: {
+        name: userProfile.name,
+        age: userProfile.age,
+        gender: userProfile.gender,
+        height: userProfile.height,
+        weight: userProfile.weight,
+        disability: userProfile.disability,
+        skillLevel: userProfile.skillLevel || 'beginner',
+        mobilityAid: userProfile.mobilityAid || 'none'
+      },
+      sport: userProfile.sport,
+      goals: userProfile.goals,
+      daysPerWeek: userProfile.trainingDays || 3,
+      location: loc || currentLocation,
+      equipment: currentEquipment
+    };
+  }
+
+  async function fetchWeek(payload, weekNumber) {
+    const res = await fetch('/api/coach/training-week', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ...payload, weekNumber })
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.error || `Week ${weekNumber} failed`);
+    }
+    return res.json();
+  }
+
+  async function fetchTips(payload) {
+    const res = await fetch('/api/coach/training-tips', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+    if (!res.ok) return { generalTips: [], safetyNotes: [] };
+    return res.json();
+  }
+
+  async function generatePlan(locationOverride) {
+    if (!userProfile || generatingRef.current) return;
+    generatingRef.current = true;
+    setGenerating(true);
+    setError('');
+    const loc = locationOverride || currentLocation;
+    const payload = getPayload(loc);
+
+    try {
+      // Step 1: Generate Week 1 fast
+      const week1 = await fetchWeek(payload, 1);
+      const plan = { weeks: [week1], generalTips: [], safetyNotes: [] };
+      setTrainingPlan(plan);
+      setActiveWeek(0);
+      setGenerating(false);
+
+      // Save Week 1 immediately so user can start training
+      await updateDoc(doc(db, 'users', user.uid), {
+        trainingPlan: plan,
+        planCreatedAt: new Date().toISOString()
+      });
+
+      // Step 2: Load weeks 2-4 + tips in background
+      setLoadingMore(true);
+      for (let w = 2; w <= 4; w++) {
+        try {
+          const week = await fetchWeek(payload, w);
+          plan.weeks.push(week);
+          setTrainingPlan({ ...plan });
+          await updateDoc(doc(db, 'users', user.uid), { trainingPlan: { ...plan } });
+        } catch (err) {
+          console.error(`Week ${w} failed:`, err.message);
+          // Continue with remaining weeks
+        }
+      }
+
+      try {
+        const tips = await fetchTips(payload);
+        plan.generalTips = tips.generalTips || [];
+        plan.safetyNotes = tips.safetyNotes || [];
+        setTrainingPlan({ ...plan });
+        await updateDoc(doc(db, 'users', user.uid), { trainingPlan: { ...plan } });
+      } catch {}
+
+      setLoadingMore(false);
+    } catch (err) {
+      console.error(err);
+      setError(t('dashboard.planError'));
+      setGenerating(false);
+    }
+    generatingRef.current = false;
+  }
+
+  async function handleLocationChange(loc) {
+    if (loc === currentLocation || generatingRef.current) return;
+    setCurrentLocation(loc);
+    await updateDoc(doc(db, 'users', user.uid), { currentLocation: loc });
+    setTrainingPlan(null);
+    generatePlan(loc);
+  }
+
+  async function handleEquipmentChange(eq) {
+    if (eq === currentEquipment || generatingRef.current) return;
+    setCurrentEquipment(eq);
+    await updateDoc(doc(db, 'users', user.uid), { equipment: eq });
+    setTrainingPlan(null);
+    generatePlan();
+  }
+
+  const weeks = trainingPlan?.weeks || [];
+  const currentWeek = weeks[activeWeek];
+
+  return (
+    <div className="max-w-2xl mx-auto space-y-6">
+      <div className="flex items-center justify-between">
+        <h1 className="text-2xl font-bold text-gray-800">
+          {t('dashboard.welcome')}, {name}!
+        </h1>
+        {setupComplete && (
+          <Link to="/profile?edit=1" className="text-sm text-gray-500 hover:text-blue-600 transition">
+            {t('dashboard.editProfile')}
+          </Link>
+        )}
+      </div>
+
+      {!setupComplete && (
+        <div className="bg-yellow-50 border border-yellow-200 rounded-xl p-5 space-y-3">
+          <h2 className="font-semibold text-yellow-800">Setup</h2>
+          {!userProfile?.name && (
+            <Link to="/profile" className="block text-blue-600 hover:underline">1. {t('profile.title')}</Link>
+          )}
+          {!sport && (
+            <Link to="/sport-selection" className="block text-blue-600 hover:underline">2. {t('sport.title')}</Link>
+          )}
+          {!goals?.length && (
+            <Link to="/goals" className="block text-blue-600 hover:underline">3. {t('goals.title')}</Link>
+          )}
+        </div>
+      )}
+
+      {/* Location toggle */}
+      {setupComplete && (
+        <div className="bg-white rounded-xl shadow p-4">
+          <div className="flex items-center justify-between mb-2">
+            <h3 className="text-sm font-semibold text-gray-700">{t('dashboard.currentLocation')}</h3>
+            <span className="text-xs text-gray-400">{t('dashboard.changeLocationHint')}</span>
+          </div>
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+            {LOCATIONS.map((loc) => (
+              <button
+                key={loc.key}
+                onClick={() => handleLocationChange(loc.key)}
+                disabled={generating}
+                className={`py-3 rounded-lg text-center transition border-2 ${
+                  currentLocation === loc.key
+                    ? 'border-blue-500 bg-blue-50 shadow-sm'
+                    : 'border-gray-200 bg-gray-50 hover:border-gray-300'
+                } disabled:opacity-50`}
+              >
+                <div className="text-xl">{loc.icon}</div>
+                <div className="text-xs font-medium mt-1 text-gray-700">
+                  {t(`dashboard.location${loc.key.charAt(0).toUpperCase() + loc.key.slice(1)}`)}
+                </div>
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Equipment toggle */}
+      {setupComplete && (
+        <div className="bg-white rounded-xl shadow p-4">
+          <div className="flex items-center justify-between mb-2">
+            <h3 className="text-sm font-semibold text-gray-700">{t('dashboard.currentEquipment')}</h3>
+            <span className="text-xs text-gray-400">{t('dashboard.changeEquipmentHint')}</span>
+          </div>
+          <div className="grid grid-cols-3 gap-2">
+            {EQUIPMENT.map((eq) => (
+              <button
+                key={eq.key}
+                onClick={() => handleEquipmentChange(eq.key)}
+                disabled={generating}
+                className={`py-3 rounded-lg text-center transition border-2 ${
+                  currentEquipment === eq.key
+                    ? 'border-green-500 bg-green-50 shadow-sm'
+                    : 'border-gray-200 bg-gray-50 hover:border-gray-300'
+                } disabled:opacity-50`}
+              >
+                <div className="text-xl">{eq.icon}</div>
+                <div className="text-xs font-medium mt-1 text-gray-700">
+                  {t(`dashboard.equipment${eq.key === 'none' ? 'None' : eq.key === 'dumbbells' ? 'Dumbbells' : 'Bands'}`)}
+                </div>
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {generating && (
+        <div className="bg-blue-50 border border-blue-200 rounded-xl p-6 text-center space-y-3">
+          <div className="animate-spin inline-block w-10 h-10 border-4 border-blue-500 border-t-transparent rounded-full"></div>
+          <p className="text-blue-700 font-medium">{t('dashboard.generating')}</p>
+        </div>
+      )}
+
+      {error && (
+        <div className="bg-red-50 border border-red-200 rounded-xl p-4 text-red-600 text-sm">
+          {error}
+          <button onClick={() => generatePlan()} className="block mt-2 text-blue-600 hover:underline font-medium">
+            {t('dashboard.retry')}
+          </button>
+        </div>
+      )}
+
+      {trainingPlan && !generating && (
+        <div className="space-y-4">
+          <div className="flex items-center justify-between">
+            <h2 className="text-xl font-semibold text-gray-800">{t('dashboard.yourPlan')}</h2>
+            <button onClick={() => { setTrainingPlan(null); generatePlan(); }} className="text-sm text-blue-600 hover:underline">
+              {t('dashboard.regenerate')}
+            </button>
+          </div>
+
+          {/* Week tabs */}
+          {weeks.length > 0 && (
+            <div className="flex gap-2 overflow-x-auto pb-2">
+              {weeks.map((week, i) => (
+                <button
+                  key={i}
+                  onClick={() => setActiveWeek(i)}
+                  className={`px-4 py-2 rounded-lg text-sm font-medium whitespace-nowrap transition ${
+                    activeWeek === i
+                      ? 'bg-blue-600 text-white shadow'
+                      : 'bg-white text-gray-600 border border-gray-200 hover:border-blue-300'
+                  }`}
+                >
+                  {t('dashboard.week')} {week.weekNumber}
+                </button>
+              ))}
+              {loadingMore && (
+                <div className="px-4 py-2 text-gray-400 text-sm flex items-center gap-2">
+                  <div className="animate-spin w-4 h-4 border-2 border-gray-300 border-t-blue-500 rounded-full"></div>
+                  {t('app.loading')}
+                </div>
+              )}
+            </div>
+          )}
+
+          {currentWeek && (
+            <div className="bg-purple-50 border border-purple-200 rounded-xl p-4">
+              <div className="font-bold text-purple-800">
+                {t('dashboard.week')} {currentWeek.weekNumber}: {currentWeek.theme}
+              </div>
+            </div>
+          )}
+
+          {currentWeek?.days?.map((day, i) => (
+            <div key={i} className="bg-white rounded-xl shadow p-3 sm:p-5 space-y-3">
+              <div className="flex items-center justify-between">
+                <h3 className="font-bold text-gray-800">{day.day}</h3>
+                <span className="text-sm text-gray-500">{day.durationMinutes} {t('dashboard.minutes')}</span>
+              </div>
+              <p className="text-sm text-purple-600 font-medium">{day.focus}</p>
+
+              {day.warmup && (
+                <div className="bg-orange-50 rounded-lg p-3 text-sm">
+                  <span className="font-medium text-orange-700">{t('dashboard.warmup')}:</span> {day.warmup}
+                </div>
+              )}
+
+              <div className="space-y-2">
+                {day.exercises?.map((ex, j) => (
+                  <div key={j} className="border border-gray-100 rounded-lg p-3">
+                    <div className="font-medium text-gray-800">{ex.name}</div>
+                    <p className="text-sm text-gray-500">{ex.description}</p>
+                    <div className="flex gap-4 mt-1 text-xs text-gray-400">
+                      {ex.sets && <span>{ex.sets} {t('dashboard.sets')}</span>}
+                      {ex.reps && <span>{ex.reps} {t('dashboard.reps')}</span>}
+                      {ex.restSeconds && <span>{ex.restSeconds}{t('dashboard.secRest')}</span>}
+                    </div>
+                    {ex.tips && <p className="text-xs text-blue-500 mt-1">{ex.tips}</p>}
+                    {(() => { const v = getExerciseVideo(ex.name); return v ? <div className="mt-2"><YouTubeEmbed videoId={v.videoId} start={v.start} end={v.end} size="sm" /></div> : null; })()}
+                  </div>
+                ))}
+              </div>
+
+              {day.cooldown && (
+                <div className="bg-blue-50 rounded-lg p-3 text-sm">
+                  <span className="font-medium text-blue-700">{t('dashboard.cooldown')}:</span> {day.cooldown}
+                </div>
+              )}
+
+              <button
+                onClick={() => navigate(`/training?week=${activeWeek}&day=${i}`)}
+                className="w-full py-3 min-h-[48px] bg-gradient-to-r from-green-500 to-emerald-600 text-white rounded-lg font-medium hover:opacity-90 transition"
+              >
+                {t('dashboard.startTraining')}
+              </button>
+            </div>
+          ))}
+
+          {trainingPlan.safetyNotes?.length > 0 && (
+            <div className="bg-red-50 border border-red-200 rounded-xl p-5">
+              <h3 className="font-semibold text-red-800 mb-2">{t('dashboard.safety')}</h3>
+              <ul className="list-disc list-inside space-y-1 text-sm text-red-700">
+                {trainingPlan.safetyNotes.map((note, i) => (
+                  <li key={i}>{note}</li>
+                ))}
+              </ul>
+            </div>
+          )}
+
+          {trainingPlan.generalTips?.length > 0 && (
+            <div className="bg-green-50 border border-green-200 rounded-xl p-5">
+              <h3 className="font-semibold text-green-800 mb-2">{t('dashboard.tips')}</h3>
+              <ul className="list-disc list-inside space-y-1 text-sm text-green-700">
+                {trainingPlan.generalTips.map((tip, i) => (
+                  <li key={i}>{tip}</li>
+                ))}
+              </ul>
+            </div>
+          )}
+        </div>
+      )}
+
+      <Link to="/stats" className="block bg-white rounded-xl shadow p-6 hover:shadow-md transition">
+        <h2 className="font-semibold text-gray-800 mb-3">{t('dashboard.stats')}</h2>
+        <div className="text-3xl font-bold text-blue-600">{workoutCount}</div>
+        <div className="text-gray-500 text-sm">{t('dashboard.trainingsCompleted')}</div>
+      </Link>
+    </div>
+  );
+}

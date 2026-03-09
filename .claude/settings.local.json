@@ -1,0 +1,27 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npm create:*)",
+      "Bash(npm install:*)",
+      "Bash(npm init:*)",
+      "Bash(npm run build:*)",
+      "Bash(node -e:*)",
+      "Bash(npm run dev:*)",
+      "Bash(curl:*)",
+      "Bash(test:*)",
+      "Bash(node:*)",
+      "Bash(netstat:*)",
+      "Bash(findstr:*)",
+      "Bash(taskkill:*)",
+      "Bash(timeout:*)",
+      "Bash(powershell -Command:*)",
+      "Bash(npx vite build)",
+      "Bash(npx vite build:*)",
+      "Bash(dir:*)",
+      "WebSearch",
+      "Bash(tasklist:*)",
+      "WebFetch(domain:www.youtube.com)",
+      "WebFetch(domain:www.muscleandstrength.com)"
+    ]
+  }
+}
