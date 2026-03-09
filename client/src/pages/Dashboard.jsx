@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next';
 import { useAuth } from '../context/AuthContext';
 import { db } from '../services/firebase';
 import { doc, getDoc, updateDoc, collection, getDocs } from 'firebase/firestore';
+import { apiUrl } from '../utils/api';
 import { Link, useNavigate } from 'react-router-dom';
 import { getExerciseVideo } from '../data/exerciseVideos';
 import YouTubeEmbed from '../components/YouTubeEmbed';
@@ -100,7 +101,7 @@ export default function Dashboard() {
   }
 
   async function fetchWeek(payload, weekNumber) {
-    const res = await fetch('/api/coach/training-week', {
+    const res = await fetch(apiUrl('/api/coach/training-week'), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ ...payload, weekNumber })
@@ -113,7 +114,7 @@ export default function Dashboard() {
   }
 
   async function fetchTips(payload) {
-    const res = await fetch('/api/coach/training-tips', {
+    const res = await fetch(apiUrl('/api/coach/training-tips'), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload)

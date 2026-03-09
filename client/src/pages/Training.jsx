@@ -12,6 +12,7 @@ import { estimateCalories } from '../utils/calorieEstimator';
 import { db } from '../services/firebase';
 import { doc, getDoc, addDoc, updateDoc, collection, Timestamp } from 'firebase/firestore';
 import { useNavigate, useSearchParams } from 'react-router-dom';
+import { apiUrl } from '../utils/api';
 
 const PHASE = {
   IDLE: 'idle',
@@ -748,7 +749,7 @@ export default function Training() {
 
   async function fetchAISummary(docId, sessionData) {
     try {
-      const resp = await fetch('/api/coach/workout-summary', {
+      const resp = await fetch(apiUrl('/api/coach/workout-summary'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
