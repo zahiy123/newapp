@@ -185,9 +185,11 @@ function buildWeekPrompt({ profile, sport, goals, daysPerWeek, location, weekNum
   const eq = equipment || 'none';
 
   const equipmentRules = {
-    none: `Strength exercises MUST use these EXACT Hebrew names (pick from this list):
+    none: `BODYWEIGHT ONLY — NO WEIGHTS, NO DUMBBELLS, NO BARBELLS, NO MACHINES, NO RESISTANCE BANDS.
+The athlete has ZERO equipment. Every exercise must use bodyweight only.
+Strength exercises MUST use these EXACT Hebrew names (pick from this list):
 שכיבות סמיכה, סקוואט, פלאנק, לאנג'ים, דיפס, כפיפות מרפק, גשר ישבן, כפיפות בטן, מטפס הרים, ישיבה על הקיר, פלאנק צידי.
-No equipment needed - bodyweight only.`,
+NEVER suggest exercises that require any equipment when equipment is "none".`,
     dumbbells: `Strength exercises MUST use these EXACT Hebrew names (pick from this list):
 שכיבות סמיכה, סקוואט, פלאנק, לאנג'ים, דיפס, כפיפות מרפק, גשר ישבן, כפיפות בטן, מטפס הרים, ישיבה על הקיר, פלאנק צידי,
 כתפיים עם משקולות, גובלט סקוואט, הרמה צידית, משיכת משקולת, הרחבת מרפק.
@@ -258,6 +260,7 @@ PLAYER: ${profile.name}, Age ${profile.age}, ${profile.gender}, ${profile.height
 Disability: ${profile.disability}. ${aidInfo}
 Level: ${skillLevel} — ${levelDirective}
 Sport: ${sport}. Goals: ${topGoals}. Days/week: ${daysPerWeek}.
+Equipment available: ${eq === 'none' ? 'NONE — bodyweight only, absolutely no weights or equipment exercises' : eq === 'dumbbells' ? 'Dumbbells' : 'Resistance bands'}.
 
 ${locationRules}
 

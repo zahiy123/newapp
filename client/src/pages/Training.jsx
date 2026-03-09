@@ -6,8 +6,7 @@ import { usePose } from '../hooks/usePose';
 import { useSpeech } from '../hooks/useSpeech';
 import { useObjectDetection } from '../hooks/useObjectDetection';
 import { getAnalyzer, getLocationProps, getWarmUpExercises, getDisabilityContext } from '../utils/exerciseAnalysis';
-import { getExerciseVideo } from '../data/exerciseVideos';
-import YouTubeEmbed from '../components/YouTubeEmbed';
+
 import { estimateCalories } from '../utils/calorieEstimator';
 import { db } from '../services/firebase';
 import { doc, getDoc, addDoc, updateDoc, collection, Timestamp } from 'firebase/firestore';
@@ -923,7 +922,6 @@ export default function Training() {
               <div className="text-3xl">&#127897;</div>
               <h3 className="text-lg font-bold text-gray-800">{currentExercise?.name}</h3>
               <p className="text-sm text-gray-600">{currentExercise?.description}</p>
-              {(() => { const v = getExerciseVideo(currentExercise?.name); return v ? <YouTubeEmbed videoId={v.videoId} start={v.start} end={v.end} size="lg" /> : null; })()}
               <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-3 text-sm text-yellow-800">
                 <span className="font-bold">{LOCATION_ICONS[currentLocation]} {isHe ? 'הכנה' : 'Setup'}:</span>{' '}
                 {locationProps.setup}
@@ -1141,7 +1139,6 @@ export default function Training() {
               </div>
               <h2 className="text-lg font-bold text-gray-800">{currentExercise.name}</h2>
               <p className="text-sm text-gray-500">{currentExercise.description}</p>
-              {(() => { const v = getExerciseVideo(currentExercise?.name); return v ? <YouTubeEmbed videoId={v.videoId} start={v.start} end={v.end} size="md" /> : null; })()}
               <div className="text-xs text-yellow-700 bg-yellow-50 rounded-lg px-3 py-2">
                 {LOCATION_ICONS[currentLocation]} {locationProps.setup}
               </div>

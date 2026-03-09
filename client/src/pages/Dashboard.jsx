@@ -5,8 +5,7 @@ import { db } from '../services/firebase';
 import { doc, getDoc, updateDoc, collection, getDocs } from 'firebase/firestore';
 import { apiUrl } from '../utils/api';
 import { Link, useNavigate } from 'react-router-dom';
-import { getExerciseVideo } from '../data/exerciseVideos';
-import YouTubeEmbed from '../components/YouTubeEmbed';
+
 
 const LOCATIONS = [
   { key: 'home', icon: '\uD83C\uDFE0' },
@@ -364,7 +363,6 @@ export default function Dashboard() {
                       {ex.restSeconds && <span>{ex.restSeconds}{t('dashboard.secRest')}</span>}
                     </div>
                     {ex.tips && <p className="text-xs text-blue-500 mt-1">{ex.tips}</p>}
-                    {(() => { const v = getExerciseVideo(ex.name); return v ? <div className="mt-2"><YouTubeEmbed videoId={v.videoId} start={v.start} end={v.end} size="sm" /></div> : null; })()}
                   </div>
                 ))}
               </div>
