@@ -73,8 +73,10 @@ export default function Dashboard() {
   }, [user]);
 
   // Auto-generate only once when setup completes and no plan exists
+  const autoGenTriggeredRef = useRef(false);
   useEffect(() => {
-    if (setupComplete && !trainingPlan && !generatingRef.current) {
+    if (setupComplete && !trainingPlan && !generatingRef.current && !autoGenTriggeredRef.current) {
+      autoGenTriggeredRef.current = true;
       generatePlan();
     }
   }, [setupComplete]); // intentionally only depend on setupComplete
@@ -99,17 +101,24 @@ export default function Dashboard() {
     };
   }
 
-  async function fetchWeek(payload, weekNumber) {
-    const res = await fetch(apiUrl('/api/coach/training-week'), {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ ...payload, weekNumber })
-    });
-    if (!res.ok) {
-      const err = await res.json().catch(() => ({}));
-      throw new Error(err.error || `Week ${weekNumber} failed`);
+  async function fetchWeek(payload, weekNumber, retries = 2) {
+    for (let attempt = 0; attempt <= retries; attempt++) {
+      const res = await fetch(apiUrl('/api/coach/training-week'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ...payload, weekNumber })
+      });
+      if (res.status === 429 && attempt < retries) {
+        // Rate limited or duplicate — wait and retry
+        await new Promise(r => setTimeout(r, (attempt + 1) * 3000));
+        continue;
+      }
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.error || `Week ${weekNumber} failed`);
+      }
+      return res.json();
     }
-    return res.json();
   }
 
   async function fetchTips(payload) {
