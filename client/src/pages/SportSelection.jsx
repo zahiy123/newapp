@@ -31,7 +31,14 @@ export default function SportSelection() {
 
   async function handleContinue() {
     if (!selected) return;
-    await updateDoc(doc(db, 'users', user.uid), { sport: selected });
+    // Clear old training plan when sport changes so Dashboard regenerates
+    const profileDoc = await getDoc(doc(db, 'users', user.uid));
+    const prevSport = profileDoc.exists() ? profileDoc.data().sport : null;
+    const updates = { sport: selected };
+    if (prevSport && prevSport !== selected) {
+      updates.trainingPlan = null;
+    }
+    await updateDoc(doc(db, 'users', user.uid), updates);
     await refreshProfile();
     navigate('/goals');
   }

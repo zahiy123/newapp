@@ -57,7 +57,7 @@ export default function Dashboard() {
     loadCount();
   }, [user]);
 
-  // Load existing plan
+  // Load existing plan — only if it matches current sport
   useEffect(() => {
     async function loadPlan() {
       if (!user) return;
@@ -65,7 +65,12 @@ export default function Dashboard() {
       if (!snap.exists()) return;
       const data = snap.data();
       if (data.trainingPlan?.weeks?.length > 0) {
-        setTrainingPlan(data.trainingPlan);
+        // If plan was generated for a different sport, discard it
+        if (data.trainingPlan.sport && data.trainingPlan.sport !== data.sport) {
+          await updateDoc(doc(db, 'users', user.uid), { trainingPlan: null });
+        } else {
+          setTrainingPlan(data.trainingPlan);
+        }
       }
       if (data.currentLocation) setCurrentLocation(data.currentLocation);
     }
@@ -142,7 +147,7 @@ export default function Dashboard() {
     try {
       // Step 1: Generate Week 1 fast
       const week1 = await fetchWeek(payload, 1);
-      const plan = { weeks: [week1], generalTips: [], safetyNotes: [] };
+      const plan = { weeks: [week1], generalTips: [], safetyNotes: [], sport: userProfile.sport };
       setTrainingPlan(plan);
       setActiveWeek(0);
       setGenerating(false);
