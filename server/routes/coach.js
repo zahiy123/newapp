@@ -1,11 +1,31 @@
 import { Router } from 'express';
-import { generateWeek, generateTips, analyzeMovement, generateWorkoutSummary, getLocalFallbackWeek } from '../services/claude.js';
+import { generateWeek, generateTips, analyzeMovement, generateWorkoutSummary, getLocalFallbackWeek, generateRealtimeFeedback, adaptWorkout } from '../services/claude.js';
 import { analyzeGameFrames } from '../services/gameAnalysis.js';
+import { analyzeEnvironment } from '../services/environmentAnalysis.js';
 
 const router = Router();
 
 // In-flight request tracking to prevent duplicates
 const inFlight = new Set();
+
+// Rate limiting for real-time endpoints
+const rateLimits = new Map();
+
+function shouldThrottle(key, minIntervalMs) {
+  const now = Date.now();
+  const last = rateLimits.get(key);
+  if (last && now - last < minIntervalMs) return true;
+  rateLimits.set(key, now);
+  return false;
+}
+
+// Clean up stale rate limit entries every 5 minutes
+setInterval(() => {
+  const now = Date.now();
+  for (const [key, time] of rateLimits) {
+    if (now - time > 300000) rateLimits.delete(key);
+  }
+}, 300000);
 
 // Generate a single week
 router.post('/training-week', async (req, res) => {
@@ -86,6 +106,68 @@ router.post('/analyze-game-frames', async (req, res) => {
   } catch (error) {
     console.error('Game analysis error:', error.message);
     res.status(500).json({ error: error.message });
+  }
+});
+
+// === REAL-TIME AI COACHING ===
+
+// Rate-limited: 1 request per 15s per player+exercise
+const realtimeInFlight = new Set();
+
+router.post('/realtime-feedback', async (req, res) => {
+  const { playerName, exercise } = req.body;
+  const key = `rt-${playerName}-${exercise}`;
+
+  if (shouldThrottle(key, 15000)) {
+    return res.json({ feedback: '', isUrgent: false });
+  }
+
+  if (realtimeInFlight.has(key)) {
+    return res.json({ feedback: '', isUrgent: false });
+  }
+  realtimeInFlight.add(key);
+
+  try {
+    const result = await generateRealtimeFeedback(req.body);
+    res.json(result);
+  } catch (error) {
+    console.error('Realtime feedback error:', error.message);
+    res.json({ feedback: '', isUrgent: false });
+  } finally {
+    realtimeInFlight.delete(key);
+  }
+});
+
+// === ENVIRONMENT SCANNING ===
+
+router.post('/analyze-environment', async (req, res) => {
+  try {
+    const { frame, cocoDetections, profile, location } = req.body;
+    const analysis = await analyzeEnvironment({ frame, cocoDetections, profile, location });
+    res.json(analysis);
+  } catch (error) {
+    console.error('Environment analysis error:', error.message);
+    res.json({ hazards: [], equipment: [], assistiveDevices: [], overallSafety: 'safe', adaptations: [] });
+  }
+});
+
+// === DYNAMIC WORKOUT ADAPTATION ===
+
+// Rate-limited: 1 request per 2 minutes per user
+router.post('/adapt-workout', async (req, res) => {
+  const userName = req.body.profile?.name || 'unknown';
+  const key = `adapt-${userName}`;
+
+  if (shouldThrottle(key, 120000)) {
+    return res.json({ adapted: false, plan: req.body.remainingPlan, reasoning: 'Rate limited' });
+  }
+
+  try {
+    const result = await adaptWorkout(req.body);
+    res.json(result);
+  } catch (error) {
+    console.error('Workout adaptation error:', error.message);
+    res.json({ adapted: false, plan: req.body.remainingPlan, reasoning: 'Error' });
   }
 });
 

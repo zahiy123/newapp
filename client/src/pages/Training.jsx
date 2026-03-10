@@ -4,7 +4,9 @@ import { useAuth } from '../context/AuthContext';
 import { useCamera } from '../hooks/useCamera';
 import { usePose } from '../hooks/usePose';
 import { useSpeech } from '../hooks/useSpeech';
-import { useObjectDetection } from '../hooks/useObjectDetection';
+import { useObjectDetection, classifyDetectedObjects } from '../hooks/useObjectDetection';
+import { useBallDetection } from '../hooks/useBallDetection';
+import { useAICoach } from '../hooks/useAICoach';
 import { getAnalyzer, getLocationProps, getWarmUpExercises, getDisabilityContext } from '../utils/exerciseAnalysis';
 
 import { estimateCalories } from '../utils/calorieEstimator';
@@ -15,6 +17,7 @@ import { apiUrl } from '../utils/api';
 
 const PHASE = {
   IDLE: 'idle',
+  ENVIRONMENT_SCAN: 'environment_scan',
   BRIEFING: 'briefing',
   CHECKING_EQUIPMENT: 'checking_equipment',
   WARM_UP: 'warm_up',
@@ -81,7 +84,8 @@ export default function Training() {
 
   const { videoRef, active: cameraActive, error: cameraError, start: startCamera, stop: stopCamera } = useCamera();
   const { ready: poseReady, landmarks, startLoop, stopLoop } = usePose(canvasRef);
-  const { ready: objReady, detectedObjects, startLoop: startObjLoop, stopLoop: stopObjLoop, hasEquipment } = useObjectDetection();
+  const { ready: objReady, detectedObjects, startLoop: startObjLoop, stopLoop: stopObjLoop, hasEquipment, scanEnvironment, captureFrame } = useObjectDetection();
+  const { ready: ballReady, getBallData, startLoop: startBallLoop, stopLoop: stopBallLoop } = useBallDetection(userProfile?.sport);
 
   // Equipment check state
   const [equipmentFound, setEquipmentFound] = useState(false);
@@ -95,8 +99,23 @@ export default function Training() {
     speakQuickReExplain, speakEquipmentFound,
     speakWarmUpIntro, speakWarmUpExercise, speakWarmUpNudge, speakWarmUpInactivityNudge, speakWarmUpReExplain,
     speakWarmUpCorrection, speakWarmUpComplete,
-    speakDisabilityTip, speakMindMuscleCue, stop: stopSpeech, isSpeaking
+    speakDisabilityTip, speakMindMuscleCue, speakAICoaching, speakEnvironmentScan,
+    stop: stopSpeech, isSpeaking
   } = useSpeech(lang);
+
+  // AI Coach hook — periodic Claude-powered feedback
+  const onAICoaching = useCallback((text, isUrgent) => {
+    speakAICoaching(text, userProfile?.age, isUrgent);
+  }, [speakAICoaching, userProfile?.age]);
+
+  const { startAICoaching, stopAICoaching, feedPoseData } = useAICoach({ onCoaching: onAICoaching });
+
+  // Environment scan state
+  const [environmentScan, setEnvironmentScan] = useState(null);
+  const environmentScannedRef = useRef(false);
+
+  // Workout adaptation
+  const lastAdaptationRef = useRef(0);
 
   const [exercises, setExercises] = useState([]);
   const [currentIdx, setCurrentIdx] = useState(0);
@@ -194,8 +213,8 @@ export default function Training() {
   // Set up analyzer when exercise changes
   useEffect(() => {
     if (currentExercise) {
-      const { analyze, type, cueKey } = getAnalyzer(currentExercise.name);
-      analyzerRef.current = { analyze, type, cueKey };
+      const { analyze, type, cueKey, ballAware } = getAnalyzer(currentExercise.name);
+      analyzerRef.current = { analyze, type, cueKey, ballAware };
       exerciseStateRef.current = {};
       setDisplayReps(0);
       setFeedback(null);
@@ -216,9 +235,11 @@ export default function Training() {
   useEffect(() => {
     if (phase !== PHASE.EXERCISING || !landmarks || !analyzerRef.current) return;
 
-    const { analyze } = analyzerRef.current;
+    const { analyze, ballAware } = analyzerRef.current;
     const prevState = exerciseStateRef.current;
-    const newState = analyze(landmarks, prevState);
+    // Pass ball data to ball-aware sport drill analyzers
+    const ballData = ballAware ? getBallData() : null;
+    const newState = analyze(landmarks, prevState, ballData);
     const posture = newState.posture;
     const isMoving = newState.moving;
     const firstRepStarted = newState.firstRepStarted || false;
@@ -332,6 +353,15 @@ export default function Training() {
       setDisplayReps(newState.reps);
     }
 
+    // Feed data to AI coach accumulator (O(1), no re-renders)
+    feedPoseData({
+      moving: isMoving,
+      headDown: newState.headDown,
+      feedback: newState.feedback,
+      formIssues: newState.formIssues,
+      ballDetected: ballData?.detected,
+    });
+
     exerciseStateRef.current = newState;
   }, [landmarks, phase]);
 
@@ -433,6 +463,117 @@ export default function Training() {
       clearInterval(timerRef.current);
     }
     return () => clearInterval(timerRef.current);
+  }, [phase]);
+
+  // Ball detection + AI coaching lifecycle
+  useEffect(() => {
+    if (phase === PHASE.EXERCISING) {
+      // Start ball detection for ball-aware sport drills
+      if (analyzerRef.current?.ballAware && ballReady && videoRef.current) {
+        startBallLoop(videoRef.current);
+      }
+      // Start AI coaching
+      const targetReps = parseInt(currentExercise?.reps) || 10;
+      startAICoaching({
+        exerciseName: currentExercise?.name || '',
+        sport: userProfile?.sport || 'fitness',
+        targetReps,
+        targetSets: totalSets,
+        currentSet,
+        age: userProfile?.age || 25,
+        disability: userProfile?.disability || 'none',
+        playerName,
+        skillLevel: userProfile?.skillLevel || 'intermediate',
+      });
+    } else {
+      stopBallLoop();
+      stopAICoaching();
+    }
+    return () => { stopBallLoop(); stopAICoaching(); };
+  }, [phase]);
+
+  // Environment scan effect
+  useEffect(() => {
+    if (phase !== PHASE.ENVIRONMENT_SCAN) return;
+
+    let cancelled = false;
+    let autoAdvanceTimer;
+
+    async function runScan() {
+      if (!videoRef.current || !objReady) {
+        // Skip scan if camera/detector not ready
+        setPhase(PHASE.BRIEFING);
+        speakBriefing(currentExercise?.name, currentExercise?.description, currentExercise?.tips, locationProps);
+        return;
+      }
+
+      // Collect detections for 3 seconds
+      const allDetections = [];
+      const scanStart = Date.now();
+
+      const collectLoop = setInterval(() => {
+        if (cancelled) { clearInterval(collectLoop); return; }
+        const objects = scanEnvironment(videoRef.current);
+        allDetections.push(...objects);
+
+        if (Date.now() - scanStart > 3000) {
+          clearInterval(collectLoop);
+          processResults();
+        }
+      }, 200);
+
+      async function processResults() {
+        if (cancelled) return;
+
+        // Deduplicate by label (keep highest confidence)
+        const seen = new Map();
+        for (const obj of allDetections) {
+          if (!seen.has(obj.label) || seen.get(obj.label).score < obj.score) {
+            seen.set(obj.label, obj);
+          }
+        }
+        const uniqueObjects = [...seen.values()];
+
+        // Capture camera frame for Claude Vision
+        const frame = captureFrame(videoRef.current);
+
+        // Send to server for Claude Vision analysis
+        try {
+          const resp = await fetch(apiUrl('/api/coach/analyze-environment'), {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              frame,
+              cocoDetections: uniqueObjects,
+              profile: { name: userProfile?.name, age: userProfile?.age, disability: userProfile?.disability, mobilityAid: userProfile?.mobilityAid, sport: userProfile?.sport },
+              location: currentLocation,
+            }),
+          });
+          if (resp.ok && !cancelled) {
+            const analysis = await resp.json();
+            setEnvironmentScan(analysis);
+            speakEnvironmentScan(analysis);
+          }
+        } catch (err) {
+          console.warn('[EnvScan] Failed:', err.message);
+        }
+
+        environmentScannedRef.current = true;
+
+        // Auto-advance to briefing after 4s
+        if (!cancelled) {
+          autoAdvanceTimer = setTimeout(() => {
+            if (!cancelled) {
+              setPhase(PHASE.BRIEFING);
+              speakBriefing(currentExercise?.name, currentExercise?.description, currentExercise?.tips, locationProps);
+            }
+          }, 4000);
+        }
+      }
+    }
+
+    runScan();
+    return () => { cancelled = true; clearTimeout(autoAdvanceTimer); };
   }, [phase]);
 
   // Equipment detection during CHECKING_EQUIPMENT phase
@@ -672,10 +813,10 @@ export default function Training() {
   }, [startCamera, startLoop, videoRef]);
 
   const handleStopCamera = useCallback(() => {
-    stopLoop(); stopObjLoop(); stopCamera(); stopSpeech();
+    stopLoop(); stopObjLoop(); stopBallLoop(); stopCamera(); stopSpeech(); stopAICoaching();
     clearInterval(warmUpTimerRef.current);
     setPhase(PHASE.IDLE);
-  }, [stopLoop, stopObjLoop, stopCamera, stopSpeech]);
+  }, [stopLoop, stopObjLoop, stopBallLoop, stopCamera, stopSpeech, stopAICoaching]);
 
   function resetAllTracking() {
     lastSpokenRef.current = '';
@@ -804,11 +945,18 @@ export default function Training() {
   }
 
   function handleStartBriefing() {
-    setPhase(PHASE.BRIEFING);
     exerciseStateRef.current = {}; setDisplayReps(0);
     setTimer(0);
     setFeedback(null);
     resetAllTracking();
+
+    // On first exercise, do environment scan before briefing
+    if (currentIdx === 0 && !environmentScannedRef.current && objReady) {
+      setPhase(PHASE.ENVIRONMENT_SCAN);
+      return;
+    }
+
+    setPhase(PHASE.BRIEFING);
     speakBriefing(currentExercise.name, currentExercise.description, currentExercise.tips, locationProps);
   }
 
@@ -882,13 +1030,52 @@ export default function Training() {
 
   function handlePauseExercise() { setPhase(PHASE.IDLE); }
 
-  function handleNextExercise() {
+  async function handleNextExercise() {
     // Record this exercise's results before moving on
     recordExerciseResult();
     stopSpeech(); setPhase(PHASE.IDLE); setTimer(0); setFeedback(null);
     exerciseStateRef.current = {}; setDisplayReps(0); setCurrentSet(1); setSetsPerformance([]); resetAllTracking();
-    if (currentIdx < exercises.length - 1) { setCurrentIdx(currentIdx + 1); speak(t('training.nextExercise')); }
-    else { setWorkoutDone(true); speak(t('training.workoutComplete')); saveSession('completed'); }
+
+    if (currentIdx < exercises.length - 1) {
+      // Try workout adaptation after 2+ exercises, max once per 2 min
+      const now = Date.now();
+      const completedCount = sessionDataRef.current.exerciseResults.length;
+      const shouldAdapt = completedCount >= 2
+        && (now - lastAdaptationRef.current) > 120000
+        && currentIdx < exercises.length - 2;
+
+      if (shouldAdapt) {
+        try {
+          const resp = await fetch(apiUrl('/api/coach/adapt-workout'), {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              profile: { name: userProfile?.name, age: userProfile?.age, disability: userProfile?.disability, sport: userProfile?.sport, skillLevel: userProfile?.skillLevel },
+              completedExercises: sessionDataRef.current.exerciseResults,
+              remainingPlan: exercises.slice(currentIdx + 1),
+              environmentContext: environmentScan,
+            }),
+          });
+          if (resp.ok) {
+            const result = await resp.json();
+            if (result.adapted && result.plan?.length > 0) {
+              const newExercises = [...exercises.slice(0, currentIdx + 1), ...result.plan];
+              setExercises(newExercises);
+              lastAdaptationRef.current = now;
+              if (result.reasoning) {
+                speakPriority(isHe ? `שיניתי את התוכנית: ${result.reasoning}` : `Plan adapted: ${result.reasoning}`);
+              }
+            }
+          }
+        } catch (err) {
+          console.warn('[Adaptation] Failed:', err.message);
+        }
+      }
+
+      setCurrentIdx(currentIdx + 1); speak(t('training.nextExercise'));
+    } else {
+      setWorkoutDone(true); speak(t('training.workoutComplete')); saveSession('completed');
+    }
   }
 
   function handlePrevExercise() {
@@ -976,6 +1163,64 @@ export default function Training() {
               <button onClick={handleStartAfterBriefing} className="w-full py-3 bg-gradient-to-r from-green-500 to-emerald-600 text-white rounded-lg font-bold text-lg hover:opacity-90 transition">
                 {t('training.briefingReady')}
               </button>
+            </div>
+          </div>
+        )}
+
+        {/* Environment scan overlay */}
+        {phase === PHASE.ENVIRONMENT_SCAN && (
+          <div className="absolute inset-0 bg-black/70 flex items-center justify-center p-6">
+            <div className="bg-white rounded-2xl p-6 max-w-md w-full text-center space-y-4" dir={isHe ? 'rtl' : 'ltr'}>
+              {!environmentScan ? (
+                <>
+                  <div className="text-5xl animate-pulse">{'\uD83D\uDD0D'}</div>
+                  <h3 className="text-lg font-bold text-gray-800">
+                    {isHe ? 'סורק את הסביבה...' : 'Scanning environment...'}
+                  </h3>
+                  <p className="text-sm text-gray-500">
+                    {isHe ? 'מחפש ציוד, מזהה סכנות ומתאים את התוכנית' : 'Looking for equipment, identifying hazards and adapting the plan'}
+                  </p>
+                  <div className="inline-block w-8 h-8 border-4 border-blue-500 border-t-transparent rounded-full animate-spin"></div>
+                  <button
+                    onClick={() => { environmentScannedRef.current = true; setPhase(PHASE.BRIEFING); speakBriefing(currentExercise?.name, currentExercise?.description, currentExercise?.tips, locationProps); }}
+                    className="text-xs text-gray-400 hover:text-gray-600 underline"
+                  >
+                    {isHe ? 'דלג' : 'Skip'}
+                  </button>
+                </>
+              ) : (
+                <>
+                  <div className="text-5xl">
+                    {environmentScan.overallSafety === 'safe' ? '\u2705' : environmentScan.overallSafety === 'caution' ? '\u26A0\uFE0F' : '\u274C'}
+                  </div>
+                  <h3 className="text-lg font-bold text-gray-800">
+                    {isHe ? 'סריקת סביבה הושלמה' : 'Environment scan complete'}
+                  </h3>
+
+                  {environmentScan.hazards?.length > 0 && (
+                    <div className="bg-red-50 border border-red-200 rounded-lg p-3 text-sm text-red-800">
+                      <div className="font-bold mb-1">{isHe ? 'אזהרות:' : 'Warnings:'}</div>
+                      {environmentScan.hazards.map((h, i) => <div key={i}>{'• '}{h.warning}</div>)}
+                    </div>
+                  )}
+
+                  {environmentScan.equipment?.length > 0 && (
+                    <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 text-sm text-blue-800">
+                      <div className="font-bold mb-1">{isHe ? 'ציוד זמין:' : 'Available equipment:'}</div>
+                      {environmentScan.equipment.map((eq, i) => <div key={i}>{'• '}{eq.suggestion}</div>)}
+                    </div>
+                  )}
+
+                  {environmentScan.assistiveDevices?.length > 0 && (
+                    <div className="bg-purple-50 border border-purple-200 rounded-lg p-3 text-sm text-purple-800">
+                      <div className="font-bold mb-1">{isHe ? 'עזרי נגישות:' : 'Assistive devices:'}</div>
+                      {environmentScan.assistiveDevices.map((d, i) => <div key={i}>{'• '}{d}</div>)}
+                    </div>
+                  )}
+
+                  <p className="text-xs text-gray-400">{isHe ? 'ממשיך לתדריך...' : 'Continuing to briefing...'}</p>
+                </>
+              )}
             </div>
           </div>
         )}

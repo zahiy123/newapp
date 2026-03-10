@@ -1,3 +1,8 @@
+import {
+  analyzeShootingForm, analyzeHandDribbling, analyzeStroke,
+  analyzeServe, analyzeFootwork, analyzeKickTechnique
+} from './sportAnalyzers';
+
 // Key landmark indices
 const LM = {
   NOSE: 0,
@@ -1905,6 +1910,13 @@ const ANALYZER_MAP = [
   { keywords: ['lunge', 'לאנג', 'מכרע'], analyze: analyzeLunges, type: 'reps', cueKey: 'lunge' },
   { keywords: ['shoulder press', 'כתפיים', 'לחיצת כתפ'], analyze: analyzeShoulderPress, type: 'reps', cueKey: 'shoulder' },
   { keywords: ['דריבל', 'dribbl', 'שליטה', 'כדור'], analyze: analyzeDribbling, type: 'form', cueKey: 'dribbling' },
+  // Sport-specific drill analyzers (basketball, tennis, football)
+  { keywords: ['זריקה', 'קליעה', 'shooting', 'free throw', 'זריקות חופשיות'], analyze: analyzeShootingForm, type: 'form', cueKey: 'shooting' },
+  { keywords: ['כדרור ביד', 'hand dribbl', 'כדרור כדורסל'], analyze: analyzeHandDribbling, type: 'form', cueKey: 'handDribble' },
+  { keywords: ['פורהנד', 'בקהנד', 'מכות', 'forehand', 'backhand', 'מכות לקיר', 'wall hit'], analyze: analyzeStroke, type: 'form', cueKey: 'stroke' },
+  { keywords: ['הגשה', 'serve', 'סרב'], analyze: analyzeServe, type: 'form', cueKey: 'serve' },
+  { keywords: ['עבודת רגליים', 'footwork', 'תנועת מגרש', 'רגליים מהירות'], analyze: analyzeFootwork, type: 'form', cueKey: 'footwork' },
+  { keywords: ['בעיטה', 'kick', 'בעיטות', 'shooting drill'], analyze: analyzeKickTechnique, type: 'form', cueKey: 'kick' },
 ];
 
 // Get the right analyzer based on exercise type
@@ -1912,8 +1924,9 @@ export function getAnalyzer(exerciseName) {
   const name = (exerciseName || '').toLowerCase();
   for (const entry of ANALYZER_MAP) {
     if (entry.keywords.some(kw => name.includes(kw))) {
-      return { analyze: entry.analyze, type: entry.type, cueKey: entry.cueKey };
+      const ballAware = entry.type === 'form'; // sport drills can use ball data
+      return { analyze: entry.analyze, type: entry.type, cueKey: entry.cueKey, ballAware };
     }
   }
-  return { analyze: analyzeGenericReps, type: 'reps', cueKey: 'default' };
+  return { analyze: analyzeGenericReps, type: 'reps', cueKey: 'default', ballAware: false };
 }

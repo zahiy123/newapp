@@ -711,28 +711,125 @@ export function getLocalFallbackWeek({ profile, sport, goals, daysPerWeek, locat
     ],
   };
 
-  // Select pools based on disability
+  // === SPORT-SPECIFIC DRILL POOLS (Basketball, Tennis) ===
+  const sportDrillsBasketball = {
+    home: [
+      { name: 'כדרור ביד', description: 'כדרור נמוך וגבוה במקום', sets: 3, reps: '20', restSeconds: 45, tips: 'שמור על ראש למעלה' },
+      { name: 'תרגול זריקה', description: 'תנועת זריקה לסל דמיוני', sets: 3, reps: '15', restSeconds: 60, tips: 'מרפק מתחת לכדור' },
+    ],
+    yard: [
+      { name: 'כדרור בין קונוסים', description: 'כדרור ביד בין מכשולים', sets: 3, reps: '10', restSeconds: 60, tips: 'החלף ידיים' },
+      { name: 'זריקות חופשיות', description: 'זריקות חופשיות לסל או למטרה', sets: 3, reps: '12', restSeconds: 60, tips: 'כופף ברכיים לפני הזריקה' },
+    ],
+    field: [
+      { name: 'כדרור מהיר', description: 'כדרור בריצה למרחקים ארוכים', sets: 3, reps: '8', restSeconds: 90, tips: 'ראש למעלה, שליטה בכדור' },
+      { name: 'זריקות ממרחקים שונים', description: 'זריקות מנקודות שונות במגרש', sets: 3, reps: '10', restSeconds: 60, tips: 'קשת גבוהה על הכדור' },
+    ],
+    gym: [
+      { name: 'כדרור + זריקות חופשיות', description: 'שילוב כדרור וזריקות', sets: 3, reps: '10', restSeconds: 60, tips: 'כדרור → עצירה → זריקה' },
+      { name: 'תרגול הנחתה', description: 'הנחתות מצד ימין ושמאל', sets: 3, reps: '10', restSeconds: 60, tips: 'שתי ידיים לסירוגין' },
+    ],
+  };
+
+  const sportDrillsTennis = {
+    home: [
+      { name: 'תנועות מחבט', description: 'תנועות פורהנד ובקהנד באוויר', sets: 3, reps: '15', restSeconds: 45, tips: 'סיבוב מלא של הגוף' },
+      { name: 'עבודת רגליים', description: 'צעדי הצלבה ותנועה צידית', sets: 3, reps: '20', restSeconds: 45, tips: 'הישאר על כפות הרגליים' },
+    ],
+    yard: [
+      { name: 'מכות לקיר', description: 'חזרות פורהנד ובקהנד לקיר', sets: 3, reps: '20', restSeconds: 60, tips: 'שמור על מרחק נכון מהקיר' },
+      { name: 'תנועת מגרש', description: 'ריצה לצדדים כמו במגרש', sets: 3, reps: '10', restSeconds: 60, tips: 'חזרה למרכז אחרי כל תנועה' },
+    ],
+    field: [
+      { name: 'פורהנד ובקהנד', description: 'תרגול מכות מקו הבסיס', sets: 3, reps: '15', restSeconds: 60, tips: 'סיום גבוה של המחבט' },
+      { name: 'תרגול הגשה', description: 'הגשות למטרות בתיבת ההגשה', sets: 3, reps: '10', restSeconds: 60, tips: 'זריקת כדור גבוהה ויציבה' },
+    ],
+    gym: [
+      { name: 'עבודת רגליים', description: 'תרגילי זריזות ותנועה צידית', sets: 3, reps: '15', restSeconds: 45, tips: 'צעדים קצרים ומהירים' },
+      { name: 'תנועות מחבט', description: 'תנועות מחבט עם גומייה להתנגדות', sets: 3, reps: '12', restSeconds: 60, tips: 'התנגדות מבוקרת' },
+    ],
+  };
+
+  const sportDrillsBasketballWheelchair = {
+    home: [
+      { name: 'כדרור מכיסא', description: 'כדרור נמוך וגבוה בישיבה', sets: 3, reps: '20', restSeconds: 45, tips: 'שמור על ראש למעלה' },
+      { name: 'מסירות מכיסא', description: 'מסירות חזה ובאונס מישיבה', sets: 3, reps: '15', restSeconds: 60, tips: 'סיבוב גוף עליון למסירה' },
+    ],
+    yard: [
+      { name: 'כדרור + נהיגת כיסא', description: 'כדרור תוך כדי נהיגה בכיסא', sets: 3, reps: '8', restSeconds: 90, tips: 'דחיפה אחת ואז כדרור' },
+      { name: 'זריקות מכיסא', description: 'זריקות לסל או למטרה מהכיסא', sets: 3, reps: '12', restSeconds: 60, tips: 'כוח מסיבוב הגוף' },
+    ],
+    field: [
+      { name: 'ספרינט כיסא + כדרור', description: 'ספרינט בכיסא עם שליטה בכדור', sets: 3, reps: '6', restSeconds: 90, tips: 'שמור על שליטה במהירות' },
+      { name: 'זריקות ממרחקים', description: 'זריקות מנקודות שונות במגרש', sets: 3, reps: '10', restSeconds: 60, tips: 'השתמש בכוח הרגליים והגוף' },
+    ],
+    gym: [
+      { name: 'כדרור מכיסא', description: 'כדרור + עצירות מהירות', sets: 3, reps: '15', restSeconds: 45, tips: 'החלף ידיים' },
+      { name: 'זריקות חופשיות מכיסא', description: 'זריקות חופשיות מישיבה', sets: 3, reps: '12', restSeconds: 60, tips: 'מרפק מתחת לכדור' },
+    ],
+  };
+
+  const sportDrillsTennisWheelchair = {
+    home: [
+      { name: 'תנועות מחבט מכיסא', description: 'פורהנד ובקהנד בישיבה', sets: 3, reps: '15', restSeconds: 45, tips: 'סיבוב גוף עליון מלא' },
+      { name: 'עבודת ידיים מהירה', description: 'תגובה מהירה עם מחבט', sets: 3, reps: '20', restSeconds: 45, tips: 'אחיזה רפויה ומוכנה' },
+    ],
+    yard: [
+      { name: 'מכות לקיר מכיסא', description: 'חזרות מכות לקיר מישיבה', sets: 3, reps: '15', restSeconds: 60, tips: 'כוח מסיבוב הגוף' },
+      { name: 'תנועת כיסא במגרש', description: 'נהיגת כיסא קדימה ואחורה', sets: 3, reps: '10', restSeconds: 60, tips: 'חזרה למרכז' },
+    ],
+    field: [
+      { name: 'מכות מקו הבסיס', description: 'פורהנד ובקהנד מהכיסא', sets: 3, reps: '12', restSeconds: 60, tips: 'מיקום כיסא לפני המכה' },
+      { name: 'תרגול הגשה מכיסא', description: 'הגשות מותאמות מישיבה', sets: 3, reps: '10', restSeconds: 60, tips: 'זריקה יציבה ושליטה בגוף' },
+    ],
+    gym: [
+      { name: 'תנועת כיסא + מחבט', description: 'שילוב נהיגת כיסא עם מכות', sets: 3, reps: '10', restSeconds: 60, tips: 'עצור לפני המכה' },
+      { name: 'עבודת ידיים מהירה', description: 'תנועות מחבט מהירות בישיבה', sets: 3, reps: '15', restSeconds: 45, tips: 'החלף פורהנד ובקהנד' },
+    ],
+  };
+
+  // Select pools based on disability and sport
   let strengthMap, drillMap, warmupText;
 
   const isFitness = sport === 'fitness';
+  const isWheelchair = disability === 'two_legs' || mobilityAid === 'wheelchair';
+  const isFootball = ['football', 'footballAmputee', 'footballAmputeeGK'].includes(sport);
+
+  // Sport-specific drill map selection
+  function getSportDrillMap() {
+    if (isFitness) {
+      if (disability === 'one_leg') return sportDrillsFitnessOneLeg;
+      if (disability === 'one_arm') return sportDrillsFitnessOneArm;
+      if (isWheelchair) return sportDrillsFitnessWheelchair;
+      return sportDrillsFitnessRegular;
+    }
+    if (sport === 'basketball' || sport === 'basketballWheelchair') {
+      return isWheelchair ? sportDrillsBasketballWheelchair : sportDrillsBasketball;
+    }
+    if (sport === 'tennis' || sport === 'tennisWheelchair') {
+      return isWheelchair ? sportDrillsTennisWheelchair : sportDrillsTennis;
+    }
+    // Football variants + fallback
+    if (disability === 'one_leg') return sportDrillsOneLeg;
+    if (isWheelchair) return sportDrillsWheelchair;
+    return sportDrillsRegular;
+  }
 
   if (disability === 'one_leg') {
     strengthMap = strengthOneLeg;
-    drillMap = isFitness ? sportDrillsFitnessOneLeg : sportDrillsOneLeg;
     warmupText = 'חימום כתפיים ופרקי ידיים + הרמות ברך עם קביים';
   } else if (disability === 'one_arm') {
     strengthMap = strengthOneArm;
-    drillMap = isFitness ? sportDrillsFitnessOneArm : sportDrillsRegular;
     warmupText = 'סיבוב יד פעילה + ריצה קלה + מתיחות דינמיות';
-  } else if (disability === 'two_legs' || mobilityAid === 'wheelchair') {
+  } else if (isWheelchair) {
     strengthMap = strengthWheelchair;
-    drillMap = isFitness ? sportDrillsFitnessWheelchair : sportDrillsWheelchair;
     warmupText = 'חימום כתפיים + סיבובי ידיים + מתיחות פלג גוף עליון';
   } else {
     strengthMap = strengthRegular;
-    drillMap = isFitness ? sportDrillsFitnessRegular : sportDrillsRegular;
     warmupText = isFitness ? 'ריצה קלה + מתיחות דינמיות + חימום מפרקים' : 'ריצה קלה + מתיחות דינמיות';
   }
+
+  drillMap = getSportDrillMap();
 
   const strengthPool = strengthMap[eq] || strengthMap.none;
   const drillPool = drillMap[location] || drillMap.field;
@@ -740,9 +837,17 @@ export function getLocalFallbackWeek({ profile, sport, goals, daysPerWeek, locat
   const dayNames = ['יום א', 'יום ב', 'יום ג', 'יום ד', 'יום ה', 'יום ו'];
   const numDays = Math.min(daysPerWeek || 3, 6);
 
-  const fallbackThemes = isFitness
-    ? ['חיזוק בסיסי', 'עוצמה ושריפת שומן', 'סיבולת וכוח', 'אימון שיא']
-    : ['יציבות וטכניקה בסיסית', 'שליטה בכדור וחיזוק', 'מהירות ותנועה', 'כוח וסיבולת'];
+  const fallbackThemesBySport = {
+    fitness: ['חיזוק בסיסי', 'עוצמה ושריפת שומן', 'סיבולת וכוח', 'אימון שיא'],
+    football: ['יציבות וטכניקת כדור', 'שליטה ומסירות', 'מהירות ודריבלינג', 'כוח ובעיטות'],
+    basketball: ['יסודות קליעה ודריבלינג', 'תנועה והגנה', 'קליעה ממרחק', 'סימולציית משחק'],
+    tennis: ['טכניקת מכות', 'תנועה ועבודת רגליים', 'הגשה ודיוק', 'סימולציית נקודות'],
+  };
+  const themeKey = isFitness ? 'fitness'
+    : (sport === 'basketball' || sport === 'basketballWheelchair') ? 'basketball'
+    : (sport === 'tennis' || sport === 'tennisWheelchair') ? 'tennis'
+    : 'football';
+  const fallbackThemes = fallbackThemesBySport[themeKey];
 
   function applyProgression(ex) {
     const e = { ...ex };
@@ -773,6 +878,10 @@ export function getLocalFallbackWeek({ profile, sport, goals, daysPerWeek, locat
       day: dayNames[d],
       focus: isFitness
         ? (d % 3 === 0 ? 'פלג גוף עליון + קרדיו' : d % 3 === 1 ? 'פלג גוף תחתון + קרדיו' : 'גוף מלא + ליבה')
+        : themeKey === 'basketball'
+        ? (d % 2 === 0 ? 'כדרור וקליעה' : 'תנועה והגנה')
+        : themeKey === 'tennis'
+        ? (d % 2 === 0 ? 'מכות וטכניקה' : 'תנועה והגשה')
         : (d % 2 === 0 ? 'טכניקה וכוח' : 'מהירות ושליטה'),
       exercises,
       warmup: warmupText,
@@ -882,4 +991,120 @@ Return ONLY valid JSON:
   const parsed = extractJSON(text);
   if (parsed) return parsed;
   return { correct: true, feedback: text, encouragement: '', corrections: [] };
+}
+
+// === REAL-TIME AI COACHING ===
+
+const AGE_STYLE_PROMPTS = {
+  kids: 'Use a fun, playful tone. Words like "וואו!", "סבבה!", "אלוף!". Short sentences. Make it feel like a game.',
+  youth: 'Use an energetic, motivating tone. Challenge them: "אתה מכונה!", "תראה לי מה יש לך!". Push hard but with respect.',
+  adults: 'Use an intense, aggressive coaching tone. Direct commands: "תדחוף חזק!", "אל תוותר!", "עוד אחד!". No softness.',
+  older: 'Use a calm, technical tone. Focus on form: "שמור על טכניקה", "תנועה מבוקרת". Precise corrections.',
+  senior: 'Use a warm, gentle tone. Encourage: "יפה מאוד", "לאט ובטוח", "מצוין, ככה". Never rush.',
+};
+
+function getAgeGroup(age) {
+  const a = Number(age) || 25;
+  if (a <= 12) return 'kids';
+  if (a <= 18) return 'youth';
+  if (a <= 40) return 'adults';
+  if (a <= 60) return 'older';
+  return 'senior';
+}
+
+export async function generateRealtimeFeedback(data) {
+  const sportContext = SPORT_CONTEXTS[data.sport] || SPORT_CONTEXTS.football || '';
+  const ageGroup = getAgeGroup(data.age);
+  const ageStyle = AGE_STYLE_PROMPTS[ageGroup] || AGE_STYLE_PROMPTS.adults;
+
+  const system = `${sportContext}
+
+You are giving LIVE coaching feedback during a training exercise.
+
+COACHING TONE:
+${ageStyle}
+
+RULES:
+- Return ONE Hebrew sentence, maximum 15 words
+- If form is good (goodFormPct > 70%) → encourage and push harder
+- If form is bad (badFormPct > 40%) → correct the TOP issue specifically
+- If athlete is struggling (low reps vs target) → motivate, don't criticize
+- Use the athlete's name: ${data.playerName || 'אלוף'}
+- Be specific to the exercise: ${data.exercise}
+${data.disability && data.disability !== 'none' ? `- Athlete has disability: ${data.disability}. Be sensitive and adaptive.` : ''}
+
+Return ONLY valid JSON: {"feedback":"Hebrew sentence here","isUrgent":false}
+isUrgent=true only for safety/critical form issues.`;
+
+  const content = `Exercise: ${data.exercise}
+Duration: ${data.duration}s
+Reps: ${data.reps}/${data.targetReps} (set ${data.sets}/${data.targetSets})
+Good form: ${data.goodFormPct}%, Bad form: ${data.badFormPct}%
+Top issues: ${(data.topIssues || []).join(', ') || 'none'}
+Skill level: ${data.skillLevel || 'intermediate'}`;
+
+  try {
+    const text = await callClaude(system, content, 150, 0); // 0 retries for speed
+    const parsed = extractJSON(text);
+    if (parsed?.feedback) return parsed;
+    // If not JSON, use raw text as feedback
+    if (text && text.length < 100) return { feedback: text.trim(), isUrgent: false };
+    return { feedback: '', isUrgent: false };
+  } catch (err) {
+    console.error('generateRealtimeFeedback error:', err.message);
+    return { feedback: '', isUrgent: false };
+  }
+}
+
+// === DYNAMIC WORKOUT ADAPTATION ===
+
+export async function adaptWorkout({ profile, completedExercises, performance, remainingPlan, environmentContext }) {
+  const sportContext = SPORT_CONTEXTS[profile.sport] || SPORT_CONTEXTS.football || '';
+
+  const performanceSummary = (completedExercises || []).map(ex =>
+    `${ex.name}: ${ex.repsActual || 0}/${ex.repsTarget || 0} reps, quality: ${ex.quality || 'unknown'}`
+  ).join('\n');
+
+  const envInfo = environmentContext?.equipment?.length > 0
+    ? `Available equipment: ${environmentContext.equipment.map(e => e.object || e.label).join(', ')}`
+    : 'No special equipment detected';
+
+  const system = `${sportContext}
+
+You are adapting a workout MID-SESSION based on athlete performance.
+
+Athlete: ${profile.name || 'Athlete'}, age ${profile.age || 25}, ${profile.disability || 'no disability'}
+Skill level: ${profile.skillLevel || 'intermediate'}
+${envInfo}
+
+RULES:
+1. If performance is consistently poor → SIMPLIFY remaining exercises (fewer reps, more rest, easier variations)
+2. If performance is perfect → INTENSIFY (add reps, reduce rest, harder variations)
+3. Keep SAME number of remaining exercises (substitute, don't add/remove)
+4. Respect disability limitations strictly
+5. Progressive overload: challenge athletes who are crushing it
+6. All exercise names MUST be in Hebrew
+7. Each exercise must have: name, description (max 15 words Hebrew), sets, reps, restSeconds, tips
+
+Return ONLY valid JSON:
+{"adapted":true,"plan":[{"name":"שם","description":"תיאור","sets":3,"reps":"12","restSeconds":60,"tips":"טיפ"}],"reasoning":"Short Hebrew explanation"}
+If no changes needed: {"adapted":false,"reasoning":"הכל בסדר"}`;
+
+  const content = `Completed exercises:
+${performanceSummary || 'None yet'}
+
+Remaining plan:
+${(remainingPlan || []).map(e => `${e.name} (${e.sets}x${e.reps}, rest ${e.restSeconds}s)`).join('\n')}
+
+Should we adapt the remaining workout?`;
+
+  try {
+    const text = await callClaude(system, content, 1500, 1);
+    const parsed = extractJSON(text);
+    if (parsed?.adapted !== undefined) return parsed;
+    return { adapted: false, plan: remainingPlan, reasoning: 'Could not parse response' };
+  } catch (err) {
+    console.error('adaptWorkout error:', err.message);
+    return { adapted: false, plan: remainingPlan, reasoning: 'API error' };
+  }
 }

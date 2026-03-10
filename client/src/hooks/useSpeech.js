@@ -1,4 +1,5 @@
 import { useCallback, useRef } from 'react';
+import { getCoachingRate, getCoachingPitch } from '../utils/ageAdaptive';
 
 export function useSpeech(lang = 'he-IL') {
   const speaking = useRef(false);
@@ -512,6 +513,40 @@ export function useSpeech(lang = 'he-IL') {
     speakIfIdle(text, { rate: 1.0, pitch: 0.95 });
   }, [isHe, speakIfIdle]);
 
+  // AI-generated coaching sentence — age-adaptive rate/pitch
+  const speakAICoaching = useCallback((text, age, isUrgent = false) => {
+    if (!text) return;
+    const rate = getCoachingRate(age);
+    const pitch = getCoachingPitch(age);
+    if (isUrgent) {
+      speakPriority(text, { rate, pitch });
+    } else {
+      speak(text, { rate, pitch });
+    }
+  }, [speak, speakPriority]);
+
+  // Environment scan results speech
+  const speakEnvironmentScan = useCallback((scanResult) => {
+    if (!scanResult) return;
+    const { hazards, equipment, overallSafety } = scanResult;
+
+    let text = '';
+    if (overallSafety === 'unsafe' || (hazards && hazards.length > 0)) {
+      text = isHe
+        ? `זהירות! ${hazards.map(h => h.warning).join('. ')}`
+        : `Caution! ${hazards.map(h => h.warning).join('. ')}`;
+    } else if (equipment && equipment.length > 0) {
+      text = isHe
+        ? `הכל נראה בטוח. ${equipment.map(e => e.suggestion).join('. ')}`
+        : `Everything looks safe. ${equipment.map(e => e.suggestion).join('. ')}`;
+    } else {
+      text = isHe
+        ? 'הסביבה נראית בטוחה. יאללה נתחיל!'
+        : 'The environment looks safe. Let\'s go!';
+    }
+    speakPriority(text, { rate: 1.0 });
+  }, [isHe, speakPriority]);
+
   // Rep count
   const speakCount = useCallback((count) => {
     _doSpeak(count.toString(), { rate: 1.3 });
@@ -557,6 +592,8 @@ export function useSpeech(lang = 'he-IL') {
     speakWarmUpComplete,
     speakDisabilityTip,
     speakMindMuscleCue,
+    speakAICoaching,
+    speakEnvironmentScan,
     speakCount,
     stop,
     isSpeaking
