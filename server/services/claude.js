@@ -225,21 +225,30 @@ SAFETY:
 - Wrist and elbow care: avoid overloading with excessive topspin early
 - Proper footwear for court surface
 - Rest between intense serving sessions to protect shoulder`,
-  fitness: `You are an expert personal fitness coach specializing in general fitness training.
-Your programs combine STRENGTH training and CARDIO/aerobic conditioning in every session.
+  fitness: `You are an expert personal fitness coach specializing in GENERAL FITNESS ONLY.
+This is NOT a sport program. ABSOLUTELY NO balls, NO dribbling, NO shooting, NO passing, NO sport-specific drills of any kind.
+Every exercise must be pure fitness: strength, cardio, aerobic conditioning, flexibility, or core work.
 
 STRENGTH BLOCK:
 - Compound exercises first (squat, deadlift, bench press, rows), then isolation work
 - Progressive overload: increase weight/reps/sets each week
 - Muscle group rotation across days: upper body → lower body → full body/core
 
-CARDIO FINISHER (end of every session):
-- HIIT intervals, circuit training, jump rope, sprint intervals
+CARDIO/CONDITIONING:
+- HIIT intervals, circuit training, jump rope, sprint intervals, burpees, mountain climbers
 - 10-15 minutes high intensity
+- Running, cycling, rowing — pure cardio, NO ball sports
 
 SESSION STRUCTURE:
 - Each session: 2-3 strength exercises + 1 cardio/conditioning exercise
 - Day rotation ensures balanced muscle development
+- ALL exercises must match the athlete's available equipment (see equipment rules below)
+
+EQUIPMENT RULES:
+- If equipment is "none"/bodyweight: ONLY bodyweight exercises. NO dumbbells, NO barbells, NO machines, NO bands.
+- If equipment is "dumbbells": Include dumbbell exercises, bodyweight exercises allowed too.
+- If equipment is "resistance_bands": Include band exercises, bodyweight exercises allowed too.
+- NEVER suggest equipment the athlete doesn't have.
 
 DISABILITY AWARENESS:
 - Adapt ALL exercises to the athlete's physical abilities
@@ -336,9 +345,11 @@ AVOID: סקוואט, לאנג'ים, גשר ישבן, מטפס הרים, ישיב
   const eqRule = equipmentRules[eq] || equipmentRules.none;
   const disaStrength = disabilityStrength[profile.disability] || '';
 
-  const strengthRule = hasStrength
-    ? `MANDATORY: Every day MUST have 2 strength exercises. ${eqRule} ${disaStrength}`
-    : `Include 1 strength/core exercise per day. ${eqRule} ${disaStrength}`;
+  const strengthRule = sport === 'fitness'
+    ? (hasStrength
+      ? `MANDATORY: Every day MUST have 2-3 strength exercises + 1 cardio finisher. ${eqRule} ${disaStrength}`
+      : `Each day: 1-2 strength exercises + 1 cardio finisher. ${eqRule} ${disaStrength}`)
+    : `Include MAX 1 strength/conditioning exercise per day — the rest must be sport-specific drills. ${eqRule} ${disaStrength}`;
 
   const fitnessThemes = {
     beginner: ['חיזוק בסיסי', 'עוצמה ושריפת שומן', 'סיבולת וכוח', 'אימון שיא'],
@@ -400,20 +411,25 @@ ${locationRules}
 STRENGTH: ${strengthRule}
 
 PROGRESSIVE OVERLOAD (Week ${weekNumber}):
-- Strength exercises: ${prog.sets} sets × ${prog.reps} reps, ${prog.rest}s rest
-- Sport drills: ${prog.sets} sets, increase intensity from previous week
+- ${sport === 'fitness' ? 'Strength' : 'All'} exercises: ${prog.sets} sets × ${prog.reps} reps, ${prog.rest}s rest
 - This is week ${weekNumber}/4 — ${weekNumber === 1 ? 'foundation, lower volume' : weekNumber === 2 ? 'build volume' : weekNumber === 3 ? 'peak intensity' : 'consolidate and test'}.
 
 ${sport === 'fitness'
-    ? `FITNESS PLAN RULES:
+    ? `STRICT FITNESS-ONLY RULES:
+- ZERO balls, ZERO sport drills, ZERO dribbling/shooting/passing. This is a GYM/FITNESS program.
 - Each day MUST have 2-3 strength exercises + 1 cardio/conditioning exercise as finisher.
 - Rotate muscle groups: Day 1=upper body, Day 2=lower body, Day 3=full body/core, then repeat.
-- Cardio finisher examples: ריצת אינטרוולים, ספרינטים, jumping jacks, בורפיז, קפיצות חבל.
-- DO NOT include ball/sport-specific drills.`
-    : `SOLO TRAINING: Include household items as simulated defenders in tips.`}
+- Cardio finisher examples: ריצת אינטרוולים, ספרינטים, jumping jacks, בורפיז, קפיצות חבל, מטפס הרים.
+- RESPECT EQUIPMENT: If no equipment → bodyweight ONLY. If dumbbells → use them. If bands → use them.
+- If you include ANY ball or sport drill, the entire plan is INVALID.`
+    : `SPORT-FOCUSED RULES:
+- The sport (${sport}) is the PRIMARY focus. ${hasStrength ? '3' : '2-3'} exercises should be sport-specific drills.
+- Maximum 1 strength/conditioning exercise per day as a supplement — NOT the main focus.
+- Sport drills: dribbling, passing, shooting, agility, tactical movement for this specific sport.
+- SOLO TRAINING: Include household items as simulated defenders/targets in tips.`}
 
 CRITICAL: Return ONLY raw JSON. NO markdown, NO backticks.
-Descriptions max 15 words. ${hasStrength ? '4' : '3'} exercises per day.
+Descriptions max 15 words. ${sport === 'fitness' ? (hasStrength ? '3-4' : '3') : '3-4'} exercises per day${sport !== 'fitness' ? ` (${hasStrength ? '3' : '2-3'} sport drills + max 1 strength)` : ' (all fitness exercises, NO sport drills)'}.
 
 {"weekNumber":${weekNumber},"theme":"${theme}","days":[{"day":"יום א","focus":"focus","exercises":[{"name":"שם","description":"תיאור קצר","sets":${prog.sets},"reps":"${prog.reps}","restSeconds":${prog.rest},"tips":"טיפ"}],"warmup":"חימום","cooldown":"שחרור","durationMinutes":50}]}
 
