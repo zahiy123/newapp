@@ -1143,19 +1143,20 @@ export default function Training() {
           </div>
         )}
 
-        {/* Briefing overlay */}
+        {/* Briefing overlay — bottom sheet on mobile so camera stays visible */}
         {phase === PHASE.BRIEFING && (
-          <div className="absolute inset-0 bg-black/70 flex items-center justify-center p-4 sm:p-6">
-            <div className="bg-white rounded-2xl p-4 sm:p-6 max-w-sm w-full text-center space-y-4 max-h-[85vh] overflow-y-auto">
-              <div className="text-3xl">&#127897;</div>
-              <h3 className="text-lg font-bold text-gray-800">{currentExercise?.name}</h3>
+          <div className="absolute inset-x-0 bottom-0 sm:inset-0 sm:flex sm:items-center sm:justify-center sm:bg-black/50 z-20">
+            <div className="bg-white/95 backdrop-blur-sm rounded-t-2xl sm:rounded-2xl p-4 sm:p-6 max-w-sm w-full text-center space-y-3 max-h-[60vh] sm:max-h-[85vh] overflow-y-auto shadow-2xl" dir={isHe ? 'rtl' : 'ltr'}>
+              {/* Drag handle for mobile */}
+              <div className="sm:hidden w-10 h-1 bg-gray-300 rounded-full mx-auto mb-1"></div>
+              <h3 className="text-base font-bold text-gray-800">{currentExercise?.name}</h3>
               <p className="text-sm text-gray-600">{currentExercise?.description}</p>
-              <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-3 text-sm text-yellow-800">
+              <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-2.5 text-sm text-yellow-800">
                 <span className="font-bold">{LOCATION_ICONS[currentLocation]} {isHe ? 'הכנה' : 'Setup'}:</span>{' '}
                 {locationProps.setup}
               </div>
               {currentExercise?.tips && (
-                <div className="bg-blue-50 rounded-lg p-3 text-sm text-blue-700">{currentExercise.tips}</div>
+                <div className="bg-blue-50 rounded-lg p-2.5 text-xs text-blue-700">{currentExercise.tips}</div>
               )}
               <div className="text-xs text-gray-400">
                 {currentExercise?.sets} {t('training.set')} | {currentExercise?.reps} {t('training.reps')} | {currentExercise?.restSeconds}{t('dashboard.secRest')}
@@ -1167,10 +1168,10 @@ export default function Training() {
           </div>
         )}
 
-        {/* Environment scan overlay */}
+        {/* Environment scan overlay — bottom sheet on mobile */}
         {phase === PHASE.ENVIRONMENT_SCAN && (
-          <div className="absolute inset-0 bg-black/70 flex items-center justify-center p-6">
-            <div className="bg-white rounded-2xl p-6 max-w-md w-full text-center space-y-4" dir={isHe ? 'rtl' : 'ltr'}>
+          <div className="absolute inset-x-0 bottom-0 sm:inset-0 sm:flex sm:items-center sm:justify-center sm:bg-black/50 z-20">
+            <div className="bg-white/95 backdrop-blur-sm rounded-t-2xl sm:rounded-2xl p-4 sm:p-6 max-w-md w-full text-center space-y-3 max-h-[55vh] sm:max-h-[85vh] overflow-y-auto shadow-2xl" dir={isHe ? 'rtl' : 'ltr'}>
               {!environmentScan ? (
                 <>
                   <div className="text-5xl animate-pulse">{'\uD83D\uDD0D'}</div>
@@ -1225,10 +1226,10 @@ export default function Training() {
           </div>
         )}
 
-        {/* Equipment check overlay */}
+        {/* Equipment check overlay — bottom sheet on mobile */}
         {phase === PHASE.CHECKING_EQUIPMENT && (
-          <div className="absolute inset-0 bg-black/70 flex items-center justify-center p-6">
-            <div className="bg-white rounded-2xl p-6 max-w-sm w-full text-center space-y-4">
+          <div className="absolute inset-x-0 bottom-0 sm:inset-0 sm:flex sm:items-center sm:justify-center sm:bg-black/50 z-20">
+            <div className="bg-white/95 backdrop-blur-sm rounded-t-2xl sm:rounded-2xl p-4 sm:p-6 max-w-sm w-full text-center space-y-3 shadow-2xl">
               <div className="text-5xl">{equipmentFound ? '\u2705' : '\uD83D\uDD0D'}</div>
               <h3 className="text-lg font-bold text-gray-800">
                 {equipmentFound
