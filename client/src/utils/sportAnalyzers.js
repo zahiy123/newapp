@@ -1,7 +1,8 @@
-// Sport-specific drill analyzers for basketball, tennis, and football
+// Sport-specific drill analyzers for basketball, tennis, football, and Paralympic sports
 // Each analyzer follows the standard return format:
 // { reps, phase, feedback: {type, text}, moving, posture, headDown, firstRepStarted, lastRepTime, formIssues }
 // All accept optional ballData third param for ball-aware feedback
+// Paralympic analyzers use _calibration baseline from prevState for personalized thresholds
 
 const LM = {
   NOSE: 0,
@@ -19,6 +20,41 @@ function angle(a, b, c) {
   let deg = Math.abs(rad * 180 / Math.PI);
   if (deg > 180) deg = 360 - deg;
   return deg;
+}
+
+// Required landmark groups for quick declaration
+const LANDMARKS = {
+  UPPER_BODY: [LM.LEFT_SHOULDER, LM.RIGHT_SHOULDER, LM.LEFT_ELBOW, LM.RIGHT_ELBOW, LM.LEFT_WRIST, LM.RIGHT_WRIST],
+  HIPS: [LM.LEFT_HIP, LM.RIGHT_HIP],
+  LEGS: [LM.LEFT_KNEE, LM.RIGHT_KNEE, LM.LEFT_ANKLE, LM.RIGHT_ANKLE],
+  HEAD: [LM.NOSE],
+};
+
+// Pre-analysis visibility check — returns { valid, missingParts }
+// If invalid, analyzer should return visibility feedback instead of technique feedback
+function validateLandmarks(landmarks, requiredIndices, threshold = 0.5) {
+  if (!landmarks) return { valid: false, missingParts: ['all'] };
+  let validCount = 0;
+  const missing = [];
+  for (const idx of requiredIndices) {
+    const lm = landmarks[idx];
+    if (lm && lm.visibility >= threshold) validCount++;
+    else missing.push(idx);
+  }
+  if (validCount / requiredIndices.length >= 0.7) return { valid: true, missingParts: [] };
+  const parts = new Set();
+  if (missing.some(i => [LM.LEFT_ANKLE, LM.RIGHT_ANKLE, LM.LEFT_KNEE, LM.RIGHT_KNEE].includes(i))) parts.add('legs');
+  if (missing.some(i => [LM.LEFT_WRIST, LM.RIGHT_WRIST, LM.LEFT_ELBOW, LM.RIGHT_ELBOW].includes(i))) parts.add('arms');
+  if (missing.some(i => [LM.LEFT_HIP, LM.RIGHT_HIP].includes(i))) parts.add('hips');
+  if (parts.size === 0) parts.add('all');
+  return { valid: false, missingParts: [...parts] };
+}
+
+// Helper: get calibrated threshold or fallback to default
+function calThreshold(calibration, joint, pct, fallback) {
+  const cal = calibration?.[joint];
+  if (!cal || cal.range < 5) return fallback; // range too small = bad calibration
+  return cal.min + cal.range * pct;
 }
 
 function detectMovement(landmarks, prevLandmarks) {
@@ -50,6 +86,16 @@ function detectHeadDown(landmarks) {
 }
 
 function vis(lm) { return lm && lm.visibility > 0.3; }
+
+// Trunk rotation helper (shoulder-hip lateral offset) — returns approximate degrees
+function getTrunkRotation(landmarks) {
+  const lS = landmarks[LM.LEFT_SHOULDER], rS = landmarks[LM.RIGHT_SHOULDER];
+  const lH = landmarks[LM.LEFT_HIP], rH = landmarks[LM.RIGHT_HIP];
+  if (!vis(lS) || !vis(rS) || !vis(lH) || !vis(rH)) return 0;
+  const shoulderDiffX = rS.x - lS.x;
+  const hipDiffX = rH.x - lH.x;
+  return Math.abs(shoulderDiffX - hipDiffX) * 180;
+}
 
 // ============================================
 // BASKETBALL: Shooting Form
@@ -624,5 +670,657 @@ export function analyzeKickTechnique(landmarks, prevState = {}, ballData = null)
     _ankleHistory: ankleHistory,
     _prevPlantAnkle: vis(plantAnkle) ? { x: plantAnkle.x, y: plantAnkle.y } : prevState._prevPlantAnkle,
     _prevLandmarks: landmarks
+  };
+}
+
+// ============================================
+// PARALYMPIC: Amputee Football — Crutch Kick
+// ============================================
+// Biomechanics: 175% body weight on upper extremities during kick.
+// Crutch elbow ~150° (30° flexion). Hip-shoulder rotation > 30° for power.
+// Phases: ready → windup → strike → follow_through
+export function analyzeAmputeeCrutchKick(landmarks, prevState = {}, ballData = null) {
+  if (!landmarks) return { ...prevState, feedback: null };
+
+  const required = [...LANDMARKS.UPPER_BODY, ...LANDMARKS.HIPS];
+  const validation = validateLandmarks(landmarks, required);
+  if (!validation.valid) {
+    return { ...prevState, feedback: { type: 'visibility', missingParts: validation.missingParts }, _prevLandmarks: landmarks };
+  }
+
+  const moving = detectMovement(landmarks, prevState._prevLandmarks);
+  const cal = prevState._calibration;
+
+  const lShoulder = landmarks[LM.LEFT_SHOULDER], rShoulder = landmarks[LM.RIGHT_SHOULDER];
+  const lElbow = landmarks[LM.LEFT_ELBOW], rElbow = landmarks[LM.RIGHT_ELBOW];
+  const lWrist = landmarks[LM.LEFT_WRIST], rWrist = landmarks[LM.RIGHT_WRIST];
+  const lHip = landmarks[LM.LEFT_HIP], rHip = landmarks[LM.RIGHT_HIP];
+  const lKnee = landmarks[LM.LEFT_KNEE], rKnee = landmarks[LM.RIGHT_KNEE];
+  const lAnkle = landmarks[LM.LEFT_ANKLE], rAnkle = landmarks[LM.RIGHT_ANKLE];
+
+  let firstRepStarted = prevState.firstRepStarted || false;
+  let reps = prevState.reps || 0;
+  let phase = prevState.phase || 'ready';
+  let newPhase = phase;
+  let newReps = reps;
+  let feedback = null;
+  let lastRepTime = prevState.lastRepTime || null;
+  const formIssues = { ...(prevState.formIssues || {}) };
+
+  // Crutch elbow angles — both arms on crutches
+  const lElbowAngle = vis(lShoulder) && vis(lElbow) && vis(lWrist) ? angle(lShoulder, lElbow, lWrist) : null;
+  const rElbowAngle = vis(rShoulder) && vis(rElbow) && vis(rWrist) ? angle(rShoulder, rElbow, rWrist) : null;
+
+  // Standing leg detection (whichever ankle is visible and lower = standing)
+  let standingKnee = null, standingHip = null, standingAnkle = null;
+  let kickAnkle = null;
+  if (vis(lAnkle) && vis(rAnkle)) {
+    if (lAnkle.y > rAnkle.y) { standingKnee = lKnee; standingHip = lHip; standingAnkle = lAnkle; kickAnkle = rAnkle; }
+    else { standingKnee = rKnee; standingHip = rHip; standingAnkle = rAnkle; kickAnkle = lAnkle; }
+  } else if (vis(lAnkle)) { standingKnee = lKnee; standingHip = lHip; standingAnkle = lAnkle; }
+  else if (vis(rAnkle)) { standingKnee = rKnee; standingHip = rHip; standingAnkle = rAnkle; }
+
+  const rotation = getTrunkRotation(landmarks);
+  const rotationThreshold = calThreshold(cal, 'trunkRotation', 0.5, 30);
+
+  if (moving) firstRepStarted = true;
+
+  if (firstRepStarted) {
+    // Detect kick via ankle movement
+    const kickAnkleHigh = kickAnkle && vis(kickAnkle) && standingHip && kickAnkle.y < standingHip.y;
+    const ankleHistory = prevState._ankleHistory || [];
+    if (kickAnkle && vis(kickAnkle)) { ankleHistory.push(kickAnkle.y); if (ankleHistory.length > 15) ankleHistory.shift(); }
+    const ankleRising = ankleHistory.length >= 3 && ankleHistory[ankleHistory.length - 1] < ankleHistory[ankleHistory.length - 3];
+
+    if (phase === 'ready' && ankleRising) {
+      newPhase = 'windup';
+    } else if (phase === 'windup' && kickAnkleHigh) {
+      newPhase = 'strike';
+    } else if (phase === 'strike' && !kickAnkleHigh) {
+      newPhase = 'follow_through';
+      newReps = reps + 1;
+      lastRepTime = Date.now();
+      feedback = { type: 'count', text: `${newReps}!`, count: newReps };
+    } else if (phase === 'follow_through' && !ankleRising) {
+      newPhase = 'ready';
+    }
+
+    // Crutch stability: elbow should stay ~150° (30° flexion), not collapse
+    const crutchElbowMin = calThreshold(cal, 'leftElbow', 0.7, 130);
+    if (lElbowAngle !== null && lElbowAngle < crutchElbowMin && (newPhase === 'windup' || newPhase === 'strike')) {
+      feedback = { type: 'warning', text: 'שמור על המרפקים יציבים על הקביים! אל תכופף יותר מדי' };
+      formIssues.crutchElbowCollapse = (formIssues.crutchElbowCollapse || 0) + 1;
+    }
+    if (rElbowAngle !== null && rElbowAngle < crutchElbowMin && (newPhase === 'windup' || newPhase === 'strike')) {
+      if (!feedback) feedback = { type: 'warning', text: 'שמור על המרפקים יציבים על הקביים!' };
+      formIssues.crutchElbowCollapse = (formIssues.crutchElbowCollapse || 0) + 1;
+    }
+
+    // Hip-shoulder rotation for power
+    if ((newPhase === 'strike' || newPhase === 'windup') && rotation < rotationThreshold) {
+      if (!feedback) {
+        feedback = { type: 'warning', text: 'סובב את הגוף! כוח הבעיטה מגיע מסיבוב מותניים-כתפיים' };
+        formIssues.noRotation = (formIssues.noRotation || 0) + 1;
+      }
+    }
+
+    // Good form feedback
+    if (moving && !feedback && rotation > rotationThreshold && newPhase === 'strike') {
+      feedback = { type: 'good', text: 'בעיטה חזקה! סיבוב גוף מעולה עם יציבות קביים!' };
+    }
+
+    return {
+      reps: newReps, phase: newPhase, feedback, moving, headDown: false,
+      lastRepTime, firstRepStarted, posture: 'standing', formIssues,
+      _ankleHistory: ankleHistory, _prevLandmarks: landmarks, _calibration: cal
+    };
+  }
+
+  return {
+    reps, phase, feedback: null, moving, headDown: false,
+    lastRepTime, firstRepStarted, posture: 'standing', formIssues,
+    _prevLandmarks: landmarks, _calibration: cal
+  };
+}
+
+// ============================================
+// PARALYMPIC: Amputee Football — Crutch Sprint
+// ============================================
+// Biomechanics: Forward pelvic tilt correlates with speed.
+// Track elbow extension cycles as strides. Nose ahead of hips = good lean.
+export function analyzeAmputeeCrutchSprint(landmarks, prevState = {}) {
+  if (!landmarks) return { ...prevState, feedback: null };
+
+  const required = [...LANDMARKS.UPPER_BODY, ...LANDMARKS.HIPS, ...LANDMARKS.HEAD];
+  const validation = validateLandmarks(landmarks, required);
+  if (!validation.valid) {
+    return { ...prevState, feedback: { type: 'visibility', missingParts: validation.missingParts }, _prevLandmarks: landmarks };
+  }
+
+  const moving = detectMovement(landmarks, prevState._prevLandmarks);
+  const cal = prevState._calibration;
+
+  const nose = landmarks[LM.NOSE];
+  const lShoulder = landmarks[LM.LEFT_SHOULDER], rShoulder = landmarks[LM.RIGHT_SHOULDER];
+  const lElbow = landmarks[LM.LEFT_ELBOW], rElbow = landmarks[LM.RIGHT_ELBOW];
+  const lWrist = landmarks[LM.LEFT_WRIST], rWrist = landmarks[LM.RIGHT_WRIST];
+  const lHip = landmarks[LM.LEFT_HIP], rHip = landmarks[LM.RIGHT_HIP];
+
+  let firstRepStarted = prevState.firstRepStarted || false;
+  let reps = prevState.reps || 0; // strides
+  let feedback = null;
+  let lastRepTime = prevState.lastRepTime || null;
+  const formIssues = { ...(prevState.formIssues || {}) };
+
+  // Track elbow extension cycles as stride count
+  const lElbowAngle = vis(lShoulder) && vis(lElbow) && vis(lWrist) ? angle(lShoulder, lElbow, lWrist) : null;
+  const rElbowAngle = vis(rShoulder) && vis(rElbow) && vis(rWrist) ? angle(rShoulder, rElbow, rWrist) : null;
+  const avgElbow = lElbowAngle && rElbowAngle ? (lElbowAngle + rElbowAngle) / 2 : (lElbowAngle || rElbowAngle || 0);
+
+  const elbowHistory = prevState._elbowHistory || [];
+  elbowHistory.push(avgElbow);
+  if (elbowHistory.length > 30) elbowHistory.shift();
+
+  // Forward lean: nose X ahead of hip center X
+  const hipMidX = vis(lHip) && vis(rHip) ? (lHip.x + rHip.x) / 2 : null;
+  const hipMidY = vis(lHip) && vis(rHip) ? (lHip.y + rHip.y) / 2 : null;
+  const forwardLean = vis(nose) && hipMidY !== null ? (hipMidY - nose.y) : 0; // positive = nose above hips (good)
+
+  if (moving) firstRepStarted = true;
+
+  // Count stride cycles from elbow extension oscillation
+  let stridePhase = prevState._stridePhase || 'extend';
+  let newReps = reps;
+
+  if (firstRepStarted && elbowHistory.length >= 5) {
+    const recent = elbowHistory.slice(-5);
+    const avg = recent.reduce((s, v) => s + v, 0) / recent.length;
+    const extendThreshold = calThreshold(cal, 'leftElbow', 0.7, 150);
+    const flexThreshold = calThreshold(cal, 'leftElbow', 0.3, 110);
+
+    if (stridePhase === 'extend' && avg < flexThreshold) {
+      stridePhase = 'flex';
+    } else if (stridePhase === 'flex' && avg > extendThreshold) {
+      stridePhase = 'extend';
+      newReps = reps + 1;
+      lastRepTime = Date.now();
+      feedback = { type: 'count', text: `${newReps}!`, count: newReps };
+    }
+
+    // Tempo check: strides per second
+    const strideHistory = prevState._strideHistory || [];
+    if (newReps > reps) { strideHistory.push(Date.now()); if (strideHistory.length > 10) strideHistory.shift(); }
+    const recentStrides = strideHistory.filter(t => Date.now() - t < 3000).length;
+    const stridesPerSec = recentStrides / 3;
+
+    // Forward lean check
+    if (forwardLean < 0.05 && moving) {
+      if (!feedback) feedback = { type: 'warning', text: 'הטה את הגוף קדימה! הטיית אגן קדימה מגבירה מהירות' };
+      formIssues.notLeaningForward = (formIssues.notLeaningForward || 0) + 1;
+    }
+
+    // Good feedback
+    if (moving && !feedback && forwardLean > 0.08 && stridesPerSec > 1.5) {
+      feedback = { type: 'good', text: 'ספרינט מעולה! הטיה קדימה וקצב חזק!' };
+    }
+
+    return {
+      reps: newReps, phase: 'active', feedback, moving, headDown: false,
+      lastRepTime, firstRepStarted, posture: 'standing', formIssues,
+      _elbowHistory: elbowHistory, _stridePhase: stridePhase, _strideHistory: strideHistory,
+      _prevLandmarks: landmarks, _calibration: cal
+    };
+  }
+
+  return {
+    reps, phase: 'active', feedback: null, moving, headDown: false,
+    lastRepTime, firstRepStarted, posture: 'standing', formIssues,
+    _elbowHistory: elbowHistory, _stridePhase: stridePhase,
+    _prevLandmarks: landmarks, _calibration: cal
+  };
+}
+
+// ============================================
+// PARALYMPIC: Wheelchair Basketball — Shooting
+// ============================================
+// Biomechanics: Elbow 75-90° at set point. Wrist above shoulder at release.
+// Trunk lean forward for power compensation. NO legs required.
+export function analyzeWheelchairBasketballShooting(landmarks, prevState = {}, ballData = null) {
+  if (!landmarks) return { ...prevState, feedback: null };
+
+  const required = [...LANDMARKS.UPPER_BODY, ...LANDMARKS.HIPS];
+  const validation = validateLandmarks(landmarks, required);
+  if (!validation.valid) {
+    return { ...prevState, feedback: { type: 'visibility', missingParts: validation.missingParts }, _prevLandmarks: landmarks };
+  }
+
+  const moving = detectMovement(landmarks, prevState._prevLandmarks);
+  const cal = prevState._calibration;
+
+  const rShoulder = landmarks[LM.RIGHT_SHOULDER], lShoulder = landmarks[LM.LEFT_SHOULDER];
+  const rElbow = landmarks[LM.RIGHT_ELBOW], lElbow = landmarks[LM.LEFT_ELBOW];
+  const rWrist = landmarks[LM.RIGHT_WRIST], lWrist = landmarks[LM.LEFT_WRIST];
+  const lHip = landmarks[LM.LEFT_HIP], rHip = landmarks[LM.RIGHT_HIP];
+
+  // Pick shooting arm (whichever wrist is higher)
+  let shoulder, elbow, wrist, elbowSide;
+  if (vis(rWrist) && vis(lWrist)) {
+    if (rWrist.y < lWrist.y) { shoulder = rShoulder; elbow = rElbow; wrist = rWrist; elbowSide = 'rightElbow'; }
+    else { shoulder = lShoulder; elbow = lElbow; wrist = lWrist; elbowSide = 'leftElbow'; }
+  } else if (vis(rWrist)) { shoulder = rShoulder; elbow = rElbow; wrist = rWrist; elbowSide = 'rightElbow'; }
+  else if (vis(lWrist)) { shoulder = lShoulder; elbow = lElbow; wrist = lWrist; elbowSide = 'leftElbow'; }
+  else { return { ...prevState, feedback: null, moving, _prevLandmarks: landmarks, _calibration: cal }; }
+
+  if (!vis(shoulder) || !vis(elbow)) {
+    return { ...prevState, feedback: null, moving, _prevLandmarks: landmarks, _calibration: cal };
+  }
+
+  let firstRepStarted = prevState.firstRepStarted || false;
+  let reps = prevState.reps || 0;
+  let phase = prevState.phase || 'setup';
+  let newPhase = phase;
+  let newReps = reps;
+  let feedback = null;
+  let lastRepTime = prevState.lastRepTime || null;
+  const formIssues = { ...(prevState.formIssues || {}) };
+
+  const elbowAngle = angle(shoulder, elbow, wrist);
+  const wristAboveShoulder = wrist.y < shoulder.y;
+  const wristHighAbove = wrist.y < shoulder.y - 0.08;
+
+  // Trunk lean: shoulders ahead of hips (forward lean for power)
+  const shoulderMidY = (lShoulder.y + rShoulder.y) / 2;
+  const hipMidY = (lHip.y + rHip.y) / 2;
+  const trunkLean = hipMidY - shoulderMidY; // positive = leaning forward
+
+  // Calibrated thresholds
+  const setPointMax = calThreshold(cal, elbowSide, 0.4, 90);
+  const setPointIdealMin = calThreshold(cal, elbowSide, 0.2, 75);
+
+  if (moving) firstRepStarted = true;
+
+  if (firstRepStarted && moving) {
+    if (phase === 'setup' && wristAboveShoulder && elbowAngle < setPointMax + 30) {
+      newPhase = 'release';
+    } else if (phase === 'release' && wristHighAbove) {
+      newPhase = 'follow_through';
+      newReps = reps + 1;
+      lastRepTime = Date.now();
+      feedback = { type: 'count', text: `${newReps}!`, count: newReps };
+    } else if (phase === 'follow_through' && !wristAboveShoulder) {
+      newPhase = 'setup';
+    }
+
+    // Elbow angle check at set point
+    if (newPhase === 'setup' || newPhase === 'release') {
+      if (elbowAngle > setPointMax + 20) {
+        feedback = { type: 'warning', text: 'כווץ את המרפק יותר! שמור זווית 75-90 מעלות' };
+        formIssues.elbowTooWide = (formIssues.elbowTooWide || 0) + 1;
+      } else if (elbowAngle >= setPointIdealMin && elbowAngle <= setPointMax) {
+        if (!feedback) feedback = { type: 'good', text: 'זווית מרפק מצוינת! סט-פוינט מושלם!' };
+      }
+    }
+
+    // Trunk lean for wheelchair power compensation
+    if (newPhase === 'release' && trunkLean < 0.02) {
+      if (!feedback) {
+        feedback = { type: 'warning', text: 'הטה את הגוף קדימה! בכיסא גלגלים הכוח מגיע מהטיית הגוף' };
+        formIssues.noTrunkLean = (formIssues.noTrunkLean || 0) + 1;
+      }
+    }
+
+    // Follow-through check
+    if (newPhase === 'follow_through' && !wristHighAbove) {
+      formIssues.noFollowThrough = (formIssues.noFollowThrough || 0) + 1;
+    }
+
+    if (moving && !feedback && newPhase === 'follow_through' && wristHighAbove && trunkLean > 0.03) {
+      feedback = { type: 'good', text: 'זריקה מעולה! פולו-ת\'רו גבוה עם הטיית גוף!' };
+    }
+  }
+
+  return {
+    reps: newReps, phase: newPhase, feedback, moving, headDown: false,
+    lastRepTime, firstRepStarted, posture: 'wheelchair', formIssues,
+    _prevLandmarks: landmarks, _calibration: cal
+  };
+}
+
+// ============================================
+// PARALYMPIC: Wheelchair Basketball — Dribbling
+// ============================================
+// Biomechanics: Wrist oscillation below shoulder level. Bounce tempo tracking.
+// Push rim between bounces. NO legs required.
+export function analyzeWheelchairBasketballDribbling(landmarks, prevState = {}, ballData = null) {
+  if (!landmarks) return { ...prevState, feedback: null };
+
+  const required = [LM.LEFT_SHOULDER, LM.RIGHT_SHOULDER, LM.LEFT_WRIST, LM.RIGHT_WRIST, ...LANDMARKS.HIPS];
+  const validation = validateLandmarks(landmarks, required);
+  if (!validation.valid) {
+    return { ...prevState, feedback: { type: 'visibility', missingParts: validation.missingParts }, _prevLandmarks: landmarks };
+  }
+
+  const moving = detectMovement(landmarks, prevState._prevLandmarks);
+
+  const rWrist = landmarks[LM.RIGHT_WRIST], lWrist = landmarks[LM.LEFT_WRIST];
+  const rShoulder = landmarks[LM.RIGHT_SHOULDER], lShoulder = landmarks[LM.LEFT_SHOULDER];
+  const shoulderMidY = (lShoulder.y + rShoulder.y) / 2;
+
+  const wrist = vis(rWrist) ? rWrist : (vis(lWrist) ? lWrist : null);
+  if (!wrist) return { ...prevState, feedback: null, moving, _prevLandmarks: landmarks, _calibration: prevState._calibration };
+
+  let firstRepStarted = prevState.firstRepStarted || false;
+  const wristHistory = prevState._wristHistory || [];
+  wristHistory.push(wrist.y);
+  if (wristHistory.length > 30) wristHistory.shift();
+
+  let feedback = null;
+  let reps = prevState.reps || 0;
+  let phase = prevState.phase || 'up';
+  let newPhase = phase;
+  let newReps = reps;
+  let lastRepTime = prevState.lastRepTime || null;
+  const formIssues = { ...(prevState.formIssues || {}) };
+
+  if (moving) firstRepStarted = true;
+
+  if (firstRepStarted && wristHistory.length >= 10) {
+    const recent = wristHistory.slice(-10);
+    const min = Math.min(...recent);
+    const max = Math.max(...recent);
+    const amplitude = max - min;
+
+    if (amplitude > 0.03) {
+      const current = recent[recent.length - 1];
+      if (phase === 'up' && current > min + amplitude * 0.7) {
+        newPhase = 'down';
+      } else if (phase === 'down' && current < min + amplitude * 0.3) {
+        newPhase = 'up';
+        newReps = reps + 1;
+        lastRepTime = Date.now();
+        feedback = { type: 'count', text: `${newReps}!`, count: newReps };
+      }
+    }
+
+    // Wheelchair: dribble must be below shoulder level (lower than standing)
+    if (wrist.y < shoulderMidY) {
+      feedback = { type: 'warning', text: 'כדרור נמוך יותר! בכיסא גלגלים הכדרור חייב להיות מתחת לכתפיים' };
+      formIssues.dribblingTooHigh = (formIssues.dribblingTooHigh || 0) + 1;
+    } else if (moving && amplitude > 0.03 && !feedback) {
+      feedback = { type: 'good', text: 'כדרור מצוין! קצב נהדר!' };
+    }
+  }
+
+  return {
+    reps: newReps, phase: newPhase, feedback, moving, headDown: false,
+    lastRepTime, firstRepStarted, posture: 'wheelchair', formIssues,
+    _wristHistory: wristHistory, _prevLandmarks: landmarks, _calibration: prevState._calibration
+  };
+}
+
+// ============================================
+// PARALYMPIC: Wheelchair Basketball — Chest Pass
+// ============================================
+// Biomechanics: Full arm extension + trunk rotation for power.
+// Phases: retract → extend. NO legs required.
+export function analyzeWheelchairBasketballChestPass(landmarks, prevState = {}, ballData = null) {
+  if (!landmarks) return { ...prevState, feedback: null };
+
+  const required = [...LANDMARKS.UPPER_BODY, ...LANDMARKS.HIPS];
+  const validation = validateLandmarks(landmarks, required);
+  if (!validation.valid) {
+    return { ...prevState, feedback: { type: 'visibility', missingParts: validation.missingParts }, _prevLandmarks: landmarks };
+  }
+
+  const moving = detectMovement(landmarks, prevState._prevLandmarks);
+  const cal = prevState._calibration;
+
+  const lShoulder = landmarks[LM.LEFT_SHOULDER], rShoulder = landmarks[LM.RIGHT_SHOULDER];
+  const lElbow = landmarks[LM.LEFT_ELBOW], rElbow = landmarks[LM.RIGHT_ELBOW];
+  const lWrist = landmarks[LM.LEFT_WRIST], rWrist = landmarks[LM.RIGHT_WRIST];
+
+  let firstRepStarted = prevState.firstRepStarted || false;
+  let reps = prevState.reps || 0;
+  let phase = prevState.phase || 'retract';
+  let newPhase = phase;
+  let newReps = reps;
+  let feedback = null;
+  let lastRepTime = prevState.lastRepTime || null;
+  const formIssues = { ...(prevState.formIssues || {}) };
+
+  // Arm extension: both elbows
+  const lElbowAngle = vis(lShoulder) && vis(lElbow) && vis(lWrist) ? angle(lShoulder, lElbow, lWrist) : null;
+  const rElbowAngle = vis(rShoulder) && vis(rElbow) && vis(rWrist) ? angle(rShoulder, rElbow, rWrist) : null;
+  const avgElbow = lElbowAngle && rElbowAngle ? (lElbowAngle + rElbowAngle) / 2 : (lElbowAngle || rElbowAngle || 0);
+
+  const rotation = getTrunkRotation(landmarks);
+  const extendThreshold = calThreshold(cal, 'leftElbow', 0.8, 150);
+  const retractThreshold = calThreshold(cal, 'leftElbow', 0.3, 90);
+
+  if (moving) firstRepStarted = true;
+
+  if (firstRepStarted) {
+    if (phase === 'retract' && avgElbow > extendThreshold) {
+      newPhase = 'extend';
+      newReps = reps + 1;
+      lastRepTime = Date.now();
+      feedback = { type: 'count', text: `${newReps}!`, count: newReps };
+    } else if (phase === 'extend' && avgElbow < retractThreshold) {
+      newPhase = 'retract';
+    }
+
+    // Trunk rotation check — key for wheelchair power
+    if (newPhase === 'extend' && rotation < 20) {
+      if (!feedback) {
+        feedback = { type: 'warning', text: 'סובב את הגוף! סיבוב פלג עליון מוסיף כוח למסירה' };
+        formIssues.noRotation = (formIssues.noRotation || 0) + 1;
+      }
+    }
+
+    // Full extension check
+    if (newPhase === 'extend' && avgElbow < 140) {
+      if (!feedback) {
+        feedback = { type: 'warning', text: 'יישר את הידיים עד הסוף! מסירה חזקה = זרועות ישרות' };
+        formIssues.incompleteExtension = (formIssues.incompleteExtension || 0) + 1;
+      }
+    }
+
+    if (moving && !feedback && newPhase === 'extend' && rotation > 30 && avgElbow > 150) {
+      feedback = { type: 'good', text: 'מסירה מושלמת! סיבוב + יישור מלא!' };
+    }
+  }
+
+  return {
+    reps: newReps, phase: newPhase, feedback, moving, headDown: false,
+    lastRepTime, firstRepStarted, posture: 'wheelchair', formIssues,
+    _prevLandmarks: landmarks, _calibration: cal
+  };
+}
+
+// ============================================
+// PARALYMPIC: Wheelchair Tennis — Stroke
+// ============================================
+// Biomechanics: LARGER trunk rotation than standing tennis (30°+ good, 60°+ excellent).
+// Higher shoulder angular velocity. Full arm extension. NO legs required.
+export function analyzeWheelchairTennisStroke(landmarks, prevState = {}, ballData = null) {
+  if (!landmarks) return { ...prevState, feedback: null };
+
+  const required = [...LANDMARKS.UPPER_BODY, ...LANDMARKS.HIPS];
+  const validation = validateLandmarks(landmarks, required);
+  if (!validation.valid) {
+    return { ...prevState, feedback: { type: 'visibility', missingParts: validation.missingParts }, _prevLandmarks: landmarks };
+  }
+
+  const moving = detectMovement(landmarks, prevState._prevLandmarks);
+  const cal = prevState._calibration;
+
+  const lShoulder = landmarks[LM.LEFT_SHOULDER], rShoulder = landmarks[LM.RIGHT_SHOULDER];
+  const rWrist = landmarks[LM.RIGHT_WRIST], lWrist = landmarks[LM.LEFT_WRIST];
+
+  let firstRepStarted = prevState.firstRepStarted || false;
+  let reps = prevState.reps || 0;
+  let phase = prevState.phase || 'ready';
+  let newPhase = phase;
+  let newReps = reps;
+  let feedback = null;
+  let lastRepTime = prevState.lastRepTime || null;
+  const formIssues = { ...(prevState.formIssues || {}) };
+
+  const rotation = getTrunkRotation(landmarks);
+  const rotationGood = calThreshold(cal, 'trunkRotation', 0.4, 30);
+  const rotationExcellent = calThreshold(cal, 'trunkRotation', 0.7, 60);
+
+  // Wrist speed tracking
+  const wristSpeedHistory = prevState._wristSpeedHistory || [];
+  const dominantWrist = vis(rWrist) ? rWrist : (vis(lWrist) ? lWrist : null);
+  if (dominantWrist && prevState._prevWristPos) {
+    const speed = Math.sqrt(
+      Math.pow(dominantWrist.x - prevState._prevWristPos.x, 2) +
+      Math.pow(dominantWrist.y - prevState._prevWristPos.y, 2)
+    );
+    wristSpeedHistory.push(speed);
+    if (wristSpeedHistory.length > 20) wristSpeedHistory.shift();
+  }
+
+  if (moving) firstRepStarted = true;
+
+  if (firstRepStarted) {
+    const maxSpeed = wristSpeedHistory.length > 0 ? Math.max(...wristSpeedHistory) : 0;
+
+    if (phase === 'ready' && maxSpeed > 0.02) {
+      newPhase = 'backswing';
+    } else if (phase === 'backswing' && maxSpeed > 0.05) {
+      newPhase = 'strike';
+    } else if (phase === 'strike' && maxSpeed < 0.02) {
+      newPhase = 'follow_through';
+      newReps = reps + 1;
+      lastRepTime = Date.now();
+      feedback = { type: 'count', text: `${newReps}!`, count: newReps };
+    } else if (phase === 'follow_through' && maxSpeed < 0.01) {
+      newPhase = 'ready';
+    }
+
+    // Wheelchair tennis needs MORE rotation than standing
+    if (moving && (newPhase === 'strike' || newPhase === 'backswing')) {
+      if (rotation < rotationGood) {
+        feedback = { type: 'warning', text: 'סובב יותר! בכיסא גלגלים סיבוב הגוף חשוב אפילו יותר!' };
+        formIssues.insufficientRotation = (formIssues.insufficientRotation || 0) + 1;
+      } else if (rotation > rotationExcellent) {
+        if (!feedback) feedback = { type: 'good', text: 'סיבוב מדהים! כוח מלא מפלג גוף עליון!' };
+      }
+    }
+
+    // Follow-through: wrist should end high (above shoulders)
+    if (newPhase === 'follow_through' && dominantWrist) {
+      const shoulderMidY = (lShoulder.y + rShoulder.y) / 2;
+      if (dominantWrist.y > shoulderMidY) {
+        if (!feedback) feedback = { type: 'warning', text: 'סיים למעלה! פולו-ת\'רו גבוה מעל הכתפיים' };
+        formIssues.lowFollowThrough = (formIssues.lowFollowThrough || 0) + 1;
+      }
+    }
+  }
+
+  return {
+    reps: newReps, phase: newPhase, feedback, moving, headDown: false,
+    lastRepTime, firstRepStarted, posture: 'wheelchair', formIssues,
+    _wristSpeedHistory: wristSpeedHistory,
+    _prevWristPos: dominantWrist ? { x: dominantWrist.x, y: dominantWrist.y } : prevState._prevWristPos,
+    _prevLandmarks: landmarks, _calibration: cal
+  };
+}
+
+// ============================================
+// PARALYMPIC: Wheelchair Tennis — Serve
+// ============================================
+// Biomechanics: Lower toss point (seated). Trunk lean critical for power.
+// Trophy position with forward lean. NO legs required.
+export function analyzeWheelchairTennisServe(landmarks, prevState = {}, ballData = null) {
+  if (!landmarks) return { ...prevState, feedback: null };
+
+  const required = [...LANDMARKS.UPPER_BODY, ...LANDMARKS.HIPS, ...LANDMARKS.HEAD];
+  const validation = validateLandmarks(landmarks, required);
+  if (!validation.valid) {
+    return { ...prevState, feedback: { type: 'visibility', missingParts: validation.missingParts }, _prevLandmarks: landmarks };
+  }
+
+  const moving = detectMovement(landmarks, prevState._prevLandmarks);
+  const cal = prevState._calibration;
+
+  const nose = landmarks[LM.NOSE];
+  const rShoulder = landmarks[LM.RIGHT_SHOULDER], lShoulder = landmarks[LM.LEFT_SHOULDER];
+  const rElbow = landmarks[LM.RIGHT_ELBOW];
+  const rWrist = landmarks[LM.RIGHT_WRIST], lWrist = landmarks[LM.LEFT_WRIST];
+  const lHip = landmarks[LM.LEFT_HIP], rHip = landmarks[LM.RIGHT_HIP];
+
+  if (!vis(rShoulder) || !vis(rElbow) || !vis(rWrist) || !vis(nose)) {
+    return { ...prevState, feedback: null, moving, _prevLandmarks: landmarks, _calibration: cal };
+  }
+
+  let firstRepStarted = prevState.firstRepStarted || false;
+  let reps = prevState.reps || 0;
+  let phase = prevState.phase || 'ready';
+  let newPhase = phase;
+  let newReps = reps;
+  let feedback = null;
+  let lastRepTime = prevState.lastRepTime || null;
+  const formIssues = { ...(prevState.formIssues || {}) };
+
+  // Toss: left wrist above nose (lower threshold for wheelchair — seated toss)
+  const tossHandHigh = vis(lWrist) && lWrist.y < nose.y;
+  // Trophy position: elbow bent, wrist above head
+  const elbowAngle = angle(rShoulder, rElbow, rWrist);
+  const wristAboveHead = rWrist.y < nose.y;
+  const trophyPosition = elbowAngle < 120 && wristAboveHead;
+  // Snap: wrist drops below shoulder
+  const wristBelowShoulder = rWrist.y > rShoulder.y;
+
+  // Trunk lean for power
+  const shoulderMidY = (lShoulder.y + rShoulder.y) / 2;
+  const hipMidY = (lHip.y + rHip.y) / 2;
+  const trunkLean = hipMidY - shoulderMidY;
+
+  if (moving) firstRepStarted = true;
+
+  if (firstRepStarted) {
+    if (phase === 'ready' && tossHandHigh) {
+      newPhase = 'toss';
+    } else if (phase === 'toss' && trophyPosition) {
+      newPhase = 'trophy';
+    } else if (phase === 'trophy' && wristBelowShoulder) {
+      newPhase = 'snap';
+      newReps = reps + 1;
+      lastRepTime = Date.now();
+      feedback = { type: 'count', text: `${newReps}!`, count: newReps };
+    } else if (phase === 'snap' && !wristBelowShoulder) {
+      newPhase = 'ready';
+    }
+
+    // Trunk lean check during trophy/snap
+    if ((newPhase === 'trophy' || newPhase === 'snap') && trunkLean < 0.03) {
+      if (!feedback) {
+        feedback = { type: 'warning', text: 'הטה קדימה! בכיסא גלגלים הטיית הגוף קריטית לכוח ההגשה' };
+        formIssues.noTrunkLean = (formIssues.noTrunkLean || 0) + 1;
+      }
+    }
+
+    // Elbow angle at trophy
+    const trophyElbowMax = calThreshold(cal, 'rightElbow', 0.5, 110);
+    if (newPhase === 'trophy' && elbowAngle > trophyElbowMax + 10) {
+      if (!feedback) {
+        feedback = { type: 'warning', text: 'כופף את המרפק יותר בעמדת הטרופי!' };
+        formIssues.trophyElbowWide = (formIssues.trophyElbowWide || 0) + 1;
+      }
+    }
+
+    if (moving && trophyPosition && !feedback && trunkLean > 0.04) {
+      feedback = { type: 'good', text: 'עמדת טרופי מצוינת עם הטיה קדימה!' };
+    }
+  }
+
+  return {
+    reps: newReps, phase: newPhase, feedback, moving, headDown: false,
+    lastRepTime, firstRepStarted, posture: 'wheelchair', formIssues,
+    _tossTime: newPhase === 'toss' && phase !== 'toss' ? Date.now() : (prevState._tossTime || null),
+    _prevLandmarks: landmarks, _calibration: cal
   };
 }

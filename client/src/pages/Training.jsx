@@ -7,7 +7,7 @@ import { useSpeech } from '../hooks/useSpeech';
 import { useObjectDetection, classifyDetectedObjects } from '../hooks/useObjectDetection';
 import { useBallDetection } from '../hooks/useBallDetection';
 import { useAICoach } from '../hooks/useAICoach';
-import { getAnalyzer, getLocationProps, getWarmUpExercises, getDisabilityContext } from '../utils/exerciseAnalysis';
+import { getAnalyzer, getLocationProps, getWarmUpExercises, getDisabilityContext, getCalibrationAngles } from '../utils/exerciseAnalysis';
 
 import { estimateCalories } from '../utils/calorieEstimator';
 import { db } from '../services/firebase';
@@ -24,6 +24,8 @@ const PHASE = {
   EXERCISING: 'exercising',
   RESTING: 'resting',
   EXERCISE_DONE: 'exercise_done',
+  PAUSED: 'paused',
+  CALIBRATING: 'calibrating',
 };
 
 const OPTIMIZATION_TIPS = {
@@ -100,6 +102,8 @@ export default function Training() {
     speakWarmUpIntro, speakWarmUpExercise, speakWarmUpNudge, speakWarmUpInactivityNudge, speakWarmUpReExplain,
     speakWarmUpCorrection, speakWarmUpComplete,
     speakDisabilityTip, speakMindMuscleCue, speakAICoaching, speakEnvironmentScan,
+    speakNotVisible, speakPositiveReinforcement,
+    speakMissingBodyParts, speakCalibrationStart, speakCalibrationDone,
     stop: stopSpeech, isSpeaking
   } = useSpeech(lang);
 
@@ -116,6 +120,23 @@ export default function Training() {
 
   // Workout adaptation
   const lastAdaptationRef = useRef(0);
+
+  // Fullscreen toggle
+  const [isFullscreen, setIsFullscreen] = useState(false);
+
+  // Pause/Resume state snapshot
+  const pausedStateRef = useRef(null);
+  const pausedWarmUpRef = useRef(null); // for warm-up pause
+
+  // Not-visible tracking
+  const notVisibleWarnedRef = useRef(false);
+
+  // Visibility feedback throttle
+  const visibilityWarningTimeRef = useRef(0);
+
+  // Calibration state
+  const calibrationDataRef = useRef(null);
+  const [calibrationCountdown, setCalibrationCountdown] = useState(5);
 
   const [exercises, setExercises] = useState([]);
   const [currentIdx, setCurrentIdx] = useState(0);
@@ -215,7 +236,7 @@ export default function Training() {
     if (currentExercise) {
       const { analyze, type, cueKey, ballAware } = getAnalyzer(currentExercise.name);
       analyzerRef.current = { analyze, type, cueKey, ballAware };
-      exerciseStateRef.current = {};
+      exerciseStateRef.current = { _userProfile: userProfile };
       setDisplayReps(0);
       setFeedback(null);
       setCurrentSet(1);
@@ -231,6 +252,63 @@ export default function Training() {
     }
   }, [currentIdx, currentExercise]);
 
+  // === CALIBRATION PHASE — 5-second ROM measurement ===
+  useEffect(() => {
+    if (phase !== PHASE.CALIBRATING || !landmarks) return;
+
+    const now = Date.now();
+
+    // Initialize calibration on first frame
+    if (!calibrationDataRef.current) {
+      calibrationDataRef.current = {
+        startTime: now,
+        minAngles: {},
+        maxAngles: {},
+        frames: 0,
+      };
+      speakCalibrationStart(playerName);
+    }
+
+    const cal = calibrationDataRef.current;
+    cal.frames++;
+
+    // Measure key joint angles every frame
+    const cueKey = analyzerRef.current?.cueKey;
+    const anglesToTrack = getCalibrationAngles(landmarks, cueKey);
+    for (const [joint, value] of Object.entries(anglesToTrack)) {
+      cal.minAngles[joint] = Math.min(cal.minAngles[joint] ?? 999, value);
+      cal.maxAngles[joint] = Math.max(cal.maxAngles[joint] ?? 0, value);
+    }
+
+    // Countdown
+    const elapsed = (now - cal.startTime) / 1000;
+    setCalibrationCountdown(Math.max(0, Math.ceil(5 - elapsed)));
+
+    // After 5 seconds, store baseline and proceed
+    if (elapsed >= 5) {
+      const baseline = {};
+      for (const joint of Object.keys(cal.maxAngles)) {
+        baseline[joint] = {
+          min: cal.minAngles[joint],
+          max: cal.maxAngles[joint],
+          range: cal.maxAngles[joint] - cal.minAngles[joint],
+        };
+      }
+      exerciseStateRef.current._calibration = baseline;
+
+      speakCalibrationDone(playerName);
+
+      calibrationDataRef.current = null;
+      setCalibrationCountdown(5);
+      setPhase(PHASE.EXERCISING);
+      setTimer(0);
+      lastActivityRef.current = Date.now();
+      exerciseStartTimeRef.current = Date.now();
+      lastNudgeTimeRef.current = 0;
+      speakSetStart(currentSet, totalSets);
+    }
+  }, [phase, landmarks]);
+
   // Core pose analysis - with posture gating (uses ref to avoid render loops)
   useEffect(() => {
     if (phase !== PHASE.EXERCISING || !landmarks || !analyzerRef.current) return;
@@ -244,8 +322,42 @@ export default function Training() {
     const isMoving = newState.moving;
     const firstRepStarted = newState.firstRepStarted || false;
 
-    // === POSTURE GATE: If sitting or unknown, suppress ALL technique feedback ===
-    if (posture === 'sitting' || posture === 'unknown') {
+    // === VISIBILITY FEEDBACK (from analyzer validateLandmarks) ===
+    if (newState.feedback?.type === 'visibility') {
+      const now = Date.now();
+      if (now - visibilityWarningTimeRef.current > 10000) {
+        speakMissingBodyParts(newState.feedback.missingParts, playerName);
+        visibilityWarningTimeRef.current = now;
+        setFeedback({
+          type: 'info',
+          text: isHe ? 'תכוון את המצלמה כדי שאוכל לראות אותך' : 'Adjust camera so I can see you'
+        });
+      }
+      exerciseStateRef.current = newState;
+      return; // Don't give wrong technique feedback
+    }
+
+    // === POSTURE GATE ===
+    // Not visible — gentle guidance (blame yourself, not user)
+    if (posture === 'unknown') {
+      const now = Date.now();
+      if (!notVisibleWarnedRef.current || now - lastNudgeTimeRef.current > 8000) {
+        notVisibleWarnedRef.current = true;
+        lastNudgeTimeRef.current = now;
+        speakNotVisible(playerName);
+        setFeedback({
+          type: 'info',
+          text: isHe
+            ? `${playerName}, אני לא רואה אותך טוב. תתקרב למצלמה.`
+            : `${playerName}, I can't see you well. Move closer to the camera.`
+        });
+      }
+      exerciseStateRef.current = newState;
+      return;
+    }
+
+    // Sitting — ask to stand (only for non-wheelchair users)
+    if (posture === 'sitting') {
       const now = Date.now();
       if (!sittingWarnedRef.current || now - lastNudgeTimeRef.current > 10000) {
         sittingWarnedRef.current = true;
@@ -262,8 +374,9 @@ export default function Training() {
       return;
     }
 
-    // User is standing - clear sitting warning
+    // Wheelchair or standing — clear warnings and proceed
     sittingWarnedRef.current = false;
+    notVisibleWarnedRef.current = false;
 
     // Update activity timestamp when movement or new rep detected
     if (isMoving || (newState.lastRepTime && newState.lastRepTime !== prevState.lastRepTime)) {
@@ -295,16 +408,16 @@ export default function Training() {
       if (fb.type === 'good' && isMoving) {
         goodFormCountRef.current++;
         const now = Date.now();
-        if (now - lastEncouragementRef.current > 8000) {
-          speakEncouragement();
+        if (now - lastEncouragementRef.current > 5000) {
+          speakPositiveReinforcement(playerName);
           lastEncouragementRef.current = now;
         }
       } else if (fb.type === 'warning' && isMoving) {
         badFormCountRef.current++;
-        if (badFormCountRef.current >= 3 && !formStoppedRef.current) {
+        if (badFormCountRef.current >= 5 && !formStoppedRef.current) {
           formStoppedRef.current = true;
           speakCorrection(currentExercise?.tips);
-          setFeedback({ type: 'warning', text: t('training.formStopped') });
+          setFeedback({ type: 'info', text: isHe ? 'כיוון טוב! בוא נשפר קצת.' : 'Good direction! Let\'s refine.' });
           setTimeout(() => {
             formStoppedRef.current = false;
             badFormCountRef.current = 0;
@@ -385,18 +498,18 @@ export default function Training() {
       // User is sitting or unknown → handled in pose loop, skip here
       if (posture === 'sitting' || posture === 'unknown') return;
 
-      // === PRIORITY 1: Mid-set quit - started reps but stopped 5s+ ===
-      if (currentReps > 0 && elapsed >= 5 && timeSinceLastNudge >= 5) {
+      // === PRIORITY 1: Mid-set encouragement - started reps but paused 8s+ ===
+      if (currentReps > 0 && elapsed >= 8 && timeSinceLastNudge >= 8) {
         const targetReps = parseInt(currentExercise?.reps) || 10;
         const repsRemaining = targetReps - currentReps;
         if (repsRemaining > 0) {
           lastNudgeTimeRef.current = now;
           speakMidSetQuit(playerName, repsRemaining);
           setFeedback({
-            type: 'warning',
+            type: 'info',
             text: isHe
-              ? `אל תפסיק! רק עוד ${repsRemaining} חזרות!`
-              : `Don't quit! Only ${repsRemaining} more reps!`
+              ? `אתה עושה מעולה! רק עוד ${repsRemaining} חזרות!`
+              : `You're doing great! Just ${repsRemaining} more reps!`
           });
           return;
         }
@@ -404,17 +517,17 @@ export default function Training() {
 
       // === Already started reps but idle ===
       if (firstRepStarted) {
-        if (elapsed >= 7 && timeSinceLastNudge >= 7) {
+        if (elapsed >= 10 && timeSinceLastNudge >= 10) {
           lastNudgeTimeRef.current = now;
           const prodText = speakActiveProd(playerName, prodIndexRef.current, locationProps, currentExercise?.description);
           prodIndexRef.current++;
-          setFeedback({ type: 'warning', text: prodText });
+          setFeedback({ type: 'info', text: prodText });
         }
         return;
       }
 
-      // === PRIORITY 2: Quick re-explain at 20s (once) ===
-      if (elapsed >= 20 && !reExplainedRef.current) {
+      // === PRIORITY 2: Quick re-explain at 25s (once) ===
+      if (elapsed >= 25 && !reExplainedRef.current) {
         reExplainedRef.current = true;
         lastNudgeTimeRef.current = now;
         prodIndexRef.current = 0;
@@ -422,19 +535,19 @@ export default function Training() {
         setFeedback({
           type: 'info',
           text: isHe
-            ? `${playerName}, אולי לא ברור? בוא נסביר מהר...`
-            : `${playerName}, not sure how to start? Let me explain quickly...`
+            ? `${playerName}, בוא נסביר שוב מה לעשות...`
+            : `${playerName}, let me explain what to do...`
         });
         return;
       }
 
-      // === PRIORITY 3: First nudge at exactly 5s, then every 7s ===
-      const nudgeCooldown = lastNudgeTimeRef.current === 0 ? 5 : 7;
-      if (elapsed >= 5 && timeSinceLastNudge >= nudgeCooldown) {
+      // === PRIORITY 3: First nudge at 8s (silence before), then every 10s ===
+      const nudgeCooldown = lastNudgeTimeRef.current === 0 ? 8 : 10;
+      if (elapsed >= 8 && timeSinceLastNudge >= nudgeCooldown) {
         lastNudgeTimeRef.current = now;
         const prodText = speakActiveProd(playerName, prodIndexRef.current, locationProps, currentExercise?.description);
         prodIndexRef.current++;
-        setFeedback({ type: 'warning', text: prodText });
+        setFeedback({ type: 'info', text: prodText });
       }
     }, 1000);
 
@@ -594,12 +707,8 @@ export default function Training() {
           speakWarmUpIntro(playerName);
           setPhase(PHASE.WARM_UP);
         } else {
-          setPhase(PHASE.EXERCISING);
-          setTimer(0);
-          lastActivityRef.current = Date.now();
-          exerciseStartTimeRef.current = Date.now();
-          lastNudgeTimeRef.current = 0;
-          speakSetStart(currentSet, totalSets);
+          calibrationDataRef.current = null;
+          setPhase(PHASE.CALIBRATING);
         }
       }
     }, 5000);
@@ -630,12 +739,8 @@ export default function Training() {
           speakWarmUpIntro(playerName);
           setPhase(PHASE.WARM_UP);
         } else {
-          setPhase(PHASE.EXERCISING);
-          setTimer(0);
-          lastActivityRef.current = Date.now();
-          exerciseStartTimeRef.current = Date.now();
-          lastNudgeTimeRef.current = 0;
-          speakSetStart(currentSet, totalSets);
+          calibrationDataRef.current = null;
+          setPhase(PHASE.CALIBRATING);
         }
       }, 2000);
     }
@@ -687,26 +792,26 @@ export default function Training() {
           setWarmUpPaused(true);
         }
 
-        // 2) Vocal Nudge: 4s of no movement → priority nudge naming the exercise
-        if (inactiveSeconds >= 4 && (now - lastWarmUpNudgeRef.current) / 1000 >= 4) {
+        // 2) Gentle nudge: 8s of no movement (forgiving timing)
+        if (inactiveSeconds >= 8 && (now - lastWarmUpNudgeRef.current) / 1000 >= 8) {
           lastWarmUpNudgeRef.current = now;
 
-          // 4) Re-explain at 15s (once per exercise)
-          if (inactiveSeconds >= 15 && !warmUpReExplainedRef.current) {
+          // Re-explain at 20s (once per exercise)
+          if (inactiveSeconds >= 20 && !warmUpReExplainedRef.current) {
             warmUpReExplainedRef.current = true;
             const eName = isHe ? currentWarmUp.name.he : currentWarmUp.name.en;
             const eDesc = isHe ? currentWarmUp.description.he : currentWarmUp.description.en;
             speakWarmUpReExplain(eName, eDesc, playerName);
             setFeedback({
-              type: 'warning',
-              text: isHe ? 'אולי לא ברור? בוא נסביר שוב...' : "Maybe it's not clear? Let me explain again..."
+              type: 'info',
+              text: isHe ? 'בוא נסביר שוב...' : "Let me explain again..."
             });
           } else {
             const eName = isHe ? currentWarmUp.name.he : currentWarmUp.name.en;
             speakWarmUpInactivityNudge(eName, playerName);
             setFeedback({
-              type: 'warning',
-              text: isHe ? `אני מחכה! התחל את ה${eName}!` : `I'm waiting! Start the ${eName}!`
+              type: 'info',
+              text: isHe ? `${playerName}, אני פה. התחל את ה${eName} כשאתה מוכן.` : `${playerName}, I'm here. Start the ${eName} when you're ready.`
             });
           }
         }
@@ -945,7 +1050,7 @@ export default function Training() {
   }
 
   function handleStartBriefing() {
-    exerciseStateRef.current = {}; setDisplayReps(0);
+    exerciseStateRef.current = { _userProfile: userProfile }; setDisplayReps(0);
     setTimer(0);
     setFeedback(null);
     resetAllTracking();
@@ -965,18 +1070,14 @@ export default function Training() {
     sittingWarnedRef.current = false;
 
     if (!needsEquipmentCheck(currentExercise)) {
-      // Skip equipment detection — go directly to warm-up or exercising
+      // Skip equipment detection — go directly to warm-up or calibrating
       if (!warmUpDone && currentIdx === 0) {
         setWarmUpIdx(0);
         speakWarmUpIntro(playerName);
         setPhase(PHASE.WARM_UP);
       } else {
-        setPhase(PHASE.EXERCISING);
-        setTimer(0);
-        lastActivityRef.current = Date.now();
-        exerciseStartTimeRef.current = Date.now();
-        lastNudgeTimeRef.current = 0;
-        speakSetStart(currentSet, totalSets);
+        calibrationDataRef.current = null;
+        setPhase(PHASE.CALIBRATING);
       }
     } else {
       setEquipmentFound(false);
@@ -1012,7 +1113,8 @@ export default function Training() {
 
   function startNextSet() {
     setCurrentSet(prev => prev + 1);
-    exerciseStateRef.current = {}; setDisplayReps(0);
+    const prevCal = exerciseStateRef.current._calibration;
+    exerciseStateRef.current = { _userProfile: userProfile, _calibration: prevCal }; setDisplayReps(0);
     setFeedback(null);
     resetAllTracking();
     exerciseStartTimeRef.current = Date.now();
@@ -1028,13 +1130,72 @@ export default function Training() {
     startNextSet();
   }
 
-  function handlePauseExercise() { setPhase(PHASE.IDLE); }
+  function handlePauseExercise() {
+    // Snapshot current state for resume
+    pausedStateRef.current = {
+      exerciseState: { ...exerciseStateRef.current },
+      displayReps,
+      currentSet,
+      timer,
+      activeTimer,
+      setsPerformance: [...setsPerformance],
+      feedback,
+      wasPhase: phase, // track if we were in EXERCISING or WARM_UP
+    };
+    if (phase === PHASE.WARM_UP) {
+      pausedWarmUpRef.current = {
+        warmUpIdx,
+        warmUpTimer: warmUpTimer,
+        warmUpState: { ...warmUpStateRef.current },
+      };
+      clearInterval(warmUpTimerRef.current);
+    }
+    clearInterval(timerRef.current);
+    stopSpeech();
+    stopAICoaching();
+    stopBallLoop();
+    setPhase(PHASE.PAUSED);
+  }
+
+  function handleResumeExercise() {
+    const snap = pausedStateRef.current;
+    if (!snap) return;
+
+    // Restore warm-up if we were in warm-up
+    if (snap.wasPhase === PHASE.WARM_UP && pausedWarmUpRef.current) {
+      const wuSnap = pausedWarmUpRef.current;
+      warmUpStateRef.current = wuSnap.warmUpState;
+      setWarmUpIdx(wuSnap.warmUpIdx);
+      setWarmUpTimer(wuSnap.warmUpTimer);
+      pausedWarmUpRef.current = null;
+      pausedStateRef.current = null;
+      lastActivityRef.current = Date.now();
+      setPhase(PHASE.WARM_UP);
+      speakPriority(isHe ? 'ממשיכים!' : "Let's go!");
+      return;
+    }
+
+    // Restore exercise state
+    exerciseStateRef.current = snap.exerciseState;
+    setDisplayReps(snap.displayReps);
+    setCurrentSet(snap.currentSet);
+    setTimer(snap.timer);
+    setActiveTimer(snap.activeTimer);
+    setSetsPerformance(snap.setsPerformance);
+    setFeedback(snap.feedback);
+    lastActivityRef.current = Date.now();
+    lastNudgeTimeRef.current = 0;
+    exerciseStartTimeRef.current = Date.now();
+    pausedStateRef.current = null;
+    setPhase(PHASE.EXERCISING);
+    speakPriority(isHe ? 'ממשיכים!' : "Let's go!");
+  }
 
   async function handleNextExercise() {
     // Record this exercise's results before moving on
     recordExerciseResult();
     stopSpeech(); setPhase(PHASE.IDLE); setTimer(0); setFeedback(null);
-    exerciseStateRef.current = {}; setDisplayReps(0); setCurrentSet(1); setSetsPerformance([]); resetAllTracking();
+    exerciseStateRef.current = { _userProfile: userProfile }; setDisplayReps(0); setCurrentSet(1); setSetsPerformance([]); resetAllTracking();
 
     if (currentIdx < exercises.length - 1) {
       // Try workout adaptation after 2+ exercises, max once per 2 min
@@ -1081,7 +1242,7 @@ export default function Training() {
   function handlePrevExercise() {
     if (currentIdx > 0) {
       stopSpeech(); setPhase(PHASE.IDLE); setTimer(0); setFeedback(null);
-      exerciseStateRef.current = {}; setDisplayReps(0); setCurrentSet(1); setSetsPerformance([]); resetAllTracking();
+      exerciseStateRef.current = { _userProfile: userProfile }; setDisplayReps(0); setCurrentSet(1); setSetsPerformance([]); resetAllTracking();
       setCurrentIdx(currentIdx - 1);
     }
   }
@@ -1108,23 +1269,48 @@ export default function Training() {
   }
 
   return (
-    <div className="max-w-4xl mx-auto space-y-4">
-      <div className="flex items-center justify-between flex-wrap gap-2">
-        <h1 className="text-xl font-bold text-gray-800">{t('training.title')}</h1>
-        <div className="flex items-center gap-3">
-          <span className="text-sm bg-gray-100 px-3 py-1 rounded-full text-gray-600">
-            {LOCATION_ICONS[currentLocation] || '\u26BD'} {t(`dashboard.location${currentLocation.charAt(0).toUpperCase() + currentLocation.slice(1)}`)}
-          </span>
-          <button onClick={() => { recordExerciseResult(); saveSession('partial'); handleStopCamera(); navigate('/'); }} className="text-sm text-gray-500 hover:text-red-500">
-            {t('training.finishWorkout')}
-          </button>
+    <div className={isFullscreen ? 'fixed inset-0 bg-black z-40' : 'max-w-4xl mx-auto space-y-4'}>
+      {!isFullscreen && (
+        <div className="flex items-center justify-between flex-wrap gap-2">
+          <h1 className="text-xl font-bold text-gray-800">{t('training.title')}</h1>
+          <div className="flex items-center gap-3">
+            <span className="text-sm bg-gray-100 px-3 py-1 rounded-full text-gray-600">
+              {LOCATION_ICONS[currentLocation] || '\u26BD'} {t(`dashboard.location${currentLocation.charAt(0).toUpperCase() + currentLocation.slice(1)}`)}
+            </span>
+            <button onClick={() => { recordExerciseResult(); saveSession('partial'); handleStopCamera(); navigate('/'); }} className="text-sm text-gray-500 hover:text-red-500">
+              {t('training.finishWorkout')}
+            </button>
+          </div>
         </div>
-      </div>
+      )}
 
       {/* Camera + Pose Overlay */}
-      <div className="relative bg-black rounded-xl overflow-hidden" style={{ aspectRatio: '4/3' }}>
+      <div className={isFullscreen
+        ? 'relative w-full h-full bg-black overflow-hidden'
+        : 'relative bg-black rounded-xl overflow-hidden'}
+        style={isFullscreen ? undefined : { aspectRatio: '4/3' }}>
         <video ref={videoRef} className="w-full h-full object-cover" playsInline muted style={{ transform: 'scaleX(-1)' }} />
         <canvas ref={canvasRef} className="absolute inset-0 w-full h-full" style={{ transform: 'scaleX(-1)' }} />
+
+        {/* Fullscreen toggle button */}
+        {cameraActive && (
+          <button
+            onClick={() => setIsFullscreen(f => !f)}
+            className="absolute top-2 left-2 z-30 bg-black/50 text-white p-2 rounded-lg hover:bg-black/70 transition text-sm"
+          >
+            {isFullscreen ? (isHe ? '\u2199 \u05E6\u05DE\u05E6\u05DD' : '\u2199 Exit') : (isHe ? '\u2197 \u05DE\u05E1\u05DA \u05DE\u05DC\u05D0' : '\u2197 Fullscreen')}
+          </button>
+        )}
+
+        {/* Fullscreen: finish workout button */}
+        {isFullscreen && cameraActive && (
+          <button
+            onClick={() => { recordExerciseResult(); saveSession('partial'); handleStopCamera(); navigate('/'); }}
+            className="absolute top-2 right-2 z-30 bg-red-500/70 text-white px-3 py-1.5 rounded-lg hover:bg-red-600/80 transition text-xs"
+          >
+            {isHe ? '\u2716 \u05E1\u05D9\u05D9\u05DD' : '\u2716 End'}
+          </button>
+        )}
 
         {!poseReady && cameraActive && (
           <div className="absolute inset-0 bg-black/60 flex items-center justify-center">
@@ -1256,12 +1442,8 @@ export default function Training() {
                       speakWarmUpIntro(playerName);
                       setPhase(PHASE.WARM_UP);
                     } else {
-                      setPhase(PHASE.EXERCISING);
-                      setTimer(0);
-                      lastActivityRef.current = Date.now();
-                      exerciseStartTimeRef.current = Date.now();
-                      lastNudgeTimeRef.current = 0;
-                      speakSetStart(currentSet, totalSets);
+                      calibrationDataRef.current = null;
+                      setPhase(PHASE.CALIBRATING);
                     }
                   }}
                   className="w-full py-3 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-lg font-medium transition"
@@ -1273,47 +1455,52 @@ export default function Training() {
           </div>
         )}
 
-        {/* Warm-up overlay */}
+        {/* Warm-up HUD — same style as exercising, no dark overlay */}
         {phase === PHASE.WARM_UP && currentWarmUp && (
-          <div className="absolute inset-0 bg-black/60 flex flex-col items-center justify-between p-4 sm:p-6">
-            {/* Top: exercise name + description */}
-            <div className="bg-white/95 rounded-2xl p-4 w-full max-w-sm text-center space-y-2 mt-2">
-              <div className="flex items-center justify-center gap-2">
-                <span className="text-2xl">{warmUpIdx === 0 ? '\uD83D\uDCAA' : warmUpIdx === 1 ? '\uD83E\uDDBF' : '\u2194\uFE0F'}</span>
-                <h3 className="text-lg font-bold text-gray-800">
-                  {isHe ? currentWarmUp.name.he : currentWarmUp.name.en}
-                </h3>
-              </div>
-              <p className="text-sm text-gray-500">
-                {isHe ? currentWarmUp.description.he : currentWarmUp.description.en}
-              </p>
-              <div className="flex items-center justify-center gap-1 text-xs text-gray-400">
-                {warmUpExercises.map((_, i) => (
-                  <div key={i} className={`w-2 h-2 rounded-full ${i < warmUpIdx ? 'bg-green-500' : i === warmUpIdx ? 'bg-orange-500' : 'bg-gray-300'}`} />
-                ))}
-              </div>
+          <>
+            {/* Exercise name badge — top left */}
+            <div className="absolute top-14 left-4 bg-black/50 backdrop-blur-sm text-white px-3 py-1.5 rounded-xl text-sm font-medium max-w-[65%] z-10">
+              <div className="truncate">{isHe ? currentWarmUp.name.he : currentWarmUp.name.en}</div>
+              <div className="text-xs text-white/60 truncate">{isHe ? currentWarmUp.description.he : currentWarmUp.description.en}</div>
             </div>
 
-            {/* Center: big countdown */}
-            <div className="text-center">
-              <div className="text-8xl font-bold text-white drop-shadow-lg">{warmUpTimer}</div>
+            {/* Warm-up badge — top right (like set counter) */}
+            <div className="absolute top-14 right-4 bg-orange-500/90 text-white px-3 py-2 rounded-xl text-sm font-bold z-10">
+              {isHe ? 'חימום' : 'Warm-up'} {warmUpIdx + 1}/{warmUpExercises.length}
+            </div>
+
+            {/* Countdown timer — bottom left (like exercise timer) */}
+            <div className="absolute bottom-4 left-4 bg-black/70 text-white px-4 py-2 rounded-xl z-10">
+              <span className="text-2xl font-bold">{warmUpTimer}</span>
               {warmUpPaused && (
-                <div className="mt-2 inline-block bg-red-600 text-white px-4 py-1 rounded-full text-sm font-bold animate-pulse">
-                  {isHe ? 'מושהה - זוז!' : 'PAUSED - move!'}
+                <div className="text-xs text-yellow-400 mt-0.5 animate-pulse">
+                  {isHe ? 'זוז כדי להמשיך' : 'Move to continue'}
                 </div>
               )}
-              <div className="text-white/70 text-sm mt-1">
-                {isHe ? `תרגיל ${warmUpIdx + 1} מתוך ${warmUpExercises.length}` : `Exercise ${warmUpIdx + 1} of ${warmUpExercises.length}`}
-              </div>
             </div>
 
-            {/* Bottom: feedback + skip */}
-            <div className="w-full max-w-sm space-y-3">
-              {feedback && (
-                <div className={`${feedbackColor[feedback.type] || 'bg-blue-500'} text-white px-4 py-2 rounded-xl text-center font-bold text-sm`}>
-                  {feedback.text}
-                </div>
-              )}
+            {/* Progress dots — bottom right */}
+            <div className="absolute bottom-4 right-4 bg-black/70 text-white px-3 py-2 rounded-xl flex items-center gap-1.5 z-10">
+              {warmUpExercises.map((_, i) => (
+                <div key={i} className={`w-3 h-3 rounded-full ${i < warmUpIdx ? 'bg-green-500' : i === warmUpIdx ? 'bg-orange-400' : 'bg-gray-500'}`} />
+              ))}
+            </div>
+
+            {/* Feedback banner — same as exercising */}
+            {feedback && (
+              <div className={`absolute top-4 left-4 right-4 ${feedbackColor[feedback.type] || 'bg-blue-500'} text-white px-4 py-3 rounded-xl text-center font-bold text-lg shadow-lg z-10`}>
+                {feedback.text}
+              </div>
+            )}
+
+            {/* Pause + Skip buttons — bottom center */}
+            <div className="absolute bottom-16 left-1/2 -translate-x-1/2 flex gap-3 z-10">
+              <button
+                onClick={handlePauseExercise}
+                className="px-4 py-2 bg-yellow-500/80 text-white rounded-lg text-sm font-medium hover:bg-yellow-500 transition"
+              >
+                {isHe ? '\u23F8 \u05D4\u05E9\u05D4\u05D4' : '\u23F8 Pause'}
+              </button>
               <button
                 onClick={() => {
                   clearInterval(warmUpTimerRef.current);
@@ -1322,12 +1509,12 @@ export default function Training() {
                   setFeedback(null);
                   setTimeout(() => setPhase(PHASE.IDLE), 2500);
                 }}
-                className="w-full py-2 bg-white/20 text-white rounded-lg hover:bg-white/30 transition text-sm"
+                className="px-4 py-2 bg-white/20 text-white rounded-lg text-sm hover:bg-white/30 transition"
               >
-                {isHe ? 'דלג על חימום' : 'Skip warm-up'} &#9654;
+                {isHe ? '\u05D3\u05DC\u05D2 \u05D7\u05D9\u05DE\u05D5\u05DD' : 'Skip warm-up'} {'\u25B6'}
               </button>
             </div>
-          </div>
+          </>
         )}
 
         {/* Rest timer overlay */}
@@ -1369,9 +1556,67 @@ export default function Training() {
           </div>
         )}
 
+        {/* PAUSED overlay */}
+        {phase === PHASE.PAUSED && (
+          <div className="absolute inset-0 bg-black/70 flex items-center justify-center z-30">
+            <div className="text-center space-y-4 px-6">
+              <div className="text-5xl">{'\u23F8\uFE0F'}</div>
+              <div className="text-white text-xl font-bold">{isHe ? 'מושהה' : 'Paused'}</div>
+              <div className="text-white/60 text-sm">
+                {isHe
+                  ? `${pausedStateRef.current?.wasPhase === PHASE.WARM_UP ? 'חימום' : `סט ${currentSet}/${totalSets}`} | ${displayReps} חזרות | ${formatTime(timer)}`
+                  : `${pausedStateRef.current?.wasPhase === PHASE.WARM_UP ? 'Warm-up' : `Set ${currentSet}/${totalSets}`} | ${displayReps} reps | ${formatTime(timer)}`}
+              </div>
+              <button onClick={handleResumeExercise} className="px-8 py-3 bg-green-500 text-white rounded-xl font-bold text-lg hover:bg-green-600 transition">
+                {isHe ? '\u25B6 \u05D4\u05DE\u05E9\u05DA' : '\u25B6 Resume'}
+              </button>
+              <button
+                onClick={() => { pausedStateRef.current = null; pausedWarmUpRef.current = null; setPhase(PHASE.IDLE); }}
+                className="block mx-auto text-white/50 text-sm underline hover:text-white/70"
+              >
+                {isHe ? '\u05D4\u05EA\u05D7\u05DC \u05DE\u05D7\u05D3\u05E9' : 'Restart exercise'}
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* Calibration overlay — 5-second ROM measurement */}
+        {phase === PHASE.CALIBRATING && (
+          <div className="absolute inset-0 flex items-center justify-center z-20">
+            <div className="bg-black/60 backdrop-blur-sm rounded-2xl p-6 text-center text-white">
+              <div className="text-lg font-bold mb-2">
+                {isHe ? 'כיול תנועה' : 'Calibrating'}
+              </div>
+              <div className="text-4xl font-bold text-yellow-400 mb-2">
+                {calibrationCountdown}
+              </div>
+              <div className="text-sm opacity-80">
+                {isHe ? 'בצע תנועה אחת מלאה' : 'Perform one full movement'}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Not-in-frame indicator */}
+        {(phase === PHASE.EXERCISING || phase === PHASE.WARM_UP || phase === PHASE.CALIBRATING) && !landmarks && cameraActive && poseReady && (
+          <div className="absolute inset-0 flex items-center justify-center pointer-events-none z-10">
+            <div className="bg-yellow-500/80 backdrop-blur-sm text-white px-6 py-3 rounded-2xl text-center animate-pulse">
+              <div className="text-lg font-bold">{isHe ? '\u05EA\u05EA\u05E7\u05E8\u05D1 \u05DC\u05DE\u05E6\u05DC\u05DE\u05D4' : 'Move closer to camera'}</div>
+              <div className="text-sm opacity-80">{isHe ? '\u05D0\u05E0\u05D9 \u05DC\u05D0 \u05E8\u05D5\u05D0\u05D4 \u05D0\u05D5\u05EA\u05DA \u05D8\u05D5\u05D1' : 'I can\'t see you well'}</div>
+            </div>
+          </div>
+        )}
+
+        {/* Exercise name badge — top left during exercising */}
+        {phase === PHASE.EXERCISING && currentExercise && (
+          <div className="absolute top-14 left-4 bg-black/50 backdrop-blur-sm text-white px-3 py-1.5 rounded-xl text-sm font-medium max-w-[55%] truncate z-10">
+            {currentExercise.name} ({currentIdx + 1}/{exercises.length})
+          </div>
+        )}
+
         {/* Live feedback overlay */}
         {feedback && phase === PHASE.EXERCISING && (
-          <div className={`absolute top-4 left-4 right-4 ${feedbackColor[feedback.type] || 'bg-blue-500'} text-white px-4 py-3 rounded-xl text-center font-bold text-lg shadow-lg`}>
+          <div className={`absolute top-4 left-4 right-4 ${feedbackColor[feedback.type] || 'bg-blue-500'} text-white px-4 py-3 rounded-xl text-center font-bold text-lg shadow-lg z-10`}>
             {feedback.type === 'count' && <span className="text-3xl sm:text-4xl block">{feedback.count}</span>}
             {feedback.text}
           </div>
@@ -1379,7 +1624,7 @@ export default function Training() {
 
         {/* Set counter */}
         {phase === PHASE.EXERCISING && (
-          <div className="absolute top-4 right-4 bg-purple-600/90 text-white px-3 py-2 rounded-xl text-sm font-bold">
+          <div className="absolute top-14 right-4 bg-purple-600/90 text-white px-3 py-2 rounded-xl text-sm font-bold z-10">
             {t('training.set')} {currentSet}/{totalSets}
           </div>
         )}
@@ -1406,86 +1651,123 @@ export default function Training() {
         )}
       </div>
 
-      {cameraError && (
-        <div className="bg-red-50 text-red-600 p-3 rounded-lg text-sm">{t('training.cameraError')}: {cameraError}</div>
-      )}
+      {/* Exercise info & controls — below camera normally, overlay in fullscreen */}
+      <div className={isFullscreen
+        ? 'absolute bottom-0 inset-x-0 z-20 bg-black/60 backdrop-blur-sm p-3 max-h-[45vh] overflow-y-auto'
+        : ''}>
 
-      {exercises.length === 0 ? (
-        <div className="text-center text-gray-500 py-8">{t('training.noExercises')}</div>
-      ) : (
-        <div className="space-y-3">
-          {currentExercise && (
-            <div className="bg-white rounded-xl shadow-lg p-5 border-2 border-blue-500 space-y-3">
-              <div className="flex items-center justify-between">
-                <span className="text-xs text-blue-600 font-medium">
-                  {t('training.currentExercise')} ({currentIdx + 1}/{exercises.length})
-                </span>
-                <span className="text-xs text-gray-400">
-                  {totalSets} {t('dashboard.sets')} | {currentExercise.reps} {t('dashboard.reps')} | {restDuration}{t('dashboard.secRest')}
-                </span>
-              </div>
-              <h2 className="text-lg font-bold text-gray-800">{currentExercise.name}</h2>
-              <p className="text-sm text-gray-500">{currentExercise.description}</p>
-              <div className="text-xs text-yellow-700 bg-yellow-50 rounded-lg px-3 py-2">
-                {LOCATION_ICONS[currentLocation]} {locationProps.setup}
-              </div>
-              {currentExercise.tips && <p className="text-xs text-blue-500">{currentExercise.tips}</p>}
+        {cameraError && !isFullscreen && (
+          <div className="bg-red-50 text-red-600 p-3 rounded-lg text-sm">{t('training.cameraError')}: {cameraError}</div>
+        )}
 
-              {setsPerformance.length > 0 && (
-                <div className="flex items-center gap-2">
-                  <span className="text-xs text-gray-400">{t('training.setsCompleted')}:</span>
-                  {setsPerformance.map((sp, i) => (
-                    <div key={i} className={`w-6 h-6 rounded-full flex items-center justify-center text-white text-xs font-bold ${
-                      sp.quality === 'perfect' ? 'bg-green-500' : sp.quality === 'good' ? 'bg-blue-500' : 'bg-orange-500'
-                    }`}>{i + 1}</div>
-                  ))}
-                  {Array.from({ length: totalSets - setsPerformance.length }, (_, i) => (
-                    <div key={`r-${i}`} className="w-6 h-6 rounded-full border-2 border-gray-200"></div>
-                  ))}
-                </div>
-              )}
-
-              <div className="flex flex-wrap gap-3 pt-2">
-                <button onClick={handlePrevExercise} disabled={currentIdx === 0} className="px-4 py-2 min-h-[44px] border border-gray-300 rounded-lg text-sm disabled:opacity-30">
-                  {t('training.prevExercise')}
-                </button>
-                {phase === PHASE.IDLE || phase === PHASE.EXERCISE_DONE ? (
-                  <button onClick={handleStartBriefing} disabled={!cameraActive || !poseReady} className="flex-1 py-2 min-h-[44px] bg-green-500 text-white rounded-lg font-medium disabled:opacity-50">
-                    {t('training.startExercise')}
-                  </button>
-                ) : phase === PHASE.EXERCISING ? (
-                  <button onClick={handlePauseExercise} className="flex-1 py-2 min-h-[44px] bg-yellow-500 text-white rounded-lg font-medium">
-                    {t('training.pauseExercise')}
-                  </button>
-                ) : null}
-                <button onClick={handleNextExercise} className="px-4 py-2 min-h-[44px] bg-blue-600 text-white rounded-lg text-sm">
-                  {currentIdx < exercises.length - 1 ? t('training.nextExercise') : t('training.finishWorkout')}
-                </button>
-              </div>
-            </div>
-          )}
-
-          <div className="grid gap-2">
-            {exercises.map((ex, i) => (
-              <button
-                key={i}
-                onClick={() => {
-                  stopSpeech(); setCurrentIdx(i); setPhase(PHASE.IDLE); setTimer(0);
-                  exerciseStateRef.current = {}; setDisplayReps(0); setSetsPerformance([]); setCurrentSet(1); resetAllTracking();
-                }}
-                className={`text-start p-3 rounded-lg border transition ${
-                  i === currentIdx ? 'border-blue-500 bg-blue-50' : 'border-gray-200 bg-white hover:border-gray-300'
-                }`}
-              >
+        {exercises.length === 0 ? (
+          !isFullscreen && <div className="text-center text-gray-500 py-8">{t('training.noExercises')}</div>
+        ) : (
+          <div className={isFullscreen ? 'space-y-2' : 'space-y-3'}>
+            {currentExercise && (
+              <div className={isFullscreen
+                ? 'bg-white/10 rounded-xl p-3 space-y-2'
+                : 'bg-white rounded-xl shadow-lg p-5 border-2 border-blue-500 space-y-3'}>
                 <div className="flex items-center justify-between">
-                  <span className="font-medium text-sm text-gray-800">{i + 1}. {ex.name}</span>
-                  <span className="text-xs text-gray-400">{ex.sets}x{ex.reps}</span>
+                  <span className={`text-xs font-medium ${isFullscreen ? 'text-blue-300' : 'text-blue-600'}`}>
+                    {t('training.currentExercise')} ({currentIdx + 1}/{exercises.length})
+                  </span>
+                  <span className={`text-xs ${isFullscreen ? 'text-white/50' : 'text-gray-400'}`}>
+                    {totalSets} {t('dashboard.sets')} | {currentExercise.reps} {t('dashboard.reps')} | {restDuration}{t('dashboard.secRest')}
+                  </span>
                 </div>
-              </button>
-            ))}
+                <h2 className={`text-lg font-bold ${isFullscreen ? 'text-white' : 'text-gray-800'}`}>{currentExercise.name}</h2>
+                {!isFullscreen && (
+                  <>
+                    <p className="text-sm text-gray-500">{currentExercise.description}</p>
+                    <div className="text-xs text-yellow-700 bg-yellow-50 rounded-lg px-3 py-2">
+                      {LOCATION_ICONS[currentLocation]} {locationProps.setup}
+                    </div>
+                    {currentExercise.tips && <p className="text-xs text-blue-500">{currentExercise.tips}</p>}
+                  </>
+                )}
+
+                {setsPerformance.length > 0 && (
+                  <div className="flex items-center gap-2">
+                    <span className={`text-xs ${isFullscreen ? 'text-white/50' : 'text-gray-400'}`}>{t('training.setsCompleted')}:</span>
+                    {setsPerformance.map((sp, i) => (
+                      <div key={i} className={`w-6 h-6 rounded-full flex items-center justify-center text-white text-xs font-bold ${
+                        sp.quality === 'perfect' ? 'bg-green-500' : sp.quality === 'good' ? 'bg-blue-500' : 'bg-orange-500'
+                      }`}>{i + 1}</div>
+                    ))}
+                    {Array.from({ length: totalSets - setsPerformance.length }, (_, i) => (
+                      <div key={`r-${i}`} className={`w-6 h-6 rounded-full border-2 ${isFullscreen ? 'border-white/30' : 'border-gray-200'}`}></div>
+                    ))}
+                  </div>
+                )}
+
+                <div className="flex flex-wrap gap-3 pt-2">
+                  <button onClick={handlePrevExercise} disabled={currentIdx === 0}
+                    className={`px-4 py-2 min-h-[44px] rounded-lg text-sm disabled:opacity-30 ${isFullscreen ? 'border border-white/30 text-white' : 'border border-gray-300'}`}>
+                    {t('training.prevExercise')}
+                  </button>
+                  {phase === PHASE.PAUSED ? (
+                    <button onClick={handleResumeExercise} className="flex-1 py-2 min-h-[44px] bg-green-500 text-white rounded-lg font-bold">
+                      {isHe ? '\u25B6 \u05D4\u05DE\u05E9\u05DA' : '\u25B6 Resume'}
+                    </button>
+                  ) : phase === PHASE.IDLE || phase === PHASE.EXERCISE_DONE ? (
+                    <button onClick={handleStartBriefing} disabled={!cameraActive || !poseReady} className="flex-1 py-2 min-h-[44px] bg-green-500 text-white rounded-lg font-medium disabled:opacity-50">
+                      {t('training.startExercise')}
+                    </button>
+                  ) : phase === PHASE.EXERCISING || phase === PHASE.WARM_UP ? (
+                    <button onClick={handlePauseExercise} className="flex-1 py-2 min-h-[44px] bg-yellow-500 text-white rounded-lg font-medium">
+                      {t('training.pauseExercise')}
+                    </button>
+                  ) : null}
+                  <button onClick={handleNextExercise} className="px-4 py-2 min-h-[44px] bg-blue-600 text-white rounded-lg text-sm">
+                    {currentIdx < exercises.length - 1 ? t('training.nextExercise') : t('training.finishWorkout')}
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* Exercise list — horizontal scroll in fullscreen, grid otherwise */}
+            {isFullscreen ? (
+              <div className="flex gap-2 overflow-x-auto pb-1">
+                {exercises.map((ex, i) => (
+                  <button
+                    key={i}
+                    onClick={() => {
+                      stopSpeech(); setCurrentIdx(i); setPhase(PHASE.IDLE); setTimer(0);
+                      exerciseStateRef.current = { _userProfile: userProfile }; setDisplayReps(0); setSetsPerformance([]); setCurrentSet(1); resetAllTracking();
+                    }}
+                    className={`flex-shrink-0 px-3 py-1.5 rounded-lg text-xs font-medium transition ${
+                      i === currentIdx ? 'bg-blue-500 text-white' : 'bg-white/10 text-white/70 hover:bg-white/20'
+                    }`}
+                  >
+                    {i + 1}. {ex.name}
+                  </button>
+                ))}
+              </div>
+            ) : (
+              <div className="grid gap-2">
+                {exercises.map((ex, i) => (
+                  <button
+                    key={i}
+                    onClick={() => {
+                      stopSpeech(); setCurrentIdx(i); setPhase(PHASE.IDLE); setTimer(0);
+                      exerciseStateRef.current = { _userProfile: userProfile }; setDisplayReps(0); setSetsPerformance([]); setCurrentSet(1); resetAllTracking();
+                    }}
+                    className={`text-start p-3 rounded-lg border transition ${
+                      i === currentIdx ? 'border-blue-500 bg-blue-50' : 'border-gray-200 bg-white hover:border-gray-300'
+                    }`}
+                  >
+                    <div className="flex items-center justify-between">
+                      <span className="font-medium text-sm text-gray-800">{i + 1}. {ex.name}</span>
+                      <span className="text-xs text-gray-400">{ex.sets}x{ex.reps}</span>
+                    </div>
+                  </button>
+                ))}
+              </div>
+            )}
           </div>
-        </div>
-      )}
+        )}
+      </div>
     </div>
   );
 }

@@ -1,6 +1,10 @@
 import {
   analyzeShootingForm, analyzeHandDribbling, analyzeStroke,
-  analyzeServe, analyzeFootwork, analyzeKickTechnique
+  analyzeServe, analyzeFootwork, analyzeKickTechnique,
+  analyzeAmputeeCrutchKick, analyzeAmputeeCrutchSprint,
+  analyzeWheelchairBasketballShooting, analyzeWheelchairBasketballDribbling,
+  analyzeWheelchairBasketballChestPass,
+  analyzeWheelchairTennisStroke, analyzeWheelchairTennisServe
 } from './sportAnalyzers';
 
 // Key landmark indices
@@ -30,9 +34,12 @@ function getStandingLeg(landmarks) {
   return leftAnkle.y > rightAnkle.y ? 'left' : 'right';
 }
 
-function detectMovement(landmarks, prevLandmarks) {
+// Rolling movement detection with smoothing — forgiving, human-like detection.
+// Uses a 10-frame history buffer to avoid false "not moving" on small pauses.
+function detectMovement(landmarks, prevLandmarks, prevState) {
   if (!prevLandmarks) return false;
-  const trackPoints = [LM.NOSE, LM.LEFT_SHOULDER, LM.RIGHT_SHOULDER, LM.LEFT_HIP, LM.RIGHT_HIP];
+  const trackPoints = [LM.NOSE, LM.LEFT_SHOULDER, LM.RIGHT_SHOULDER, LM.LEFT_HIP, LM.RIGHT_HIP,
+    LM.LEFT_WRIST, LM.RIGHT_WRIST];
   let totalDelta = 0;
   let counted = 0;
 
@@ -44,17 +51,37 @@ function detectMovement(landmarks, prevLandmarks) {
       counted++;
     }
   }
-  if (counted === 0) return false;
-  return (totalDelta / counted) > 0.005;
+
+  const frameDelta = counted > 0 ? totalDelta / counted : 0;
+
+  // Rolling buffer of last 10 frame deltas (stored in prevState)
+  const history = prevState?._movementHistory ? [...prevState._movementHistory] : [];
+  history.push(frameDelta);
+  if (history.length > 10) history.shift();
+
+  // Store history back for next frame (caller must persist in state)
+  if (prevState) prevState._movementHistory = history;
+
+  // Average over the buffer — smooths out micro-pauses
+  const avgDelta = history.reduce((s, v) => s + v, 0) / history.length;
+
+  // Forgiving thresholds — need sustained stillness before "not moving"
+  if (avgDelta > 0.004) return true;
+  // Only "not moving" if 5+ recent frames are all still
+  const allStill = history.length >= 5 && history.every(d => d < 0.003);
+  return !allStill;
 }
 
-// Detect posture: 'sitting', 'standing', or 'unknown'
+// Detect posture: 'sitting', 'standing', 'wheelchair', or 'unknown'
 // Uses 3 factors with 2-of-3 voting for sitting detection:
 // 1. Hip-knee vertical distance (small = sitting)
 // 2. Hip-knee-ankle angle (70°-110° = sitting)
 // 3. Torso ratio: nose-to-hip vs shoulder-to-hip (compressed = sitting)
-export function detectPosture(landmarks) {
+// userProfile param: if mobilityAid === 'wheelchair', returns 'wheelchair' instead of 'sitting'
+export function detectPosture(landmarks, userProfile) {
   if (!landmarks) return 'unknown';
+
+  const isWheelchairUser = userProfile?.mobilityAid === 'wheelchair';
 
   const nose = landmarks[LM.NOSE];
   const leftHip = landmarks[LM.LEFT_HIP];
@@ -73,6 +100,8 @@ export function detectPosture(landmarks) {
   } else if (rightHip?.visibility > 0.3 && rightKnee?.visibility > 0.3) {
     hip = rightHip; knee = rightKnee; ankle = rightAnkle;
   } else {
+    // Wheelchair users: if we can see upper body but not legs, that's expected
+    if (isWheelchairUser && leftHip?.visibility > 0.3 && leftShoulder?.visibility > 0.3) return 'wheelchair';
     return 'unknown';
   }
 
@@ -116,11 +145,14 @@ export function detectPosture(landmarks) {
   }
 
   // 2-of-3 voting
-  if (sittingVotes >= 2) return 'sitting';
+  if (sittingVotes >= 2) return isWheelchairUser ? 'wheelchair' : 'sitting';
   if (standingVotes >= 2) return 'standing';
 
   // Fallback: if hip is clearly above knee, probably standing
   if (hipKneeVertDist > 0.12) return 'standing';
+
+  // Wheelchair users: default to wheelchair rather than unknown
+  if (isWheelchairUser) return 'wheelchair';
 
   return 'unknown';
 }
@@ -238,7 +270,7 @@ export function analyzeSquat(landmarks, prevState = {}) {
   if (!landmarks) return { ...prevState, feedback: null };
 
   const posture = detectPosture(landmarks);
-  const moving = detectMovement(landmarks, prevState._prevLandmarks);
+  const moving = detectMovement(landmarks, prevState._prevLandmarks, prevState);
   const headDown = detectHeadDown(landmarks);
 
   // Gate: if sitting or unknown posture, no technique feedback
@@ -288,7 +320,7 @@ export function analyzeDips(landmarks, prevState = {}) {
   if (!landmarks) return { ...prevState, feedback: null };
 
   const posture = detectPosture(landmarks);
-  const moving = detectMovement(landmarks, prevState._prevLandmarks);
+  const moving = detectMovement(landmarks, prevState._prevLandmarks, prevState);
   const headDown = detectHeadDown(landmarks);
 
   if (posture === 'sitting' || posture === 'unknown') {
@@ -338,7 +370,7 @@ export function analyzePlank(landmarks, prevState = {}) {
   if (!shoulder || !hip || !ankle) return { ...prevState, feedback: null, posture: 'unknown', _prevLandmarks: landmarks };
 
   const bodyAngle = angle(shoulder, hip, ankle);
-  const moving = detectMovement(landmarks, prevState._prevLandmarks);
+  const moving = detectMovement(landmarks, prevState._prevLandmarks, prevState);
 
   // Plank position: body is horizontal
   const isInPlankPosition = hip.y > shoulder.y * 0.8 && bodyAngle < 200;
@@ -365,7 +397,7 @@ export function analyzeDribbling(landmarks, prevState = {}) {
   if (!landmarks) return { ...prevState, feedback: null };
 
   const posture = detectPosture(landmarks);
-  const moving = detectMovement(landmarks, prevState._prevLandmarks);
+  const moving = detectMovement(landmarks, prevState._prevLandmarks, prevState);
   const headDown = detectHeadDown(landmarks);
 
   // Gate: if sitting or unknown posture, no technique feedback at all
@@ -419,7 +451,7 @@ export function analyzeDribbling(landmarks, prevState = {}) {
 export function analyzeArmCircles(landmarks, prevState = {}) {
   if (!landmarks) return { ...prevState, feedback: null };
 
-  const bodyMoving = detectMovement(landmarks, prevState._prevLandmarks);
+  const bodyMoving = detectMovement(landmarks, prevState._prevLandmarks, prevState);
   const posture = detectPosture(landmarks);
 
   if (posture === 'sitting' || posture === 'unknown') {
@@ -492,7 +524,7 @@ export function analyzeArmCircles(landmarks, prevState = {}) {
 export function analyzeHighKnees(landmarks, prevState = {}) {
   if (!landmarks) return { ...prevState, feedback: null };
 
-  const moving = detectMovement(landmarks, prevState._prevLandmarks);
+  const moving = detectMovement(landmarks, prevState._prevLandmarks, prevState);
   const posture = detectPosture(landmarks);
 
   if (posture === 'sitting' || posture === 'unknown') {
@@ -552,7 +584,7 @@ export function analyzeHighKnees(landmarks, prevState = {}) {
 export function analyzeSideSteps(landmarks, prevState = {}) {
   if (!landmarks) return { ...prevState, feedback: null };
 
-  const moving = detectMovement(landmarks, prevState._prevLandmarks);
+  const moving = detectMovement(landmarks, prevState._prevLandmarks, prevState);
   const posture = detectPosture(landmarks);
 
   if (posture === 'sitting' || posture === 'unknown') {
@@ -629,7 +661,7 @@ export function getLimitations(userProfile) {
 export function analyzeSingleLegHighKnee(landmarks, prevState = {}) {
   if (!landmarks) return { ...prevState, feedback: null };
 
-  const moving = detectMovement(landmarks, prevState._prevLandmarks);
+  const moving = detectMovement(landmarks, prevState._prevLandmarks, prevState);
   const posture = detectPosture(landmarks);
 
   if (posture === 'sitting' || posture === 'unknown') {
@@ -675,7 +707,7 @@ export function analyzeSingleLegHighKnee(landmarks, prevState = {}) {
 export function analyzeForwardKicks(landmarks, prevState = {}) {
   if (!landmarks) return { ...prevState, feedback: null };
 
-  const moving = detectMovement(landmarks, prevState._prevLandmarks);
+  const moving = detectMovement(landmarks, prevState._prevLandmarks, prevState);
   const posture = detectPosture(landmarks);
 
   if (posture === 'sitting' || posture === 'unknown') {
@@ -719,7 +751,7 @@ export function analyzeForwardKicks(landmarks, prevState = {}) {
 export function analyzeBalanceHops(landmarks, prevState = {}) {
   if (!landmarks) return { ...prevState, feedback: null };
 
-  const moving = detectMovement(landmarks, prevState._prevLandmarks);
+  const moving = detectMovement(landmarks, prevState._prevLandmarks, prevState);
   const posture = detectPosture(landmarks);
 
   if (posture === 'sitting' || posture === 'unknown') {
@@ -761,7 +793,7 @@ export function analyzeBalanceHops(landmarks, prevState = {}) {
 export function analyzeSingleArmRotation(landmarks, prevState = {}) {
   if (!landmarks) return { ...prevState, feedback: null };
 
-  const bodyMoving = detectMovement(landmarks, prevState._prevLandmarks);
+  const bodyMoving = detectMovement(landmarks, prevState._prevLandmarks, prevState);
   const posture = detectPosture(landmarks);
 
   if (posture === 'sitting' || posture === 'unknown') {
@@ -813,7 +845,7 @@ export function analyzeSingleArmRotation(landmarks, prevState = {}) {
 export function analyzeArmPunches(landmarks, prevState = {}) {
   if (!landmarks) return { ...prevState, feedback: null };
 
-  const bodyMoving = detectMovement(landmarks, prevState._prevLandmarks);
+  const bodyMoving = detectMovement(landmarks, prevState._prevLandmarks, prevState);
   const posture = detectPosture(landmarks);
 
   if (posture === 'sitting' || posture === 'unknown') {
@@ -871,7 +903,7 @@ export function analyzeArmPunches(landmarks, prevState = {}) {
 export function analyzeCoreTwists(landmarks, prevState = {}) {
   if (!landmarks) return { ...prevState, feedback: null };
 
-  const moving = detectMovement(landmarks, prevState._prevLandmarks);
+  const moving = detectMovement(landmarks, prevState._prevLandmarks, prevState);
   const posture = detectPosture(landmarks);
 
   if (posture === 'sitting' || posture === 'unknown') {
@@ -1021,7 +1053,7 @@ export function analyzeGenericReps(landmarks, prevState = {}) {
   if (!landmarks) return { ...prevState, feedback: null };
 
   const posture = detectPosture(landmarks);
-  const moving = detectMovement(landmarks, prevState._prevLandmarks);
+  const moving = detectMovement(landmarks, prevState._prevLandmarks, prevState);
   const headDown = detectHeadDown(landmarks);
 
   if (posture === 'sitting' || posture === 'unknown') {
@@ -1080,7 +1112,7 @@ export function analyzeBicepCurl(landmarks, prevState = {}) {
   if (!landmarks) return { ...prevState, feedback: null };
 
   const posture = detectPosture(landmarks);
-  const moving = detectMovement(landmarks, prevState._prevLandmarks);
+  const moving = detectMovement(landmarks, prevState._prevLandmarks, prevState);
   const headDown = detectHeadDown(landmarks);
 
   if (posture === 'sitting' || posture === 'unknown') {
@@ -1167,7 +1199,7 @@ export function analyzeBentOverRow(landmarks, prevState = {}) {
   if (!landmarks) return { ...prevState, feedback: null };
 
   const posture = detectPosture(landmarks);
-  const moving = detectMovement(landmarks, prevState._prevLandmarks);
+  const moving = detectMovement(landmarks, prevState._prevLandmarks, prevState);
   const headDown = detectHeadDown(landmarks);
 
   if (posture === 'sitting' || posture === 'unknown') {
@@ -1232,7 +1264,7 @@ export function analyzeLateralRaise(landmarks, prevState = {}) {
   if (!landmarks) return { ...prevState, feedback: null };
 
   const posture = detectPosture(landmarks);
-  const moving = detectMovement(landmarks, prevState._prevLandmarks);
+  const moving = detectMovement(landmarks, prevState._prevLandmarks, prevState);
   const headDown = detectHeadDown(landmarks);
 
   if (posture === 'sitting' || posture === 'unknown') {
@@ -1298,7 +1330,7 @@ export function analyzeLateralRaise(landmarks, prevState = {}) {
 export function analyzeGluteBridge(landmarks, prevState = {}) {
   if (!landmarks) return { ...prevState, feedback: null };
 
-  const moving = detectMovement(landmarks, prevState._prevLandmarks);
+  const moving = detectMovement(landmarks, prevState._prevLandmarks, prevState);
 
   const lHip = landmarks[LM.LEFT_HIP];
   const rHip = landmarks[LM.RIGHT_HIP];
@@ -1363,7 +1395,7 @@ export function analyzeTricepExtension(landmarks, prevState = {}) {
   if (!landmarks) return { ...prevState, feedback: null };
 
   const posture = detectPosture(landmarks);
-  const moving = detectMovement(landmarks, prevState._prevLandmarks);
+  const moving = detectMovement(landmarks, prevState._prevLandmarks, prevState);
   const headDown = detectHeadDown(landmarks);
 
   if (posture === 'sitting' || posture === 'unknown') {
@@ -1435,7 +1467,7 @@ export function analyzeTricepExtension(landmarks, prevState = {}) {
 export function analyzeWallSit(landmarks, prevState = {}) {
   if (!landmarks) return { ...prevState, feedback: null };
 
-  const moving = detectMovement(landmarks, prevState._prevLandmarks);
+  const moving = detectMovement(landmarks, prevState._prevLandmarks, prevState);
 
   const hip = landmarks[LM.LEFT_HIP];
   const knee = landmarks[LM.LEFT_KNEE];
@@ -1482,7 +1514,7 @@ export function analyzeWallSit(landmarks, prevState = {}) {
 export function analyzeMountainClimbers(landmarks, prevState = {}) {
   if (!landmarks) return { ...prevState, feedback: null };
 
-  const moving = detectMovement(landmarks, prevState._prevLandmarks);
+  const moving = detectMovement(landmarks, prevState._prevLandmarks, prevState);
 
   const shoulder = landmarks[LM.LEFT_SHOULDER];
   const hip = landmarks[LM.LEFT_HIP];
@@ -1550,7 +1582,7 @@ export function analyzeMountainClimbers(landmarks, prevState = {}) {
 export function analyzeCrunches(landmarks, prevState = {}) {
   if (!landmarks) return { ...prevState, feedback: null };
 
-  const moving = detectMovement(landmarks, prevState._prevLandmarks);
+  const moving = detectMovement(landmarks, prevState._prevLandmarks, prevState);
 
   const shoulder = landmarks[LM.LEFT_SHOULDER];
   const hip = landmarks[LM.LEFT_HIP];
@@ -1606,7 +1638,7 @@ export function analyzeCrunches(landmarks, prevState = {}) {
 export function analyzeSidePlank(landmarks, prevState = {}) {
   if (!landmarks) return { ...prevState, feedback: null };
 
-  const moving = detectMovement(landmarks, prevState._prevLandmarks);
+  const moving = detectMovement(landmarks, prevState._prevLandmarks, prevState);
 
   const shoulder = landmarks[LM.LEFT_SHOULDER];
   const hip = landmarks[LM.LEFT_HIP];
@@ -1647,7 +1679,7 @@ export function analyzeBandPullApart(landmarks, prevState = {}) {
   if (!landmarks) return { ...prevState, feedback: null };
 
   const posture = detectPosture(landmarks);
-  const moving = detectMovement(landmarks, prevState._prevLandmarks);
+  const moving = detectMovement(landmarks, prevState._prevLandmarks, prevState);
   const headDown = detectHeadDown(landmarks);
 
   if (posture === 'sitting' || posture === 'unknown') {
@@ -1716,7 +1748,7 @@ export function analyzeBandPullApart(landmarks, prevState = {}) {
 export function analyzePushUps(landmarks, prevState = {}) {
   if (!landmarks) return { ...prevState, feedback: null };
 
-  const moving = detectMovement(landmarks, prevState._prevLandmarks);
+  const moving = detectMovement(landmarks, prevState._prevLandmarks, prevState);
   const headDown = detectHeadDown(landmarks);
 
   const lShoulder = landmarks[LM.LEFT_SHOULDER];
@@ -1781,7 +1813,7 @@ export function analyzeLunges(landmarks, prevState = {}) {
   if (!landmarks) return { ...prevState, feedback: null };
 
   const posture = detectPosture(landmarks);
-  const moving = detectMovement(landmarks, prevState._prevLandmarks);
+  const moving = detectMovement(landmarks, prevState._prevLandmarks, prevState);
   const headDown = detectHeadDown(landmarks);
 
   if (posture === 'sitting' || posture === 'unknown') {
@@ -1842,7 +1874,7 @@ export function analyzeShoulderPress(landmarks, prevState = {}) {
   if (!landmarks) return { ...prevState, feedback: null };
 
   const posture = detectPosture(landmarks);
-  const moving = detectMovement(landmarks, prevState._prevLandmarks);
+  const moving = detectMovement(landmarks, prevState._prevLandmarks, prevState);
   const headDown = detectHeadDown(landmarks);
 
   if (posture === 'sitting' || posture === 'unknown') {
@@ -1963,6 +1995,16 @@ const ANALYZER_MAP = [
   { keywords: ['הגשה', 'serve', 'סרב'], analyze: analyzeServe, type: 'form', cueKey: 'serve' },
   { keywords: ['עבודת רגליים', 'footwork', 'תנועת מגרש', 'רגליים מהירות'], analyze: analyzeFootwork, type: 'form', cueKey: 'footwork' },
   { keywords: ['בעיטה', 'kick', 'בעיטות', 'shooting drill'], analyze: analyzeKickTechnique, type: 'form', cueKey: 'kick' },
+  // Paralympic — Amputee Football
+  { keywords: ['בעיטה בקביים', 'בעיטת קביים', 'amputee kick', 'crutch kick'], analyze: analyzeAmputeeCrutchKick, type: 'form', cueKey: 'amputeeKick' },
+  { keywords: ['ריצה בקביים', 'ספרינט קביים', 'crutch sprint', 'amputee sprint'], analyze: analyzeAmputeeCrutchSprint, type: 'form', cueKey: 'amputeeSprint' },
+  // Paralympic — Wheelchair Basketball
+  { keywords: ['זריקה כיסא גלגלים', 'קליעה כיסא', 'wheelchair shooting', 'wheelchair basketball shoot'], analyze: analyzeWheelchairBasketballShooting, type: 'form', cueKey: 'wheelchairShooting' },
+  { keywords: ['כדרור כיסא גלגלים', 'כדרור כיסא', 'wheelchair dribble'], analyze: analyzeWheelchairBasketballDribbling, type: 'form', cueKey: 'wheelchairDribble' },
+  { keywords: ['מסירה כיסא גלגלים', 'מסירת חזה כיסא', 'wheelchair pass', 'chest pass wheelchair'], analyze: analyzeWheelchairBasketballChestPass, type: 'form', cueKey: 'wheelchairPass' },
+  // Paralympic — Wheelchair Tennis
+  { keywords: ['מכות כיסא גלגלים', 'פורהנד כיסא', 'wheelchair stroke', 'wheelchair forehand'], analyze: analyzeWheelchairTennisStroke, type: 'form', cueKey: 'wheelchairStroke' },
+  { keywords: ['הגשה כיסא גלגלים', 'סרב כיסא', 'wheelchair serve'], analyze: analyzeWheelchairTennisServe, type: 'form', cueKey: 'wheelchairServe' },
 ];
 
 // Get the right analyzer based on exercise type
@@ -1975,4 +2017,47 @@ export function getAnalyzer(exerciseName) {
     }
   }
   return { analyze: analyzeGenericReps, type: 'reps', cueKey: 'default', ballAware: false };
+}
+
+// Calibration: measure key joint angles for a given exercise type
+// Called every frame during the 5-second calibration phase to track ROM
+export function getCalibrationAngles(landmarks, cueKey) {
+  const angles = {};
+  const lm = (idx) => landmarks[idx];
+  const v = (idx) => lm(idx) && lm(idx).visibility > 0.3;
+
+  // Elbow angles (most exercises)
+  if (v(LM.LEFT_SHOULDER) && v(LM.LEFT_ELBOW) && v(LM.LEFT_WRIST)) {
+    angles.leftElbow = angle(lm(LM.LEFT_SHOULDER), lm(LM.LEFT_ELBOW), lm(LM.LEFT_WRIST));
+  }
+  if (v(LM.RIGHT_SHOULDER) && v(LM.RIGHT_ELBOW) && v(LM.RIGHT_WRIST)) {
+    angles.rightElbow = angle(lm(LM.RIGHT_SHOULDER), lm(LM.RIGHT_ELBOW), lm(LM.RIGHT_WRIST));
+  }
+
+  // Knee angles (squats, lunges, kicks)
+  if (['squat', 'lunge', 'amputeeKick', 'kick'].includes(cueKey)) {
+    if (v(LM.LEFT_HIP) && v(LM.LEFT_KNEE) && v(LM.LEFT_ANKLE))
+      angles.leftKnee = angle(lm(LM.LEFT_HIP), lm(LM.LEFT_KNEE), lm(LM.LEFT_ANKLE));
+    if (v(LM.RIGHT_HIP) && v(LM.RIGHT_KNEE) && v(LM.RIGHT_ANKLE))
+      angles.rightKnee = angle(lm(LM.RIGHT_HIP), lm(LM.RIGHT_KNEE), lm(LM.RIGHT_ANKLE));
+  }
+
+  // Shoulder angles (overhead press, shooting, serves)
+  if (['shoulder', 'wheelchairShooting', 'wheelchairServe', 'wheelchairStroke', 'shooting', 'serve'].includes(cueKey)) {
+    if (v(LM.LEFT_ELBOW) && v(LM.LEFT_SHOULDER) && v(LM.LEFT_HIP))
+      angles.leftShoulder = angle(lm(LM.LEFT_ELBOW), lm(LM.LEFT_SHOULDER), lm(LM.LEFT_HIP));
+    if (v(LM.RIGHT_ELBOW) && v(LM.RIGHT_SHOULDER) && v(LM.RIGHT_HIP))
+      angles.rightShoulder = angle(lm(LM.RIGHT_ELBOW), lm(LM.RIGHT_SHOULDER), lm(LM.RIGHT_HIP));
+  }
+
+  // Trunk rotation (wheelchair sports, passes, strokes, kicks)
+  if (['wheelchairStroke', 'wheelchairServe', 'wheelchairPass', 'amputeeKick', 'stroke', 'kick'].includes(cueKey)) {
+    if (v(LM.LEFT_SHOULDER) && v(LM.RIGHT_SHOULDER) && v(LM.LEFT_HIP) && v(LM.RIGHT_HIP)) {
+      const shoulderMidX = (lm(LM.LEFT_SHOULDER).x + lm(LM.RIGHT_SHOULDER).x) / 2;
+      const hipMidX = (lm(LM.LEFT_HIP).x + lm(LM.RIGHT_HIP).x) / 2;
+      angles.trunkRotation = Math.abs(shoulderMidX - hipMidX) * 360;
+    }
+  }
+
+  return angles;
 }

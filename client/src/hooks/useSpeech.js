@@ -125,13 +125,13 @@ export function useSpeech(lang = 'he-IL') {
     speakIfIdle(phrase, { rate: 1.1 });
   }, [lang, speakIfIdle, isHe]);
 
-  // Correction for bad form
+  // Correction for form — encouraging, guiding tone
   const speakCorrection = useCallback((specificTip) => {
     const base = isHe
-      ? 'אל תוותר! בוא ננסה שוב.'
-      : "Don't give up! Let's try again.";
+      ? 'כיוון טוב! בוא נשפר קצת.'
+      : "Good direction! Let's refine a bit.";
     const tip = specificTip
-      ? (isHe ? ` זכור: ${specificTip}` : ` Remember: ${specificTip}`)
+      ? (isHe ? ` נסה: ${specificTip}` : ` Try: ${specificTip}`)
       : '';
     speak(base + tip);
   }, [lang, speak, isHe]);
@@ -172,23 +172,23 @@ export function useSpeech(lang = 'he-IL') {
     speak(text, { rate: 1.3, pitch: 1.1 });
   }, [lang, speak, isHe]);
 
-  // General inactivity nudge (ENERGETIC rate 1.25, high priority)
+  // General inactivity nudge — encouraging
   const speakNudge = useCallback((playerName, shortInstruction) => {
     const name = playerName || (isHe ? 'אלוף' : 'champ');
     const base = isHe
-      ? `${name}, אני לא רואה אותך זז! יאללה, אתה מקצוען!`
-      : `${name}, I don't see you moving! Come on, you're a pro!`;
+      ? `${name}, אני פה ומחכה לך. כשתהיה מוכן, תתחיל לזוז.`
+      : `${name}, I'm here waiting for you. Start moving when you're ready.`;
     const tip = shortInstruction ? ` ${shortInstruction}` : '';
-    speakPriority(base + tip, { rate: 1.25, pitch: 1.1 });
+    speakPriority(base + tip, { rate: 1.1, pitch: 1.0 });
   }, [lang, speakPriority, isHe]);
 
-  // Mid-set quit nudge (ENERGETIC rate 1.25, high priority)
+  // Mid-set encouragement — motivating, not accusing
   const speakMidSetQuit = useCallback((playerName, repsRemaining) => {
     const name = playerName || (isHe ? 'אלוף' : 'champ');
     const text = isHe
-      ? `${name}, אל תפסיק עכשיו, אתה מקצוען! רק עוד ${repsRemaining} חזרות לסיום הסט!`
-      : `${name}, don't quit now, you're a Pro! Only ${repsRemaining} more reps to finish the set!`;
-    speakPriority(text, { rate: 1.25, pitch: 1.1 });
+      ? `${name}, אתה עושה מעולה! רק עוד ${repsRemaining} חזרות, אתה יכול!`
+      : `${name}, you're doing great! Just ${repsRemaining} more reps, you've got this!`;
+    speakPriority(text, { rate: 1.2, pitch: 1.0 });
   }, [lang, speakPriority, isHe]);
 
   // Head-down correction for football drills
@@ -225,33 +225,33 @@ export function useSpeech(lang = 'he-IL') {
     speak(text, { rate: 0.95 });
   }, [lang, speak, isHe]);
 
-  // Active prodding - rotating motivational lines when standing idle (ENERGETIC rate 1.35)
+  // Active prodding — encouraging & guiding, never blaming (rate 1.2, warm tone)
   const speakActiveProd = useCallback((playerName, prodIndex, locationProps, exerciseDesc) => {
     const name = playerName || (isHe ? 'אלוף' : 'champ');
     const equipment = locationProps?.markers || (isHe ? 'הציוד' : 'the equipment');
 
     const phrasesHe = [
-      `${name}, אל תעמוד סתם! יאללה, תראה לי מה אתה יכול!`,
-      `${name}, אני מחכה לתנועה הראשונה שלך! סדר את ${equipment} ויאללה!`,
-      `${name}, הזמן רץ! אתה מקצוען, תוכיח את זה!`,
-      `${name}, מה קרה? יאללה נתחיל! ${exerciseDesc || ''}`,
-      `${name}, אתה יכול יותר מזה! סדר את ${equipment} והתחל לזוז!`,
-      `${name}, בוא כבר! אני לא הולך לחכות כל היום!`,
-      `${name}, זוז! תראה לי שאתה לא מוותר!`,
+      `${name}, אני פה, קח את הזמן שלך.`,
+      `${name}, תנסה להגדיל את טווח התנועה כדי שאוכל לעקוב אחריך.`,
+      `${name}, אני מאמין בך! כשתהיה מוכן, תתחיל לזוז.`,
+      `${name}, אולי תסדר את ${equipment} ותתחיל כשנוח לך? ${exerciseDesc || ''}`,
+      `${name}, אני רואה אותך! תתחיל לאט ותגביר בהדרגה.`,
+      `${name}, בוא נעשה את זה ביחד! אתה לא לבד.`,
+      `${name}, קח נשימה עמוקה, ויאללה. אני עוקב.`,
     ];
     const phrasesEn = [
-      `${name}, don't just stand there! Show me what you've got!`,
-      `${name}, I'm waiting for your first move! Set up your ${equipment} and let's go!`,
-      `${name}, the clock is ticking! You're a pro, prove it!`,
-      `${name}, what's the hold-up? Let's get started! ${exerciseDesc || ''}`,
-      `${name}, you can do better than this! Set up your ${equipment} and start moving!`,
-      `${name}, come on already! I'm not waiting all day!`,
-      `${name}, move it! Show me you're not giving up!`,
+      `${name}, I'm here, take your time.`,
+      `${name}, try to increase your range of motion so I can follow along.`,
+      `${name}, I believe in you! Start moving when you're ready.`,
+      `${name}, maybe set up your ${equipment} and start when comfortable? ${exerciseDesc || ''}`,
+      `${name}, I can see you! Start slow and build up gradually.`,
+      `${name}, let's do this together! You're not alone.`,
+      `${name}, take a deep breath, and let's go. I'm watching.`,
     ];
 
     const phrases = isHe ? phrasesHe : phrasesEn;
     const idx = prodIndex % phrases.length;
-    speakPriority(phrases[idx], { rate: 1.35, pitch: 1.1 });
+    speakPriority(phrases[idx], { rate: 1.2, pitch: 1.0 });
     return phrases[idx];
   }, [lang, speakPriority, isHe]);
 
@@ -298,32 +298,32 @@ export function useSpeech(lang = 'he-IL') {
     speakPriority(text, { rate: 1.15 });
   }, [isHe, speakPriority]);
 
-  // Warm-up pace nudge
+  // Warm-up pace encouragement
   const speakWarmUpNudge = useCallback((playerName) => {
     const name = playerName || (isHe ? 'אלוף' : 'champ');
     const phrases = isHe
-      ? [`${name}, הגבר את הקצב! תעלה את הדופק!`, `${name}, יאללה, יותר מהר! חימום אמיתי!`, `${name}, זוז! הגוף צריך להתחמם!`]
-      : [`${name}, pick up the pace! Get that heart rate up!`, `${name}, come on, faster! Real warm-up!`, `${name}, move it! Your body needs to warm up!`];
+      ? [`${name}, יפה! תנסה להגביר קצת את הקצב.`, `${name}, מצוין! הגוף מתחיל להתחמם.`, `${name}, ממשיכים ככה! עוד קצת.`]
+      : [`${name}, great! Try to pick up the pace a bit.`, `${name}, excellent! Your body is warming up.`, `${name}, keep it up! Just a bit more.`];
     const phrase = phrases[Math.floor(Math.random() * phrases.length)];
-    speakPriority(phrase, { rate: 1.3, pitch: 1.1 });
+    speakPriority(phrase, { rate: 1.15, pitch: 1.0 });
   }, [isHe, speakPriority]);
 
-  // Warm-up inactivity nudge — 4s no movement, names the exercise
+  // Warm-up inactivity nudge — gentle, encouraging
   const speakWarmUpInactivityNudge = useCallback((exerciseName, playerName) => {
     const name = playerName || (isHe ? 'אלוף' : 'champ');
     const phrases = isHe
       ? [
-        `${name}, אני מחכה! יאללה תתחיל את ה${exerciseName} עכשיו!`,
-        `${name}, למה אתה עומד? יאללה ${exerciseName}!`,
-        `${name}, הזמן עומד! תתחיל לזוז! ${exerciseName}!`,
+        `${name}, אני פה. כשתהיה מוכן, תתחיל את ה${exerciseName}.`,
+        `${name}, קח את הזמן שלך. ה${exerciseName} מחכה לך.`,
+        `${name}, תנסה להתחיל לזוז לאט. אני עוקב אחריך.`,
       ]
       : [
-        `${name}, I'm waiting! Start the ${exerciseName} now!`,
-        `${name}, why are you standing? Let's go, ${exerciseName}!`,
-        `${name}, the timer is frozen! Start moving! ${exerciseName}!`,
+        `${name}, I'm here. Start the ${exerciseName} when you're ready.`,
+        `${name}, take your time. The ${exerciseName} is waiting for you.`,
+        `${name}, try to start moving slowly. I'm following along.`,
       ];
     const phrase = phrases[Math.floor(Math.random() * phrases.length)];
-    speakPriority(phrase, { rate: 1.3, pitch: 1.1 });
+    speakPriority(phrase, { rate: 1.1, pitch: 1.0 });
   }, [isHe, speakPriority]);
 
   // Warm-up re-explain — 15s no movement, repeat full instruction
@@ -547,10 +547,88 @@ export function useSpeech(lang = 'he-IL') {
     speakPriority(text, { rate: 1.0 });
   }, [isHe, speakPriority]);
 
+  // Not visible — gentle guidance, blame yourself not the user
+  const speakNotVisible = useCallback((playerName) => {
+    const name = playerName || (isHe ? 'חבר' : 'buddy');
+    const phrases = isHe
+      ? [
+        `${name}, אני לא רואה אותך טוב. תתקרב קצת למצלמה.`,
+        `${name}, תנסה להגדיל את טווח התנועה כדי שאוכל לעקוב.`,
+        `${name}, אני מתקשה לראות אותך. תוודא שאתה במרכז המצלמה.`,
+      ]
+      : [
+        `${name}, I can't see you well. Try moving closer to the camera.`,
+        `${name}, try increasing your range of motion so I can follow.`,
+        `${name}, I'm having trouble seeing you. Make sure you're in the center of the camera.`,
+      ];
+    const phrase = phrases[Math.floor(Math.random() * phrases.length)];
+    speak(phrase, { rate: 1.0 });
+  }, [isHe, speak]);
+
+  // Positive reinforcement — frequent encouragement when user IS moving
+  const speakPositiveReinforcement = useCallback((playerName) => {
+    const name = playerName || (isHe ? 'אלוף' : 'champ');
+    const phrases = isHe
+      ? [
+        `יפה מאוד ${name}!`,
+        `תמשיך ככה!`,
+        `אני רואה אותך עובד!`,
+        `מצוין, ממשיכים!`,
+        `כל הכבוד ${name}, ביצוע יפה!`,
+        `ככה ${name}! בדיוק ככה!`,
+      ]
+      : [
+        `Great job ${name}!`,
+        `Keep it up!`,
+        `I can see you working!`,
+        `Excellent, keep going!`,
+        `Well done ${name}, nice form!`,
+        `That's it ${name}! Just like that!`,
+      ];
+    const phrase = phrases[Math.floor(Math.random() * phrases.length)];
+    speakIfIdle(phrase, { rate: 1.1 });
+  }, [isHe, speakIfIdle]);
+
   // Rep count
   const speakCount = useCallback((count) => {
     _doSpeak(count.toString(), { rate: 1.3 });
   }, [_doSpeak]);
+
+  // Body-part visibility warnings — self-blaming tone
+  const speakMissingBodyParts = useCallback((missingParts, playerName) => {
+    const msgs = {
+      legs: isHe
+        ? `${playerName}, אני לא מצליח לראות את הרגליים שלך. תכוון את המצלמה נמוך יותר`
+        : `${playerName}, I can't see your legs. Point the camera lower`,
+      arms: isHe
+        ? `${playerName}, אני לא רואה את הידיים שלך. תתרחק קצת מהמצלמה`
+        : `${playerName}, I can't see your arms. Step back a bit from the camera`,
+      hips: isHe
+        ? `${playerName}, אני לא רואה את המותניים שלך. תוודא שכל הגוף במסך`
+        : `${playerName}, I can't see your hips. Make sure your full body is on screen`,
+      all: isHe
+        ? `${playerName}, אני לא רואה אותך. תוודא שאתה מול המצלמה`
+        : `${playerName}, I can't see you. Make sure you're facing the camera`,
+    };
+    const part = missingParts[0] || 'all';
+    speakPriority(msgs[part] || msgs.all);
+  }, [isHe, speakPriority]);
+
+  // Calibration start — encouraging prep
+  const speakCalibrationStart = useCallback((playerName) => {
+    const msg = isHe
+      ? `${playerName}, בוא נעשה תנועה אחת של הכנה כדי שאוכל להבין את הטווח שלך`
+      : `${playerName}, let's do one prep movement so I can understand your range`;
+    speakPriority(msg);
+  }, [isHe, speakPriority]);
+
+  // Calibration done — quick confirmation
+  const speakCalibrationDone = useCallback((playerName) => {
+    const msg = isHe
+      ? `מעולה ${playerName}, תפסתי את הטווח שלך. יאללה נתחיל!`
+      : `Great ${playerName}, I've got your range. Let's go!`;
+    speakPriority(msg);
+  }, [isHe, speakPriority]);
 
   const stop = useCallback(() => {
     window.speechSynthesis?.cancel();
@@ -594,6 +672,11 @@ export function useSpeech(lang = 'he-IL') {
     speakMindMuscleCue,
     speakAICoaching,
     speakEnvironmentScan,
+    speakNotVisible,
+    speakPositiveReinforcement,
+    speakMissingBodyParts,
+    speakCalibrationStart,
+    speakCalibrationDone,
     speakCount,
     stop,
     isSpeaking
