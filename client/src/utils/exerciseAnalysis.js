@@ -419,7 +419,7 @@ export function analyzeDribbling(landmarks, prevState = {}) {
 export function analyzeArmCircles(landmarks, prevState = {}) {
   if (!landmarks) return { ...prevState, feedback: null };
 
-  const moving = detectMovement(landmarks, prevState._prevLandmarks);
+  const bodyMoving = detectMovement(landmarks, prevState._prevLandmarks);
   const posture = detectPosture(landmarks);
 
   if (posture === 'sitting' || posture === 'unknown') {
@@ -431,7 +431,7 @@ export function analyzeArmCircles(landmarks, prevState = {}) {
   const lWrist = landmarks[LM.LEFT_WRIST];
   const rWrist = landmarks[LM.RIGHT_WRIST];
 
-  if (!lShoulder || !lWrist) return { ...prevState, feedback: null, posture, moving, _prevLandmarks: landmarks };
+  if (!lShoulder || !lWrist) return { ...prevState, feedback: null, posture, moving: bodyMoving, _prevLandmarks: landmarks };
 
   // Track wrist Y min/max over recent frames for amplitude detection
   const history = prevState._wristHistory || [];
@@ -439,14 +439,36 @@ export function analyzeArmCircles(landmarks, prevState = {}) {
   history.push(wristY);
   if (history.length > 30) history.shift(); // ~0.5s window at 60fps
 
+  // Also track wrist X for horizontal circles
+  const historyX = prevState._wristHistoryX || [];
+  const wristX = (lWrist.x + (rWrist?.visibility > 0.3 ? rWrist.x : lWrist.x)) / 2;
+  historyX.push(wristX);
+  if (historyX.length > 30) historyX.shift();
+
   let feedback = null;
-  const amplitude = history.length > 10
+  const amplitudeY = history.length > 10
     ? Math.max(...history) - Math.min(...history)
     : 0;
+  const amplitudeX = historyX.length > 10
+    ? Math.max(...historyX) - Math.min(...historyX)
+    : 0;
+  // Use the larger of X or Y amplitude — arm circles can be in any plane
+  const amplitude = Math.max(amplitudeY, amplitudeX);
 
-  if (moving && amplitude > 0.15) {
+  // Arm circles: wrist moves even when torso stays still
+  // Detect wrist-specific movement by comparing wrist position frame-to-frame
+  let wristMoving = false;
+  if (prevState._prevWristY !== undefined) {
+    const wristDelta = Math.abs(wristY - prevState._prevWristY) + Math.abs(wristX - (prevState._prevWristX || wristX));
+    wristMoving = wristDelta > 0.005;
+  }
+
+  // moving = body movement OR wrist movement (arm circles don't move the torso)
+  const moving = bodyMoving || wristMoving;
+
+  if (moving && amplitude > 0.12) {
     feedback = { type: 'good', text: null }; // good movement, no text needed
-  } else if (moving && amplitude > 0.05 && amplitude <= 0.15) {
+  } else if (moving && amplitude > 0.04 && amplitude <= 0.12) {
     feedback = { type: 'warning', text: 'armCirclesSmall' }; // marker for TTS
   } else if (!moving && history.length > 20) {
     feedback = { type: 'warning', text: 'notMoving' };
@@ -458,6 +480,9 @@ export function analyzeArmCircles(landmarks, prevState = {}) {
     posture,
     moving,
     _wristHistory: history,
+    _wristHistoryX: historyX,
+    _prevWristY: wristY,
+    _prevWristX: wristX,
     lastRepTime: moving ? Date.now() : prevState.lastRepTime,
     _prevLandmarks: landmarks
   };
@@ -736,7 +761,7 @@ export function analyzeBalanceHops(landmarks, prevState = {}) {
 export function analyzeSingleArmRotation(landmarks, prevState = {}) {
   if (!landmarks) return { ...prevState, feedback: null };
 
-  const moving = detectMovement(landmarks, prevState._prevLandmarks);
+  const bodyMoving = detectMovement(landmarks, prevState._prevLandmarks);
   const posture = detectPosture(landmarks);
 
   if (posture === 'sitting' || posture === 'unknown') {
@@ -748,7 +773,7 @@ export function analyzeSingleArmRotation(landmarks, prevState = {}) {
 
   // Use whichever wrist has higher visibility (the remaining arm)
   const wrist = (lWrist?.visibility || 0) >= (rWrist?.visibility || 0) ? lWrist : rWrist;
-  if (!wrist || wrist.visibility < 0.3) return { ...prevState, feedback: null, posture, moving, _prevLandmarks: landmarks };
+  if (!wrist || wrist.visibility < 0.3) return { ...prevState, feedback: null, posture, moving: bodyMoving, _prevLandmarks: landmarks };
 
   const history = prevState._wristHistory || [];
   history.push(wrist.y);
@@ -759,9 +784,16 @@ export function analyzeSingleArmRotation(landmarks, prevState = {}) {
     ? Math.max(...history) - Math.min(...history)
     : 0;
 
-  if (moving && amplitude > 0.15) {
+  // Detect wrist movement even when torso is still
+  let wristMoving = false;
+  if (prevState._prevWristY !== undefined) {
+    wristMoving = Math.abs(wrist.y - prevState._prevWristY) + Math.abs(wrist.x - (prevState._prevWristX || wrist.x)) > 0.005;
+  }
+  const moving = bodyMoving || wristMoving;
+
+  if (moving && amplitude > 0.12) {
     feedback = { type: 'good', text: null };
-  } else if (moving && amplitude > 0.05 && amplitude <= 0.15) {
+  } else if (moving && amplitude > 0.04 && amplitude <= 0.12) {
     feedback = { type: 'warning', text: 'singleArmSmall' };
   } else if (!moving && history.length > 20) {
     feedback = { type: 'warning', text: 'notMoving' };
@@ -770,6 +802,8 @@ export function analyzeSingleArmRotation(landmarks, prevState = {}) {
   return {
     ...prevState, feedback, posture, moving,
     _wristHistory: history,
+    _prevWristY: wrist.y,
+    _prevWristX: wrist.x,
     lastRepTime: moving ? Date.now() : prevState.lastRepTime,
     _prevLandmarks: landmarks
   };
@@ -779,7 +813,7 @@ export function analyzeSingleArmRotation(landmarks, prevState = {}) {
 export function analyzeArmPunches(landmarks, prevState = {}) {
   if (!landmarks) return { ...prevState, feedback: null };
 
-  const moving = detectMovement(landmarks, prevState._prevLandmarks);
+  const bodyMoving = detectMovement(landmarks, prevState._prevLandmarks);
   const posture = detectPosture(landmarks);
 
   if (posture === 'sitting' || posture === 'unknown') {
@@ -789,7 +823,7 @@ export function analyzeArmPunches(landmarks, prevState = {}) {
   const lWrist = landmarks[LM.LEFT_WRIST];
   const rWrist = landmarks[LM.RIGHT_WRIST];
 
-  if (!lWrist) return { ...prevState, feedback: null, posture, moving, _prevLandmarks: landmarks };
+  if (!lWrist) return { ...prevState, feedback: null, posture, moving: bodyMoving, _prevLandmarks: landmarks };
 
   // Track wrist X-axis oscillation (forward/back punching amplitude)
   const history = prevState._wristXHistory || [];
@@ -797,14 +831,24 @@ export function analyzeArmPunches(landmarks, prevState = {}) {
   history.push(wristX);
   if (history.length > 30) history.shift();
 
+  // Track wrist Y too for upward punches
+  const wristY = (lWrist.y + (rWrist?.visibility > 0.3 ? rWrist.y : lWrist.y)) / 2;
+
   let feedback = null;
   const amplitude = history.length > 10
     ? Math.max(...history) - Math.min(...history)
     : 0;
 
-  if (moving && amplitude > 0.12) {
+  // Detect wrist movement even when torso is still (punching in place)
+  let wristMoving = false;
+  if (prevState._prevPunchX !== undefined) {
+    wristMoving = Math.abs(wristX - prevState._prevPunchX) + Math.abs(wristY - (prevState._prevPunchY || wristY)) > 0.005;
+  }
+  const moving = bodyMoving || wristMoving;
+
+  if (moving && amplitude > 0.10) {
     feedback = { type: 'good', text: null };
-  } else if (moving && amplitude > 0.04 && amplitude <= 0.12) {
+  } else if (moving && amplitude > 0.03 && amplitude <= 0.10) {
     feedback = { type: 'warning', text: 'armPunchesSmall' };
   } else if (!moving && history.length > 20) {
     feedback = { type: 'warning', text: 'notMoving' };
@@ -816,6 +860,8 @@ export function analyzeArmPunches(landmarks, prevState = {}) {
     posture,
     moving,
     _wristXHistory: history,
+    _prevPunchX: wristX,
+    _prevPunchY: wristY,
     lastRepTime: moving ? Date.now() : prevState.lastRepTime,
     _prevLandmarks: landmarks
   };
