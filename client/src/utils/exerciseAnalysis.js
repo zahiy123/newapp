@@ -134,8 +134,71 @@ export function detectHeadDown(landmarks) {
   return headDropRatio < 0.04;
 }
 
-// Location-aware equipment/prop substitution
-export function getLocationProps(location, isHe) {
+// Location-aware equipment/prop substitution (sport-aware)
+export function getLocationProps(location, isHe, sport) {
+  // Fitness: no chairs/defenders/markers needed
+  if (sport === 'fitness') {
+    const fitnessProps = {
+      home: {
+        markers: isHe ? 'מרחב פתוח' : 'open space',
+        distance: isHe ? '2 מטר' : '2 meters',
+        defenders: '',
+        setup: isHe ? 'פנה מרחב פתוח לאימון, ללא ציוד נדרש' : 'Clear open space for training, no equipment needed',
+      },
+      yard: {
+        markers: isHe ? 'מרחב פתוח' : 'open space',
+        distance: isHe ? '5 מטר' : '5 meters',
+        defenders: '',
+        setup: isHe ? 'מצא מרחב פתוח בחצר לאימון' : 'Find open space in the yard for training',
+      },
+      field: {
+        markers: isHe ? 'מרחב פתוח' : 'open space',
+        distance: isHe ? '5 מטר' : '5 meters',
+        defenders: '',
+        setup: isHe ? 'מצא מרחב פתוח לאימון' : 'Find open space for training',
+      },
+      gym: {
+        markers: isHe ? 'אזור אימון' : 'training area',
+        distance: isHe ? '3 מטר' : '3 meters',
+        defenders: '',
+        setup: isHe ? 'מצא אזור פתוח בחדר הכושר' : 'Find an open area in the gym',
+      },
+    };
+    return fitnessProps[location] || fitnessProps.field;
+  }
+
+  // Tennis: court-specific setup
+  if (sport === 'tennis' || sport === 'tennisWheelchair') {
+    const tennisProps = {
+      home: {
+        markers: isHe ? 'מטרות (מגבות או בקבוקים)' : 'targets (towels or bottles)',
+        distance: isHe ? '3 מטר' : '3 meters',
+        defenders: isHe ? 'מטרות' : 'targets',
+        setup: isHe ? 'הצב מטרות (מגבות/בקבוקים) לדיוק מכות' : 'Place targets (towels/bottles) for stroke accuracy',
+      },
+      yard: {
+        markers: isHe ? 'מטרות או קונוסים' : 'targets or cones',
+        distance: isHe ? '5 מטר' : '5 meters',
+        defenders: isHe ? 'מטרות' : 'targets',
+        setup: isHe ? 'הצב קונוסים כמטרות לאימון מכות' : 'Place cones as targets for stroke practice',
+      },
+      field: {
+        markers: isHe ? 'קונוסים או מטרות' : 'cones or targets',
+        distance: isHe ? '5 מטר' : '5 meters',
+        defenders: isHe ? 'מטרות' : 'targets',
+        setup: isHe ? 'סמן אזורי מטרה במגרש עם קונוסים' : 'Mark target zones on court with cones',
+      },
+      gym: {
+        markers: isHe ? 'מטרות' : 'targets',
+        distance: isHe ? '3 מטר' : '3 meters',
+        defenders: isHe ? 'מטרות' : 'targets',
+        setup: isHe ? 'הצב מטרות לאימון דיוק' : 'Place targets for accuracy training',
+      },
+    };
+    return tennisProps[location] || tennisProps.field;
+  }
+
+  // Ball sports (football, basketball, etc.): keep markers/defenders
   const props = {
     home: {
       markers: isHe ? 'כיסאות או פחיות' : 'chairs or cans',

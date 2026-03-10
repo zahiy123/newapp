@@ -114,7 +114,7 @@ export default function Profile() {
               name="age"
               type="number"
               min="5"
-              max="120"
+              max="99"
               value={form.age}
               onChange={handleChange}
               required

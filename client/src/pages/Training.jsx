@@ -77,7 +77,7 @@ export default function Training() {
   const isHe = lang.startsWith('he');
   const playerName = userProfile?.name || '';
   const currentLocation = userProfile?.trainingLocation || userProfile?.currentLocation || 'field';
-  const locationProps = getLocationProps(currentLocation, isHe);
+  const locationProps = getLocationProps(currentLocation, isHe, userProfile?.sport);
 
   const { videoRef, active: cameraActive, error: cameraError, start: startCamera, stop: stopCamera } = useCamera();
   const { ready: poseReady, landmarks, startLoop, stopLoop } = usePose(canvasRef);
@@ -779,6 +779,30 @@ export default function Training() {
     }
   }
 
+  // Determine if exercise needs equipment detection (skip for bodyweight/fitness exercises)
+  function needsEquipmentCheck(exercise) {
+    if (!exercise) return false;
+    const sport = userProfile?.sport;
+    // Fitness exercises never need equipment check
+    if (sport === 'fitness') return false;
+    // Known bodyweight exercise names (Hebrew) — no equipment needed
+    const bodyweightNames = [
+      'שכיבות סמיכה', 'סקוואט', 'פלאנק', 'לאנג\'ים', 'דיפס',
+      'כפיפות מרפק', 'גשר ישבן', 'כפיפות בטן', 'מטפס הרים',
+      'ישיבה על הקיר', 'פלאנק צידי', 'בורפיז',
+      'כתפיים עם משקולות', 'גובלט סקוואט', 'הרמה צידית',
+      'משיכת משקולת', 'הרחבת מרפק',
+      'לחיצת כתפיים עם גומייה', 'סקוואט עם גומייה',
+      'כפיפות מרפק עם גומייה', 'משיכת גומייה', 'מתיחת גומייה',
+      'ריצת אינטרוולים', 'ספרינטים', 'אירובי ישיבה',
+      'אגרוף ישיבה', 'סיבובי ידיים מהירים', 'סיבובי גוף עליון מהירים',
+    ];
+    const name = exercise.name || '';
+    if (bodyweightNames.some(bw => name.includes(bw))) return false;
+    // Ball/sport drills likely need equipment
+    return true;
+  }
+
   function handleStartBriefing() {
     setPhase(PHASE.BRIEFING);
     exerciseStateRef.current = {}; setDisplayReps(0);
@@ -790,10 +814,27 @@ export default function Training() {
 
   function handleStartAfterBriefing() {
     stopSpeech();
-    setEquipmentFound(false);
-    setEquipmentLabel('');
-    setPhase(PHASE.CHECKING_EQUIPMENT);
     sittingWarnedRef.current = false;
+
+    if (!needsEquipmentCheck(currentExercise)) {
+      // Skip equipment detection — go directly to warm-up or exercising
+      if (!warmUpDone && currentIdx === 0) {
+        setWarmUpIdx(0);
+        speakWarmUpIntro(playerName);
+        setPhase(PHASE.WARM_UP);
+      } else {
+        setPhase(PHASE.EXERCISING);
+        setTimer(0);
+        lastActivityRef.current = Date.now();
+        exerciseStartTimeRef.current = Date.now();
+        lastNudgeTimeRef.current = 0;
+        speakSetStart(currentSet, totalSets);
+      }
+    } else {
+      setEquipmentFound(false);
+      setEquipmentLabel('');
+      setPhase(PHASE.CHECKING_EQUIPMENT);
+    }
   }
 
   function handleSetComplete() {
