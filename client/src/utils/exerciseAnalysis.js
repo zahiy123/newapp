@@ -965,15 +965,15 @@ const WARM_UP_CORE_TWISTS = {
 // Adapted warm-up exercises for disabilities
 const WARM_UP_SINGLE_LEG_HIGH_KNEE = {
   id: 'single_leg_high_knee',
-  name: { he: 'הרמת ברך עם קביים', en: 'Single Leg High Knee (Crutch Support)' },
-  description: { he: 'היישען על הקביים והרם את הברך לכיוון החזה', en: 'Lean on your crutches and bring your knee to your chest' },
+  name: { he: 'הרמת ברך', en: 'High Knee Raise' },
+  description: { he: 'הרם את הברך לכיוון החזה תוך שמירה על יציבות', en: 'Raise your knee toward your chest while maintaining balance' },
   duration: 45, analyze: analyzeSingleLegHighKnee,
 };
 
 const WARM_UP_FORWARD_KICKS = {
   id: 'forward_kicks_crutches',
-  name: { he: 'בעיטות קדימה עם קביים', en: 'Forward Kicks with Crutches' },
-  description: { he: 'היישען על הקביים ובעט קדימה ברגל', en: 'Lean on crutches and kick forward with your leg' },
+  name: { he: 'בעיטות חימום', en: 'Warm-up Kicks' },
+  description: { he: 'בעט קדימה ברגל לחימום שרירי הירך', en: 'Kick forward to warm up your thigh muscles' },
   duration: 45, analyze: analyzeForwardKicks,
 };
 

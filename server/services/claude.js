@@ -817,7 +817,9 @@ export function getLocalFallbackWeek({ profile, sport, goals, daysPerWeek, locat
 
   if (disability === 'one_leg') {
     strengthMap = strengthOneLeg;
-    warmupText = 'חימום כתפיים ופרקי ידיים + הרמות ברך עם קביים';
+    warmupText = isFitness
+      ? 'חימום כתפיים ופרקי ידיים + הרמות ברך + מתיחות דינמיות'
+      : 'חימום כתפיים ופרקי ידיים + הרמות ברך עם קביים';
   } else if (disability === 'one_arm') {
     strengthMap = strengthOneArm;
     warmupText = 'סיבוב יד פעילה + ריצה קלה + מתיחות דינמיות';

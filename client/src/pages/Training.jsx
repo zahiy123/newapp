@@ -253,59 +253,82 @@ export default function Training() {
   }, [currentIdx, currentExercise]);
 
   // === CALIBRATION PHASE — 5-second ROM measurement ===
+  const calibrationIntervalRef = useRef(null);
+
   useEffect(() => {
-    if (phase !== PHASE.CALIBRATING || !landmarks) return;
-
-    const now = Date.now();
-
-    // Initialize calibration on first frame
-    if (!calibrationDataRef.current) {
-      calibrationDataRef.current = {
-        startTime: now,
-        minAngles: {},
-        maxAngles: {},
-        frames: 0,
-      };
-      speakCalibrationStart(playerName);
+    if (phase !== PHASE.CALIBRATING) {
+      // Clean up interval if phase changes away
+      if (calibrationIntervalRef.current) {
+        clearInterval(calibrationIntervalRef.current);
+        calibrationIntervalRef.current = null;
+      }
+      return;
     }
 
+    // Initialize calibration data
+    calibrationDataRef.current = {
+      startTime: Date.now(),
+      minAngles: {},
+      maxAngles: {},
+      frames: 0,
+    };
+    setCalibrationCountdown(5);
+    speakCalibrationStart(playerName);
+
+    // Countdown timer — updates every second, transitions to EXERCISING after 5s
+    calibrationIntervalRef.current = setInterval(() => {
+      const cal = calibrationDataRef.current;
+      if (!cal) return;
+      const elapsed = (Date.now() - cal.startTime) / 1000;
+      const remaining = Math.max(0, Math.ceil(5 - elapsed));
+      setCalibrationCountdown(remaining);
+
+      if (elapsed >= 5) {
+        clearInterval(calibrationIntervalRef.current);
+        calibrationIntervalRef.current = null;
+
+        // Build baseline from collected angles
+        const baseline = {};
+        for (const joint of Object.keys(cal.maxAngles)) {
+          baseline[joint] = {
+            min: cal.minAngles[joint],
+            max: cal.maxAngles[joint],
+            range: cal.maxAngles[joint] - cal.minAngles[joint],
+          };
+        }
+        if (Object.keys(baseline).length > 0) {
+          exerciseStateRef.current._calibration = baseline;
+        }
+
+        speakCalibrationDone(playerName);
+        calibrationDataRef.current = null;
+        setPhase(PHASE.EXERCISING);
+        setTimer(0);
+        lastActivityRef.current = Date.now();
+        exerciseStartTimeRef.current = Date.now();
+        lastNudgeTimeRef.current = 0;
+        speakSetStart(currentSet, totalSets);
+      }
+    }, 1000);
+
+    return () => {
+      if (calibrationIntervalRef.current) {
+        clearInterval(calibrationIntervalRef.current);
+        calibrationIntervalRef.current = null;
+      }
+    };
+  }, [phase]);
+
+  // Collect angle data from landmarks during calibration (runs at ~60fps)
+  useEffect(() => {
+    if (phase !== PHASE.CALIBRATING || !landmarks || !calibrationDataRef.current) return;
     const cal = calibrationDataRef.current;
     cal.frames++;
-
-    // Measure key joint angles every frame
     const cueKey = analyzerRef.current?.cueKey;
     const anglesToTrack = getCalibrationAngles(landmarks, cueKey);
     for (const [joint, value] of Object.entries(anglesToTrack)) {
       cal.minAngles[joint] = Math.min(cal.minAngles[joint] ?? 999, value);
       cal.maxAngles[joint] = Math.max(cal.maxAngles[joint] ?? 0, value);
-    }
-
-    // Countdown
-    const elapsed = (now - cal.startTime) / 1000;
-    setCalibrationCountdown(Math.max(0, Math.ceil(5 - elapsed)));
-
-    // After 5 seconds, store baseline and proceed
-    if (elapsed >= 5) {
-      const baseline = {};
-      for (const joint of Object.keys(cal.maxAngles)) {
-        baseline[joint] = {
-          min: cal.minAngles[joint],
-          max: cal.maxAngles[joint],
-          range: cal.maxAngles[joint] - cal.minAngles[joint],
-        };
-      }
-      exerciseStateRef.current._calibration = baseline;
-
-      speakCalibrationDone(playerName);
-
-      calibrationDataRef.current = null;
-      setCalibrationCountdown(5);
-      setPhase(PHASE.EXERCISING);
-      setTimer(0);
-      lastActivityRef.current = Date.now();
-      exerciseStartTimeRef.current = Date.now();
-      lastNudgeTimeRef.current = 0;
-      speakSetStart(currentSet, totalSets);
     }
   }, [phase, landmarks]);
 
@@ -1455,23 +1478,13 @@ export default function Training() {
           </div>
         )}
 
-        {/* Warm-up HUD — same style as exercising, no dark overlay */}
+        {/* Warm-up — minimal camera overlay (timer + feedback only) */}
         {phase === PHASE.WARM_UP && currentWarmUp && (
           <>
-            {/* Exercise name badge — top left */}
-            <div className="absolute top-14 left-4 bg-black/50 backdrop-blur-sm text-white px-3 py-1.5 rounded-xl text-sm font-medium max-w-[65%] z-10">
-              <div className="truncate">{isHe ? currentWarmUp.name.he : currentWarmUp.name.en}</div>
-              <div className="text-xs text-white/60 truncate">{isHe ? currentWarmUp.description.he : currentWarmUp.description.en}</div>
-            </div>
-
-            {/* Warm-up badge — top right (like set counter) */}
-            <div className="absolute top-14 right-4 bg-orange-500/90 text-white px-3 py-2 rounded-xl text-sm font-bold z-10">
-              {isHe ? 'חימום' : 'Warm-up'} {warmUpIdx + 1}/{warmUpExercises.length}
-            </div>
-
-            {/* Countdown timer — bottom left (like exercise timer) */}
-            <div className="absolute bottom-4 left-4 bg-black/70 text-white px-4 py-2 rounded-xl z-10">
-              <span className="text-2xl font-bold">{warmUpTimer}</span>
+            {/* Big countdown timer — center of camera */}
+            <div className="absolute bottom-4 left-4 bg-black/70 backdrop-blur-sm text-white px-5 py-3 rounded-xl z-10">
+              <span className="text-3xl font-bold">{warmUpTimer}</span>
+              <span className="text-sm ml-2 opacity-70">{warmUpIdx + 1}/{warmUpExercises.length}</span>
               {warmUpPaused && (
                 <div className="text-xs text-yellow-400 mt-0.5 animate-pulse">
                   {isHe ? 'זוז כדי להמשיך' : 'Move to continue'}
@@ -1479,41 +1492,12 @@ export default function Training() {
               )}
             </div>
 
-            {/* Progress dots — bottom right */}
-            <div className="absolute bottom-4 right-4 bg-black/70 text-white px-3 py-2 rounded-xl flex items-center gap-1.5 z-10">
-              {warmUpExercises.map((_, i) => (
-                <div key={i} className={`w-3 h-3 rounded-full ${i < warmUpIdx ? 'bg-green-500' : i === warmUpIdx ? 'bg-orange-400' : 'bg-gray-500'}`} />
-              ))}
-            </div>
-
-            {/* Feedback banner — same as exercising */}
+            {/* Feedback banner */}
             {feedback && (
               <div className={`absolute top-4 left-4 right-4 ${feedbackColor[feedback.type] || 'bg-blue-500'} text-white px-4 py-3 rounded-xl text-center font-bold text-lg shadow-lg z-10`}>
                 {feedback.text}
               </div>
             )}
-
-            {/* Pause + Skip buttons — bottom center */}
-            <div className="absolute bottom-16 left-1/2 -translate-x-1/2 flex gap-3 z-10">
-              <button
-                onClick={handlePauseExercise}
-                className="px-4 py-2 bg-yellow-500/80 text-white rounded-lg text-sm font-medium hover:bg-yellow-500 transition"
-              >
-                {isHe ? '\u23F8 \u05D4\u05E9\u05D4\u05D4' : '\u23F8 Pause'}
-              </button>
-              <button
-                onClick={() => {
-                  clearInterval(warmUpTimerRef.current);
-                  setWarmUpDone(true);
-                  speakWarmUpComplete(playerName);
-                  setFeedback(null);
-                  setTimeout(() => setPhase(PHASE.IDLE), 2500);
-                }}
-                className="px-4 py-2 bg-white/20 text-white rounded-lg text-sm hover:bg-white/30 transition"
-              >
-                {isHe ? '\u05D3\u05DC\u05D2 \u05D7\u05D9\u05DE\u05D5\u05DD' : 'Skip warm-up'} {'\u25B6'}
-              </button>
-            </div>
           </>
         )}
 
@@ -1664,7 +1648,83 @@ export default function Training() {
           !isFullscreen && <div className="text-center text-gray-500 py-8">{t('training.noExercises')}</div>
         ) : (
           <div className={isFullscreen ? 'space-y-2' : 'space-y-3'}>
-            {currentExercise && (
+            {/* Warm-up exercise card — looks identical to regular exercise */}
+            {phase === PHASE.WARM_UP && currentWarmUp && (
+              <div className={isFullscreen
+                ? 'bg-white/10 rounded-xl p-3 space-y-2'
+                : 'bg-white rounded-xl shadow-lg p-5 border-2 border-orange-500 space-y-3'}>
+                <div className="flex items-center justify-between">
+                  <span className={`text-xs font-medium ${isFullscreen ? 'text-orange-300' : 'text-orange-600'}`}>
+                    {isHe ? 'חימום' : 'Warm-up'} ({warmUpIdx + 1}/{warmUpExercises.length})
+                  </span>
+                  <span className={`text-xs ${isFullscreen ? 'text-white/50' : 'text-gray-400'}`}>
+                    {currentWarmUp.duration}{isHe ? ' שניות' : 's'}
+                  </span>
+                </div>
+                <h2 className={`text-lg font-bold ${isFullscreen ? 'text-white' : 'text-gray-800'}`}>
+                  {isHe ? currentWarmUp.name.he : currentWarmUp.name.en}
+                </h2>
+                {!isFullscreen && (
+                  <p className="text-sm text-gray-500">{isHe ? currentWarmUp.description.he : currentWarmUp.description.en}</p>
+                )}
+
+                {/* Big timer display */}
+                <div className="flex items-center justify-center py-2">
+                  <span className={`text-5xl font-bold ${warmUpPaused ? 'text-yellow-500 animate-pulse' : isFullscreen ? 'text-white' : 'text-gray-800'}`}>
+                    {warmUpTimer}
+                  </span>
+                </div>
+
+                {/* Progress dots */}
+                <div className="flex items-center justify-center gap-2">
+                  {warmUpExercises.map((_, i) => (
+                    <div key={i} className={`w-3 h-3 rounded-full ${i < warmUpIdx ? 'bg-green-500' : i === warmUpIdx ? 'bg-orange-400 animate-pulse' : 'bg-gray-300'}`} />
+                  ))}
+                </div>
+
+                {/* Buttons */}
+                <div className="flex flex-wrap gap-3 pt-2">
+                  <button
+                    onClick={handlePauseExercise}
+                    className="px-4 py-2 min-h-[44px] bg-yellow-500 text-white rounded-lg text-sm font-medium"
+                  >
+                    {isHe ? '⏸ השהה' : '⏸ Pause'}
+                  </button>
+                  <button
+                    onClick={() => {
+                      clearInterval(warmUpTimerRef.current);
+                      if (warmUpIdx < warmUpExercises.length - 1) {
+                        setWarmUpIdx(warmUpIdx + 1);
+                      } else {
+                        setWarmUpDone(true);
+                        speakWarmUpComplete(playerName);
+                        setFeedback(null);
+                        setTimeout(() => setPhase(PHASE.IDLE), 2500);
+                      }
+                    }}
+                    className="flex-1 py-2 min-h-[44px] bg-blue-600 text-white rounded-lg font-medium"
+                  >
+                    {warmUpIdx < warmUpExercises.length - 1
+                      ? (isHe ? 'הבא ▶' : 'Next ▶')
+                      : (isHe ? 'סיים חימום ▶' : 'Finish warm-up ▶')}
+                  </button>
+                  <button
+                    onClick={() => {
+                      clearInterval(warmUpTimerRef.current);
+                      setWarmUpDone(true);
+                      speakWarmUpComplete(playerName);
+                      setFeedback(null);
+                      setTimeout(() => setPhase(PHASE.IDLE), 2500);
+                    }}
+                    className={`px-4 py-2 min-h-[44px] rounded-lg text-sm ${isFullscreen ? 'border border-white/30 text-white' : 'border border-gray-300 text-gray-500'}`}
+                  >
+                    {isHe ? 'דלג' : 'Skip'}
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {currentExercise && phase !== PHASE.WARM_UP && (
               <div className={isFullscreen
                 ? 'bg-white/10 rounded-xl p-3 space-y-2'
                 : 'bg-white rounded-xl shadow-lg p-5 border-2 border-blue-500 space-y-3'}>
