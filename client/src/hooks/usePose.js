@@ -1,5 +1,6 @@
 import { useRef, useState, useCallback, useEffect } from 'react';
 import { PoseLandmarker, FilesetResolver, DrawingUtils } from '@mediapipe/tasks-vision';
+import { angleCosine } from '../utils/motionEngine';
 
 // Key landmark indices
 const LM = {
@@ -12,11 +13,9 @@ const LM = {
   LEFT_ANKLE: 27, RIGHT_ANKLE: 28
 };
 
+// Law of cosines — unused in this file but kept for consistency
 function angle(a, b, c) {
-  const radians = Math.atan2(c.y - b.y, c.x - b.x) - Math.atan2(a.y - b.y, a.x - b.x);
-  let deg = Math.abs(radians * 180 / Math.PI);
-  if (deg > 180) deg = 360 - deg;
-  return deg;
+  return angleCosine(a, b, c);
 }
 
 function midpoint(a, b) {

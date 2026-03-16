@@ -1,5 +1,5 @@
 import { useRef, useState, useCallback, useEffect } from 'react';
-import * as ort from 'onnxruntime-web';
+// onnxruntime-web is dynamically imported to avoid WASM compile errors at module load
 
 // Ball diameter in cm by sport (for distance estimation)
 const BALL_DIAMETERS = {
@@ -25,6 +25,11 @@ const INPUT_SIZE = 640;
 const CONFIDENCE_THRESHOLD = 0.4;
 const NMS_IOU_THRESHOLD = 0.5;
 
+// Module-level flag: once WASM/ONNX runtime fails, don't retry
+let runtimeBroken = false;
+// Module-level ort reference (set after successful dynamic import)
+let ortModule = null;
+
 export function useBallDetection(sport = 'football') {
   const sessionRef = useRef(null);
   const animFrameRef = useRef(null);
@@ -37,13 +42,27 @@ export function useBallDetection(sport = 'football') {
 
   useEffect(() => { sportRef.current = sport; }, [sport]);
 
-  // Benchmark all models and pick fastest
+  // Try to load ONNX models — graceful failure with no console spam
   useEffect(() => {
     let cancelled = false;
 
     async function init() {
-      // Set ONNX runtime to use WebGL (fastest in browser)
-      ort.env.wasm.numThreads = 1;
+      // If WASM runtime already failed in a previous mount, skip entirely
+      if (runtimeBroken) return;
+
+      // Fitness doesn't need ball detection
+      if (sport === 'fitness') return;
+
+      try {
+        ortModule = await import('onnxruntime-web');
+        ortModule.env.wasm.numThreads = 1;
+        // Suppress ONNX runtime logs
+        ortModule.env.logLevel = 'error';
+      } catch {
+        runtimeBroken = true;
+        return; // ONNX runtime import failed — safe mode
+      }
+      const ort = ortModule;
 
       // Create offscreen canvas for preprocessing
       canvasRef.current = document.createElement('canvas');
@@ -53,11 +72,19 @@ export function useBallDetection(sport = 'football') {
       let bestSession = null;
       let bestTime = Infinity;
       let bestPath = '';
+      let loadAttempts = 0;
 
-      // Benchmark each model
+      // Try each model — stop on first success to minimize noise
       for (const path of MODEL_PATHS) {
         if (cancelled) return;
         try {
+          // First verify the file exists and is actually an ONNX file (not an HTML 404 page)
+          const probe = await fetch(path, { method: 'HEAD' });
+          if (!probe.ok) continue; // 404 — skip silently
+          const contentType = probe.headers.get('content-type') || '';
+          if (contentType.includes('text/html')) continue; // Server returned HTML error page
+
+          loadAttempts++;
           const session = await ort.InferenceSession.create(path, {
             executionProviders: ['webgl', 'wasm'],
           });
@@ -71,10 +98,7 @@ export function useBallDetection(sport = 'football') {
           await session.run({ [inputName]: tensor });
           const elapsed = performance.now() - start;
 
-          console.log(`[BallDetection] ${path}: ${elapsed.toFixed(0)}ms warmup`);
-
           if (elapsed < bestTime) {
-            // Release previous best if any
             if (bestSession) bestSession.release();
             bestSession = session;
             bestTime = elapsed;
@@ -82,8 +106,8 @@ export function useBallDetection(sport = 'football') {
           } else {
             session.release();
           }
-        } catch (err) {
-          console.warn(`[BallDetection] Failed to load ${path}:`, err.message);
+        } catch {
+          // Silent — don't pollute console
         }
       }
 
@@ -94,16 +118,18 @@ export function useBallDetection(sport = 'football') {
 
       if (bestSession) {
         sessionRef.current = bestSession;
-        console.log(`[BallDetection] Selected: ${bestPath} (${bestTime.toFixed(0)}ms)`);
+        console.log(`[BallDetection] Ready: ${bestPath} (${bestTime.toFixed(0)}ms)`);
         setReady(true);
       } else {
-        console.warn('[BallDetection] No models could be loaded');
+        // All models failed — mark runtime as broken to prevent retries
+        if (loadAttempts > 0) runtimeBroken = true;
+        // No console spam — just silently fall back to pose-only mode
       }
     }
 
     init();
     return () => { cancelled = true; };
-  }, []);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Preprocess video frame to tensor
   const preprocess = useCallback((videoEl) => {
@@ -114,6 +140,8 @@ export function useBallDetection(sport = 'football') {
     const imageData = ctx.getImageData(0, 0, INPUT_SIZE, INPUT_SIZE);
     const { data } = imageData;
 
+    if (!ortModule) return null;
+
     // Convert to CHW float32 normalized [0, 1]
     const float32 = new Float32Array(3 * INPUT_SIZE * INPUT_SIZE);
     const area = INPUT_SIZE * INPUT_SIZE;
@@ -123,7 +151,7 @@ export function useBallDetection(sport = 'football') {
       float32[2 * area + i] = data[i * 4 + 2] / 255; // B
     }
 
-    return new ort.Tensor('float32', float32, [1, 3, INPUT_SIZE, INPUT_SIZE]);
+    return new ortModule.Tensor('float32', float32, [1, 3, INPUT_SIZE, INPUT_SIZE]);
   }, []);
 
   // NMS: Non-Maximum Suppression
@@ -160,8 +188,6 @@ export function useBallDetection(sport = 'football') {
 
   // Post-process YOLOv8 output
   const postprocess = useCallback((output) => {
-    // YOLOv8 output shape: [1, 5+numClasses, 8400] or [1, 8400, 5+numClasses]
-    // For single-class ball: [1, 5, 8400] → x, y, w, h, conf
     const data = output.data;
     const dims = output.dims;
 
@@ -170,12 +196,10 @@ export function useBallDetection(sport = 'football') {
 
     if (dims.length === 3) {
       if (dims[1] < dims[2]) {
-        // Shape [1, 5+, 8400] — need to interpret columns as detections
         numValues = dims[1];
         numDetections = dims[2];
         transposed = true;
       } else {
-        // Shape [1, 8400, 5+]
         numDetections = dims[1];
         numValues = dims[2];
       }
@@ -194,8 +218,6 @@ export function useBallDetection(sport = 'football') {
         y = data[1 * numDetections + i];
         w = data[2 * numDetections + i];
         h = data[3 * numDetections + i];
-        // For single-class: confidence is at index 4
-        // For multi-class: take max of class scores starting at 4
         if (numValues === 5) {
           conf = data[4 * numDetections + i];
         } else {
@@ -228,15 +250,12 @@ export function useBallDetection(sport = 'football') {
 
     if (boxes.length === 0) return null;
 
-    // NMS
     const kept = nms(boxes, scores, NMS_IOU_THRESHOLD);
     if (kept.length === 0) return null;
 
-    // Return best detection
     const best = kept[0];
     const box = boxes[best];
     const ballDiameter = BALL_DIAMETERS[sportRef.current] || BALL_DIAMETERS.default;
-    // Distance in cm from apparent size
     const bboxHeightPx = box.h * INPUT_SIZE;
     const distanceEstimate = bboxHeightPx > 5 ? (ballDiameter * FOCAL_LENGTH) / bboxHeightPx : null;
 
@@ -267,20 +286,20 @@ export function useBallDetection(sport = 'football') {
 
       ballDataRef.current = result || { detected: false };
 
-      // Only update state every 5th detection to avoid excessive re-renders
       if (frameCountRef.current % 5 === 0) {
         setBallData(ballDataRef.current);
       }
 
       return result;
-    } catch (err) {
-      // Silent failure — don't break the training loop
+    } catch {
       return null;
     }
   }, [preprocess, postprocess]);
 
   // Detection loop: runs every 10th rAF frame (~6fps at 60fps camera)
   const startLoop = useCallback((videoEl) => {
+    // Don't start loop if no model loaded (safe mode — pose-only)
+    if (!sessionRef.current) return;
     frameCountRef.current = 0;
 
     function loop() {

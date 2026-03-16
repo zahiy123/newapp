@@ -4,6 +4,8 @@
 // All accept optional ballData third param for ball-aware feedback
 // Paralympic analyzers use _calibration baseline from prevState for personalized thresholds
 
+import { angleCosine } from './motionEngine';
+
 const LM = {
   NOSE: 0,
   LEFT_EYE: 2, RIGHT_EYE: 5,
@@ -15,11 +17,9 @@ const LM = {
   LEFT_ANKLE: 27, RIGHT_ANKLE: 28
 };
 
+// Law of cosines angle — more stable than atan2, uses 3D distances
 function angle(a, b, c) {
-  const rad = Math.atan2(c.y - b.y, c.x - b.x) - Math.atan2(a.y - b.y, a.x - b.x);
-  let deg = Math.abs(rad * 180 / Math.PI);
-  if (deg > 180) deg = 360 - deg;
-  return deg;
+  return angleCosine(a, b, c);
 }
 
 // Required landmark groups for quick declaration

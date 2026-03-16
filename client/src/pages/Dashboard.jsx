@@ -1,10 +1,14 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useAuth } from '../context/AuthContext';
 import { db } from '../services/firebase';
 import { doc, getDoc, updateDoc, collection, getDocs } from 'firebase/firestore';
 import { apiUrl } from '../utils/api';
 import { Link, useNavigate } from 'react-router-dom';
+import {
+  buildFingerprint, savePlan, loadPlan, clearPlan, sanitizePlan,
+  loadProgress, isDayCompleted, areAllWeeksComplete, getNextWorkoutDay, clearProgress
+} from '../utils/workoutStorage';
 
 
 const LOCATIONS = [
@@ -33,12 +37,15 @@ export default function Dashboard() {
   const [currentLocation, setCurrentLocation] = useState('field');
   const [currentEquipment, setCurrentEquipment] = useState('none');
   const [workoutCount, setWorkoutCount] = useState(0);
+  const [progress, setProgress] = useState({ completedDays: [] });
   const generatingRef = useRef(false);
 
   const name = userProfile?.name || '';
   const sport = userProfile?.sport;
   const goals = userProfile?.goals;
   const setupComplete = sport && goals?.length > 0 && name;
+
+  const fingerprint = useMemo(() => userProfile ? buildFingerprint(userProfile) : '', [userProfile]);
 
   useEffect(() => {
     if (userProfile?.trainingLocation) setCurrentLocation(userProfile.trainingLocation);
@@ -57,34 +64,68 @@ export default function Dashboard() {
     loadCount();
   }, [user]);
 
-  // Load existing plan — only if it matches current sport
+  // Refresh progress from localStorage
+  function refreshProgress() {
+    setProgress(loadProgress());
+  }
+
   useEffect(() => {
-    async function loadPlan() {
-      if (!user) return;
+    refreshProgress();
+  }, [trainingPlan]);
+
+  // Load existing plan: localStorage first, then Firestore
+  useEffect(() => {
+    async function loadExistingPlan() {
+      if (!user || !userProfile) return;
+      const fp = buildFingerprint(userProfile);
+
+      // 1. Try localStorage
+      const cached = loadPlan(fp);
+      if (cached?.weeks?.length > 0) {
+        const clean = sanitizePlan(cached, userProfile.sport);
+        setTrainingPlan(clean);
+        savePlan(clean, fp); // re-save sanitized version
+        return;
+      }
+
+      // 2. Try Firestore
       const snap = await getDoc(doc(db, 'users', user.uid));
       if (!snap.exists()) return;
       const data = snap.data();
       if (data.trainingPlan?.weeks?.length > 0) {
-        // If plan was generated for a different sport, discard it
         if (data.trainingPlan.sport && data.trainingPlan.sport !== data.sport) {
           await updateDoc(doc(db, 'users', user.uid), { trainingPlan: null });
         } else {
-          setTrainingPlan(data.trainingPlan);
+          const clean = sanitizePlan(data.trainingPlan, userProfile.sport);
+          setTrainingPlan(clean);
+          savePlan(clean, fp);
         }
       }
       if (data.currentLocation) setCurrentLocation(data.currentLocation);
     }
-    loadPlan();
-  }, [user]);
+    loadExistingPlan();
+  }, [user, userProfile]);
 
-  // Auto-generate only once when setup completes and no plan exists
+  // Auto-generate only once on initial mount when setup is complete and no plan loaded
   const autoGenTriggeredRef = useRef(false);
+  const planLoadedRef = useRef(false);
+
+  // Track whether plan was loaded from cache/Firestore
   useEffect(() => {
-    if (setupComplete && !trainingPlan && !generatingRef.current && !autoGenTriggeredRef.current) {
-      autoGenTriggeredRef.current = true;
-      generatePlan();
-    }
-  }, [setupComplete]); // intentionally only depend on setupComplete
+    if (trainingPlan) planLoadedRef.current = true;
+  }, [trainingPlan]);
+
+  // Fire auto-gen after a short delay — gives loadExistingPlan time to set the plan
+  useEffect(() => {
+    if (!setupComplete || autoGenTriggeredRef.current) return;
+    const timer = setTimeout(() => {
+      if (!planLoadedRef.current && !generatingRef.current) {
+        autoGenTriggeredRef.current = true;
+        generatePlan();
+      }
+    }, 1500); // wait 1.5s for cache/Firestore to load
+    return () => clearTimeout(timer);
+  }, [setupComplete]);
 
   function getPayload(loc) {
     return {
@@ -114,7 +155,6 @@ export default function Dashboard() {
         body: JSON.stringify({ ...payload, weekNumber })
       });
       if (res.status === 429 && attempt < retries) {
-        // Rate limited or duplicate — wait and retry
         await new Promise(r => setTimeout(r, (attempt + 1) * 3000));
         continue;
       }
@@ -152,11 +192,13 @@ export default function Dashboard() {
       setActiveWeek(0);
       setGenerating(false);
 
-      // Save Week 1 immediately so user can start training
+      // Save to Firestore + localStorage
+      const fp = buildFingerprint(userProfile);
       await updateDoc(doc(db, 'users', user.uid), {
         trainingPlan: plan,
         planCreatedAt: new Date().toISOString()
       });
+      savePlan(plan, fp);
 
       // Step 2: Load weeks 2-4 + tips in background
       setLoadingMore(true);
@@ -166,9 +208,9 @@ export default function Dashboard() {
           plan.weeks.push(week);
           setTrainingPlan({ ...plan });
           await updateDoc(doc(db, 'users', user.uid), { trainingPlan: { ...plan } });
+          savePlan({ ...plan }, fp);
         } catch (err) {
           console.error(`Week ${w} failed:`, err.message);
-          // Continue with remaining weeks
         }
       }
 
@@ -178,6 +220,7 @@ export default function Dashboard() {
         plan.safetyNotes = tips.safetyNotes || [];
         setTrainingPlan({ ...plan });
         await updateDoc(doc(db, 'users', user.uid), { trainingPlan: { ...plan } });
+        savePlan({ ...plan }, fp);
       } catch {}
 
       setLoadingMore(false);
@@ -189,11 +232,23 @@ export default function Dashboard() {
     generatingRef.current = false;
   }
 
+  function handleRegenerate() {
+    if (generatingRef.current) return;
+    clearPlan();
+    clearProgress();
+    setTrainingPlan(null);
+    planLoadedRef.current = false;
+    generatePlan();
+  }
+
   async function handleLocationChange(loc) {
     if (loc === currentLocation || generatingRef.current) return;
     setCurrentLocation(loc);
     await updateDoc(doc(db, 'users', user.uid), { currentLocation: loc });
+    clearPlan();
+    clearProgress();
     setTrainingPlan(null);
+    planLoadedRef.current = false;
     generatePlan(loc);
   }
 
@@ -201,12 +256,20 @@ export default function Dashboard() {
     if (eq === currentEquipment || generatingRef.current) return;
     setCurrentEquipment(eq);
     await updateDoc(doc(db, 'users', user.uid), { equipment: eq });
+    clearPlan();
+    clearProgress();
     setTrainingPlan(null);
+    planLoadedRef.current = false;
     generatePlan();
   }
 
   const weeks = trainingPlan?.weeks || [];
   const currentWeek = weeks[activeWeek];
+  const allComplete = trainingPlan && areAllWeeksComplete(trainingPlan);
+  const nextWorkout = trainingPlan ? getNextWorkoutDay(trainingPlan) : null;
+
+  // Check if user is on Hebrew
+  const isHe = (userProfile?.language || 'he') === 'he';
 
   return (
     <div className="max-w-2xl mx-auto space-y-6">
@@ -310,11 +373,40 @@ export default function Dashboard() {
         </div>
       )}
 
+      {/* Plan complete banner */}
+      {allComplete && !generating && (
+        <div className="bg-green-50 border-2 border-green-400 rounded-xl p-5 text-center space-y-3">
+          <div className="text-3xl">&#127942;</div>
+          <h2 className="font-bold text-green-800 text-lg">
+            {isHe ? 'סיימת את כל התוכנית!' : 'Plan Complete!'}
+          </h2>
+          <p className="text-sm text-green-700">
+            {isHe ? 'כל הכבוד! השלמת את כל האימונים בתוכנית השבועית.' : 'Amazing! You completed all workouts in the plan.'}
+          </p>
+          <button
+            onClick={handleRegenerate}
+            className="px-6 py-3 min-h-[48px] bg-gradient-to-r from-green-500 to-emerald-600 text-white rounded-lg font-medium hover:opacity-90 transition"
+          >
+            {isHe ? 'צור תוכנית חדשה' : 'Generate New Plan'}
+          </button>
+        </div>
+      )}
+
+      {/* Continue training shortcut */}
+      {nextWorkout && trainingPlan && !generating && !allComplete && (
+        <button
+          onClick={() => navigate(`/training?week=${nextWorkout.week}&day=${nextWorkout.day}`)}
+          className="w-full py-4 min-h-[56px] bg-gradient-to-r from-blue-600 to-indigo-600 text-white rounded-xl font-bold text-lg hover:opacity-90 transition shadow-lg"
+        >
+          {isHe ? 'המשך אימון' : 'Continue Training'} &#8594;
+        </button>
+      )}
+
       {trainingPlan && !generating && (
         <div className="space-y-4">
           <div className="flex items-center justify-between">
             <h2 className="text-xl font-semibold text-gray-800">{t('dashboard.yourPlan')}</h2>
-            <button onClick={() => { setTrainingPlan(null); generatePlan(); }} className="text-sm text-blue-600 hover:underline">
+            <button onClick={handleRegenerate} className="text-sm text-blue-600 hover:underline">
               {t('dashboard.regenerate')}
             </button>
           </div>
@@ -352,49 +444,78 @@ export default function Dashboard() {
             </div>
           )}
 
-          {currentWeek?.days?.map((day, i) => (
-            <div key={i} className="bg-white rounded-xl shadow p-3 sm:p-5 space-y-3">
-              <div className="flex items-center justify-between">
-                <h3 className="font-bold text-gray-800">{day.day}</h3>
-                <span className="text-sm text-gray-500">{day.durationMinutes} {t('dashboard.minutes')}</span>
-              </div>
-              <p className="text-sm text-purple-600 font-medium">{day.focus}</p>
+          {currentWeek?.days?.map((day, i) => {
+            const completed = isDayCompleted(activeWeek, i);
+            const isNext = nextWorkout && nextWorkout.week === activeWeek && nextWorkout.day === i;
 
-              {day.warmup && (
-                <div className="bg-orange-50 rounded-lg p-3 text-sm">
-                  <span className="font-medium text-orange-700">{t('dashboard.warmup')}:</span> {day.warmup}
-                </div>
-              )}
-
-              <div className="space-y-2">
-                {day.exercises?.map((ex, j) => (
-                  <div key={j} className="border border-gray-100 rounded-lg p-3">
-                    <div className="font-medium text-gray-800">{ex.name}</div>
-                    <p className="text-sm text-gray-500">{ex.description}</p>
-                    <div className="flex gap-4 mt-1 text-xs text-gray-400">
-                      {ex.sets && <span>{ex.sets} {t('dashboard.sets')}</span>}
-                      {ex.reps && <span>{ex.reps} {t('dashboard.reps')}</span>}
-                      {ex.restSeconds && <span>{ex.restSeconds}{t('dashboard.secRest')}</span>}
-                    </div>
-                    {ex.tips && <p className="text-xs text-blue-500 mt-1">{ex.tips}</p>}
-                  </div>
-                ))}
-              </div>
-
-              {day.cooldown && (
-                <div className="bg-blue-50 rounded-lg p-3 text-sm">
-                  <span className="font-medium text-blue-700">{t('dashboard.cooldown')}:</span> {day.cooldown}
-                </div>
-              )}
-
-              <button
-                onClick={() => navigate(`/training?week=${activeWeek}&day=${i}`)}
-                className="w-full py-3 min-h-[48px] bg-gradient-to-r from-green-500 to-emerald-600 text-white rounded-lg font-medium hover:opacity-90 transition"
+            return (
+              <div
+                key={i}
+                className={`rounded-xl shadow p-3 sm:p-5 space-y-3 transition ${
+                  completed
+                    ? 'bg-gray-50 border-2 border-green-300 opacity-75'
+                    : isNext
+                    ? 'bg-white border-2 border-blue-400 shadow-lg'
+                    : 'bg-white'
+                }`}
               >
-                {t('dashboard.startTraining')}
-              </button>
-            </div>
-          ))}
+                <div className="flex items-center justify-between">
+                  <h3 className="font-bold text-gray-800 flex items-center gap-2">
+                    {completed && <span className="text-green-500 text-lg">&#10003;</span>}
+                    {day.day}
+                    {isNext && (
+                      <span className="text-xs bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full font-medium">
+                        {isHe ? 'הבא' : 'Next'}
+                      </span>
+                    )}
+                  </h3>
+                  <span className="text-sm text-gray-500">{day.durationMinutes} {t('dashboard.minutes')}</span>
+                </div>
+                <p className="text-sm text-purple-600 font-medium">{day.focus}</p>
+
+                {day.warmup && (
+                  <div className="bg-orange-50 rounded-lg p-3 text-sm">
+                    <span className="font-medium text-orange-700">{t('dashboard.warmup')}:</span> {day.warmup}
+                  </div>
+                )}
+
+                <div className="space-y-2">
+                  {day.exercises?.map((ex, j) => (
+                    <div key={j} className="border border-gray-100 rounded-lg p-3">
+                      <div className="font-medium text-gray-800">{ex.name}</div>
+                      <p className="text-sm text-gray-500">{ex.description}</p>
+                      <div className="flex gap-4 mt-1 text-xs text-gray-400">
+                        {ex.sets && <span>{ex.sets} {t('dashboard.sets')}</span>}
+                        {ex.reps && <span>{ex.reps} {t('dashboard.reps')}</span>}
+                        {ex.restSeconds && <span>{ex.restSeconds}{t('dashboard.secRest')}</span>}
+                      </div>
+                      {ex.tips && <p className="text-xs text-blue-500 mt-1">{ex.tips}</p>}
+                    </div>
+                  ))}
+                </div>
+
+                {day.cooldown && (
+                  <div className="bg-blue-50 rounded-lg p-3 text-sm">
+                    <span className="font-medium text-blue-700">{t('dashboard.cooldown')}:</span> {day.cooldown}
+                  </div>
+                )}
+
+                <button
+                  onClick={() => navigate(`/training?week=${activeWeek}&day=${i}`)}
+                  className={`w-full py-3 min-h-[48px] rounded-lg font-medium transition ${
+                    completed
+                      ? 'bg-gray-200 text-gray-500'
+                      : 'bg-gradient-to-r from-green-500 to-emerald-600 text-white hover:opacity-90'
+                  }`}
+                >
+                  {completed
+                    ? (isHe ? 'הושלם - תרגל שוב' : 'Completed - Train Again')
+                    : t('dashboard.startTraining')
+                  }
+                </button>
+              </div>
+            );
+          })}
 
           {trainingPlan.safetyNotes?.length > 0 && (
             <div className="bg-red-50 border border-red-200 rounded-xl p-5">

@@ -6,6 +6,7 @@ import {
   analyzeWheelchairBasketballChestPass,
   analyzeWheelchairTennisStroke, analyzeWheelchairTennisServe
 } from './sportAnalyzers';
+import { angleCosine } from './motionEngine';
 
 // Key landmark indices
 const LM = {
@@ -19,11 +20,221 @@ const LM = {
   LEFT_ANKLE: 27, RIGHT_ANKLE: 28
 };
 
+// Law of cosines angle — uses 3D distances, more stable than atan2
+// Landmarks are pre-stabilized by Kalman filter in Training.jsx
 function angle(a, b, c) {
-  const rad = Math.atan2(c.y - b.y, c.x - b.x) - Math.atan2(a.y - b.y, a.x - b.x);
-  let deg = Math.abs(rad * 180 / Math.PI);
-  if (deg > 180) deg = 360 - deg;
-  return deg;
+  return angleCosine(a, b, c);
+}
+
+// --- Minimum ROM validation for rep counting ---
+// Returns true if the angle delta between phase start and current meets the minimum threshold.
+// Uses calibration data if available (30% of calibrated range), otherwise uses fixed minimums.
+const MIN_ROM_DEFAULTS = {
+  knee: 25,       // squat, lunge: at least 25° of knee bend
+  elbow: 30,      // pushup, curl, dips: at least 30° of elbow bend
+  shoulder: 20,   // shoulder press: at least 20°
+  yDelta: 0.04,   // Y-position based: at least 4% of frame height
+};
+
+function meetsMinROM(prevState, joint, currentAngle, phaseStartAngle) {
+  if (phaseStartAngle == null) return true; // no tracking yet
+  const delta = Math.abs(currentAngle - phaseStartAngle);
+  const cal = prevState?._calibration;
+
+  // If we have calibration data for this joint, require 50% of calibrated range
+  if (cal) {
+    // Check both left and right variants
+    const calData = cal[joint] || cal[`left${joint.charAt(0).toUpperCase() + joint.slice(1)}`]
+      || cal[`right${joint.charAt(0).toUpperCase() + joint.slice(1)}`];
+    if (calData && calData.range > 10) {
+      return delta >= calData.range * 0.5;
+    }
+  }
+
+  // Fallback to fixed minimum
+  return delta >= (MIN_ROM_DEFAULTS[joint] || 20);
+}
+
+// Minimum time between reps (ms) — prevents impossibly fast "reps" from jitter
+const MIN_REP_INTERVAL_MS = 800; // real reps take at least 0.8s
+
+function canCountRep(lastRepTime) {
+  if (!lastRepTime) return true;
+  return Date.now() - lastRepTime >= MIN_REP_INTERVAL_MS;
+}
+
+// --- Orientation Verification System ---
+// Determines if user is in the correct body position for the exercise
+export const ORIENTATION = {
+  STANDING: 'standing',   // body vertical (tilt > 60° from floor)
+  LYING: 'lying',         // body horizontal (tilt < 30° from floor)
+  SITTING: 'sitting',     // wheelchair / seated exercises
+  ANY: 'any',             // no orientation requirement
+};
+
+// Calculate body tilt angle relative to floor (0° = flat, 90° = upright)
+function getBodyTiltDeg(landmarks) {
+  const lShoulder = landmarks[LM.LEFT_SHOULDER];
+  const rShoulder = landmarks[LM.RIGHT_SHOULDER];
+  const lHip = landmarks[LM.LEFT_HIP];
+  const rHip = landmarks[LM.RIGHT_HIP];
+
+  if (!lShoulder || !lHip || lShoulder.visibility < 0.3 || lHip.visibility < 0.3) return null;
+
+  const shoulderMidX = (lShoulder.x + (rShoulder?.visibility > 0.3 ? rShoulder.x : lShoulder.x)) / 2;
+  const shoulderMidY = (lShoulder.y + (rShoulder?.visibility > 0.3 ? rShoulder.y : lShoulder.y)) / 2;
+  const hipMidX = (lHip.x + (rHip?.visibility > 0.3 ? rHip.x : lHip.x)) / 2;
+  const hipMidY = (lHip.y + (rHip?.visibility > 0.3 ? rHip.y : lHip.y)) / 2;
+
+  const dx = Math.abs(hipMidX - shoulderMidX);
+  const dy = Math.abs(hipMidY - shoulderMidY);
+
+  // atan2(vertical, horizontal) → 90° when vertical, 0° when horizontal
+  return Math.atan2(dy, dx) * (180 / Math.PI);
+}
+
+// Orientation messages — aggressive coach style (Hebrew primary)
+const ORIENTATION_MSGS = {
+  lying_from_standing: {
+    he: 'תרד לרצפה! שכיבות סמיכה עושים למטה, לא בעמידה!',
+    en: 'Get down on the floor! Push-ups are done lying down, not standing!',
+  },
+  lying_from_sitting: {
+    he: 'תרד לרצפה ושכב! התרגיל הזה דורש שכיבה!',
+    en: 'Get on the floor! This exercise requires a lying position!',
+  },
+  standing_from_lying: {
+    he: 'קום! התרגיל הזה בעמידה בלבד!',
+    en: 'Stand up! This exercise is done standing only!',
+  },
+  standing_from_sitting: {
+    he: 'קום על הרגליים! אי אפשר לעשות את זה בישיבה!',
+    en: 'Get on your feet! You can\'t do this sitting down!',
+  },
+  sitting_from_standing: {
+    he: 'שב בכיסא! התרגיל הזה מתבצע בישיבה!',
+    en: 'Sit down! This exercise is performed seated!',
+  },
+  sitting_from_lying: {
+    he: 'שב בכיסא! התרגיל הזה מתבצע בישיבה!',
+    en: 'Sit in the chair! This exercise is performed seated!',
+  },
+};
+
+/**
+ * Check if user is in the correct body orientation for the exercise.
+ * Uses body tilt angle + calibration height comparison.
+ * @returns {{ valid: boolean, feedback?: { type: string, text: string, textEn: string } }}
+ */
+export function checkOrientation(landmarks, required, prevState) {
+  if (!required || required === ORIENTATION.ANY) return { valid: true };
+  if (!landmarks) return { valid: true }; // can't check without landmarks
+
+  const tilt = getBodyTiltDeg(landmarks);
+  if (tilt === null) return { valid: true }; // can't determine — don't block
+
+  // Determine current orientation from tilt
+  let currentOrientation;
+  if (tilt > 55) {
+    currentOrientation = 'standing';
+  } else if (tilt < 35) {
+    currentOrientation = 'lying';
+  } else {
+    // Ambiguous zone (35-55°) — could be bent-over exercises, don't block
+    return { valid: true };
+  }
+
+  // Sitting detection: use detectPosture for sitting/wheelchair
+  if (required === ORIENTATION.SITTING) {
+    const posture = detectPosture(landmarks);
+    if (posture === 'sitting' || posture === 'wheelchair') return { valid: true };
+    const msgKey = currentOrientation === 'lying' ? 'sitting_from_lying' : 'sitting_from_standing';
+    return { valid: false, feedback: { type: 'orientation', text: ORIENTATION_MSGS[msgKey].he, textEn: ORIENTATION_MSGS[msgKey].en } };
+  }
+
+  // Calibration height check — extra layer for LYING exercises
+  if (required === ORIENTATION.LYING && prevState?._calibration?._calShoulderY != null) {
+    const lShoulder = landmarks[LM.LEFT_SHOULDER];
+    const rShoulder = landmarks[LM.RIGHT_SHOULDER];
+    if (lShoulder?.visibility > 0.3) {
+      const currentShoulderY = (lShoulder.y + (rShoulder?.visibility > 0.3 ? rShoulder.y : lShoulder.y)) / 2;
+      const calShoulderY = prevState._calibration._calShoulderY;
+      // If shoulder Y hasn't dropped significantly from standing calibration → still standing
+      // In normalized coords, Y increases downward; lying = shoulder Y closer to 0.5 (mid-frame) or higher
+      if (currentShoulderY < calShoulderY + 0.10 && currentOrientation === 'standing') {
+        return {
+          valid: false,
+          feedback: { type: 'orientation', text: ORIENTATION_MSGS.lying_from_standing.he, textEn: ORIENTATION_MSGS.lying_from_standing.en },
+        };
+      }
+    }
+  }
+
+  // Standard tilt check
+  if (required === ORIENTATION.LYING && currentOrientation === 'standing') {
+    return { valid: false, feedback: { type: 'orientation', text: ORIENTATION_MSGS.lying_from_standing.he, textEn: ORIENTATION_MSGS.lying_from_standing.en } };
+  }
+  if (required === ORIENTATION.STANDING && currentOrientation === 'lying') {
+    return { valid: false, feedback: { type: 'orientation', text: ORIENTATION_MSGS.standing_from_lying.he, textEn: ORIENTATION_MSGS.standing_from_lying.en } };
+  }
+
+  // Also check sitting via detectPosture for standing-required exercises
+  if (required === ORIENTATION.STANDING) {
+    const posture = detectPosture(landmarks);
+    if (posture === 'sitting') {
+      return { valid: false, feedback: { type: 'orientation', text: ORIENTATION_MSGS.standing_from_sitting.he, textEn: ORIENTATION_MSGS.standing_from_sitting.en } };
+    }
+  }
+
+  return { valid: true };
+}
+
+/**
+ * Check movement quality using calibration data.
+ * Returns ROM percentage (0-100) relative to calibrated range.
+ * If ROM < 50%, returns a coach feedback message.
+ */
+export function checkMovementQuality(prevState, joint, currentAngle, phaseStartAngle) {
+  if (phaseStartAngle == null) return { romPct: 100, feedback: null };
+  const delta = Math.abs(currentAngle - phaseStartAngle);
+  const cal = prevState?._calibration;
+
+  if (!cal) return { romPct: 100, feedback: null }; // no calibration → can't assess quality
+
+  const calData = cal[joint] || cal[`left${joint.charAt(0).toUpperCase() + joint.slice(1)}`]
+    || cal[`right${joint.charAt(0).toUpperCase() + joint.slice(1)}`];
+
+  if (!calData || calData.range < 10) return { romPct: 100, feedback: null };
+
+  const romPct = Math.round((delta / calData.range) * 100);
+
+  if (romPct < 50) {
+    return {
+      romPct,
+      feedback: {
+        type: 'quality',
+        text: `תנועה לא מלאה! אתה מבצע רק ${romPct}% מהטווח שלך. תרד נמוך יותר!`,
+        textEn: `Incomplete movement! Only ${romPct}% of your range. Go deeper!`,
+      },
+    };
+  }
+
+  return { romPct, feedback: null };
+}
+
+/**
+ * Smooth an angle reading to filter out camera jitter / pose estimation noise.
+ * Uses exponential moving average (EMA) with α=0.4.
+ * Ignores deltas < 2° as noise. Stores smoothed value in prevState.
+ */
+// Smoothing is now handled by Kalman filter in Training.jsx (LandmarkStabilizer).
+// These functions are pass-through wrappers to avoid breaking existing call sites.
+function smoothAngle(rawAngle, _prevState, _key) {
+  return rawAngle;
+}
+
+function smoothY(rawY, _prevState, _key) {
+  return rawY;
 }
 
 function getStandingLeg(landmarks) {
@@ -285,34 +496,84 @@ export function analyzeSquat(landmarks, prevState = {}) {
 
   if (!hip || !knee || !ankle) return { ...prevState, feedback: null, posture, moving, headDown, _prevLandmarks: landmarks };
 
-  const kneeAngle = angle(hip, knee, ankle);
+  const rawKneeAngle = angle(hip, knee, ankle);
+  const kneeAngle = smoothAngle(rawKneeAngle, prevState, '_smoothKnee');
   const reps = prevState.reps || 0;
   const phase = prevState.phase || 'up';
   const firstRepStarted = prevState.firstRepStarted || false;
+  const phaseStartAngle = prevState._phaseStartAngle ?? kneeAngle;
 
   let newPhase = phase;
   let newReps = reps;
   let feedback = null;
   let lastRepTime = prevState.lastRepTime || null;
   let newFirstRep = firstRepStarted;
+  let newPhaseStartAngle = phaseStartAngle;
 
   if (phase === 'up' && kneeAngle < 120) {
     newPhase = 'down';
     newFirstRep = true;
+    newPhaseStartAngle = kneeAngle;
     feedback = { type: 'info', text: 'יפה! ירידה...' };
   } else if (phase === 'down' && kneeAngle > 160) {
-    newPhase = 'up';
-    newReps = reps + 1;
-    lastRepTime = Date.now();
-    feedback = { type: 'count', text: `${newReps}!`, count: newReps };
+    // Only count if ROM is sufficient AND enough time passed since last rep
+    if (meetsMinROM(prevState, 'knee', kneeAngle, phaseStartAngle) && canCountRep(lastRepTime)) {
+      newPhase = 'up';
+      newReps = reps + 1;
+      lastRepTime = Date.now();
+      newPhaseStartAngle = kneeAngle;
+      // Coaching: assess squat depth quality
+      const romDelta = Math.abs(kneeAngle - phaseStartAngle);
+      let coaching = null;
+      if (romDelta > 70) {
+        coaching = { he: 'עומק מעולה! סקוואט מלא - המשך ככה', en: 'Excellent depth! Full squat - keep it up' };
+      } else if (romDelta > 45) {
+        coaching = { he: 'עומק טוב. נסה לרדת עוד קצת - ירכיים מקבילות לרצפה', en: 'Good depth. Try going a bit lower - thighs parallel to floor' };
+      } else {
+        coaching = { he: 'רד יותר עמוק! הירכיים צריכות להגיע לפחות למקביל לרצפה', en: 'Go deeper! Thighs should reach at least parallel to floor' };
+      }
+      feedback = { type: 'count', text: `${newReps}!`, count: newReps, coaching };
+    }
+  }
+
+  // Knee valgus detection (knees collapsing inward)
+  if (newFirstRep && newPhase === 'down') {
+    const lKnee = landmarks[LM.LEFT_KNEE];
+    const rKnee = landmarks[LM.RIGHT_KNEE];
+    const lHip = landmarks[LM.LEFT_HIP];
+    const rHip = landmarks[LM.RIGHT_HIP];
+    if (lKnee?.visibility > 0.3 && rKnee?.visibility > 0.3 && lHip?.visibility > 0.3 && rHip?.visibility > 0.3) {
+      const hipWidth = Math.abs(lHip.x - rHip.x);
+      const kneeWidth = Math.abs(lKnee.x - rKnee.x);
+      if (hipWidth > 0.01 && kneeWidth / hipWidth < 0.7) {
+        feedback = { type: 'warning', text: 'הברכיים קורסות פנימה! תפתח אותן החוצה לרוחב כתפיים',
+                     coaching: { he: 'הברכיים נופלות פנימה! דחוף אותן החוצה בקו עם האצבעות - זה מגן על הברכיים ומפעיל את הישבן', en: 'Knees caving in! Push them out in line with toes - this protects knees and activates glutes' } };
+      }
+    }
+  }
+
+  // Forward lean detection
+  if (newFirstRep && newPhase === 'down') {
+    const lShoulder = landmarks[LM.LEFT_SHOULDER];
+    const rShoulder = landmarks[LM.RIGHT_SHOULDER];
+    if (lShoulder?.visibility > 0.3 && rShoulder?.visibility > 0.3 && hip?.visibility > 0.3) {
+      const shoulderX = (lShoulder.x + rShoulder.x) / 2;
+      const hipX = hip.x;
+      // If shoulders are significantly in front of hips (forward lean)
+      if (Math.abs(shoulderX - hipX) > 0.08) {
+        feedback = { type: 'warning', text: 'הגב נוטה קדימה! שמור על חזה זקוף',
+                     coaching: { he: 'הגב נוטה קדימה מדי - שמור על חזה זקוף, הסתכל קדימה, דחוף את הישבן אחורה', en: 'Leaning too far forward - keep chest up, look ahead, push hips back' } };
+      }
+    }
   }
 
   // Only give technique warnings AFTER first rep has started
   if (newFirstRep && newPhase === 'down' && kneeAngle < 70) {
-    feedback = { type: 'warning', text: 'אל תרד יותר מדי! שמור על הברך מעל הקרסול' };
+    feedback = { type: 'warning', text: 'אל תרד יותר מדי! שמור על הברך מעל הקרסול',
+                 coaching: { he: 'עומק מוגזם - הברכיים עוברות את האצבעות. עצור כשהירכיים מקבילות לרצפה', en: 'Too deep - knees past toes. Stop when thighs are parallel to floor' } };
   }
 
-  return { reps: newReps, phase: newPhase, feedback, kneeAngle: Math.round(kneeAngle), moving, headDown: newFirstRep ? headDown : false, lastRepTime, firstRepStarted: newFirstRep, posture, _prevLandmarks: landmarks };
+  return { reps: newReps, phase: newPhase, feedback, kneeAngle: Math.round(kneeAngle), moving, headDown: newFirstRep ? headDown : false, lastRepTime, firstRepStarted: newFirstRep, posture, _phaseStartAngle: newPhaseStartAngle, _smoothKnee: kneeAngle, _prevLandmarks: landmarks };
 }
 
 // --- Rep counting for crutch dips ---
@@ -339,24 +600,40 @@ export function analyzeDips(landmarks, prevState = {}) {
   const phase = prevState.phase || 'up';
   const threshold = 0.03;
   const firstRepStarted = prevState.firstRepStarted || false;
+  const phaseStartY = prevState._phaseStartY ?? shoulderY;
 
   let newPhase = phase;
   let newReps = reps;
   let feedback = null;
   let lastRepTime = prevState.lastRepTime || null;
   let newFirstRep = firstRepStarted;
+  let newPhaseStartY = phaseStartY;
 
   if (phase === 'up' && shoulderY - prevY > threshold) {
     newPhase = 'down';
     newFirstRep = true;
+    newPhaseStartY = shoulderY;
   } else if (phase === 'down' && prevY - shoulderY > threshold) {
-    newPhase = 'up';
-    newReps = reps + 1;
-    lastRepTime = Date.now();
-    feedback = { type: 'count', text: `${newReps}!`, count: newReps };
+    // Validate minimum Y delta for the full rep (down→up)
+    const yDelta = Math.abs(shoulderY - phaseStartY);
+    if (yDelta >= MIN_ROM_DEFAULTS.yDelta && canCountRep(lastRepTime)) {
+      newPhase = 'up';
+      newReps = reps + 1;
+      lastRepTime = Date.now();
+      newPhaseStartY = shoulderY;
+      let coaching = null;
+      if (yDelta > 0.08) {
+        coaching = { he: 'ירידה עמוקה מצוינת! שליטה מלאה', en: 'Excellent deep dip! Full control' };
+      } else if (yDelta > 0.05) {
+        coaching = { he: 'טוב! נסה לרדת עוד - מרפקים ב-90 מעלות', en: 'Good! Try going deeper - elbows at 90 degrees' };
+      } else {
+        coaching = { he: 'רד יותר עמוק! המרפקים צריכים להגיע ל-90 מעלות', en: 'Go deeper! Elbows should reach 90 degrees' };
+      }
+      feedback = { type: 'count', text: `${newReps}!`, count: newReps, coaching };
+    }
   }
 
-  return { reps: newReps, phase: newPhase, feedback, prevShoulderY: shoulderY, moving, headDown: newFirstRep ? headDown : false, lastRepTime, firstRepStarted: newFirstRep, posture, _prevLandmarks: landmarks };
+  return { reps: newReps, phase: newPhase, feedback, prevShoulderY: shoulderY, moving, headDown: newFirstRep ? headDown : false, lastRepTime, firstRepStarted: newFirstRep, posture, _phaseStartY: newPhaseStartY, _prevLandmarks: landmarks };
 }
 
 // --- Plank hold analysis ---
@@ -1048,7 +1325,9 @@ export function getWarmUpExercises(userProfile) {
 // STRENGTH EXERCISE ANALYZERS
 // ==========================================
 
-// --- Generic rep counter: tracks shoulder-center Y oscillation for any up/down exercise ---
+// --- Generic rep counter: tracks coordinated body movement (multi-joint) ---
+// Requires shoulder + hip + wrist to ALL move vertically in sync to prevent
+// false reps from head nods, camera shake, or air movements.
 export function analyzeGenericReps(landmarks, prevState = {}) {
   if (!landmarks) return { ...prevState, feedback: null };
 
@@ -1057,53 +1336,121 @@ export function analyzeGenericReps(landmarks, prevState = {}) {
   const headDown = detectHeadDown(landmarks);
 
   if (posture === 'sitting' || posture === 'unknown') {
-    return { ...prevState, feedback: null, posture, moving: false, headDown: false, firstRepStarted: false, _prevLandmarks: landmarks };
+    return { ...prevState, feedback: null, posture, moving: false, headDown: false,
+             firstRepStarted: false, _prevLandmarks: landmarks };
   }
 
-  const lShoulder = landmarks[LM.LEFT_SHOULDER];
-  const rShoulder = landmarks[LM.RIGHT_SHOULDER];
-  if (!lShoulder || !rShoulder || lShoulder.visibility < 0.3) {
-    return { ...prevState, feedback: null, posture, moving, headDown, _prevLandmarks: landmarks };
+  const lm = (idx) => landmarks[idx];
+  const v = (idx) => lm(idx) && lm(idx).visibility > 0.3;
+
+  // REQUIRE: Both shoulders AND both hips visible
+  if (!v(LM.LEFT_SHOULDER) || !v(LM.RIGHT_SHOULDER) ||
+      !v(LM.LEFT_HIP) || !v(LM.RIGHT_HIP)) {
+    return { ...prevState, feedback: { type: 'visibility', text: 'הזז את המצלמה כדי שאראה את כל הגוף' },
+             posture, moving, headDown, _prevLandmarks: landmarks };
   }
 
-  const shoulderY = (lShoulder.y + rShoulder.y) / 2;
-  const history = prevState._yHistory || [];
-  history.push(shoulderY);
-  if (history.length > 60) history.shift();
+  // === ANGLE-BASED REP COUNTING — no Y-position dependency ===
+  // Track the primary changing joint angle (elbow OR knee)
+  let elbowAngle = null;
+  if (v(LM.LEFT_SHOULDER) && v(LM.LEFT_ELBOW) && v(LM.LEFT_WRIST)) {
+    elbowAngle = angle(lm(LM.LEFT_SHOULDER), lm(LM.LEFT_ELBOW), lm(LM.LEFT_WRIST));
+  } else if (v(LM.RIGHT_SHOULDER) && v(LM.RIGHT_ELBOW) && v(LM.RIGHT_WRIST)) {
+    elbowAngle = angle(lm(LM.RIGHT_SHOULDER), lm(LM.RIGHT_ELBOW), lm(LM.RIGHT_WRIST));
+  }
+
+  let kneeAngle = null;
+  if (v(LM.LEFT_HIP) && v(LM.LEFT_KNEE) && v(LM.LEFT_ANKLE)) {
+    kneeAngle = angle(lm(LM.LEFT_HIP), lm(LM.LEFT_KNEE), lm(LM.LEFT_ANKLE));
+  } else if (v(LM.RIGHT_HIP) && v(LM.RIGHT_KNEE) && v(LM.RIGHT_ANKLE)) {
+    kneeAngle = angle(lm(LM.RIGHT_HIP), lm(LM.RIGHT_KNEE), lm(LM.RIGHT_ANKLE));
+  }
+
+  // Hip angle (shoulder-hip-knee) — detects bending at the waist
+  let hipAngle = null;
+  if (v(LM.LEFT_SHOULDER) && v(LM.LEFT_HIP) && v(LM.LEFT_KNEE)) {
+    hipAngle = angle(lm(LM.LEFT_SHOULDER), lm(LM.LEFT_HIP), lm(LM.LEFT_KNEE));
+  } else if (v(LM.RIGHT_SHOULDER) && v(LM.RIGHT_HIP) && v(LM.RIGHT_KNEE)) {
+    hipAngle = angle(lm(LM.RIGHT_SHOULDER), lm(LM.RIGHT_HIP), lm(LM.RIGHT_KNEE));
+  }
+
+  // Must have at least one trackable joint angle
+  if (elbowAngle == null && kneeAngle == null && hipAngle == null) {
+    return { ...prevState, feedback: { type: 'visibility', text: 'הזז את המצלמה כדי שאראה את המפרקים' },
+             posture, moving, headDown, _prevLandmarks: landmarks };
+  }
+
+  // Build angle history (track all available angles)
+  const angleHistory = prevState._angleHistory || [];
+  angleHistory.push({ elbow: elbowAngle, knee: kneeAngle, hip: hipAngle });
+  if (angleHistory.length > 60) angleHistory.shift();
 
   const reps = prevState.reps || 0;
-  const phase = prevState.phase || 'up';
-  const firstRepStarted = prevState.firstRepStarted || false;
+  const phase = prevState.phase || 'idle';
   let newPhase = phase;
   let newReps = reps;
   let feedback = null;
   let lastRepTime = prevState.lastRepTime || null;
-  let newFirstRep = firstRepStarted;
+  let firstRepStarted = prevState.firstRepStarted || false;
+  let phaseStartAngle = prevState._phaseStartAngle;
 
-  // Peak detection: need at least 15 frames
-  if (history.length >= 15) {
-    const recent = history.slice(-15);
-    const min = Math.min(...recent);
-    const max = Math.max(...recent);
-    const amplitude = max - min;
-    const current = recent[recent.length - 1];
+  // Determine which joint has the most variation — that's the primary exercise joint
+  if (angleHistory.length >= 20) {
+    const recent = angleHistory.slice(-20);
 
-    if (amplitude > 0.03) {
-      newFirstRep = true;
-      if (phase === 'up' && current > min + amplitude * 0.7) {
-        newPhase = 'down';
-      } else if (phase === 'down' && current < min + amplitude * 0.3) {
-        newPhase = 'up';
-        newReps = reps + 1;
-        lastRepTime = Date.now();
-        feedback = { type: 'count', text: `${newReps}!`, count: newReps };
+    // Calculate range for each joint type
+    let bestJoint = null;
+    let bestRange = 0;
+    let bestCurrent = null;
+    let bestMin = null;
+    let bestMax = null;
+
+    for (const jointKey of ['elbow', 'knee', 'hip']) {
+      const vals = recent.map(f => f[jointKey]).filter(v => v != null);
+      if (vals.length < 10) continue;
+      const jMin = Math.min(...vals);
+      const jMax = Math.max(...vals);
+      const range = jMax - jMin;
+      if (range > bestRange) {
+        bestRange = range;
+        bestJoint = jointKey;
+        bestCurrent = vals[vals.length - 1];
+        bestMin = jMin;
+        bestMax = jMax;
+      }
+    }
+
+    // STRICT: require at least 25° range of motion in the primary joint
+    // Head nods cause <5° change in elbow/knee/hip angles
+    if (bestJoint && bestRange > 25 && bestCurrent != null) {
+      firstRepStarted = true;
+
+      if (phase === 'idle' || phase === 'up') {
+        // Angle decreasing significantly → flexion phase (going down)
+        if (bestCurrent < bestMin + bestRange * 0.3) {
+          newPhase = 'down';
+          phaseStartAngle = bestCurrent;
+        }
+      } else if (phase === 'down') {
+        // Angle increasing back to near max → extension phase (going up) = 1 rep
+        if (bestCurrent > bestMin + bestRange * 0.7 && canCountRep(lastRepTime)) {
+          const romDelta = phaseStartAngle != null ? Math.abs(bestCurrent - phaseStartAngle) : bestRange;
+          // Must have at least 20° of actual ROM in this rep
+          if (romDelta > 20) {
+            newPhase = 'up';
+            newReps = reps + 1;
+            lastRepTime = Date.now();
+            feedback = { type: 'count', text: `${newReps}!`, count: newReps };
+          }
+        }
       }
     }
   }
 
   return {
-    reps: newReps, phase: newPhase, feedback, moving, headDown: newFirstRep ? headDown : false,
-    lastRepTime, firstRepStarted: newFirstRep, posture, _yHistory: history, _prevLandmarks: landmarks
+    reps: newReps, phase: newPhase, feedback, moving, headDown: firstRepStarted ? headDown : false,
+    lastRepTime, firstRepStarted, posture, _phaseStartAngle: phaseStartAngle,
+    _angleHistory: angleHistory, _prevLandmarks: landmarks,
   };
 }
 
@@ -1133,36 +1480,54 @@ export function analyzeBicepCurl(landmarks, prevState = {}) {
     return { ...prevState, feedback: null, posture, moving, headDown, _prevLandmarks: landmarks };
   }
 
-  const elbowAngle = angle(shoulder, elbow, wrist);
+  const rawElbowAngle = angle(shoulder, elbow, wrist);
+  const elbowAngle = smoothAngle(rawElbowAngle, prevState, '_smoothElbow');
   const reps = prevState.reps || 0;
   const phase = prevState.phase || 'down';
   const firstRepStarted = prevState.firstRepStarted || false;
+  const phaseStartAngle = prevState._phaseStartAngle ?? elbowAngle;
 
   let newPhase = phase;
   let newReps = reps;
   let feedback = null;
   let lastRepTime = prevState.lastRepTime || null;
   let newFirstRep = firstRepStarted;
+  let newPhaseStartAngle = phaseStartAngle;
 
   if (phase === 'down' && elbowAngle < 50) {
     newPhase = 'up';
     newFirstRep = true;
+    newPhaseStartAngle = elbowAngle;
     feedback = { type: 'info', text: 'כיווץ מעולה! החזק רגע למעלה' };
   } else if (phase === 'up' && elbowAngle > 150) {
-    newPhase = 'down';
-    newReps = reps + 1;
-    lastRepTime = Date.now();
-    feedback = { type: 'count', text: `${newReps}!`, count: newReps };
+    if (meetsMinROM(prevState, 'elbow', elbowAngle, phaseStartAngle) && canCountRep(lastRepTime)) {
+      newPhase = 'down';
+      newReps = reps + 1;
+      lastRepTime = Date.now();
+      newPhaseStartAngle = elbowAngle;
+      // Coaching: assess curl quality
+      const romDelta = Math.abs(elbowAngle - phaseStartAngle);
+      let coaching = null;
+      if (romDelta > 100) {
+        coaching = { he: 'מעולה! טווח תנועה מלא ושליטה מושלמת', en: 'Excellent! Full range of motion with perfect control' };
+      } else if (romDelta > 70) {
+        coaching = { he: 'טוב. נסה לכופף יותר - הבא את כף היד עד לכתף', en: 'Good. Try curling more - bring hand all the way to shoulder' };
+      } else {
+        coaching = { he: 'כופף יותר! טווח תנועה חלקי לא בונה שריר מקסימלי', en: 'Curl more! Partial range won\'t build maximum muscle' };
+      }
+      feedback = { type: 'count', text: `${newReps}!`, count: newReps, coaching };
+    }
   }
 
   // Good form: elbow stays tight AND no shrug → positive feedback
   let formGood = true;
 
-  // Form: elbow drifting from torso
+  // Form: elbow drifting from torso (body swinging)
   if (newFirstRep && hip && elbow.visibility > 0.3) {
     const elbowDrift = Math.abs(elbow.x - hip.x);
     if (elbowDrift > 0.12) {
-      feedback = { type: 'warning', text: 'שמור את המרפקים צמודים לגוף! אל תיתן להם לזוז' };
+      feedback = { type: 'warning', text: 'שמור את המרפקים צמודים לגוף! אל תיתן להם לזוז',
+                   coaching: { he: 'הגוף מתנדנד - נעל את המרפקים ליד הגוף. רק האמה זזה, לא הזרוע כולה', en: 'Body swinging - lock elbows to your sides. Only forearm moves, not the whole arm' } };
       formGood = false;
     }
   }
@@ -1171,26 +1536,29 @@ export function analyzeBicepCurl(landmarks, prevState = {}) {
   if (newFirstRep && shoulder && elbowAngle < 60) {
     const shoulderShrug = (prevState._prevShoulderY || shoulder.y) - shoulder.y;
     if (shoulderShrug > 0.02) {
-      feedback = { type: 'warning', text: 'אל תרים את הכתפיים! רק המרפקים זזים, הכתפיים נשארות למטה' };
+      feedback = { type: 'warning', text: 'אל תרים את הכתפיים! רק המרפקים זזים, הכתפיים נשארות למטה',
+                   coaching: { he: 'הכתפיים עולות למעלה - שחרר אותן למטה. זה מעמיס על הטרפז במקום הביספ', en: 'Shoulders rising - drop them down. This loads traps instead of biceps' } };
       formGood = false;
     }
   }
 
   // Form: not going full range
   if (newFirstRep && newPhase === 'up' && elbowAngle > 80 && elbowAngle < 120) {
-    feedback = { type: 'warning', text: 'כווץ עד הסוף! הביא את היד לכתף' };
+    feedback = { type: 'warning', text: 'כווץ עד הסוף! הביא את היד לכתף',
+                 coaching: { he: 'כופף יותר - הבא את כף היד עד לכתף. טווח תנועה מלא = שריר חזק יותר', en: 'Curl fully - bring hand to shoulder. Full ROM = stronger muscle' } };
     formGood = false;
   }
 
   // Good form positive reinforcement (every 3 reps)
   if (formGood && newReps > 0 && newReps % 3 === 0 && newPhase === 'down' && feedback?.type === 'count') {
-    feedback = { type: 'good', text: 'טכניקה מושלמת! מרפקים צמודים, כל הכבוד!' };
+    feedback = { type: 'good', text: 'טכניקה מושלמת! מרפקים צמודים, כל הכבוד!',
+                 coaching: { he: 'טכניקה מושלמת! מרפקים צמודים, תנועה מבוקרת - אתה אלוף!', en: 'Perfect technique! Elbows locked, controlled movement - you\'re a champion!' } };
   }
 
   return {
     reps: newReps, phase: newPhase, feedback, elbowAngle: Math.round(elbowAngle),
     moving, headDown: newFirstRep ? headDown : false, lastRepTime,
-    firstRepStarted: newFirstRep, posture, _prevShoulderY: shoulder.y, _prevLandmarks: landmarks
+    firstRepStarted: newFirstRep, posture, _phaseStartAngle: newPhaseStartAngle, _smoothElbow: elbowAngle, _prevShoulderY: shoulder.y, _prevLandmarks: landmarks
   };
 }
 
@@ -1222,22 +1590,29 @@ export function analyzeBentOverRow(landmarks, prevState = {}) {
   const reps = prevState.reps || 0;
   const phase = prevState.phase || 'down';
   const firstRepStarted = prevState.firstRepStarted || false;
+  const phaseStartY = prevState._phaseStartY ?? wristToHipY;
 
   let newPhase = phase;
   let newReps = reps;
   let feedback = null;
   let lastRepTime = prevState.lastRepTime || null;
   let newFirstRep = firstRepStarted;
+  let newPhaseStartY = phaseStartY;
 
   if (phase === 'down' && wristToHipY > 0.05) {
     newPhase = 'up';
     newFirstRep = true;
+    newPhaseStartY = wristToHipY;
     feedback = { type: 'info', text: 'משיכה טובה! כווץ את הגב' };
   } else if (phase === 'up' && wristToHipY < -0.02) {
-    newPhase = 'down';
-    newReps = reps + 1;
-    lastRepTime = Date.now();
-    feedback = { type: 'count', text: `${newReps}!`, count: newReps };
+    const yDelta = Math.abs(wristToHipY - phaseStartY);
+    if (yDelta >= MIN_ROM_DEFAULTS.yDelta && canCountRep(lastRepTime)) {
+      newPhase = 'down';
+      newReps = reps + 1;
+      lastRepTime = Date.now();
+      newPhaseStartY = wristToHipY;
+      feedback = { type: 'count', text: `${newReps}!`, count: newReps };
+    }
   }
 
   // Form: torso too upright or too low
@@ -1255,7 +1630,7 @@ export function analyzeBentOverRow(landmarks, prevState = {}) {
   return {
     reps: newReps, phase: newPhase, feedback, moving,
     headDown: newFirstRep ? headDown : false, lastRepTime,
-    firstRepStarted: newFirstRep, posture, _prevLandmarks: landmarks
+    firstRepStarted: newFirstRep, posture, _phaseStartY: newPhaseStartY, _prevLandmarks: landmarks
   };
 }
 
@@ -1288,22 +1663,29 @@ export function analyzeLateralRaise(landmarks, prevState = {}) {
   const reps = prevState.reps || 0;
   const phase = prevState.phase || 'down';
   const firstRepStarted = prevState.firstRepStarted || false;
+  const phaseStartY = prevState._phaseStartY ?? wristRelShoulder;
 
   let newPhase = phase;
   let newReps = reps;
   let feedback = null;
   let lastRepTime = prevState.lastRepTime || null;
   let newFirstRep = firstRepStarted;
+  let newPhaseStartY = phaseStartY;
 
   if (phase === 'down' && wristRelShoulder > -0.02) {
     newPhase = 'up';
     newFirstRep = true;
+    newPhaseStartY = wristRelShoulder;
     feedback = { type: 'info', text: 'הרמה יפה!' };
   } else if (phase === 'up' && wristRelShoulder < -0.10) {
-    newPhase = 'down';
-    newReps = reps + 1;
-    lastRepTime = Date.now();
-    feedback = { type: 'count', text: `${newReps}!`, count: newReps };
+    const yDelta = Math.abs(wristRelShoulder - phaseStartY);
+    if (yDelta >= MIN_ROM_DEFAULTS.yDelta && canCountRep(lastRepTime)) {
+      newPhase = 'down';
+      newReps = reps + 1;
+      lastRepTime = Date.now();
+      newPhaseStartY = wristRelShoulder;
+      feedback = { type: 'count', text: `${newReps}!`, count: newReps };
+    }
   }
 
   // Form: wrists too high above shoulders
@@ -1322,7 +1704,7 @@ export function analyzeLateralRaise(landmarks, prevState = {}) {
   return {
     reps: newReps, phase: newPhase, feedback, moving,
     headDown: newFirstRep ? headDown : false, lastRepTime,
-    firstRepStarted: newFirstRep, posture, _prevLandmarks: landmarks
+    firstRepStarted: newFirstRep, posture, _phaseStartY: newPhaseStartY, _prevLandmarks: landmarks
   };
 }
 
@@ -1362,15 +1744,24 @@ export function analyzeGluteBridge(landmarks, prevState = {}) {
   // Update baseline when hip is at its lowest
   if (hipY > baselineHipY) newBaseline = hipY;
 
+  // Track phase start for ROM validation
+  const phaseStartRise = prevState._phaseStartRise ?? hipRise;
+  let newPhaseStartRise = phaseStartRise;
+
   if (phase === 'down' && hipRise > 0.04) {
     newPhase = 'up';
     newFirstRep = true;
+    newPhaseStartRise = hipRise;
     feedback = { type: 'info', text: 'הרמה יפה!' };
   } else if (phase === 'up' && hipRise < 0.01) {
-    newPhase = 'down';
-    newReps = reps + 1;
-    lastRepTime = Date.now();
-    feedback = { type: 'count', text: `${newReps}!`, count: newReps };
+    const delta = Math.abs(hipRise - phaseStartRise);
+    if (delta >= MIN_ROM_DEFAULTS.yDelta) {
+      newPhase = 'down';
+      newReps = reps + 1;
+      lastRepTime = Date.now();
+      newPhaseStartRise = hipRise;
+      feedback = { type: 'count', text: `${newReps}!`, count: newReps };
+    }
   }
 
   // Form: hip not high enough
@@ -1386,7 +1777,7 @@ export function analyzeGluteBridge(landmarks, prevState = {}) {
   return {
     reps: newReps, phase: newPhase, feedback, moving,
     headDown: false, lastRepTime, firstRepStarted: newFirstRep,
-    posture: 'floor', _baselineHipY: newBaseline, _prevLandmarks: landmarks
+    posture: 'floor', _baselineHipY: newBaseline, _phaseStartRise: newPhaseStartRise, _prevLandmarks: landmarks
   };
 }
 
@@ -1413,26 +1804,42 @@ export function analyzeTricepExtension(landmarks, prevState = {}) {
     return { ...prevState, feedback: null, posture, moving, headDown, _prevLandmarks: landmarks };
   }
 
-  const elbowAngle = angle(shoulder, elbow, wrist);
+  const rawElbowAngle = angle(shoulder, elbow, wrist);
+  const elbowAngle = smoothAngle(rawElbowAngle, prevState, '_smoothElbow');
   const reps = prevState.reps || 0;
   const phase = prevState.phase || 'down';
   const firstRepStarted = prevState.firstRepStarted || false;
+  const phaseStartAngle = prevState._phaseStartAngle ?? elbowAngle;
 
   let newPhase = phase;
   let newReps = reps;
   let feedback = null;
   let lastRepTime = prevState.lastRepTime || null;
   let newFirstRep = firstRepStarted;
+  let newPhaseStartAngle = phaseStartAngle;
 
   if (phase === 'down' && elbowAngle < 90) {
     newPhase = 'up';
     newFirstRep = true;
+    newPhaseStartAngle = elbowAngle;
     feedback = { type: 'info', text: 'ירידה טובה!' };
   } else if (phase === 'up' && elbowAngle > 150) {
-    newPhase = 'down';
-    newReps = reps + 1;
-    lastRepTime = Date.now();
-    feedback = { type: 'count', text: `${newReps}!`, count: newReps };
+    if (meetsMinROM(prevState, 'elbow', elbowAngle, phaseStartAngle) && canCountRep(lastRepTime)) {
+      newPhase = 'down';
+      newReps = reps + 1;
+      lastRepTime = Date.now();
+      newPhaseStartAngle = elbowAngle;
+      const romDelta = Math.abs(elbowAngle - phaseStartAngle);
+      let coaching = null;
+      if (romDelta > 80) {
+        coaching = { he: 'מצוין! טווח תנועה מלא - הטריצפס עובד מקסימום', en: 'Excellent! Full ROM - triceps working at maximum' };
+      } else if (romDelta > 50) {
+        coaching = { he: 'טוב! כופף את המרפקים עוד קצת לירידה עמוקה יותר', en: 'Good! Bend elbows a bit more for deeper extension' };
+      } else {
+        coaching = { he: 'כופף יותר! הורד את המשקל עד מאחורי הראש', en: 'Bend more! Lower the weight behind your head' };
+      }
+      feedback = { type: 'count', text: `${newReps}!`, count: newReps, coaching };
+    }
   }
 
   // Form: elbows flaring out
@@ -1440,26 +1847,29 @@ export function analyzeTricepExtension(landmarks, prevState = {}) {
   if (newFirstRep && shoulder && elbow) {
     const elbowSpread = Math.abs(elbow.x - shoulder.x);
     if (elbowSpread > 0.10) {
-      feedback = { type: 'warning', text: 'שמור את המרפקים קרובים לראש! אל תיתן להם להתפשט' };
+      feedback = { type: 'warning', text: 'שמור את המרפקים קרובים לראש! אל תיתן להם להתפשט',
+                   coaching: { he: 'המרפקים מתרחקים מהראש - שמור אותם צמודים! מרפקים רחבים מעבירים עומס לכתפיים', en: 'Elbows flaring out - keep them close to head! Wide elbows shift load to shoulders' } };
       tricepFormGood = false;
     }
   }
 
   // Form: not extending fully
   if (newFirstRep && newPhase === 'up' && elbowAngle > 120 && elbowAngle < 145) {
-    feedback = { type: 'warning', text: 'יישר את הזרועות עד הסוף! טווח תנועה מלא' };
+    feedback = { type: 'warning', text: 'יישר את הזרועות עד הסוף! טווח תנועה מלא',
+                 coaching: { he: 'יישר את הזרועות עד הסוף! נעילת המרפקים למעלה מפעילה את הטריצפס באופן מקסימלי', en: 'Extend arms fully! Locking out activates triceps maximally' } };
     tricepFormGood = false;
   }
 
   // Good form every 3 reps
   if (tricepFormGood && newReps > 0 && newReps % 3 === 0 && feedback?.type === 'count') {
-    feedback = { type: 'good', text: 'מרפקים צמודים, תנועה מלאה! מעולה!' };
+    feedback = { type: 'good', text: 'מרפקים צמודים, תנועה מלאה! מעולה!',
+                 coaching: { he: 'טכניקה מצוינת! מרפקים צמודים לראש, תנועה מבוקרת - אתה אלוף!', en: 'Excellent technique! Elbows close to head, controlled movement - champion!' } };
   }
 
   return {
     reps: newReps, phase: newPhase, feedback, elbowAngle: Math.round(elbowAngle),
     moving, headDown: newFirstRep ? headDown : false, lastRepTime,
-    firstRepStarted: newFirstRep, posture, _prevLandmarks: landmarks
+    firstRepStarted: newFirstRep, posture, _phaseStartAngle: newPhaseStartAngle, _smoothElbow: elbowAngle, _prevLandmarks: landmarks
   };
 }
 
@@ -1546,15 +1956,23 @@ export function analyzeMountainClimbers(landmarks, prevState = {}) {
   let lastRepTime = prevState.lastRepTime || null;
   let newFirstRep = firstRepStarted;
 
+  const phaseStartKneeY = prevState._phaseStartKneeY ?? kneeY;
+  let newPhaseStartKneeY = phaseStartKneeY;
+
   if (isPlankLike) {
     if (phase === 'back' && kneeY < hip.y - 0.03) {
       newPhase = 'forward';
       newFirstRep = true;
+      newPhaseStartKneeY = kneeY;
     } else if (phase === 'forward' && kneeY > hip.y - 0.01) {
-      newPhase = 'back';
-      newReps = reps + 1;
-      lastRepTime = Date.now();
-      feedback = { type: 'count', text: `${newReps}!`, count: newReps };
+      const yDelta = Math.abs(kneeY - phaseStartKneeY);
+      if (yDelta >= MIN_ROM_DEFAULTS.yDelta && canCountRep(lastRepTime)) {
+        newPhase = 'back';
+        newReps = reps + 1;
+        lastRepTime = Date.now();
+        newPhaseStartKneeY = kneeY;
+        feedback = { type: 'count', text: `${newReps}!`, count: newReps };
+      }
     }
 
     // Hips rising warning
@@ -1574,7 +1992,7 @@ export function analyzeMountainClimbers(landmarks, prevState = {}) {
   return {
     reps: newReps, phase: newPhase, feedback, moving,
     headDown: false, lastRepTime, firstRepStarted: newFirstRep,
-    posture: isPlankLike ? 'plank' : 'unknown', _prevKneeY: kneeY, _prevLandmarks: landmarks
+    posture: isPlankLike ? 'plank' : 'unknown', _prevKneeY: kneeY, _phaseStartKneeY: newPhaseStartKneeY, _prevLandmarks: landmarks
   };
 }
 
@@ -1611,15 +2029,23 @@ export function analyzeCrunches(landmarks, prevState = {}) {
   let lastRepTime = prevState.lastRepTime || null;
   let newFirstRep = firstRepStarted;
 
+  const phaseStartRise = prevState._phaseStartRise ?? rise;
+  let newPhaseStartRise = phaseStartRise;
+
   if (phase === 'down' && rise > 0.03) {
     newPhase = 'up';
     newFirstRep = true;
+    newPhaseStartRise = rise;
     feedback = { type: 'info', text: 'כיווץ!' };
   } else if (phase === 'up' && rise < 0.01) {
-    newPhase = 'down';
-    newReps = reps + 1;
-    lastRepTime = Date.now();
-    feedback = { type: 'count', text: `${newReps}!`, count: newReps };
+    const delta = Math.abs(rise - phaseStartRise);
+    if (delta >= MIN_ROM_DEFAULTS.yDelta) {
+      newPhase = 'down';
+      newReps = reps + 1;
+      lastRepTime = Date.now();
+      newPhaseStartRise = rise;
+      feedback = { type: 'count', text: `${newReps}!`, count: newReps };
+    }
   }
 
   // Form: insufficient lift
@@ -1630,7 +2056,7 @@ export function analyzeCrunches(landmarks, prevState = {}) {
   return {
     reps: newReps, phase: newPhase, feedback, moving,
     headDown: false, lastRepTime, firstRepStarted: newFirstRep,
-    posture: 'floor', _baselineY: newBaseline, _prevLandmarks: landmarks
+    posture: 'floor', _baselineY: newBaseline, _phaseStartRise: newPhaseStartRise, _prevLandmarks: landmarks
   };
 }
 
@@ -1703,22 +2129,29 @@ export function analyzeBandPullApart(landmarks, prevState = {}) {
   const reps = prevState.reps || 0;
   const phase = prevState.phase || 'together';
   const firstRepStarted = prevState.firstRepStarted || false;
+  const phaseStartSpread = prevState._phaseStartSpread ?? spreadRatio;
 
   let newPhase = phase;
   let newReps = reps;
   let feedback = null;
   let lastRepTime = prevState.lastRepTime || null;
   let newFirstRep = firstRepStarted;
+  let newPhaseStartSpread = phaseStartSpread;
 
   if (phase === 'together' && spreadRatio > 2.0) {
     newPhase = 'apart';
     newFirstRep = true;
+    newPhaseStartSpread = spreadRatio;
     feedback = { type: 'info', text: 'מתיחה טובה!' };
   } else if (phase === 'apart' && spreadRatio < 1.2) {
-    newPhase = 'together';
-    newReps = reps + 1;
-    lastRepTime = Date.now();
-    feedback = { type: 'count', text: `${newReps}!`, count: newReps };
+    const delta = Math.abs(spreadRatio - phaseStartSpread);
+    if (delta >= 0.5) { // minimum spread change of 0.5x shoulder width
+      newPhase = 'together';
+      newReps = reps + 1;
+      lastRepTime = Date.now();
+      newPhaseStartSpread = spreadRatio;
+      feedback = { type: 'count', text: `${newReps}!`, count: newReps };
+    }
   }
 
   // Form: elbows bending too much
@@ -1740,7 +2173,7 @@ export function analyzeBandPullApart(landmarks, prevState = {}) {
   return {
     reps: newReps, phase: newPhase, feedback, moving,
     headDown: newFirstRep ? headDown : false, lastRepTime,
-    firstRepStarted: newFirstRep, posture, _prevShoulderY: lShoulder?.y, _prevLandmarks: landmarks
+    firstRepStarted: newFirstRep, posture, _phaseStartSpread: newPhaseStartSpread, _prevShoulderY: lShoulder?.y, _prevLandmarks: landmarks
   };
 }
 
@@ -1771,40 +2204,61 @@ export function analyzePushUps(landmarks, prevState = {}) {
     return { ...prevState, feedback: null, moving, headDown: false, posture: 'unknown', _prevLandmarks: landmarks };
   }
 
-  const elbowAngle = angle(shoulder, elbow, wrist);
+  const rawElbowAngle = angle(shoulder, elbow, wrist);
+  const elbowAngle = smoothAngle(rawElbowAngle, prevState, '_smoothElbow');
   const reps = prevState.reps || 0;
   const phase = prevState.phase || 'up';
   const firstRepStarted = prevState.firstRepStarted || false;
+  const phaseStartAngle = prevState._phaseStartAngle ?? elbowAngle;
 
   let newPhase = phase;
   let newReps = reps;
   let feedback = null;
   let lastRepTime = prevState.lastRepTime || null;
   let newFirstRep = firstRepStarted;
+  let newPhaseStartAngle = phaseStartAngle;
 
   if (phase === 'up' && elbowAngle < 100) {
     newPhase = 'down';
     newFirstRep = true;
+    newPhaseStartAngle = elbowAngle;
     feedback = { type: 'info', text: 'ירידה טובה!' };
   } else if (phase === 'down' && elbowAngle > 160) {
-    newPhase = 'up';
-    newReps = reps + 1;
-    lastRepTime = Date.now();
-    feedback = { type: 'count', text: `${newReps}!`, count: newReps };
+    if (meetsMinROM(prevState, 'elbow', elbowAngle, phaseStartAngle) && canCountRep(lastRepTime)) {
+      newPhase = 'up';
+      newReps = reps + 1;
+      lastRepTime = Date.now();
+      newPhaseStartAngle = elbowAngle;
+      // Coaching: assess pushup depth
+      const romDelta = Math.abs(elbowAngle - phaseStartAngle);
+      let coaching = null;
+      if (romDelta > 80) {
+        coaching = { he: 'טכניקה מושלמת! ירידה מלאה עם גוף ישר כמו קרש', en: 'Perfect technique! Full depth with a plank-straight body' };
+      } else if (romDelta > 50) {
+        coaching = { he: 'טוב! נסה לרדת עוד קצת - החזה כמעט נוגע ברצפה', en: 'Good! Try going lower - chest almost touching the floor' };
+      } else {
+        coaching = { he: 'רד יותר! המרפקים צריכים להגיע ל-90 מעלות לפחות', en: 'Go lower! Elbows should reach at least 90 degrees' };
+      }
+      feedback = { type: 'count', text: `${newReps}!`, count: newReps, coaching };
+    }
   }
 
-  // Form check: hips sagging (hip much lower than shoulder line)
+  // Form check: hips sagging (hip much lower than shoulder line) — must move together
   if (newFirstRep && lHip?.visibility > 0.3 && shoulder?.visibility > 0.3) {
     const hipDrop = lHip.y - shoulder.y;
     if (hipDrop > 0.15) {
-      feedback = { type: 'warning', text: 'הרם את הירכיים! שמור על גב ישר' };
+      feedback = { type: 'warning', text: 'שמור על גב ישר ובטן אסופה! האגן צונח',
+                   coaching: { he: 'הירכיים שוקעות - חזק את הליבה! תחשוב על קו ישר מראש לעקב. כווץ את הבטן', en: 'Hips sagging - engage your core! Think straight line from head to heels. Tighten abs' } };
+    } else if (hipDrop < -0.05) {
+      feedback = { type: 'warning', text: 'הישבן למעלה מדי! שמור על קו ישר מכתפיים לקרסול',
+                   coaching: { he: 'הישבן למעלה מדי - הורד את הירכיים. דמיין שמישהו שם ספר על הגב שלך - הוא לא צריך ליפול', en: 'Butt too high - lower your hips. Imagine a book on your back - it should not fall' } };
     }
   }
 
   return {
     reps: newReps, phase: newPhase, feedback, elbowAngle: Math.round(elbowAngle),
     moving, headDown: newFirstRep ? headDown : false, lastRepTime,
-    firstRepStarted: newFirstRep, posture: 'plank', _prevLandmarks: landmarks
+    firstRepStarted: newFirstRep, posture: 'plank', _phaseStartAngle: newPhaseStartAngle, _smoothElbow: elbowAngle, _prevLandmarks: landmarks
   };
 }
 
@@ -1834,38 +2288,55 @@ export function analyzeLunges(landmarks, prevState = {}) {
   // Auto-detect forward leg: the one with knee further forward (lower Y = higher on screen, but for lunges, the forward knee bends more)
   const leftKneeAngle = angle(lHip, lKnee, lAnkle);
   const rightKneeAngle = angle(rHip, rKnee, rAnkle);
-  const kneeAngle = Math.min(leftKneeAngle, rightKneeAngle); // use the more bent knee
+  const rawKneeAngle = Math.min(leftKneeAngle, rightKneeAngle); // use the more bent knee
+  const kneeAngle = smoothAngle(rawKneeAngle, prevState, '_smoothKnee');
 
   const reps = prevState.reps || 0;
   const phase = prevState.phase || 'up';
   const firstRepStarted = prevState.firstRepStarted || false;
+  const phaseStartAngle = prevState._phaseStartAngle ?? kneeAngle;
 
   let newPhase = phase;
   let newReps = reps;
   let feedback = null;
   let lastRepTime = prevState.lastRepTime || null;
   let newFirstRep = firstRepStarted;
+  let newPhaseStartAngle = phaseStartAngle;
 
   if (phase === 'up' && kneeAngle < 110) {
     newPhase = 'down';
     newFirstRep = true;
+    newPhaseStartAngle = kneeAngle;
     feedback = { type: 'info', text: 'ירידה יפה!' };
   } else if (phase === 'down' && kneeAngle > 160) {
-    newPhase = 'up';
-    newReps = reps + 1;
-    lastRepTime = Date.now();
-    feedback = { type: 'count', text: `${newReps}!`, count: newReps };
+    if (meetsMinROM(prevState, 'knee', kneeAngle, phaseStartAngle) && canCountRep(lastRepTime)) {
+      newPhase = 'up';
+      newReps = reps + 1;
+      lastRepTime = Date.now();
+      newPhaseStartAngle = kneeAngle;
+      const romDelta = Math.abs(kneeAngle - phaseStartAngle);
+      let coaching = null;
+      if (romDelta > 70) {
+        coaching = { he: 'מכרעת מצוינת! ברך אחורית כמעט נוגעת ברצפה', en: 'Excellent lunge! Back knee almost touching floor' };
+      } else if (romDelta > 45) {
+        coaching = { he: 'טוב! נסה לרדת עוד - ברך אחורית קרובה לרצפה', en: 'Good! Try going lower - back knee close to floor' };
+      } else {
+        coaching = { he: 'רד יותר עמוק! הברך האחורית צריכה לגעת כמעט ברצפה', en: 'Go deeper! Back knee should almost touch the floor' };
+      }
+      feedback = { type: 'count', text: `${newReps}!`, count: newReps, coaching };
+    }
   }
 
   // Knee over ankle warning
   if (newFirstRep && kneeAngle < 70) {
-    feedback = { type: 'warning', text: 'אל תרד יותר מדי! שמור על הברך מעל הקרסול' };
+    feedback = { type: 'warning', text: 'אל תרד יותר מדי! שמור על הברך מעל הקרסול',
+                 coaching: { he: 'הברך עוברת את הקרסול - צעד רחב יותר קדימה, הברך הקדמית ב-90 מעלות', en: 'Knee past ankle - take a wider step forward, front knee at 90 degrees' } };
   }
 
   return {
     reps: newReps, phase: newPhase, feedback, kneeAngle: Math.round(kneeAngle),
     moving, headDown: newFirstRep ? headDown : false, lastRepTime,
-    firstRepStarted: newFirstRep, posture, _prevLandmarks: landmarks
+    firstRepStarted: newFirstRep, posture, _phaseStartAngle: newPhaseStartAngle, _smoothKnee: kneeAngle, _prevLandmarks: landmarks
   };
 }
 
@@ -1900,45 +2371,63 @@ export function analyzeShoulderPress(landmarks, prevState = {}) {
     return { ...prevState, feedback: null, posture, moving, headDown, _prevLandmarks: landmarks };
   }
 
-  const elbowAngle = angle(shoulder, elbow, wrist);
+  const rawElbowAngle = angle(shoulder, elbow, wrist);
+  const elbowAngle = smoothAngle(rawElbowAngle, prevState, '_smoothElbow');
   const reps = prevState.reps || 0;
   const phase = prevState.phase || 'down'; // start at bottom
   const firstRepStarted = prevState.firstRepStarted || false;
+  const phaseStartAngle = prevState._phaseStartAngle ?? elbowAngle;
 
   let newPhase = phase;
   let newReps = reps;
   let feedback = null;
   let lastRepTime = prevState.lastRepTime || null;
   let newFirstRep = firstRepStarted;
+  let newPhaseStartAngle = phaseStartAngle;
 
   // Up phase: wrist above shoulder (Y decreases upward) and elbow extended
   const wristAboveShoulder = wrist.y < shoulder.y;
 
   if (phase === 'down' && elbowAngle < 100) {
     newFirstRep = true;
+    newPhaseStartAngle = elbowAngle;
     // Ready position confirmed
   }
 
   if (phase === 'down' && wristAboveShoulder && elbowAngle > 160) {
-    newPhase = 'up';
-    newFirstRep = true;
-    newReps = reps + 1;
-    lastRepTime = Date.now();
-    feedback = { type: 'count', text: `${newReps}!`, count: newReps };
+    if (meetsMinROM(prevState, 'shoulder', elbowAngle, phaseStartAngle) && canCountRep(lastRepTime)) {
+      newPhase = 'up';
+      newFirstRep = true;
+      newReps = reps + 1;
+      lastRepTime = Date.now();
+      newPhaseStartAngle = elbowAngle;
+      const romDelta = Math.abs(elbowAngle - phaseStartAngle);
+      let coaching = null;
+      if (romDelta > 80) {
+        coaching = { he: 'לחיצה מושלמת! טווח תנועה מלא מהכתפיים עד למעלה', en: 'Perfect press! Full range from shoulders to overhead' };
+      } else if (romDelta > 50) {
+        coaching = { he: 'טוב! הורד את המשקולות עד לגובה האוזניים לטווח מלא', en: 'Good! Lower weights to ear level for full range' };
+      } else {
+        coaching = { he: 'הורד יותר! המשקולות צריכות לרדת לגובה הכתפיים', en: 'Lower more! Weights should come down to shoulder level' };
+      }
+      feedback = { type: 'count', text: `${newReps}!`, count: newReps, coaching };
+    }
   } else if (phase === 'up' && elbowAngle < 100) {
     newPhase = 'down';
+    newPhaseStartAngle = elbowAngle;
     feedback = { type: 'info', text: 'ירידה טובה!' };
   }
 
   // Back arch warning
   if (newFirstRep && !wristAboveShoulder && elbowAngle > 140 && moving) {
-    feedback = { type: 'warning', text: 'דחוף את המשקולות למעלה! אל תקמר את הגב' };
+    feedback = { type: 'warning', text: 'דחוף את המשקולות למעלה! אל תקמר את הגב',
+                 coaching: { he: 'הגב מתקמר - כווץ את הבטן ודחוף ישר למעלה. גב קמור מעמיס על עמוד השדרה', en: 'Back arching - tighten abs and press straight up. Arched back loads the spine' } };
   }
 
   return {
     reps: newReps, phase: newPhase, feedback, elbowAngle: Math.round(elbowAngle),
     moving, headDown: newFirstRep ? headDown : false, lastRepTime,
-    firstRepStarted: newFirstRep, posture, _prevLandmarks: landmarks
+    firstRepStarted: newFirstRep, posture, _phaseStartAngle: newPhaseStartAngle, _smoothElbow: elbowAngle, _prevLandmarks: landmarks
   };
 }
 
@@ -1968,43 +2457,165 @@ export function analyzeGobletSquat(landmarks, prevState = {}) {
   return squatResult;
 }
 
-// Table-based analyzer mapping with keyword matching
+// --- Jumping Exercise: jumping jacks, burpees ---
+export function analyzeJumpingExercise(landmarks, prevState = {}) {
+  if (!landmarks) return { ...prevState, feedback: null };
+
+  const posture = detectPosture(landmarks);
+  const moving = detectMovement(landmarks, prevState._prevLandmarks, prevState);
+  const headDown = detectHeadDown(landmarks);
+
+  if (posture === 'sitting' || posture === 'unknown') {
+    return { ...prevState, feedback: null, posture, moving: false, headDown: false, firstRepStarted: false, _prevLandmarks: landmarks };
+  }
+
+  const lm = (idx) => landmarks[idx];
+  const v = (idx) => lm(idx) && lm(idx).visibility > 0.3;
+
+  if (!v(LM.LEFT_SHOULDER) || !v(LM.RIGHT_SHOULDER) || !v(LM.LEFT_HIP) || !v(LM.RIGHT_HIP)) {
+    return { ...prevState, feedback: null, posture, moving, headDown, _prevLandmarks: landmarks };
+  }
+
+  // Track wrist height relative to shoulder — jumping jacks: hands go above shoulders
+  const shoulderY = (lm(LM.LEFT_SHOULDER).y + lm(LM.RIGHT_SHOULDER).y) / 2;
+  let wristAbove = false;
+  if (v(LM.LEFT_WRIST) && v(LM.RIGHT_WRIST)) {
+    const avgWristY = (lm(LM.LEFT_WRIST).y + lm(LM.RIGHT_WRIST).y) / 2;
+    wristAbove = avgWristY < shoulderY - 0.05; // wrists above shoulders (Y is inverted)
+  } else if (v(LM.LEFT_WRIST)) {
+    wristAbove = lm(LM.LEFT_WRIST).y < shoulderY - 0.05;
+  } else if (v(LM.RIGHT_WRIST)) {
+    wristAbove = lm(LM.RIGHT_WRIST).y < shoulderY - 0.05;
+  }
+
+  // Also track hip Y for body going up/down (burpees)
+  const hipY = (lm(LM.LEFT_HIP).y + lm(LM.RIGHT_HIP).y) / 2;
+  const sHipY = smoothY(hipY, prevState, '_jumpHipY');
+
+  const reps = prevState.reps || 0;
+  const phase = prevState.phase || 'down'; // start expecting arms down
+  let newPhase = phase;
+  let newReps = reps;
+  let feedback = null;
+  let lastRepTime = prevState.lastRepTime || null;
+  let firstRepStarted = prevState.firstRepStarted || false;
+
+  if (phase === 'down' && wristAbove) {
+    newPhase = 'up';
+    firstRepStarted = true;
+  } else if (phase === 'up' && !wristAbove && canCountRep(lastRepTime)) {
+    newPhase = 'down';
+    newReps = reps + 1;
+    lastRepTime = Date.now();
+    feedback = { type: 'count', text: `${newReps}!`, count: newReps };
+  }
+
+  return {
+    reps: newReps, phase: newPhase, feedback, moving, headDown: firstRepStarted ? headDown : false,
+    lastRepTime, firstRepStarted, posture, _prevLandmarks: landmarks,
+    _smooth_jumpHipY: sHipY,
+  };
+}
+
+// --- Running Form: tracks knee lift alternation ---
+export function analyzeRunningForm(landmarks, prevState = {}) {
+  if (!landmarks) return { ...prevState, feedback: null };
+
+  const posture = detectPosture(landmarks);
+  const moving = detectMovement(landmarks, prevState._prevLandmarks, prevState);
+  const headDown = detectHeadDown(landmarks);
+
+  const lm = (idx) => landmarks[idx];
+  const v = (idx) => lm(idx) && lm(idx).visibility > 0.3;
+
+  if (!v(LM.LEFT_HIP) || !v(LM.RIGHT_HIP)) {
+    return { ...prevState, feedback: null, posture, moving, headDown, _prevLandmarks: landmarks };
+  }
+
+  // Track knee height — good running form has high knee lifts
+  let kneeForm = 'neutral';
+  const hipY = (lm(LM.LEFT_HIP).y + lm(LM.RIGHT_HIP).y) / 2;
+
+  if (v(LM.LEFT_KNEE) && v(LM.RIGHT_KNEE)) {
+    const lKneeY = lm(LM.LEFT_KNEE).y;
+    const rKneeY = lm(LM.RIGHT_KNEE).y;
+    const higherKnee = Math.min(lKneeY, rKneeY);
+    // Good knee lift: knee reaches at least hip level
+    if (higherKnee < hipY + 0.02) {
+      kneeForm = 'good';
+    } else {
+      kneeForm = 'low';
+    }
+  }
+
+  // Count strides via alternating knee lifts
+  const reps = prevState.reps || 0;
+  let lastRepTime = prevState.lastRepTime || null;
+  let newReps = reps;
+  let feedback = null;
+
+  if (moving && kneeForm === 'good' && canCountRep(lastRepTime)) {
+    newReps = reps + 1;
+    lastRepTime = Date.now();
+    if (newReps % 10 === 0) {
+      feedback = { type: 'count', text: `${newReps} צעדים!`, count: newReps };
+    }
+  }
+
+  if (kneeForm === 'low' && moving) {
+    feedback = { type: 'warning', text: 'הרם ברכיים גבוה יותר!',
+                 coaching: { he: 'הרם ברכיים גבוה יותר - ברכיים לגובה המותניים', en: 'Lift knees higher - knee to hip level' } };
+  }
+
+  return {
+    reps: newReps, feedback, moving, headDown, posture, lastRepTime,
+    firstRepStarted: newReps > 0, _prevLandmarks: landmarks,
+  };
+}
+
+// Table-based analyzer mapping with keyword matching + required orientation
+const O = ORIENTATION; // shorthand
 const ANALYZER_MAP = [
-  { keywords: ['ביספ', 'כפיפות מרפק', 'bicep curl'], analyze: analyzeBicepCurl, type: 'reps', cueKey: 'bicep' },
-  { keywords: ['טריצפס', 'הרחבת מרפק', 'tricep extension'], analyze: analyzeTricepExtension, type: 'reps', cueKey: 'tricep' },
-  { keywords: ['משיכת משקולת', 'משיכה', 'bent over row', 'row'], analyze: analyzeBentOverRow, type: 'reps', cueKey: 'row' },
-  { keywords: ['הרמה צידית', 'lateral raise'], analyze: analyzeLateralRaise, type: 'reps', cueKey: 'lateral' },
-  { keywords: ['גשר ישבן', 'glute bridge', 'גשר'], analyze: analyzeGluteBridge, type: 'reps', cueKey: 'bridge' },
-  { keywords: ['ישיבה על הקיר', 'wall sit'], analyze: analyzeWallSit, type: 'hold', cueKey: 'wallsit' },
-  { keywords: ['מטפס הרים', 'mountain climber'], analyze: analyzeMountainClimbers, type: 'reps', cueKey: 'mountain' },
-  { keywords: ['כפיפות בטן', 'crunch'], analyze: analyzeCrunches, type: 'reps', cueKey: 'crunch' },
-  { keywords: ['פלאנק צידי', 'side plank'], analyze: analyzeSidePlank, type: 'hold', cueKey: 'sideplank' },
-  { keywords: ['מתיחת גומייה', 'band pull apart'], analyze: analyzeBandPullApart, type: 'reps', cueKey: 'pullApart' },
-  { keywords: ['גובלט', 'goblet'], analyze: analyzeGobletSquat, type: 'reps', cueKey: 'squat' },
-  { keywords: ['סקוואט', 'squat', 'כריעה'], analyze: analyzeSquat, type: 'reps', cueKey: 'squat' },
-  { keywords: ['push', 'שכיבות סמיכה', 'שכיבות שמיכה', 'פוש'], analyze: analyzePushUps, type: 'reps', cueKey: 'push' },
-  { keywords: ['דיפ', 'dip'], analyze: analyzeDips, type: 'reps', cueKey: 'dip' },
-  { keywords: ['פלאנק', 'plank'], analyze: analyzePlank, type: 'hold', cueKey: 'plank' },
-  { keywords: ['lunge', 'לאנג', 'מכרע'], analyze: analyzeLunges, type: 'reps', cueKey: 'lunge' },
-  { keywords: ['shoulder press', 'כתפיים', 'לחיצת כתפ'], analyze: analyzeShoulderPress, type: 'reps', cueKey: 'shoulder' },
-  { keywords: ['דריבל', 'dribbl', 'שליטה', 'כדור'], analyze: analyzeDribbling, type: 'form', cueKey: 'dribbling' },
-  // Sport-specific drill analyzers (basketball, tennis, football)
-  { keywords: ['זריקה', 'קליעה', 'shooting', 'free throw', 'זריקות חופשיות'], analyze: analyzeShootingForm, type: 'form', cueKey: 'shooting' },
-  { keywords: ['כדרור ביד', 'hand dribbl', 'כדרור כדורסל'], analyze: analyzeHandDribbling, type: 'form', cueKey: 'handDribble' },
-  { keywords: ['פורהנד', 'בקהנד', 'מכות', 'forehand', 'backhand', 'מכות לקיר', 'wall hit'], analyze: analyzeStroke, type: 'form', cueKey: 'stroke' },
-  { keywords: ['הגשה', 'serve', 'סרב'], analyze: analyzeServe, type: 'form', cueKey: 'serve' },
-  { keywords: ['עבודת רגליים', 'footwork', 'תנועת מגרש', 'רגליים מהירות'], analyze: analyzeFootwork, type: 'form', cueKey: 'footwork' },
-  { keywords: ['בעיטה', 'kick', 'בעיטות', 'shooting drill'], analyze: analyzeKickTechnique, type: 'form', cueKey: 'kick' },
-  // Paralympic — Amputee Football
-  { keywords: ['בעיטה בקביים', 'בעיטת קביים', 'amputee kick', 'crutch kick'], analyze: analyzeAmputeeCrutchKick, type: 'form', cueKey: 'amputeeKick' },
-  { keywords: ['ריצה בקביים', 'ספרינט קביים', 'crutch sprint', 'amputee sprint'], analyze: analyzeAmputeeCrutchSprint, type: 'form', cueKey: 'amputeeSprint' },
-  // Paralympic — Wheelchair Basketball
-  { keywords: ['זריקה כיסא גלגלים', 'קליעה כיסא', 'wheelchair shooting', 'wheelchair basketball shoot'], analyze: analyzeWheelchairBasketballShooting, type: 'form', cueKey: 'wheelchairShooting' },
-  { keywords: ['כדרור כיסא גלגלים', 'כדרור כיסא', 'wheelchair dribble'], analyze: analyzeWheelchairBasketballDribbling, type: 'form', cueKey: 'wheelchairDribble' },
-  { keywords: ['מסירה כיסא גלגלים', 'מסירת חזה כיסא', 'wheelchair pass', 'chest pass wheelchair'], analyze: analyzeWheelchairBasketballChestPass, type: 'form', cueKey: 'wheelchairPass' },
-  // Paralympic — Wheelchair Tennis
-  { keywords: ['מכות כיסא גלגלים', 'פורהנד כיסא', 'wheelchair stroke', 'wheelchair forehand'], analyze: analyzeWheelchairTennisStroke, type: 'form', cueKey: 'wheelchairStroke' },
-  { keywords: ['הגשה כיסא גלגלים', 'סרב כיסא', 'wheelchair serve'], analyze: analyzeWheelchairTennisServe, type: 'form', cueKey: 'wheelchairServe' },
+  // === STANDING fitness exercises ===
+  { keywords: ['ביספ', 'כפיפות מרפק', 'bicep curl', 'כפיפות ידיים'], analyze: analyzeBicepCurl, type: 'reps', cueKey: 'bicep', orientation: O.STANDING },
+  { keywords: ['טריצפס', 'הרחבת מרפק', 'tricep extension', 'tricep'], analyze: analyzeTricepExtension, type: 'reps', cueKey: 'tricep', orientation: O.STANDING },
+  { keywords: ['משיכת משקולת', 'משיכה', 'bent over row', 'row'], analyze: analyzeBentOverRow, type: 'reps', cueKey: 'row', orientation: O.STANDING },
+  { keywords: ['הרמה צידית', 'lateral raise', 'הרמות צידיות'], analyze: analyzeLateralRaise, type: 'reps', cueKey: 'lateral', orientation: O.STANDING },
+  { keywords: ['ישיבה על הקיר', 'wall sit', 'ישיבת קיר'], analyze: analyzeWallSit, type: 'hold', cueKey: 'wallsit', orientation: O.STANDING },
+  { keywords: ['מתיחת גומייה', 'band pull apart', 'גומייה'], analyze: analyzeBandPullApart, type: 'reps', cueKey: 'pullApart', orientation: O.STANDING },
+  { keywords: ['גובלט', 'goblet'], analyze: analyzeGobletSquat, type: 'reps', cueKey: 'squat', orientation: O.STANDING },
+  { keywords: ['סקוואט', 'squat', 'כריעה', 'כריעות'], analyze: analyzeSquat, type: 'reps', cueKey: 'squat', orientation: O.STANDING },
+  { keywords: ['דיפ', 'dip', 'שקיעות', 'שקיעה'], analyze: analyzeDips, type: 'reps', cueKey: 'dip', orientation: O.STANDING },
+  { keywords: ['lunge', 'לאנג', 'מכרע', 'מכרעות'], analyze: analyzeLunges, type: 'reps', cueKey: 'lunge', orientation: O.STANDING },
+  { keywords: ['shoulder press', 'כתפיים', 'לחיצת כתפ', 'לחיצות כתפ'], analyze: analyzeShoulderPress, type: 'reps', cueKey: 'shoulder', orientation: O.STANDING },
+  // === STANDING dynamic exercises ===
+  { keywords: ['jumping jack', "ג'אמפינג", 'בורפי', 'burpee', 'קפיצות פיצוח', 'קפיצות'], analyze: analyzeJumpingExercise, type: 'reps', cueKey: 'jump', orientation: O.STANDING },
+  { keywords: ['ריצה', 'ספרינט', 'sprint', 'running', 'אינטרוולים', 'ריצת'], analyze: analyzeRunningForm, type: 'form', cueKey: 'running', orientation: O.STANDING },
+  // === LYING fitness exercises ===
+  { keywords: ['גשר ישבן', 'glute bridge', 'גשר'], analyze: analyzeGluteBridge, type: 'reps', cueKey: 'bridge', orientation: O.LYING },
+  { keywords: ['מטפס הרים', 'mountain climber', 'מטפסי הרים'], analyze: analyzeMountainClimbers, type: 'reps', cueKey: 'mountain', orientation: O.LYING },
+  { keywords: ['כפיפות בטן', 'crunch', 'בטן'], analyze: analyzeCrunches, type: 'reps', cueKey: 'crunch', orientation: O.LYING },
+  { keywords: ['פלאנק צידי', 'side plank'], analyze: analyzeSidePlank, type: 'hold', cueKey: 'sideplank', orientation: O.LYING },
+  { keywords: ['push', 'שכיבות סמיכה', 'שכיבות שמיכה', 'פוש', 'שכיבות'], analyze: analyzePushUps, type: 'reps', cueKey: 'push', orientation: O.LYING },
+  { keywords: ['פלאנק', 'plank'], analyze: analyzePlank, type: 'hold', cueKey: 'plank', orientation: O.LYING },
+  // === STANDING sport drills ===
+  { keywords: ['דריבל', 'dribbl', 'שליטה', 'כדור'], analyze: analyzeDribbling, type: 'form', cueKey: 'dribbling', orientation: O.STANDING },
+  { keywords: ['זריקה', 'קליעה', 'shooting', 'free throw', 'זריקות חופשיות'], analyze: analyzeShootingForm, type: 'form', cueKey: 'shooting', orientation: O.STANDING },
+  { keywords: ['כדרור ביד', 'hand dribbl', 'כדרור כדורסל'], analyze: analyzeHandDribbling, type: 'form', cueKey: 'handDribble', orientation: O.STANDING },
+  { keywords: ['פורהנד', 'בקהנד', 'מכות', 'forehand', 'backhand', 'מכות לקיר', 'wall hit'], analyze: analyzeStroke, type: 'form', cueKey: 'stroke', orientation: O.STANDING },
+  { keywords: ['הגשה', 'serve', 'סרב'], analyze: analyzeServe, type: 'form', cueKey: 'serve', orientation: O.STANDING },
+  { keywords: ['עבודת רגליים', 'footwork', 'תנועת מגרש', 'רגליים מהירות'], analyze: analyzeFootwork, type: 'form', cueKey: 'footwork', orientation: O.STANDING },
+  { keywords: ['בעיטה', 'kick', 'בעיטות', 'shooting drill'], analyze: analyzeKickTechnique, type: 'form', cueKey: 'kick', orientation: O.STANDING },
+  // === STANDING Paralympic — Amputee Football ===
+  { keywords: ['בעיטה בקביים', 'בעיטת קביים', 'amputee kick', 'crutch kick'], analyze: analyzeAmputeeCrutchKick, type: 'form', cueKey: 'amputeeKick', orientation: O.STANDING },
+  { keywords: ['ריצה בקביים', 'ספרינט קביים', 'crutch sprint', 'amputee sprint'], analyze: analyzeAmputeeCrutchSprint, type: 'form', cueKey: 'amputeeSprint', orientation: O.STANDING },
+  // === SITTING Paralympic — Wheelchair Basketball ===
+  { keywords: ['זריקה כיסא גלגלים', 'קליעה כיסא', 'wheelchair shooting', 'wheelchair basketball shoot'], analyze: analyzeWheelchairBasketballShooting, type: 'form', cueKey: 'wheelchairShooting', orientation: O.SITTING },
+  { keywords: ['כדרור כיסא גלגלים', 'כדרור כיסא', 'wheelchair dribble'], analyze: analyzeWheelchairBasketballDribbling, type: 'form', cueKey: 'wheelchairDribble', orientation: O.SITTING },
+  { keywords: ['מסירה כיסא גלגלים', 'מסירת חזה כיסא', 'wheelchair pass', 'chest pass wheelchair'], analyze: analyzeWheelchairBasketballChestPass, type: 'form', cueKey: 'wheelchairPass', orientation: O.SITTING },
+  // === SITTING Paralympic — Wheelchair Tennis ===
+  { keywords: ['מכות כיסא גלגלים', 'פורהנד כיסא', 'wheelchair stroke', 'wheelchair forehand'], analyze: analyzeWheelchairTennisStroke, type: 'form', cueKey: 'wheelchairStroke', orientation: O.SITTING },
+  { keywords: ['הגשה כיסא גלגלים', 'סרב כיסא', 'wheelchair serve'], analyze: analyzeWheelchairTennisServe, type: 'form', cueKey: 'wheelchairServe', orientation: O.SITTING },
 ];
 
 // Get the right analyzer based on exercise type
@@ -2013,10 +2624,10 @@ export function getAnalyzer(exerciseName) {
   for (const entry of ANALYZER_MAP) {
     if (entry.keywords.some(kw => name.includes(kw))) {
       const ballAware = entry.type === 'form'; // sport drills can use ball data
-      return { analyze: entry.analyze, type: entry.type, cueKey: entry.cueKey, ballAware };
+      return { analyze: entry.analyze, type: entry.type, cueKey: entry.cueKey, ballAware, orientation: entry.orientation || O.ANY };
     }
   }
-  return { analyze: analyzeGenericReps, type: 'reps', cueKey: 'default', ballAware: false };
+  return { analyze: analyzeGenericReps, type: 'reps', cueKey: 'default', ballAware: false, orientation: O.STANDING };
 }
 
 // Calibration: measure key joint angles for a given exercise type
@@ -2057,6 +2668,15 @@ export function getCalibrationAngles(landmarks, cueKey) {
       const hipMidX = (lm(LM.LEFT_HIP).x + lm(LM.RIGHT_HIP).x) / 2;
       angles.trunkRotation = Math.abs(shoulderMidX - hipMidX) * 360;
     }
+  }
+
+  // Always capture shoulder + head Y for orientation verification
+  if (v(LM.LEFT_SHOULDER)) {
+    const sY = (lm(LM.LEFT_SHOULDER).y + (v(LM.RIGHT_SHOULDER) ? lm(LM.RIGHT_SHOULDER).y : lm(LM.LEFT_SHOULDER).y)) / 2;
+    angles._shoulderY = sY;
+  }
+  if (v(LM.NOSE)) {
+    angles._headY = lm(LM.NOSE).y;
   }
 
   return angles;

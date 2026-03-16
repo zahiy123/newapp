@@ -21,6 +21,7 @@ export default function Goals() {
   const navigate = useNavigate();
 
   const [selectedGoals, setSelectedGoals] = useState([]);
+  const [storedGoals, setStoredGoals] = useState([]);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
 
@@ -30,6 +31,7 @@ export default function Goals() {
       const profileDoc = await getDoc(doc(db, 'users', user.uid));
       if (profileDoc.exists() && profileDoc.data().goals) {
         setSelectedGoals(profileDoc.data().goals);
+        setStoredGoals(profileDoc.data().goals);
       }
     }
     load();
@@ -51,7 +53,13 @@ export default function Goals() {
     }
     setLoading(true);
     try {
-      await updateDoc(doc(db, 'users', user.uid), { goals: selectedGoals });
+      const goalsChanged = selectedGoals.length !== storedGoals.length ||
+        selectedGoals.some(g => !storedGoals.includes(g));
+      const update = { goals: selectedGoals };
+      if (goalsChanged) {
+        update.trainingPlan = null;
+      }
+      await updateDoc(doc(db, 'users', user.uid), update);
       await refreshProfile();
       navigate('/');
     } catch (err) {

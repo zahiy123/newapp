@@ -916,6 +916,164 @@ function getLocalFallbackSummary({ profile, sessionData }) {
   return `${name}, התחלת אימון וזה כבר מעולה! בפעם הבאה ננסה להשלים יותר תרגילים.`;
 }
 
+// === CROSS-SPORT ISOLATION FILTER ===
+// Banned keywords per sport — exercises containing these terms are blocked
+const BANNED_KEYWORDS_BY_SPORT = {
+  fitness: [
+    'כדור', 'שער', 'דריבל', 'דריבלינג', 'קליעה', 'בעיטה', 'בעיטות',
+    'מסירה', 'מסירות', 'כדרור', 'חרוטים', 'קונוסים',
+    'זריקה לסל', 'הנחתה', 'הגשה', 'סל', 'טניס', 'מחבט', 'פורהנד', 'בקהנד',
+    'גול', 'שוער', 'עמדת שוער', 'חסימה', 'נגיחה', 'פנדל', 'קורנר',
+    'ריצה עם כדור', 'שליטה בכדור', 'קבלת כדור',
+    'dribble', 'dribbling', 'shoot', 'goal', 'pass', 'ball', 'kick', 'basket', 'racket', 'serve', 'cone',
+  ],
+  football: [
+    'סל', 'קליעה לסל', 'חישוק', 'כדרור ביד', 'זריקה לסל', 'הנחתה',
+    'טניס', 'מחבט', 'פורהנד', 'בקהנד', 'רשת',
+    'כיסא גלגלים', 'wheelchair',
+    'basket', 'racket', 'serve', 'forehand', 'backhand', 'dunk', 'layup',
+  ],
+  basketball: [
+    'בעיטה', 'בעיטות', 'שער', 'גול', 'קורנר', 'פנדל', 'נגיחה', 'שוער',
+    'קביים', 'crutch',
+    'טניס', 'מחבט', 'פורהנד', 'בקהנד',
+    'kick', 'goal', 'corner', 'penalty', 'racket', 'serve', 'forehand', 'backhand',
+  ],
+  tennis: [
+    'בעיטה', 'בעיטות', 'שער', 'גול', 'קורנר', 'פנדל', 'נגיחה', 'שוער',
+    'סל', 'קליעה לסל', 'חישוק', 'כדרור ביד', 'הנחתה',
+    'קביים', 'crutch',
+    'kick', 'goal', 'corner', 'penalty', 'basket', 'dunk', 'layup',
+  ],
+};
+
+// Aliases — sport variants map to parent sport's banned list
+const SPORT_ALIAS = {
+  footballAmputee: 'football',
+  footballAmputeeGK: 'football',
+  basketballWheelchair: 'basketball',
+  tennisWheelchair: 'tennis',
+};
+
+// Per-sport replacement exercises when a foreign exercise is filtered out
+const REPLACEMENT_EXERCISES = {
+  fitness: [
+    { name: 'בורפיז', description: 'בורפיז מלאים בקצב גבוה', sets: 3, reps: '10', restSeconds: 60, tips: 'שמור על טכניקה נכונה' },
+    { name: 'מטפס הרים', description: 'תנועת ריצה בתנוחת פלאנק', sets: 3, reps: '20', restSeconds: 60, tips: 'שמור על ירכיים למטה' },
+    { name: 'jumping jacks', description: 'קפיצות פיצוח בקצב מהיר', sets: 3, reps: '30', restSeconds: 45, tips: 'ידיים מלאות מעל הראש' },
+    { name: 'ריצת אינטרוולים', description: 'ספרינט 30 שניות, הליכה 30 שניות', sets: 3, reps: '6', restSeconds: 60, tips: 'ספרינט מלא ואז שחרור' },
+    { name: 'סקוואט קפיצות', description: 'כריעות עם קפיצה פיצוצית', sets: 3, reps: '10', restSeconds: 60, tips: 'נחיתה רכה' },
+    { name: 'פלאנק', description: 'החזקה בתנוחת פלאנק', sets: 3, reps: '30', restSeconds: 45, tips: 'שמור על ליבה מחוזקת' },
+    { name: 'כפיפות בטן', description: 'כפיפות בטן על הרצפה', sets: 3, reps: '15', restSeconds: 45, tips: 'אל תמשוך את הצוואר' },
+    { name: 'שכיבות סמיכה', description: 'שכיבות סמיכה מלאות', sets: 3, reps: '10', restSeconds: 60, tips: 'שמור על גב ישר' },
+    { name: 'סקוואט', description: 'כריעות עם משקל הגוף', sets: 3, reps: '12', restSeconds: 60, tips: 'ברכיים מעל האצבעות' },
+    { name: 'לאנג\'ים', description: 'מכרעות קדימה לסירוגין', sets: 3, reps: '10', restSeconds: 60, tips: 'צעד גדול קדימה' },
+    { name: 'גשר ישבן', description: 'הרמת ירכיים שכיבה על הגב', sets: 3, reps: '12', restSeconds: 60, tips: 'סחוט את הישבן למעלה' },
+    { name: 'פלאנק צידי', description: 'החזקה בתנוחת פלאנק צידי', sets: 3, reps: '20', restSeconds: 45, tips: 'שמור על הירכיים גבוהות' },
+    { name: 'דיפס', description: 'שקיעות גוף על כיסא או ספסל', sets: 3, reps: '10', restSeconds: 60, tips: 'תנועה מבוקרת, אל תנעל מרפקים' },
+    { name: 'ישיבה על הקיר', description: 'ישיבה על הקיר ללא כיסא', sets: 3, reps: '30', restSeconds: 60, tips: 'ברכיים ב-90 מעלות' },
+    { name: 'ספרינטים', description: 'ריצות קצרות הלוך וחזור', sets: 3, reps: '8', restSeconds: 90, tips: 'האץ בהדרגה' },
+    { name: 'לחיצת כתפיים', description: 'לחיצות כתפיים במשקל גוף או משקולות', sets: 3, reps: '10', restSeconds: 60, tips: 'שמור על גב ישר' },
+  ],
+  football: [
+    { name: 'דריבל', description: 'דריבל עם כדור בין קונוסים', sets: 3, reps: '10', restSeconds: 60, tips: 'שמור על הכדור קרוב' },
+    { name: 'בעיטות לשער', description: 'בעיטות מדויקות לפינות השער', sets: 3, reps: '10', restSeconds: 60, tips: 'כוון לפינות' },
+    { name: 'מסירות קצרות', description: 'מסירות מדויקות למרחק קצר', sets: 3, reps: '12', restSeconds: 45, tips: 'פנים הרגל, דיוק מרבי' },
+    { name: 'ריצה עם כדור', description: 'ריצה חופשית עם שליטה בכדור', sets: 3, reps: '8', restSeconds: 60, tips: 'ראש למעלה' },
+    { name: 'עצירות וסיבובים', description: 'עצירות פתאומיות ושינויי כיוון', sets: 3, reps: '10', restSeconds: 60, tips: 'נחיתה על כף הרגל' },
+    { name: 'שליטה בכדור', description: 'קבלת כדור ושליטה במגע ראשון', sets: 3, reps: '15', restSeconds: 45, tips: 'מגע רך, רגל רפויה' },
+  ],
+  basketball: [
+    { name: 'כדרור ביד', description: 'כדרור נמוך וגבוה במקום', sets: 3, reps: '20', restSeconds: 45, tips: 'שמור על ראש למעלה' },
+    { name: 'זריקות חופשיות', description: 'זריקות חופשיות לסל', sets: 3, reps: '12', restSeconds: 60, tips: 'כופף ברכיים לפני הזריקה' },
+    { name: 'כדרור בין קונוסים', description: 'כדרור ביד בין מכשולים', sets: 3, reps: '10', restSeconds: 60, tips: 'החלף ידיים' },
+    { name: 'תרגול הנחתה', description: 'הנחתות מצד ימין ושמאל', sets: 3, reps: '10', restSeconds: 60, tips: 'שתי ידיים לסירוגין' },
+    { name: 'מסירות חזה', description: 'מסירות חזה מדויקות', sets: 3, reps: '12', restSeconds: 45, tips: 'זרועות ישרות בסיום' },
+    { name: 'זריקות ממרחקים', description: 'זריקות מנקודות שונות', sets: 3, reps: '10', restSeconds: 60, tips: 'קשת גבוהה' },
+  ],
+  tennis: [
+    { name: 'פורהנד', description: 'תנועות פורהנד חוזרות', sets: 3, reps: '15', restSeconds: 45, tips: 'סיבוב מלא של הגוף' },
+    { name: 'בקהנד', description: 'תנועות בקהנד חוזרות', sets: 3, reps: '15', restSeconds: 45, tips: 'שתי ידיים יציבות' },
+    { name: 'הגשה', description: 'תרגול הגשה מדויקת', sets: 3, reps: '10', restSeconds: 60, tips: 'זריקה גבוהה וישרה' },
+    { name: 'עבודת רגליים', description: 'צעדי הצלבה ותנועה צידית', sets: 3, reps: '20', restSeconds: 45, tips: 'הישאר על כפות הרגליים' },
+    { name: 'וולי', description: 'מכות וולי ליד הרשת', sets: 3, reps: '12', restSeconds: 45, tips: 'קדימה לכדור' },
+    { name: 'תנועות מחבט', description: 'תנועות פורהנד ובקהנד באוויר', sets: 3, reps: '15', restSeconds: 45, tips: 'סיבוב מלא' },
+  ],
+};
+
+// Focus text per sport for sanitization
+const FOCUS_BY_SPORT = {
+  fitness: ['פלג גוף עליון + קרדיו', 'פלג גוף תחתון + קרדיו', 'גוף מלא + ליבה'],
+  football: ['טכניקה וכוח', 'מהירות ושליטה', 'דיוק ועוצמה'],
+  basketball: ['כדרור וקליעה', 'תנועה והגנה', 'קליעה ועוצמה'],
+  tennis: ['מכות וטכניקה', 'תנועה והגשה', 'דיוק ועוצמה'],
+};
+
+const THEME_BY_SPORT = {
+  fitness: ['חיזוק בסיסי', 'עוצמה ושריפת שומן', 'סיבולת וכוח', 'אימון שיא'],
+  football: ['יציבות וטכניקת כדור', 'שליטה ומסירות', 'מהירות ודריבלינג', 'כוח ובעיטות'],
+  basketball: ['יסודות קליעה ודריבלינג', 'תנועה והגנה', 'קליעה ממרחק', 'סימולציית משחק'],
+  tennis: ['טכניקת מכות', 'תנועה ועבודת רגליים', 'הגשה ודיוק', 'סימולציית נקודות'],
+};
+
+function resolveSport(sport) {
+  return SPORT_ALIAS[sport] || sport;
+}
+
+function hasBannedKeyword(text, bannedList) {
+  const lower = (text || '').toLowerCase();
+  return bannedList.some(kw => lower.includes(kw));
+}
+
+function filterCrossSportLeakage(weekData, sport) {
+  if (!weekData?.days) return weekData;
+
+  const resolved = resolveSport(sport);
+  const bannedList = BANNED_KEYWORDS_BY_SPORT[resolved];
+  if (!bannedList) return weekData; // unknown sport — no filter
+
+  const replacements = REPLACEMENT_EXERCISES[resolved] || REPLACEMENT_EXERCISES.fitness;
+  const focusList = FOCUS_BY_SPORT[resolved] || FOCUS_BY_SPORT.fitness;
+  const themeList = THEME_BY_SPORT[resolved] || THEME_BY_SPORT.fitness;
+
+  // Sanitize week theme
+  if (weekData.theme && hasBannedKeyword(weekData.theme, bannedList)) {
+    weekData.theme = themeList[(weekData.weekNumber || 1) % themeList.length];
+  }
+
+  let replacementIdx = 0;
+
+  for (let di = 0; di < weekData.days.length; di++) {
+    const day = weekData.days[di];
+    if (!day.exercises) continue;
+
+    // Sanitize day focus
+    if (day.focus && hasBannedKeyword(day.focus, bannedList)) {
+      day.focus = focusList[di % focusList.length];
+    }
+
+    const usedInDay = new Set(day.exercises.filter(e => !hasBannedKeyword(e.name, bannedList)).map(e => e.name));
+    day.exercises = day.exercises.map(ex => {
+      if (hasBannedKeyword(ex.name, bannedList)) {
+        console.warn(`[CrossSport Filter][${resolved}] Removed: "${ex.name}"`);
+        for (let i = 0; i < replacements.length; i++) {
+          const candidate = replacements[(replacementIdx + i) % replacements.length];
+          if (!usedInDay.has(candidate.name)) {
+            const replacement = { ...candidate, sets: ex.sets || candidate.sets, reps: ex.reps || candidate.reps, restSeconds: ex.restSeconds || candidate.restSeconds };
+            usedInDay.add(candidate.name);
+            replacementIdx = (replacementIdx + i + 1) % replacements.length;
+            return replacement;
+          }
+        }
+        return { ...replacements[replacementIdx++ % replacements.length] };
+      }
+      return ex;
+    });
+  }
+
+  return weekData;
+}
+
 // Generate a single week
 export async function generateWeek(params) {
   const sportContext = SPORT_CONTEXTS[params.sport] || SPORT_CONTEXTS.football;
@@ -925,7 +1083,7 @@ export async function generateWeek(params) {
   try {
     const text = await callClaude(sportContext, prompt);
     const parsed = extractJSON(text);
-    if (parsed) return parsed;
+    if (parsed) return filterCrossSportLeakage(parsed, params.sport);
 
     console.error(`Week ${params.weekNumber} parse failed. Length: ${text.length}`);
     console.error('Start:', text.substring(0, 300));
@@ -935,7 +1093,7 @@ export async function generateWeek(params) {
 
   // Fallback to local template
   console.log(`Using local fallback for week ${params.weekNumber}`);
-  return getLocalFallbackWeek(params);
+  return filterCrossSportLeakage(getLocalFallbackWeek(params), params.sport);
 }
 
 // Generate tips

@@ -7,13 +7,15 @@ import { useSpeech } from '../hooks/useSpeech';
 import { useObjectDetection, classifyDetectedObjects } from '../hooks/useObjectDetection';
 import { useBallDetection } from '../hooks/useBallDetection';
 import { useAICoach } from '../hooks/useAICoach';
-import { getAnalyzer, getLocationProps, getWarmUpExercises, getDisabilityContext, getCalibrationAngles } from '../utils/exerciseAnalysis';
+import { getAnalyzer, getLocationProps, getWarmUpExercises, getDisabilityContext, getCalibrationAngles, checkOrientation, checkMovementQuality, ORIENTATION } from '../utils/exerciseAnalysis';
+import { LandmarkStabilizer, computeJointAngles, computeSymmetryScore, computeStabilityScore, detectMovementPhase, buildPerformanceReport, getSportProfile, runSafetyCheck, generateCoachFeedback } from '../utils/motionEngine';
 
 import { estimateCalories } from '../utils/calorieEstimator';
 import { db } from '../services/firebase';
 import { doc, getDoc, addDoc, updateDoc, collection, Timestamp } from 'firebase/firestore';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { apiUrl } from '../utils/api';
+import { markDayCompleted, sanitizePlan } from '../utils/workoutStorage';
 
 const PHASE = {
   IDLE: 'idle',
@@ -189,6 +191,7 @@ export default function Training() {
 
   // Nudge state machine: tracks what we've already said to avoid noise
   const lastNudgeTimeRef = useRef(0);
+  const lastCoachingTimeRef = useRef(0);
   const sittingWarnedRef = useRef(false);
 
   // Head-down tracking
@@ -200,6 +203,14 @@ export default function Training() {
 
   // Mind-muscle cue timing
   const lastMindMuscleCueRef = useRef(0);
+
+  // Kalman Filter landmark stabilizer
+  const stabilizerRef = useRef(new LandmarkStabilizer());
+  const anglesHistoryRef = useRef([]);
+  const prevAnglesRef = useRef(null);
+  const performanceReportRef = useRef(null);
+  const frameCountRef = useRef(0);
+  const coachFeedbackRef = useRef(null);
 
   // Session tracking for stats
   const sessionDataRef = useRef({
@@ -224,7 +235,10 @@ export default function Training() {
       const week = plan.weeks[weekIdx];
       if (!week?.days?.[dayIdx]) return;
 
-      setExercises(week.days[dayIdx].exercises || []);
+      // Sanitize exercises in-place before displaying (last-mile defense)
+      const sport = data.sport || plan.sport || 'fitness';
+      const sanitized = sanitizePlan({ weeks: [{ days: [{ exercises: week.days[dayIdx].exercises || [] }] }] }, sport);
+      setExercises(sanitized.weeks[0].days[0].exercises || []);
     }
     load();
   }, [user, searchParams]);
@@ -297,6 +311,13 @@ export default function Training() {
           };
         }
         if (Object.keys(baseline).length > 0) {
+          // Store shoulder/head height averages for orientation verification
+          if (baseline._shoulderY) {
+            baseline._calShoulderY = (baseline._shoulderY.min + baseline._shoulderY.max) / 2;
+          }
+          if (baseline._headY) {
+            baseline._calHeadY = (baseline._headY.min + baseline._headY.max) / 2;
+          }
           exerciseStateRef.current._calibration = baseline;
         }
 
@@ -322,10 +343,13 @@ export default function Training() {
   // Collect angle data from landmarks during calibration (runs at ~60fps)
   useEffect(() => {
     if (phase !== PHASE.CALIBRATING || !landmarks || !calibrationDataRef.current) return;
+    // Use stabilized landmarks for calibration too
+    const stableLm = stabilizerRef.current.stabilize(landmarks);
+    if (!stableLm) return;
     const cal = calibrationDataRef.current;
     cal.frames++;
     const cueKey = analyzerRef.current?.cueKey;
-    const anglesToTrack = getCalibrationAngles(landmarks, cueKey);
+    const anglesToTrack = getCalibrationAngles(stableLm, cueKey);
     for (const [joint, value] of Object.entries(anglesToTrack)) {
       cal.minAngles[joint] = Math.min(cal.minAngles[joint] ?? 999, value);
       cal.maxAngles[joint] = Math.max(cal.maxAngles[joint] ?? 0, value);
@@ -336,14 +360,54 @@ export default function Training() {
   useEffect(() => {
     if (phase !== PHASE.EXERCISING || !landmarks || !analyzerRef.current) return;
 
-    const { analyze, ballAware } = analyzerRef.current;
+    // === KALMAN FILTER STABILIZATION ===
+    // Smooth raw MediaPipe landmarks before any analysis
+    const stableLandmarks = stabilizerRef.current.stabilize(landmarks);
+    if (!stableLandmarks) return;
+
+    const { analyze, ballAware, orientation } = analyzerRef.current;
     const prevState = exerciseStateRef.current;
     // Pass ball data to ball-aware sport drill analyzers
     const ballData = ballAware ? getBallData() : null;
-    const newState = analyze(landmarks, prevState, ballData);
+    const newState = analyze(stableLandmarks, prevState, ballData);
     const posture = newState.posture;
     const isMoving = newState.moving;
     const firstRepStarted = newState.firstRepStarted || false;
+
+    // === BIOMECHANICS: Compute joint angles + performance report ===
+    frameCountRef.current++;
+    if (frameCountRef.current % 3 === 0) { // Every 3rd frame (~20fps) for efficiency
+      const angles = computeJointAngles(stableLandmarks);
+      anglesHistoryRef.current.push(angles);
+      if (anglesHistoryRef.current.length > 30) anglesHistoryRef.current.shift();
+
+      // Build performance report every ~1 second (every 20th computed frame)
+      if (frameCountRef.current % 60 === 0) {
+        const primaryJoint = analyzerRef.current?.cueKey === 'squat' || analyzerRef.current?.cueKey === 'lunge' ? 'leftKnee' : 'leftElbow';
+        performanceReportRef.current = buildPerformanceReport(
+          angles,
+          detectMovementPhase(angles, prevAnglesRef.current, primaryJoint),
+          computeStabilityScore(anglesHistoryRef.current),
+          computeSymmetryScore(angles),
+          { reps: newState.reps, romPct: newState._romPct, formIssues: newState._formIssues }
+        );
+      }
+      prevAnglesRef.current = angles;
+
+      // === SPORT PROFILE COACH FEEDBACK (every ~10s) ===
+      if (frameCountRef.current % 600 === 0 && performanceReportRef.current) {
+        const sportProfile = getSportProfile(userProfile?.sport);
+        const safetyResult = runSafetyCheck(detectedObjects || [], sportProfile, stableLandmarks);
+        const coachRequest = generateCoachFeedback(
+          performanceReportRef.current,
+          { ...sportProfile, calibration: exerciseStateRef.current._calibration, cueKey: analyzerRef.current?.cueKey },
+          safetyResult
+        );
+        if (coachRequest?.shouldSend) {
+          coachFeedbackRef.current = coachRequest;
+        }
+      }
+    }
 
     // === VISIBILITY FEEDBACK (from analyzer validateLandmarks) ===
     if (newState.feedback?.type === 'visibility') {
@@ -379,25 +443,22 @@ export default function Training() {
       return;
     }
 
-    // Sitting — ask to stand (only for non-wheelchair users)
-    if (posture === 'sitting') {
+    // === ORIENTATION GATE — exercise-specific body position verification ===
+    const orientCheck = checkOrientation(landmarks, orientation, prevState);
+    if (!orientCheck.valid) {
       const now = Date.now();
-      if (!sittingWarnedRef.current || now - lastNudgeTimeRef.current > 10000) {
-        sittingWarnedRef.current = true;
+      if (now - lastNudgeTimeRef.current > 4000) {
         lastNudgeTimeRef.current = now;
-        speakSitting(playerName);
-        setFeedback({
-          type: 'warning',
-          text: isHe
-            ? `${playerName}, אני רואה שאתה יושב. קום כדי להתחיל.`
-            : `${playerName}, I see you're sitting. Please stand up.`
-        });
+        const msg = isHe ? orientCheck.feedback.text : orientCheck.feedback.textEn;
+        speakPriority(msg, { rate: 1.3, pitch: 1.05 });
+        setFeedback({ type: 'warning', text: msg });
       }
-      exerciseStateRef.current = newState;
+      // Block rep counting — keep previous reps, don't update count
+      exerciseStateRef.current = { ...newState, reps: prevState.reps || 0, lastRepTime: prevState.lastRepTime };
       return;
     }
 
-    // Wheelchair or standing — clear warnings and proceed
+    // Orientation valid — clear warnings and proceed
     sittingWarnedRef.current = false;
     notVisibleWarnedRef.current = false;
 
@@ -422,6 +483,24 @@ export default function Training() {
       }
     } else {
       headDownCountRef.current = 0;
+    }
+
+    // === MOVEMENT QUALITY CHECK (calibration-aware ROM) ===
+    // If a rep was just counted, check if ROM was deep enough relative to calibration
+    if (newState.feedback?.type === 'count' && prevState._calibration && newState._phaseStartAngle != null) {
+      const joint = analyzerRef.current?.cueKey === 'squat' || analyzerRef.current?.cueKey === 'lunge' ? 'knee'
+        : analyzerRef.current?.cueKey === 'shoulder' ? 'shoulder' : 'elbow';
+      const currentAngle = newState.elbowAngle || newState.kneeAngle || 0;
+      const quality = checkMovementQuality(prevState, joint, currentAngle, newState._phaseStartAngle);
+      if (quality.feedback) {
+        const now = Date.now();
+        if (now - lastNudgeTimeRef.current > 6000) {
+          lastNudgeTimeRef.current = now;
+          const msg = isHe ? quality.feedback.text : quality.feedback.textEn;
+          speakPriority(msg, { rate: 1.3, pitch: 1.05 });
+          setFeedback({ type: 'warning', text: msg });
+        }
+      }
     }
 
     // === TECHNIQUE FEEDBACK: Only if firstRepStarted ===
@@ -456,11 +535,23 @@ export default function Training() {
       if (!isMoving && (fb.type === 'good' || fb.type === 'warning')) {
         // Silence
       } else if (fb.text !== lastSpokenRef.current) {
-        setFeedback(fb);
+        // Show coaching text if available, otherwise show default text
+        const coachingText = fb.coaching ? (isHe ? fb.coaching.he : fb.coaching.en) : null;
+        setFeedback(coachingText ? { ...fb, text: coachingText } : fb);
+
         if (fb.type === 'count') {
           speakCount(fb.count);
           lastSpokenRef.current = fb.text;
           setDisplayReps(fb.count);
+
+          // Speak coaching tip after counting (max every 10s)
+          if (coachingText) {
+            const now = Date.now();
+            if (now - lastCoachingTimeRef.current > 10000) {
+              lastCoachingTimeRef.current = now;
+              speakIfIdle(coachingText, { rate: 1.2 });
+            }
+          }
 
           const targetReps = parseInt(currentExercise?.reps) || 10;
           if (fb.count >= targetReps) {
@@ -468,6 +559,10 @@ export default function Training() {
             handleSetComplete();
             return;
           }
+        } else if (fb.type === 'warning' && coachingText) {
+          // For warnings, always speak the coaching text (more detailed)
+          speakPriority(coachingText, { rate: 1.2, pitch: 1.05 });
+          lastSpokenRef.current = fb.text;
         } else {
           speakIfIdle(fb.text);
           lastSpokenRef.current = fb.text;
@@ -694,6 +789,15 @@ export default function Training() {
           console.warn('[EnvScan] Failed:', err.message);
         }
 
+        // Run sport-profile safety check on scan results
+        const sportProfile = getSportProfile(userProfile?.sport);
+        const safetyResult = runSafetyCheck(uniqueObjects, sportProfile, landmarks);
+        if (!safetyResult.safe) {
+          for (const issue of safetyResult.issues) {
+            speakPriority(isHe ? issue.message_he : issue.message_en);
+          }
+        }
+
         environmentScannedRef.current = true;
 
         // Auto-advance to briefing after 4s
@@ -877,9 +981,11 @@ export default function Training() {
   useEffect(() => {
     if (phase !== PHASE.WARM_UP || !landmarks || !currentWarmUp) return;
 
+    const stableLm = stabilizerRef.current.stabilize(landmarks);
+    if (!stableLm) return;
     const analyze = currentWarmUp.analyze;
     const prevState = warmUpStateRef.current;
-    const newState = analyze(landmarks, prevState);
+    const newState = analyze(stableLm, prevState);
 
     // Update activity tracking
     if (newState.moving) {
@@ -953,11 +1059,18 @@ export default function Training() {
     formStoppedRef.current = false;
     lastActivityRef.current = Date.now();
     lastNudgeTimeRef.current = 0;
+    lastCoachingTimeRef.current = 0;
     sittingWarnedRef.current = false;
     headDownCountRef.current = 0;
     prodIndexRef.current = 0;
     exerciseStartTimeRef.current = null;
     lastMindMuscleCueRef.current = 0;
+    // Reset Kalman filters for new exercise
+    stabilizerRef.current.reset();
+    anglesHistoryRef.current = [];
+    prevAnglesRef.current = null;
+    performanceReportRef.current = null;
+    frameCountRef.current = 0;
   }
 
   // === SESSION TRACKING ===
@@ -1007,6 +1120,12 @@ export default function Training() {
 
     try {
       const ref = await addDoc(collection(db, 'users', user.uid, 'workouts'), data);
+      // Mark day as completed in localStorage for Dashboard progress tracking
+      if (status === 'completed') {
+        const weekIdx = parseInt(searchParams.get('week') || '0');
+        const dayIdx = parseInt(searchParams.get('day') || '0');
+        markDayCompleted(weekIdx, dayIdx);
+      }
       // Fire-and-forget AI summary
       fetchAISummary(ref.id, data);
     } catch (err) {
@@ -1243,7 +1362,10 @@ export default function Training() {
           if (resp.ok) {
             const result = await resp.json();
             if (result.adapted && result.plan?.length > 0) {
-              const newExercises = [...exercises.slice(0, currentIdx + 1), ...result.plan];
+              const sport = userProfile?.sport || 'fitness';
+              const sanitizedAdapt = sanitizePlan({ weeks: [{ days: [{ exercises: result.plan }] }] }, sport);
+              const cleanPlan = sanitizedAdapt.weeks[0].days[0].exercises || [];
+              const newExercises = [...exercises.slice(0, currentIdx + 1), ...cleanPlan];
               setExercises(newExercises);
               lastAdaptationRef.current = now;
               if (result.reasoning) {
@@ -1479,26 +1601,10 @@ export default function Training() {
         )}
 
         {/* Warm-up — minimal camera overlay (timer + feedback only) */}
-        {phase === PHASE.WARM_UP && currentWarmUp && (
-          <>
-            {/* Big countdown timer — center of camera */}
-            <div className="absolute bottom-4 left-4 bg-black/70 backdrop-blur-sm text-white px-5 py-3 rounded-xl z-10">
-              <span className="text-3xl font-bold">{warmUpTimer}</span>
-              <span className="text-sm ml-2 opacity-70">{warmUpIdx + 1}/{warmUpExercises.length}</span>
-              {warmUpPaused && (
-                <div className="text-xs text-yellow-400 mt-0.5 animate-pulse">
-                  {isHe ? 'זוז כדי להמשיך' : 'Move to continue'}
-                </div>
-              )}
-            </div>
-
-            {/* Feedback banner */}
-            {feedback && (
-              <div className={`absolute top-4 left-4 right-4 ${feedbackColor[feedback.type] || 'bg-blue-500'} text-white px-4 py-3 rounded-xl text-center font-bold text-lg shadow-lg z-10`}>
-                {feedback.text}
-              </div>
-            )}
-          </>
+        {phase === PHASE.WARM_UP && feedback && (
+          <div className={`absolute top-4 left-4 right-4 ${feedbackColor[feedback.type] || 'bg-blue-500'} text-white px-4 py-3 rounded-xl text-center font-bold text-lg shadow-lg z-10`}>
+            {feedback.text}
+          </div>
         )}
 
         {/* Rest timer overlay */}
@@ -1697,6 +1803,7 @@ export default function Training() {
                         setWarmUpIdx(warmUpIdx + 1);
                       } else {
                         setWarmUpDone(true);
+                        sessionDataRef.current.warmUpCompleted = true;
                         speakWarmUpComplete(playerName);
                         setFeedback(null);
                         setTimeout(() => setPhase(PHASE.IDLE), 2500);
@@ -1712,6 +1819,7 @@ export default function Training() {
                     onClick={() => {
                       clearInterval(warmUpTimerRef.current);
                       setWarmUpDone(true);
+                      sessionDataRef.current.warmUpCompleted = true;
                       speakWarmUpComplete(playerName);
                       setFeedback(null);
                       setTimeout(() => setPhase(PHASE.IDLE), 2500);
