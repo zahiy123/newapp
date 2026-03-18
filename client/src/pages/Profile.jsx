@@ -28,6 +28,7 @@ export default function Profile() {
   });
   const [saved, setSaved] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
 
   useEffect(() => {
     async function loadProfile() {
@@ -51,6 +52,14 @@ export default function Profile() {
   async function handleSubmit(e) {
     e.preventDefault();
     setLoading(true);
+    setError('');
+    const ageNum = Number(form.age);
+    if (ageNum < 5 || ageNum > 99) {
+      const isHe = (userProfile?.language || 'he') === 'he';
+      setError(isHe ? 'האימונים זמינים לגילאי 5 עד 99 בלבד.' : 'Training is available for ages 5 to 99 only.');
+      setLoading(false);
+      return;
+    }
     try {
       await setDoc(doc(db, 'users', user.uid), {
         ...form,
@@ -72,6 +81,12 @@ export default function Profile() {
   return (
     <div className="max-w-lg mx-auto">
       <h1 className="text-2xl font-bold text-gray-800 mb-6">{t('profile.title')}</h1>
+
+      {error && (
+        <div className="bg-red-50 text-red-600 p-3 rounded-lg mb-4 text-sm">
+          {error}
+        </div>
+      )}
 
       {saved && (
         <div className="bg-green-50 text-green-600 p-3 rounded-lg mb-4 text-sm">

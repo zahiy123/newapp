@@ -1,12 +1,14 @@
 import { useCallback, useRef } from 'react';
-import { getCoachingRate, getCoachingPitch } from '../utils/ageAdaptive';
+import { getCoachingRate, getCoachingPitch, getLifeStage } from '../utils/ageAdaptive';
 
-export function useSpeech(lang = 'he-IL') {
+export function useSpeech(lang = 'he-IL', age) {
   const speaking = useRef(false);
   const queueRef = useRef([]);
   const currentUtteranceRef = useRef(null);
   const speechStartedAtRef = useRef(0);
+  const audioUnlockedRef = useRef(false);
   const isHe = lang.startsWith('he');
+  const lifeStage = getLifeStage(age);
 
   // Low-level helper: speak a single utterance, does NOT clear queue
   const _utterSpeak = useCallback((text, options = {}) => {
@@ -35,6 +37,17 @@ export function useSpeech(lang = 'he-IL') {
     };
 
     window.speechSynthesis.speak(utterance);
+  }, [lang]);
+
+  // Unlock audio on mobile — must be called from a user gesture (tap/click)
+  const unlockAudio = useCallback(() => {
+    if (audioUnlockedRef.current) return;
+    if (!window.speechSynthesis) return;
+    const utterance = new SpeechSynthesisUtterance('');
+    utterance.volume = 0;
+    utterance.lang = lang;
+    window.speechSynthesis.speak(utterance);
+    audioUnlockedRef.current = true;
   }, [lang]);
 
   // Internal helper: cancel previous speech, clear queue, then speak
@@ -118,23 +131,39 @@ export function useSpeech(lang = 'he-IL') {
 
   // Encouragement for good form (only when actively moving) - low priority, don't cut
   const speakEncouragement = useCallback(() => {
-    const phrases = isHe
-      ? ['ביצוע מעולה!', 'שיווי משקל מושלם!', 'קצב מצוין, ככה!', 'יפה מאוד, כל הכבוד!', 'מקצוען אמיתי!']
-      : ['Excellent form!', 'Perfect balance!', 'Great pace, keep it!', 'Great job!', 'Like a true pro!'];
+    let phrases;
+    if (lifeStage === 'kids') {
+      phrases = isHe
+        ? ['!וואו, סופר כוכב', '!כל הכבוד, אלוף על', '!יש לך כוחות על', '!מדהים, ככה ממשיכים']
+        : ['Wow, super star!', 'Amazing job, champion!', 'You have super powers!', 'Incredible, keep going!'];
+    } else if (lifeStage === 'longevity') {
+      phrases = isHe
+        ? ['ביצוע מעולה, שמור על נשימה יציבה', 'יציבות מושלמת, כל הכבוד', 'תנועה מבוקרת, ממש יפה', 'מצוין, המפרקים שלך יודו לך']
+        : ['Excellent form, keep breathing steady', 'Perfect stability, well done', 'Controlled movement, beautiful', 'Great, your joints will thank you'];
+    } else {
+      phrases = isHe
+        ? ['ביצוע מעולה!', 'שיווי משקל מושלם!', 'קצב מצוין, ככה!', 'יפה מאוד, כל הכבוד!', 'מקצוען אמיתי!']
+        : ['Excellent form!', 'Perfect balance!', 'Great pace, keep it!', 'Great job!', 'Like a true pro!'];
+    }
     const phrase = phrases[Math.floor(Math.random() * phrases.length)];
     speakIfIdle(phrase, { rate: 1.1 });
-  }, [lang, speakIfIdle, isHe]);
+  }, [lang, speakIfIdle, isHe, lifeStage]);
 
   // Correction for form — encouraging, guiding tone
   const speakCorrection = useCallback((specificTip) => {
-    const base = isHe
-      ? 'כיוון טוב! בוא נשפר קצת.'
-      : "Good direction! Let's refine a bit.";
+    let base;
+    if (lifeStage === 'kids') {
+      base = isHe ? 'אפשר עוד יותר טוב! נסה ככה...' : 'You can do even better! Try like this...';
+    } else if (lifeStage === 'longevity') {
+      base = isHe ? 'שמור על המפרקים. תנועה איטית ומבוקרת.' : 'Protect your joints. Slow, controlled movement.';
+    } else {
+      base = isHe ? 'כיוון טוב! בוא נשפר קצת.' : "Good direction! Let's refine a bit.";
+    }
     const tip = specificTip
       ? (isHe ? ` נסה: ${specificTip}` : ` Try: ${specificTip}`)
       : '';
     speak(base + tip);
-  }, [lang, speak, isHe]);
+  }, [lang, speak, isHe, lifeStage]);
 
   // Optimization tip after a perfect set
   const speakOptimization = useCallback((tip) => {
@@ -156,11 +185,22 @@ export function useSpeech(lang = 'he-IL') {
 
   // Set announcement
   const speakSetStart = useCallback((setNum, totalSets) => {
-    const text = isHe
-      ? `סט ${setNum} מתוך ${totalSets}. יאללה!`
-      : `Set ${setNum} of ${totalSets}. Let's go!`;
+    let text;
+    if (lifeStage === 'kids') {
+      text = isHe
+        ? `משחק ${setNum} מתוך ${totalSets}! יאללה נשחק!`
+        : `Game ${setNum} of ${totalSets}! Let's play!`;
+    } else if (lifeStage === 'longevity') {
+      text = isHe
+        ? `סט ${setNum} מתוך ${totalSets}. קח נשימה עמוקה ונתחיל.`
+        : `Set ${setNum} of ${totalSets}. Take a deep breath and begin.`;
+    } else {
+      text = isHe
+        ? `סט ${setNum} מתוך ${totalSets}. יאללה!`
+        : `Set ${setNum} of ${totalSets}. Let's go!`;
+    }
     speak(text, { rate: 1.1 });
-  }, [lang, speak, isHe]);
+  }, [lang, speak, isHe, lifeStage]);
 
   // 5s post-briefing nudge with location-aware props (ENERGETIC rate 1.3)
   const speakPostBriefingNudge = useCallback((playerName, locationProps) => {
@@ -175,12 +215,23 @@ export function useSpeech(lang = 'he-IL') {
   // General inactivity nudge — encouraging
   const speakNudge = useCallback((playerName, shortInstruction) => {
     const name = playerName || (isHe ? 'אלוף' : 'champ');
-    const base = isHe
-      ? `${name}, אני פה ומחכה לך. כשתהיה מוכן, תתחיל לזוז.`
-      : `${name}, I'm here waiting for you. Start moving when you're ready.`;
+    let base;
+    if (lifeStage === 'kids') {
+      base = isHe
+        ? `${name}, בוא נשחק! אני מחכה לך!`
+        : `${name}, let's play! I'm waiting for you!`;
+    } else if (lifeStage === 'longevity') {
+      base = isHe
+        ? `${name}, קח את הזמן שלך. כשתהיה מוכן, נתחיל באיטיות.`
+        : `${name}, take your time. When you're ready, we'll start slowly.`;
+    } else {
+      base = isHe
+        ? `${name}, אני פה ומחכה לך. כשתהיה מוכן, תתחיל לזוז.`
+        : `${name}, I'm here waiting for you. Start moving when you're ready.`;
+    }
     const tip = shortInstruction ? ` ${shortInstruction}` : '';
     speakPriority(base + tip, { rate: 1.1, pitch: 1.0 });
-  }, [lang, speakPriority, isHe]);
+  }, [lang, speakPriority, isHe, lifeStage]);
 
   // Mid-set encouragement — motivating, not accusing
   const speakMidSetQuit = useCallback((playerName, repsRemaining) => {
@@ -595,7 +646,24 @@ export function useSpeech(lang = 'he-IL') {
   }, [_doSpeak]);
 
   // Body-part visibility warnings — self-blaming tone
-  const speakMissingBodyParts = useCallback((missingParts, playerName) => {
+  // Optional 3rd param `direction` for specific directional hints
+  const speakMissingBodyParts = useCallback((missingParts, playerName, direction) => {
+    // Directional messages override generic per-part messages
+    if (direction === 'down') {
+      const msg = isHe
+        ? `${playerName}, תכוון את המצלמה למטה, אני לא רואה את הרגליים שלך`
+        : `${playerName}, tilt the camera down, I can't see your legs`;
+      speakPriority(msg);
+      return;
+    }
+    if (direction === 'up') {
+      const msg = isHe
+        ? `${playerName}, תכוון את המצלמה למעלה, אני לא רואה את הכתפיים שלך`
+        : `${playerName}, tilt the camera up, I can't see your shoulders`;
+      speakPriority(msg);
+      return;
+    }
+
     const msgs = {
       legs: isHe
         ? `${playerName}, אני לא מצליח לראות את הרגליים שלך. תכוון את המצלמה נמוך יותר`
@@ -614,6 +682,23 @@ export function useSpeech(lang = 'he-IL') {
     speakPriority(msgs[part] || msgs.all);
   }, [isHe, speakPriority]);
 
+  // Side camera suggestion for lying exercises viewed from front
+  const speakSideCamera = useCallback(() => {
+    const msg = isHe
+      ? 'שים את המצלמה מהצד כדי שאוכל לראות את התנוחה שלך טוב יותר'
+      : 'Place the camera to the side so I can see your form better';
+    speak(msg);
+  }, [isHe, speak]);
+
+  // Resume welcome — when returning to an in-progress workout
+  const speakResumeWelcome = useCallback((playerName) => {
+    const name = playerName || (isHe ? 'אלוף' : 'champ');
+    const msg = isHe
+      ? `${name}! חזרת! יאללה נמשיך מאיפה שעצרנו`
+      : `${name}! Welcome back! Let's pick up where we left off`;
+    speakPriority(msg, { rate: 1.2 });
+  }, [isHe, speakPriority]);
+
   // Calibration start — encouraging prep
   const speakCalibrationStart = useCallback((playerName) => {
     const msg = isHe
@@ -628,6 +713,15 @@ export function useSpeech(lang = 'he-IL') {
       ? `מעולה ${playerName}, תפסתי את הטווח שלך. יאללה נתחיל!`
       : `Great ${playerName}, I've got your range. Let's go!`;
     speakPriority(msg);
+  }, [isHe, speakPriority]);
+
+  // Level-up prompt for longevity athletes performing at high level
+  const speakLevelUpPrompt = useCallback((playerName) => {
+    const name = playerName || (isHe ? 'אלוף' : 'champ');
+    const text = isHe
+      ? `${name}, אתה מבצע ברמה גבוהה מאוד! רוצה לנסות תרגילים מתקדמים יותר?`
+      : `${name}, you're performing at a very high level! Want to try more advanced exercises?`;
+    speakPriority(text);
   }, [isHe, speakPriority]);
 
   const stop = useCallback(() => {
@@ -675,8 +769,12 @@ export function useSpeech(lang = 'he-IL') {
     speakNotVisible,
     speakPositiveReinforcement,
     speakMissingBodyParts,
+    speakSideCamera,
+    speakResumeWelcome,
     speakCalibrationStart,
     speakCalibrationDone,
+    speakLevelUpPrompt,
+    unlockAudio,
     speakCount,
     stop,
     isSpeaking

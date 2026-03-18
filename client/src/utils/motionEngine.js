@@ -387,6 +387,16 @@ export function buildPerformanceReport(angles, phase, stabilityScore, symmetrySc
   };
 }
 
+/**
+ * Evaluate a completed set's performance metrics for level-up eligibility.
+ * Used by the longevity (51+) level-up progression system.
+ */
+export function evaluateSetPerformance(stabilityScore, symmetryScore, romPct, avgRepTimeMs) {
+  const highVelocity = avgRepTimeMs != null && avgRepTimeMs > 0 && avgRepTimeMs < 2500;
+  const perfectForm = stabilityScore > 0.85 && symmetryScore > 0.85 && (romPct == null || romPct > 80);
+  return { highVelocity, perfectForm, qualifiesForLevelUp: highVelocity && perfectForm };
+}
+
 // ─── Layer 4: Floor Plane & Spatial Safety ─────────────────────────
 
 /**

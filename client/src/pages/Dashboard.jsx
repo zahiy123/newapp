@@ -7,7 +7,8 @@ import { apiUrl } from '../utils/api';
 import { Link, useNavigate } from 'react-router-dom';
 import {
   buildFingerprint, savePlan, loadPlan, clearPlan, sanitizePlan,
-  loadProgress, isDayCompleted, areAllWeeksComplete, getNextWorkoutDay, clearProgress
+  loadProgress, isDayCompleted, areAllWeeksComplete, getNextWorkoutDay, clearProgress,
+  loadActiveWorkout, clearActiveWorkout
 } from '../utils/workoutStorage';
 
 
@@ -38,6 +39,7 @@ export default function Dashboard() {
   const [currentEquipment, setCurrentEquipment] = useState('none');
   const [workoutCount, setWorkoutCount] = useState(0);
   const [progress, setProgress] = useState({ completedDays: [] });
+  const [activeWorkout, setActiveWorkout] = useState(null);
   const generatingRef = useRef(false);
 
   const name = userProfile?.name || '';
@@ -73,6 +75,11 @@ export default function Dashboard() {
     refreshProgress();
   }, [trainingPlan]);
 
+  // Check for active (resumable) workout
+  useEffect(() => {
+    setActiveWorkout(loadActiveWorkout());
+  }, []);
+
   // Load existing plan: localStorage first, then Firestore
   useEffect(() => {
     async function loadExistingPlan() {
@@ -82,7 +89,7 @@ export default function Dashboard() {
       // 1. Try localStorage
       const cached = loadPlan(fp);
       if (cached?.weeks?.length > 0) {
-        const clean = sanitizePlan(cached, userProfile.sport);
+        const clean = sanitizePlan(cached, userProfile.sport, userProfile.age);
         setTrainingPlan(clean);
         savePlan(clean, fp); // re-save sanitized version
         return;
@@ -96,7 +103,7 @@ export default function Dashboard() {
         if (data.trainingPlan.sport && data.trainingPlan.sport !== data.sport) {
           await updateDoc(doc(db, 'users', user.uid), { trainingPlan: null });
         } else {
-          const clean = sanitizePlan(data.trainingPlan, userProfile.sport);
+          const clean = sanitizePlan(data.trainingPlan, userProfile.sport, userProfile.age);
           setTrainingPlan(clean);
           savePlan(clean, fp);
         }
@@ -388,6 +395,24 @@ export default function Dashboard() {
             className="px-6 py-3 min-h-[48px] bg-gradient-to-r from-green-500 to-emerald-600 text-white rounded-lg font-medium hover:opacity-90 transition"
           >
             {isHe ? 'צור תוכנית חדשה' : 'Generate New Plan'}
+          </button>
+        </div>
+      )}
+
+      {/* Resume interrupted workout */}
+      {activeWorkout && (
+        <div className="space-y-1">
+          <button
+            onClick={() => navigate(`/training?week=${activeWorkout.week}&day=${activeWorkout.day}&resume=true`)}
+            className="w-full py-4 min-h-[56px] bg-gradient-to-r from-amber-500 to-orange-500 text-white rounded-xl font-bold text-lg hover:opacity-90 transition shadow-lg animate-pulse"
+          >
+            {isHe ? 'חזור לאימון' : 'Resume Workout'} &#9654;
+          </button>
+          <button
+            onClick={() => { clearActiveWorkout(); setActiveWorkout(null); }}
+            className="w-full text-sm text-gray-500 hover:text-gray-700 underline"
+          >
+            {isHe ? 'בטל' : 'Dismiss'}
           </button>
         </div>
       )}

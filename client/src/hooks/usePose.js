@@ -22,7 +22,7 @@ function midpoint(a, b) {
   return { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2, z: (a.z + b.z) / 2 };
 }
 
-export function usePose(canvasRef) {
+export function usePose(canvasRef, beforeDrawRef) {
   const landmarkerRef = useRef(null);
   const animFrameRef = useRef(null);
   const [ready, setReady] = useState(false);
@@ -65,6 +65,9 @@ export function usePose(canvasRef) {
       canvas.height = videoEl.videoHeight;
       const ctx = canvas.getContext('2d');
       ctx.clearRect(0, 0, canvas.width, canvas.height);
+      if (beforeDrawRef?.current) {
+        beforeDrawRef.current(ctx, lm, canvas.width, canvas.height);
+      }
       const drawingUtils = new DrawingUtils(ctx);
       drawingUtils.drawLandmarks(lm, { radius: 4, color: '#00FF00' });
       drawingUtils.drawConnectors(lm, PoseLandmarker.POSE_CONNECTIONS, { color: '#00FFFF', lineWidth: 2 });

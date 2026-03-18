@@ -7,15 +7,16 @@ import { useSpeech } from '../hooks/useSpeech';
 import { useObjectDetection, classifyDetectedObjects } from '../hooks/useObjectDetection';
 import { useBallDetection } from '../hooks/useBallDetection';
 import { useAICoach } from '../hooks/useAICoach';
-import { getAnalyzer, getLocationProps, getWarmUpExercises, getDisabilityContext, getCalibrationAngles, checkOrientation, checkMovementQuality, ORIENTATION } from '../utils/exerciseAnalysis';
-import { LandmarkStabilizer, computeJointAngles, computeSymmetryScore, computeStabilityScore, detectMovementPhase, buildPerformanceReport, getSportProfile, runSafetyCheck, generateCoachFeedback } from '../utils/motionEngine';
+import { useGhostSkeleton } from '../hooks/useGhostSkeleton';
+import { getAnalyzer, getLocationProps, getWarmUpExercises, getDisabilityContext, getCalibrationAngles, checkOrientation, checkPerspective, checkMovementQuality, ORIENTATION } from '../utils/exerciseAnalysis';
+import { LandmarkStabilizer, computeJointAngles, computeSymmetryScore, computeStabilityScore, detectMovementPhase, buildPerformanceReport, evaluateSetPerformance, getSportProfile, runSafetyCheck, generateCoachFeedback } from '../utils/motionEngine';
 
 import { estimateCalories } from '../utils/calorieEstimator';
 import { db } from '../services/firebase';
 import { doc, getDoc, addDoc, updateDoc, collection, Timestamp } from 'firebase/firestore';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { apiUrl } from '../utils/api';
-import { markDayCompleted, sanitizePlan } from '../utils/workoutStorage';
+import { markDayCompleted, sanitizePlan, saveActiveWorkout, loadActiveWorkout, clearActiveWorkout } from '../utils/workoutStorage';
 
 const PHASE = {
   IDLE: 'idle',
@@ -86,8 +87,10 @@ export default function Training() {
   const currentLocation = userProfile?.trainingLocation || userProfile?.currentLocation || 'field';
   const locationProps = getLocationProps(currentLocation, isHe, userProfile?.sport);
 
+  const beforeDrawRef = useRef(null);
   const { videoRef, active: cameraActive, error: cameraError, start: startCamera, stop: stopCamera } = useCamera();
-  const { ready: poseReady, landmarks, startLoop, stopLoop } = usePose(canvasRef);
+  const { ready: poseReady, landmarks, startLoop, stopLoop } = usePose(canvasRef, beforeDrawRef);
+  const { drawGhost, toggle: toggleGhost, isEnabled: ghostEnabled } = useGhostSkeleton();
   const { ready: objReady, detectedObjects, startLoop: startObjLoop, stopLoop: stopObjLoop, hasEquipment, scanEnvironment, captureFrame } = useObjectDetection();
   const { ready: ballReady, getBallData, startLoop: startBallLoop, stopLoop: stopBallLoop } = useBallDetection(userProfile?.sport);
 
@@ -105,9 +108,10 @@ export default function Training() {
     speakWarmUpCorrection, speakWarmUpComplete,
     speakDisabilityTip, speakMindMuscleCue, speakAICoaching, speakEnvironmentScan,
     speakNotVisible, speakPositiveReinforcement,
-    speakMissingBodyParts, speakCalibrationStart, speakCalibrationDone,
+    speakMissingBodyParts, speakSideCamera, speakResumeWelcome, speakCalibrationStart, speakCalibrationDone,
+    speakLevelUpPrompt, unlockAudio,
     stop: stopSpeech, isSpeaking
-  } = useSpeech(lang);
+  } = useSpeech(lang, userProfile?.age);
 
   // AI Coach hook — periodic Claude-powered feedback
   const onAICoaching = useCallback((text, isUrgent) => {
@@ -123,6 +127,10 @@ export default function Training() {
   // Workout adaptation
   const lastAdaptationRef = useRef(0);
 
+  // Mobile detection
+  const [isMobile] = useState(() => /iPhone|iPad|iPod|Android/i.test(navigator.userAgent));
+  const [audioUnlocked, setAudioUnlocked] = useState(false);
+
   // Fullscreen toggle
   const [isFullscreen, setIsFullscreen] = useState(false);
 
@@ -135,6 +143,9 @@ export default function Training() {
 
   // Visibility feedback throttle
   const visibilityWarningTimeRef = useRef(0);
+
+  // Perspective feedback throttle
+  const perspectiveWarningTimeRef = useRef(0);
 
   // Calibration state
   const calibrationDataRef = useRef(null);
@@ -212,6 +223,11 @@ export default function Training() {
   const frameCountRef = useRef(0);
   const coachFeedbackRef = useRef(null);
 
+  // Level-Up tracking for longevity (51+) athletes
+  const levelUpSetsRef = useRef(0);
+  const levelUpPromptShownRef = useRef(false);
+  const [showLevelUpModal, setShowLevelUpModal] = useState(false);
+
   // Session tracking for stats
   const sessionDataRef = useRef({
     exerciseResults: [],
@@ -237,11 +253,58 @@ export default function Training() {
 
       // Sanitize exercises in-place before displaying (last-mile defense)
       const sport = data.sport || plan.sport || 'fitness';
-      const sanitized = sanitizePlan({ weeks: [{ days: [{ exercises: week.days[dayIdx].exercises || [] }] }] }, sport);
-      setExercises(sanitized.weeks[0].days[0].exercises || []);
+      const sanitized = sanitizePlan({ weeks: [{ days: [{ exercises: week.days[dayIdx].exercises || [] }] }] }, sport, data.age || userProfile?.age);
+      const loadedExercises = sanitized.weeks[0].days[0].exercises || [];
+      setExercises(loadedExercises);
+
+      // Resume detection
+      if (searchParams.get('resume') === 'true') {
+        const saved = loadActiveWorkout();
+        if (saved && saved.week === weekIdx && saved.day === dayIdx) {
+          // Restore state
+          setCurrentIdx(Math.min(saved.exerciseIndex || 0, loadedExercises.length - 1));
+          setCurrentSet(saved.currentSet || 1);
+          setDisplayReps(saved.displayReps || 0);
+          setTimer(saved.timer || 0);
+          if (saved.exerciseResults) {
+            sessionDataRef.current.exerciseResults = saved.exerciseResults;
+          }
+          if (saved.warmUpCompleted) {
+            sessionDataRef.current.warmUpCompleted = true;
+            setWarmUpDone(true);
+          }
+          if (saved.startTime) {
+            sessionDataRef.current.startTime = saved.startTime;
+          }
+          clearActiveWorkout();
+          // Welcome back speech will be triggered after camera starts
+          setTimeout(() => speakResumeWelcome(playerName), 2000);
+        }
+      }
     }
     load();
   }, [user, searchParams]);
+
+  // Save active workout on page unload (browser close / navigate away)
+  useEffect(() => {
+    function handleBeforeUnload() {
+      if (phase === PHASE.EXERCISING || phase === PHASE.RESTING || phase === PHASE.WARM_UP) {
+        saveActiveWorkout({
+          week: parseInt(searchParams.get('week') || '0'),
+          day: parseInt(searchParams.get('day') || '0'),
+          exerciseIndex: currentIdx,
+          currentSet,
+          displayReps,
+          timer,
+          exerciseResults: sessionDataRef.current.exerciseResults,
+          warmUpCompleted: sessionDataRef.current.warmUpCompleted,
+          startTime: sessionDataRef.current.startTime,
+        });
+      }
+    }
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    return () => window.removeEventListener('beforeunload', handleBeforeUnload);
+  }, [phase, currentIdx, currentSet, displayReps, timer, searchParams]);
 
   const currentExercise = exercises[currentIdx];
 
@@ -265,6 +328,19 @@ export default function Training() {
       lastMindMuscleCueRef.current = 0;
     }
   }, [currentIdx, currentExercise]);
+
+  // Ghost skeleton: set beforeDrawRef during EXERCISING phase
+  useEffect(() => {
+    if (phase === PHASE.EXERCISING && ghostEnabled && analyzerRef.current) {
+      const cueKey = analyzerRef.current.cueKey;
+      const sportKey = userProfile?.sport || 'fitness';
+      beforeDrawRef.current = (ctx, lm, w, h) => {
+        drawGhost(ctx, sportKey, cueKey, lm, w, h);
+      };
+    } else {
+      beforeDrawRef.current = null;
+    }
+  }, [phase, ghostEnabled, drawGhost, userProfile?.sport]);
 
   // === CALIBRATION PHASE — 5-second ROM measurement ===
   const calibrationIntervalRef = useRef(null);
@@ -413,7 +489,7 @@ export default function Training() {
     if (newState.feedback?.type === 'visibility') {
       const now = Date.now();
       if (now - visibilityWarningTimeRef.current > 10000) {
-        speakMissingBodyParts(newState.feedback.missingParts, playerName);
+        speakMissingBodyParts(newState.feedback.missingParts, playerName, newState.feedback.direction);
         visibilityWarningTimeRef.current = now;
         setFeedback({
           type: 'info',
@@ -461,6 +537,16 @@ export default function Training() {
     // Orientation valid — clear warnings and proceed
     sittingWarnedRef.current = false;
     notVisibleWarnedRef.current = false;
+
+    // === PERSPECTIVE GATE — suggest side camera for lying exercises (non-blocking) ===
+    const perspCheck = checkPerspective(landmarks, orientation);
+    if (!perspCheck.valid) {
+      const now = Date.now();
+      if (now - perspectiveWarningTimeRef.current > 15000) {
+        perspectiveWarningTimeRef.current = now;
+        speakSideCamera();
+      }
+    }
 
     // Update activity timestamp when movement or new rep detected
     if (isMoving || (newState.lastRepTime && newState.lastRepTime !== prevState.lastRepTime)) {
@@ -1037,6 +1123,7 @@ export default function Training() {
   }, [landmarks, phase, warmUpIdx]);
 
   const handleStartCamera = useCallback(async () => {
+    unlockAudio(); // Unlock mobile audio on first user tap
     await startCamera();
     setTimeout(() => { if (videoRef.current) startLoop(videoRef.current); }, 500);
     // Start session timer
@@ -1044,7 +1131,7 @@ export default function Training() {
       sessionDataRef.current.startTime = Date.now();
       sessionSavedRef.current = false;
     }
-  }, [startCamera, startLoop, videoRef]);
+  }, [startCamera, startLoop, videoRef, unlockAudio]);
 
   const handleStopCamera = useCallback(() => {
     stopLoop(); stopObjLoop(); stopBallLoop(); stopCamera(); stopSpeech(); stopAICoaching();
@@ -1101,6 +1188,7 @@ export default function Training() {
     if (!user || sessionSavedRef.current) return;
     if (sessionDataRef.current.exerciseResults.length === 0) return;
     sessionSavedRef.current = true;
+    clearActiveWorkout();
 
     const data = {
       date: Timestamp.now(),
@@ -1243,6 +1331,26 @@ export default function Training() {
       speakEncouragement();
     }
 
+    // Level-Up check for 51+ longevity athletes
+    const playerAge = userProfile?.age;
+    if (playerAge >= 51 && !levelUpPromptShownRef.current && wasPerfect) {
+      const avgRepTime = displayReps > 0 ? (timer * 1000) / displayReps : null;
+      const report = performanceReportRef.current;
+      if (report) {
+        const evalResult = evaluateSetPerformance(
+          report.stabilityScore, report.symmetryScore, report.romPercentage, avgRepTime
+        );
+        if (evalResult.qualifiesForLevelUp) {
+          levelUpSetsRef.current++;
+          if (levelUpSetsRef.current >= 2) {
+            levelUpPromptShownRef.current = true;
+            speakLevelUpPrompt(playerName);
+            setShowLevelUpModal(true);
+          }
+        }
+      }
+    }
+
     if (currentSet >= totalSets) {
       setPhase(PHASE.EXERCISE_DONE);
       speak(t('training.allSetsComplete'));
@@ -1273,6 +1381,18 @@ export default function Training() {
   }
 
   function handlePauseExercise() {
+    // Save for cross-session resume
+    saveActiveWorkout({
+      week: parseInt(searchParams.get('week') || '0'),
+      day: parseInt(searchParams.get('day') || '0'),
+      exerciseIndex: currentIdx,
+      currentSet,
+      displayReps,
+      timer,
+      exerciseResults: sessionDataRef.current.exerciseResults,
+      warmUpCompleted: sessionDataRef.current.warmUpCompleted,
+      startTime: sessionDataRef.current.startTime,
+    });
     // Snapshot current state for resume
     pausedStateRef.current = {
       exerciseState: { ...exerciseStateRef.current },
@@ -1336,6 +1456,18 @@ export default function Training() {
   async function handleNextExercise() {
     // Record this exercise's results before moving on
     recordExerciseResult();
+    // Save progress for resume
+    saveActiveWorkout({
+      week: parseInt(searchParams.get('week') || '0'),
+      day: parseInt(searchParams.get('day') || '0'),
+      exerciseIndex: currentIdx + 1 < exercises.length ? currentIdx + 1 : currentIdx,
+      currentSet: 1,
+      displayReps: 0,
+      timer: 0,
+      exerciseResults: sessionDataRef.current.exerciseResults,
+      warmUpCompleted: sessionDataRef.current.warmUpCompleted,
+      startTime: sessionDataRef.current.startTime,
+    });
     stopSpeech(); setPhase(PHASE.IDLE); setTimer(0); setFeedback(null);
     exerciseStateRef.current = { _userProfile: userProfile }; setDisplayReps(0); setCurrentSet(1); setSetsPerformance([]); resetAllTracking();
 
@@ -1363,7 +1495,7 @@ export default function Training() {
             const result = await resp.json();
             if (result.adapted && result.plan?.length > 0) {
               const sport = userProfile?.sport || 'fitness';
-              const sanitizedAdapt = sanitizePlan({ weeks: [{ days: [{ exercises: result.plan }] }] }, sport);
+              const sanitizedAdapt = sanitizePlan({ weeks: [{ days: [{ exercises: result.plan }] }] }, sport, userProfile?.age);
               const cleanPlan = sanitizedAdapt.weeks[0].days[0].exercises || [];
               const newExercises = [...exercises.slice(0, currentIdx + 1), ...cleanPlan];
               setExercises(newExercises);
@@ -1432,8 +1564,9 @@ export default function Training() {
       {/* Camera + Pose Overlay */}
       <div className={isFullscreen
         ? 'relative w-full h-full bg-black overflow-hidden'
+        : isMobile ? 'relative w-full bg-black rounded-xl overflow-hidden min-h-[60vh]'
         : 'relative bg-black rounded-xl overflow-hidden'}
-        style={isFullscreen ? undefined : { aspectRatio: '4/3' }}>
+        style={isFullscreen || isMobile ? undefined : { aspectRatio: '4/3' }}>
         <video ref={videoRef} className="w-full h-full object-cover" playsInline muted style={{ transform: 'scaleX(-1)' }} />
         <canvas ref={canvasRef} className="absolute inset-0 w-full h-full" style={{ transform: 'scaleX(-1)' }} />
 
@@ -1464,6 +1597,16 @@ export default function Training() {
               <p>{t('training.loadingPose')}</p>
             </div>
           </div>
+        )}
+
+        {/* Mobile audio unlock button */}
+        {isMobile && cameraActive && !audioUnlocked && (
+          <button
+            onClick={() => { unlockAudio(); setAudioUnlocked(true); }}
+            className="absolute bottom-16 left-1/2 -translate-x-1/2 z-30 px-4 py-2 bg-green-500 text-white rounded-lg font-medium text-sm animate-pulse hover:bg-green-600 transition"
+          >
+            {isHe ? '\uD83D\uDD0A \u05D4\u05E4\u05E2\u05DC \u05E7\u05D5\u05DC / Start Voice' : '\uD83D\uDD0A Start Voice'}
+          </button>
         )}
 
         {!cameraActive && (
@@ -1719,6 +1862,19 @@ export default function Training() {
           </div>
         )}
 
+        {/* Ghost skeleton toggle */}
+        {phase === PHASE.EXERCISING && (
+          <button
+            onClick={toggleGhost}
+            className={`absolute top-14 left-4 px-3 py-2 rounded-xl text-sm font-bold z-10 transition ${
+              ghostEnabled ? 'bg-blue-500/90 text-white' : 'bg-black/50 text-white/70'
+            }`}
+            title={isHe ? 'הצג/הסתר שלד מנחה' : 'Toggle ghost guide'}
+          >
+            {'\uD83D\uDC7B'}
+          </button>
+        )}
+
         {/* Rep counter */}
         {phase === PHASE.EXERCISING && displayReps != null && (
           <div className="absolute bottom-4 right-4 bg-black/70 text-white px-4 py-2 rounded-xl">
@@ -1741,42 +1897,42 @@ export default function Training() {
         )}
       </div>
 
-      {/* Exercise info & controls — below camera normally, overlay in fullscreen */}
-      <div className={isFullscreen
-        ? 'absolute bottom-0 inset-x-0 z-20 bg-black/60 backdrop-blur-sm p-3 max-h-[45vh] overflow-y-auto'
+      {/* Exercise info & controls — below camera normally, overlay in fullscreen/mobile */}
+      <div className={(isFullscreen || isMobile)
+        ? 'absolute bottom-0 inset-x-0 z-20 bg-black/60 backdrop-blur-sm p-3 max-h-[40vh] overflow-y-auto pb-[env(safe-area-inset-bottom)]'
         : ''}>
 
-        {cameraError && !isFullscreen && (
+        {cameraError && !isFullscreen && !isMobile && (
           <div className="bg-red-50 text-red-600 p-3 rounded-lg text-sm">{t('training.cameraError')}: {cameraError}</div>
         )}
 
         {exercises.length === 0 ? (
-          !isFullscreen && <div className="text-center text-gray-500 py-8">{t('training.noExercises')}</div>
+          !(isFullscreen || isMobile) && <div className="text-center text-gray-500 py-8">{t('training.noExercises')}</div>
         ) : (
-          <div className={isFullscreen ? 'space-y-2' : 'space-y-3'}>
+          <div className={(isFullscreen || isMobile) ? 'space-y-2' : 'space-y-3'}>
             {/* Warm-up exercise card — looks identical to regular exercise */}
             {phase === PHASE.WARM_UP && currentWarmUp && (
-              <div className={isFullscreen
+              <div className={(isFullscreen || isMobile)
                 ? 'bg-white/10 rounded-xl p-3 space-y-2'
                 : 'bg-white rounded-xl shadow-lg p-5 border-2 border-orange-500 space-y-3'}>
                 <div className="flex items-center justify-between">
-                  <span className={`text-xs font-medium ${isFullscreen ? 'text-orange-300' : 'text-orange-600'}`}>
+                  <span className={`text-xs font-medium ${(isFullscreen || isMobile) ? 'text-orange-300' : 'text-orange-600'}`}>
                     {isHe ? 'חימום' : 'Warm-up'} ({warmUpIdx + 1}/{warmUpExercises.length})
                   </span>
-                  <span className={`text-xs ${isFullscreen ? 'text-white/50' : 'text-gray-400'}`}>
+                  <span className={`text-xs ${(isFullscreen || isMobile) ? 'text-white/50' : 'text-gray-400'}`}>
                     {currentWarmUp.duration}{isHe ? ' שניות' : 's'}
                   </span>
                 </div>
-                <h2 className={`text-lg font-bold ${isFullscreen ? 'text-white' : 'text-gray-800'}`}>
+                <h2 className={`text-lg font-bold ${(isFullscreen || isMobile) ? 'text-white' : 'text-gray-800'}`}>
                   {isHe ? currentWarmUp.name.he : currentWarmUp.name.en}
                 </h2>
-                {!isFullscreen && (
+                {!(isFullscreen || isMobile) && (
                   <p className="text-sm text-gray-500">{isHe ? currentWarmUp.description.he : currentWarmUp.description.en}</p>
                 )}
 
                 {/* Big timer display */}
                 <div className="flex items-center justify-center py-2">
-                  <span className={`text-5xl font-bold ${warmUpPaused ? 'text-yellow-500 animate-pulse' : isFullscreen ? 'text-white' : 'text-gray-800'}`}>
+                  <span className={`text-5xl font-bold ${warmUpPaused ? 'text-yellow-500 animate-pulse' : (isFullscreen || isMobile) ? 'text-white' : 'text-gray-800'}`}>
                     {warmUpTimer}
                   </span>
                 </div>
@@ -1833,19 +1989,19 @@ export default function Training() {
             )}
 
             {currentExercise && phase !== PHASE.WARM_UP && (
-              <div className={isFullscreen
+              <div className={(isFullscreen || isMobile)
                 ? 'bg-white/10 rounded-xl p-3 space-y-2'
                 : 'bg-white rounded-xl shadow-lg p-5 border-2 border-blue-500 space-y-3'}>
                 <div className="flex items-center justify-between">
-                  <span className={`text-xs font-medium ${isFullscreen ? 'text-blue-300' : 'text-blue-600'}`}>
+                  <span className={`text-xs font-medium ${(isFullscreen || isMobile) ? 'text-blue-300' : 'text-blue-600'}`}>
                     {t('training.currentExercise')} ({currentIdx + 1}/{exercises.length})
                   </span>
-                  <span className={`text-xs ${isFullscreen ? 'text-white/50' : 'text-gray-400'}`}>
+                  <span className={`text-xs ${(isFullscreen || isMobile) ? 'text-white/50' : 'text-gray-400'}`}>
                     {totalSets} {t('dashboard.sets')} | {currentExercise.reps} {t('dashboard.reps')} | {restDuration}{t('dashboard.secRest')}
                   </span>
                 </div>
-                <h2 className={`text-lg font-bold ${isFullscreen ? 'text-white' : 'text-gray-800'}`}>{currentExercise.name}</h2>
-                {!isFullscreen && (
+                <h2 className={`text-lg font-bold ${(isFullscreen || isMobile) ? 'text-white' : 'text-gray-800'}`}>{currentExercise.name}</h2>
+                {!(isFullscreen || isMobile) && (
                   <>
                     <p className="text-sm text-gray-500">{currentExercise.description}</p>
                     <div className="text-xs text-yellow-700 bg-yellow-50 rounded-lg px-3 py-2">
@@ -1936,6 +2092,33 @@ export default function Training() {
           </div>
         )}
       </div>
+
+      {/* Level-Up Modal for longevity (51+) athletes */}
+      {showLevelUpModal && (
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl p-6 max-w-sm text-center space-y-4">
+            <div className="text-4xl">{'\u26A1'}</div>
+            <h3 className="text-xl font-bold">
+              {isHe ? 'אתה מוכן ליותר!' : "You're ready for more!"}
+            </h3>
+            <p className="text-gray-600">
+              {isHe ? 'הביצועים שלך מצוינים. רוצה לנסות תרגילים מתקדמים יותר?' : 'Your performance is excellent. Want to try more advanced exercises?'}
+            </p>
+            <div className="flex gap-3">
+              <button onClick={async () => {
+                await updateDoc(doc(db, 'users', user.uid), { unlockedPerformance: true });
+                setShowLevelUpModal(false);
+                speakPriority(isHe ? 'מעולה! מהסט הבא נעבור לתרגילים מתקדמים!' : "Awesome! Starting next set with advanced exercises!");
+              }} className="flex-1 py-3 bg-gradient-to-r from-blue-600 to-indigo-600 text-white rounded-xl font-bold">
+                {isHe ? 'יאללה!' : "Let's go!"}
+              </button>
+              <button onClick={() => setShowLevelUpModal(false)} className="flex-1 py-3 bg-gray-200 text-gray-700 rounded-xl font-medium">
+                {isHe ? 'לא עכשיו' : 'Not now'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

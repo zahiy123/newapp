@@ -388,14 +388,10 @@ AVOID: סקוואט, לאנג'ים, גשר ישבן, מטפס הרים, ישיב
 
   const age = Number(profile.age) || 25;
   const ageRule = age <= 12
-    ? 'AGE GROUP (5-12): Lower volume, playful/fun approach, shorter sessions (30-35 min), NO heavy loads, focus on coordination and basic movement patterns.'
-    : age <= 18
-    ? 'AGE GROUP (13-18 YOUTH): Build athletic foundations — coordination, strength, and dynamic movement. Strong emphasis on CORRECT TECHNIQUE to prevent growth-related injuries. Moderate-to-high intensity but NO maximal loads. Include plyometrics and agility at controlled progression.'
-    : age <= 40
-    ? 'AGE GROUP (19-40 PEAK): MAXIMUM intensity. Explosive power, high-volume strength, advanced conditioning. Push limits — sprint intervals, heavy compound movements, high-intensity circuits. This is the peak performance window.'
-    : age <= 60
-    ? 'AGE GROUP (41-60): Longer rest periods (+15s), prefer joint-friendly exercises, moderate intensity, include mobility work.'
-    : 'AGE GROUP (61+): Low impact only, balance/stability focus, longer warm-up (8-10 min), careful progression, avoid explosive movements.';
+    ? 'AGE GROUP KIDS (5-12): Lower volume (2 sets max), playful/fun approach, shorter sessions (25-30 min), NO heavy loads, NO technical lifts (dips, rows, shoulder press), focus on coordination, animal movements, and game-style exercises. Use encouraging game language.'
+    : age <= 50
+    ? 'AGE GROUP PERFORMANCE (13-50): Full access to all exercises. Intensity and volume based on skill level. Push limits. Bio-mechanical precision.'
+    : 'AGE GROUP LONGEVITY (51-99): Low impact ONLY, NO explosive movements (burpees, jumping jacks, sprints, mountain climbers), focus on stability, balance, mobility, and joint health. Longer rest (+15s), longer warm-up (8-10 min). Breathing cues in tips.';
 
   return `Create week ${weekNumber}/4. Theme: "${theme}"
 
@@ -1156,26 +1152,22 @@ Return ONLY valid JSON:
 // === REAL-TIME AI COACHING ===
 
 const AGE_STYLE_PROMPTS = {
-  kids: 'Use a fun, playful tone. Words like "וואו!", "סבבה!", "אלוף!". Short sentences. Make it feel like a game.',
-  youth: 'Use an energetic, motivating tone. Challenge them: "אתה מכונה!", "תראה לי מה יש לך!". Push hard but with respect.',
-  adults: 'Use an intense, aggressive coaching tone. Direct commands: "תדחוף חזק!", "אל תוותר!", "עוד אחד!". No softness.',
-  older: 'Use a calm, technical tone. Focus on form: "שמור על טכניקה", "תנועה מבוקרת". Precise corrections.',
-  senior: 'Use a warm, gentle tone. Encourage: "יפה מאוד", "לאט ובטוח", "מצוין, ככה". Never rush.',
+  kids: 'Use a fun, playful, gamified tone. Words like "וואו!", "סבבה!", "אלוף!". Short sentences. Make it feel like a game. Celebrate every small win.',
+  performance: 'Use an intense, aggressive coaching tone. Direct commands: "תדחוף חזק!", "אל תוותר!", "עוד אחד!". Bio-mechanical precision feedback. Challenge the athlete.',
+  longevity: 'Use a warm, gentle, safety-first tone. Encourage: "לאט ובטוח", "מצוין, ככה", "יפה מאוד". Focus on joint health, breathing reminders, and controlled movement. Never rush.',
 };
 
 function getAgeGroup(age) {
   const a = Number(age) || 25;
   if (a <= 12) return 'kids';
-  if (a <= 18) return 'youth';
-  if (a <= 40) return 'adults';
-  if (a <= 60) return 'older';
-  return 'senior';
+  if (a <= 50) return 'performance';
+  return 'longevity';
 }
 
 export async function generateRealtimeFeedback(data) {
   const sportContext = SPORT_CONTEXTS[data.sport] || SPORT_CONTEXTS.football || '';
   const ageGroup = getAgeGroup(data.age);
-  const ageStyle = AGE_STYLE_PROMPTS[ageGroup] || AGE_STYLE_PROMPTS.adults;
+  const ageStyle = AGE_STYLE_PROMPTS[ageGroup] || AGE_STYLE_PROMPTS.performance;
 
   const system = `${sportContext}
 

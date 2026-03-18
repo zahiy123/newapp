@@ -1,3 +1,5 @@
+import { getAgeExerciseFilter } from './ageAdaptive';
+
 const PLAN_KEY = 'training_plan';
 const PROGRESS_KEY = 'training_progress';
 
@@ -50,14 +52,19 @@ const FITNESS_REPLACEMENTS = [
 ];
 
 // Sanitize a plan loaded from cache/Firestore — strip any leaked exercises
-export function sanitizePlan(plan, sport) {
-  if (!plan?.weeks || !sport) return plan;
-  const resolved = SPORT_ALIAS[sport] || sport;
-  const banned = BANNED_KEYWORDS[resolved];
-  if (!banned) return plan;
+export function sanitizePlan(plan, sport, age) {
+  if (!plan?.weeks) return plan;
 
-  // Only fitness needs a generic replacement pool (sport plans keep their own exercises)
-  const replacements = resolved === 'fitness' ? FITNESS_REPLACEMENTS : null;
+  const resolved = SPORT_ALIAS[sport] || sport;
+  const sportBanned = BANNED_KEYWORDS[resolved] || [];
+  const sportReplacements = resolved === 'fitness' ? FITNESS_REPLACEMENTS : null;
+
+  // Age-based filter
+  const ageFilter = getAgeExerciseFilter(age);
+  const ageBanned = ageFilter.banned;
+  const ageReplacements = ageFilter.replacements;
+
+  if (!sportBanned.length && !ageBanned.length) return plan;
 
   let dirty = false;
   for (const week of plan.weeks) {
@@ -67,28 +74,45 @@ export function sanitizePlan(plan, sport) {
       const usedNames = new Set();
       day.exercises = day.exercises.map(ex => {
         const lower = (ex.name || '').toLowerCase();
-        const isBanned = banned.some(kw => lower.includes(kw));
-        if (!isBanned) {
-          usedNames.add(ex.name);
-          return ex;
-        }
-        dirty = true;
-        console.warn(`[Client Filter][${resolved}] Removed: "${ex.name}"`);
-        if (!replacements) return null; // non-fitness: just remove, server should fix on next gen
-        // Pick a replacement not already used in this day
-        for (const r of replacements) {
-          if (!usedNames.has(r.name)) {
-            usedNames.add(r.name);
-            return { ...r, sets: ex.sets || r.sets, reps: ex.reps || r.reps, restSeconds: ex.restSeconds || r.restSeconds };
+
+        // Sport-based filter
+        const isSportBanned = sportBanned.length > 0 && sportBanned.some(kw => lower.includes(kw));
+        if (isSportBanned) {
+          dirty = true;
+          console.warn(`[Client Filter][${resolved}] Removed: "${ex.name}"`);
+          if (!sportReplacements) return null;
+          for (const r of sportReplacements) {
+            if (!usedNames.has(r.name)) {
+              usedNames.add(r.name);
+              return { ...r, sets: ex.sets || r.sets, reps: ex.reps || r.reps, restSeconds: ex.restSeconds || r.restSeconds };
+            }
           }
+          return sportReplacements[0];
         }
-        return replacements[0];
+
+        // Age-based filter
+        const isAgeBanned = ageBanned.length > 0 && ageBanned.some(kw => lower.includes(kw));
+        if (isAgeBanned) {
+          dirty = true;
+          console.warn(`[Client Filter][age] Removed: "${ex.name}"`);
+          if (!ageReplacements.length) return null;
+          for (const r of ageReplacements) {
+            if (!usedNames.has(r.name)) {
+              usedNames.add(r.name);
+              return { ...r, sets: ex.sets || r.sets, reps: ex.reps || r.reps, restSeconds: ex.restSeconds || r.restSeconds };
+            }
+          }
+          return ageReplacements[0];
+        }
+
+        usedNames.add(ex.name);
+        return ex;
       }).filter(Boolean);
     }
   }
 
   if (dirty) {
-    console.warn(`[Client Filter] Plan was sanitized for sport="${resolved}"`);
+    console.warn(`[Client Filter] Plan was sanitized for sport="${resolved}", age=${age}`);
   }
   return plan;
 }
@@ -203,4 +227,38 @@ export function getNextWorkoutDay(plan) {
 
 export function clearProgress() {
   localStorage.removeItem(PROGRESS_KEY);
+}
+
+// --- Active workout resume ---
+const ACTIVE_WORKOUT_KEY = 'active_workout';
+
+export function saveActiveWorkout(state) {
+  try {
+    localStorage.setItem(ACTIVE_WORKOUT_KEY, JSON.stringify({
+      ...state,
+      savedAt: Date.now(),
+    }));
+  } catch (err) {
+    console.warn('Failed to save active workout:', err);
+  }
+}
+
+export function loadActiveWorkout() {
+  try {
+    const raw = localStorage.getItem(ACTIVE_WORKOUT_KEY);
+    if (!raw) return null;
+    const data = JSON.parse(raw);
+    // Expire if older than 4 hours
+    if (Date.now() - data.savedAt > 4 * 60 * 60 * 1000) {
+      localStorage.removeItem(ACTIVE_WORKOUT_KEY);
+      return null;
+    }
+    return data;
+  } catch {
+    return null;
+  }
+}
+
+export function clearActiveWorkout() {
+  localStorage.removeItem(ACTIVE_WORKOUT_KEY);
 }
