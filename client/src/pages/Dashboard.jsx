@@ -33,6 +33,7 @@ export default function Dashboard() {
   const [trainingPlan, setTrainingPlan] = useState(null);
   const [generating, setGenerating] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
+  const [generatingWeek, setGeneratingWeek] = useState(0);
   const [error, setError] = useState('');
   const [activeWeek, setActiveWeek] = useState(0);
   const [currentLocation, setCurrentLocation] = useState('field');
@@ -154,22 +155,32 @@ export default function Dashboard() {
     };
   }
 
-  async function fetchWeek(payload, weekNumber, retries = 2) {
+  async function fetchWeek(payload, weekNumber, retries = 1) {
     for (let attempt = 0; attempt <= retries; attempt++) {
-      const res = await fetch(apiUrl('/api/coach/training-week'), {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ...payload, weekNumber })
-      });
-      if (res.status === 429 && attempt < retries) {
-        await new Promise(r => setTimeout(r, (attempt + 1) * 3000));
-        continue;
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 30000);
+      try {
+        const res = await fetch(apiUrl('/api/coach/training-week'), {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ ...payload, weekNumber }),
+          signal: controller.signal
+        });
+        clearTimeout(timeout);
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({}));
+          throw new Error(err.error || `Week ${weekNumber} failed`);
+        }
+        return res.json();
+      } catch (err) {
+        clearTimeout(timeout);
+        if (attempt < retries) {
+          console.log(`Week ${weekNumber} attempt ${attempt + 1} failed, retrying in 3s...`);
+          await new Promise(r => setTimeout(r, 3000));
+          continue;
+        }
+        throw err;
       }
-      if (!res.ok) {
-        const err = await res.json().catch(() => ({}));
-        throw new Error(err.error || `Week ${weekNumber} failed`);
-      }
-      return res.json();
     }
   }
 
@@ -187,29 +198,65 @@ export default function Dashboard() {
     if (!userProfile || generatingRef.current) return;
     generatingRef.current = true;
     setGenerating(true);
+    setGeneratingWeek(1);
     setError('');
     const loc = locationOverride || currentLocation;
     const payload = getPayload(loc);
+    const fp = buildFingerprint(userProfile);
 
-    try {
-      // Step 1: Generate Week 1 fast
-      const week1 = await fetchWeek(payload, 1);
-      const plan = { weeks: [week1], generalTips: [], safetyNotes: [], sport: userProfile.sport };
+    // Cache-first: check if we already have weeks cached
+    const cached = loadPlan(fp);
+    const cachedWeeks = cached?.weeks || [];
+    let plan;
+    let startFromWeek = 1;
+
+    if (cachedWeeks.length > 0 && cached.sport === userProfile.sport) {
+      plan = { ...cached, weeks: [...cachedWeeks] };
+      startFromWeek = cachedWeeks.length + 1;
       setTrainingPlan(plan);
       setActiveWeek(0);
+      if (startFromWeek > 4) {
+        // All weeks cached, skip generation
+        setGenerating(false);
+        setGeneratingWeek(0);
+        generatingRef.current = false;
+        return;
+      }
       setGenerating(false);
-
-      // Save to Firestore + localStorage
-      const fp = buildFingerprint(userProfile);
-      await updateDoc(doc(db, 'users', user.uid), {
-        trainingPlan: plan,
-        planCreatedAt: new Date().toISOString()
-      });
-      savePlan(plan, fp);
-
-      // Step 2: Load weeks 2-4 + tips in background
       setLoadingMore(true);
-      for (let w = 2; w <= 4; w++) {
+      setGeneratingWeek(startFromWeek);
+    }
+
+    try {
+      if (startFromWeek === 1) {
+        // No cache — generate Week 1
+        setGeneratingWeek(1);
+        let week1;
+        try {
+          week1 = await fetchWeek(payload, 1);
+        } catch (err) {
+          // Auto-retry once
+          console.log('Week 1 failed, auto-retrying once...');
+          await new Promise(r => setTimeout(r, 3000));
+          week1 = await fetchWeek(payload, 1, 0);
+        }
+        plan = { weeks: [week1], generalTips: [], safetyNotes: [], sport: userProfile.sport };
+        setTrainingPlan(plan);
+        setActiveWeek(0);
+        setGenerating(false);
+
+        await updateDoc(doc(db, 'users', user.uid), {
+          trainingPlan: plan,
+          planCreatedAt: new Date().toISOString()
+        });
+        savePlan(plan, fp);
+        startFromWeek = 2;
+      }
+
+      // Load remaining weeks in background
+      setLoadingMore(true);
+      for (let w = startFromWeek; w <= 4; w++) {
+        setGeneratingWeek(w);
         try {
           const week = await fetchWeek(payload, w);
           plan.weeks.push(week);
@@ -231,10 +278,12 @@ export default function Dashboard() {
       } catch {}
 
       setLoadingMore(false);
+      setGeneratingWeek(0);
     } catch (err) {
       console.error(err);
       setError(t('dashboard.planError'));
       setGenerating(false);
+      setGeneratingWeek(0);
     }
     generatingRef.current = false;
   }
@@ -367,7 +416,11 @@ export default function Dashboard() {
       {generating && (
         <div className="bg-blue-50 border border-blue-200 rounded-xl p-6 text-center space-y-3">
           <div className="animate-spin inline-block w-10 h-10 border-4 border-blue-500 border-t-transparent rounded-full"></div>
-          <p className="text-blue-700 font-medium">{t('dashboard.generating')}</p>
+          <p className="text-blue-700 font-medium">
+            {generatingWeek > 0
+              ? (isHe ? `יוצר שבוע ${generatingWeek} מתוך 4...` : `Creating week ${generatingWeek} of 4...`)
+              : t('dashboard.generating')}
+          </p>
         </div>
       )}
 
@@ -455,7 +508,9 @@ export default function Dashboard() {
               {loadingMore && (
                 <div className="px-4 py-2 text-gray-400 text-sm flex items-center gap-2">
                   <div className="animate-spin w-4 h-4 border-2 border-gray-300 border-t-blue-500 rounded-full"></div>
-                  {t('app.loading')}
+                  {generatingWeek > 0
+                    ? (isHe ? `שבוע ${generatingWeek}/4...` : `Week ${generatingWeek}/4...`)
+                    : t('app.loading')}
                 </div>
               )}
             </div>

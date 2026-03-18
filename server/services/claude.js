@@ -69,6 +69,28 @@ export async function callClaudeVision(system, contentBlocks, maxTokens = 4096, 
 
 const HAIKU_VISION_MODEL = 'claude-haiku-4-5-20251001';
 
+async function callClaudeHaiku(system, content, maxTokens = 2048, retries = 2) {
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    try {
+      const message = await client.messages.create({
+        model: HAIKU_VISION_MODEL,
+        max_tokens: maxTokens,
+        system,
+        messages: [{ role: 'user', content }]
+      });
+      return message.content[0].text;
+    } catch (err) {
+      if (err.status === 429 && attempt < retries) {
+        const wait = (attempt + 1) * 15000;
+        console.log(`Haiku rate limited. Waiting ${wait / 1000}s before retry...`);
+        await new Promise(r => setTimeout(r, wait));
+        continue;
+      }
+      throw err;
+    }
+  }
+}
+
 export async function analyzeRepFrames({ frames, sport, exercise, playerProfile, repNumber }) {
   const safeFallback = { is_correct: true, feedback: '', score: 0 };
   try {
@@ -472,10 +494,11 @@ ${sport === 'fitness'
 - Sport drills: dribbling, passing, shooting, agility, tactical movement for this specific sport.
 - SOLO TRAINING: Include household items as simulated defenders/targets in tips.`}
 
-CRITICAL: Return ONLY raw JSON. NO markdown, NO backticks.
-Descriptions max 15 words. ${sport === 'fitness' ? (hasStrength ? '3-4' : '3') : '3-4'} exercises per day${sport !== 'fitness' ? ` (${hasStrength ? '3' : '2-3'} sport drills + max 1 strength)` : ' (all fitness exercises, NO sport drills)'}.
+CRITICAL: Return ONLY raw JSON. NO markdown, NO backticks, NO prose, NO long sentences. Minimal JSON only.
+description: max 8 words. tips: max 8 words. warmup/cooldown: max 6 words.
+${sport === 'fitness' ? (hasStrength ? '3-4' : '3') : '3-4'} exercises per day${sport !== 'fitness' ? ` (${hasStrength ? '3' : '2-3'} sport drills + max 1 strength)` : ' (all fitness exercises, NO sport drills)'}.
 
-{"weekNumber":${weekNumber},"theme":"${theme}","days":[{"day":"יום א","focus":"focus","exercises":[{"name":"שם","description":"תיאור קצר","sets":${prog.sets},"reps":"${prog.reps}","restSeconds":${prog.rest},"tips":"טיפ"}],"warmup":"חימום","cooldown":"שחרור","durationMinutes":50}]}
+{"weekNumber":${weekNumber},"theme":"${theme}","days":[{"day":"יום א","focus":"מיקוד","exercises":[{"name":"שם","description":"קצר מאוד","sets":${prog.sets},"reps":"${prog.reps}","restSeconds":${prog.rest},"tips":"טיפ קצר"}],"warmup":"חימום קצר","cooldown":"שחרור","durationMinutes":50}]}
 
 Hebrew only. ${daysPerWeek} days.`;
 }
@@ -1125,7 +1148,7 @@ export async function generateWeek(params) {
 
   console.log(`Generating week ${params.weekNumber}/4 (${params.profile.skillLevel || 'beginner'}, ${params.location})...`);
   try {
-    const text = await callClaude(sportContext, prompt);
+    const text = await callClaudeHaiku(sportContext, prompt, 2048);
     const parsed = extractJSON(text);
     if (parsed) return filterCrossSportLeakage(parsed, params.sport);
 
@@ -1148,11 +1171,11 @@ export async function generateTips({ profile, sport, goals, location }) {
   const aidInfo = mobilityAid !== 'none' ? `Uses ${mobilityAid}.` : '';
   const hasStrength = goals.some(g => ['strength', 'weightLoss'].includes(g));
 
-  const text = await callClaude(sportContext,
+  const text = await callClaudeHaiku(sportContext,
     `Give 4 training tips and 4 safety notes for a ${skillLevel}-level ${sport} player.
 Disability: ${profile.disability}. ${aidInfo} Location: ${location}.${hasStrength ? ' Include strength advice.' : ''}
 ONLY raw JSON, no markdown: {"generalTips":["tip1","tip2","tip3","tip4"],"safetyNotes":["note1","note2","note3","note4"]}
-Hebrew only.`, 1024);
+Hebrew only. Max 10 words per tip/note.`, 512);
 
   return extractJSON(text) || { generalTips: [], safetyNotes: [] };
 }
