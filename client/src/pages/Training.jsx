@@ -7,6 +7,7 @@ import { useSpeech } from '../hooks/useSpeech';
 import { useObjectDetection, classifyDetectedObjects } from '../hooks/useObjectDetection';
 import { useBallDetection } from '../hooks/useBallDetection';
 import { useAICoach } from '../hooks/useAICoach';
+import { useHaikuVision } from '../hooks/useHaikuVision';
 import { useGhostSkeleton } from '../hooks/useGhostSkeleton';
 import { getAnalyzer, getLocationProps, getWarmUpExercises, getDisabilityContext, getCalibrationAngles, checkOrientation, checkPerspective, checkMovementQuality, ORIENTATION } from '../utils/exerciseAnalysis';
 import { LandmarkStabilizer, computeJointAngles, computeSymmetryScore, computeStabilityScore, detectMovementPhase, buildPerformanceReport, evaluateSetPerformance, getSportProfile, runSafetyCheck, generateCoachFeedback } from '../utils/motionEngine';
@@ -119,6 +120,15 @@ export default function Training() {
   }, [speakAICoaching, userProfile?.age]);
 
   const { startAICoaching, stopAICoaching, feedPoseData } = useAICoach({ onCoaching: onAICoaching });
+
+  // Haiku Vision — per-rep visual form analysis
+  const onVisionFeedback = useCallback((result) => {
+    if (result.feedback) {
+      speakIfIdle(result.feedback, { rate: 1.2 });
+    }
+  }, [speakIfIdle]);
+
+  const { feedPhaseData, startVision, stopVision, resetSession: resetVisionSession } = useHaikuVision({ onVisionFeedback });
 
   // Environment scan state
   const [environmentScan, setEnvironmentScan] = useState(null);
@@ -256,6 +266,7 @@ export default function Training() {
       const sanitized = sanitizePlan({ weeks: [{ days: [{ exercises: week.days[dayIdx].exercises || [] }] }] }, sport, data.age || userProfile?.age);
       const loadedExercises = sanitized.weeks[0].days[0].exercises || [];
       setExercises(loadedExercises);
+      resetVisionSession();
 
       // Resume detection
       if (searchParams.get('resume') === 'true') {
@@ -680,6 +691,7 @@ export default function Training() {
     });
 
     exerciseStateRef.current = newState;
+    feedPhaseData(newState);
   }, [landmarks, phase]);
 
   // === INACTIVITY NUDGES: AGGRESSIVE & FAST ===
@@ -802,11 +814,19 @@ export default function Training() {
         playerName,
         skillLevel: userProfile?.skillLevel || 'intermediate',
       });
+      // Start Haiku Vision per-rep analysis
+      startVision({
+        sport: userProfile?.sport,
+        exerciseName: currentExercise?.name,
+        playerProfile: userProfile,
+        playerName
+      }, captureFrame, videoRef.current);
     } else {
       stopBallLoop();
       stopAICoaching();
+      stopVision();
     }
-    return () => { stopBallLoop(); stopAICoaching(); };
+    return () => { stopBallLoop(); stopAICoaching(); stopVision(); };
   }, [phase]);
 
   // Environment scan effect
@@ -1134,7 +1154,7 @@ export default function Training() {
   }, [startCamera, startLoop, videoRef, unlockAudio]);
 
   const handleStopCamera = useCallback(() => {
-    stopLoop(); stopObjLoop(); stopBallLoop(); stopCamera(); stopSpeech(); stopAICoaching();
+    stopLoop(); stopObjLoop(); stopBallLoop(); stopCamera(); stopSpeech(); stopAICoaching(); stopVision();
     clearInterval(warmUpTimerRef.current);
     setPhase(PHASE.IDLE);
   }, [stopLoop, stopObjLoop, stopBallLoop, stopCamera, stopSpeech, stopAICoaching]);

@@ -67,6 +67,54 @@ export async function callClaudeVision(system, contentBlocks, maxTokens = 4096, 
   }
 }
 
+const HAIKU_VISION_MODEL = 'claude-haiku-4-5-20251001';
+
+export async function analyzeRepFrames({ frames, sport, exercise, playerProfile, repNumber }) {
+  const safeFallback = { is_correct: true, feedback: '', score: 0 };
+  try {
+    if (!frames || frames.length !== 3) return safeFallback;
+
+    const sportContext = SPORT_CONTEXTS[sport] || SPORT_CONTEXTS.fitness || '';
+    const playerInfo = playerProfile
+      ? `Player: ${playerProfile.name || 'Unknown'}, Age: ${playerProfile.age || '?'}, Disability: ${playerProfile.disability || 'none'}`
+      : '';
+
+    const system = `You are a real-time exercise form analyst for ${exercise}.
+${sportContext}
+${playerInfo}
+
+Analyze 3 frames from rep #${repNumber}: Frame 1 = start of movement, Frame 2 = peak effort/depth, Frame 3 = return.
+Respond ONLY with a JSON object: {"is_correct": boolean, "feedback": "short Hebrew feedback", "score": 1-10}
+If form is good, feedback should be a short Hebrew encouragement. If form needs correction, give ONE specific Hebrew tip.
+Keep feedback under 15 words. Score 7+ means good form.`;
+
+    const contentBlocks = [
+      { type: 'text', text: `Frame 1 (start of rep #${repNumber}):` },
+      { type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: frames[0] } },
+      { type: 'text', text: `Frame 2 (peak effort/depth):` },
+      { type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: frames[1] } },
+      { type: 'text', text: `Frame 3 (return/completion):` },
+      { type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: frames[2] } },
+      { type: 'text', text: 'Analyze the form across these 3 frames. Return ONLY the JSON.' }
+    ];
+
+    const message = await client.messages.create({
+      model: HAIKU_VISION_MODEL,
+      max_tokens: 200,
+      system,
+      messages: [{ role: 'user', content: contentBlocks }]
+    });
+
+    const parsed = extractJSON(message.content[0].text);
+    if (parsed && typeof parsed.is_correct === 'boolean') return parsed;
+    return safeFallback;
+  } catch (err) {
+    if (err.status === 429) return safeFallback; // skip silently on rate limit
+    console.error('analyzeRepFrames error:', err.message);
+    return safeFallback;
+  }
+}
+
 const SPORT_CONTEXTS = {
   footballAmputee: `You are an expert AMPUTEE FOOTBALL (Para-Football) coach.
 This sport is played by athletes with lower limb amputations using forearm crutches. NO prosthetics allowed during play.

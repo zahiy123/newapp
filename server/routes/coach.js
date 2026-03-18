@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { generateWeek, generateTips, analyzeMovement, generateWorkoutSummary, getLocalFallbackWeek, generateRealtimeFeedback, adaptWorkout } from '../services/claude.js';
+import { generateWeek, generateTips, analyzeMovement, generateWorkoutSummary, getLocalFallbackWeek, generateRealtimeFeedback, adaptWorkout, analyzeRepFrames } from '../services/claude.js';
 import { analyzeGameFrames } from '../services/gameAnalysis.js';
 import { analyzeEnvironment } from '../services/environmentAnalysis.js';
 
@@ -135,6 +135,40 @@ router.post('/realtime-feedback', async (req, res) => {
     res.json({ feedback: '', isUrgent: false });
   } finally {
     realtimeInFlight.delete(key);
+  }
+});
+
+// === PER-REP HAIKU VISION ANALYSIS ===
+
+const repAnalysisInFlight = new Set();
+
+router.post('/analyze-rep', async (req, res) => {
+  const { playerName, exercise, frames, sport, playerProfile, repNumber } = req.body;
+  const safeFallback = { is_correct: true, feedback: '', score: 0 };
+  const key = `rep-${playerName}-${exercise}`;
+
+  if (shouldThrottle(key, 3000)) {
+    return res.json(safeFallback);
+  }
+
+  if (repAnalysisInFlight.has(key)) {
+    return res.json(safeFallback);
+  }
+
+  if (!frames || !Array.isArray(frames) || frames.length !== 3) {
+    return res.json(safeFallback);
+  }
+
+  repAnalysisInFlight.add(key);
+
+  try {
+    const result = await analyzeRepFrames({ frames, sport, exercise, playerProfile, repNumber });
+    res.json(result);
+  } catch (error) {
+    console.error('Rep analysis error:', error.message);
+    res.json(safeFallback);
+  } finally {
+    repAnalysisInFlight.delete(key);
   }
 });
 
