@@ -124,9 +124,13 @@ export default function Training() {
   // Haiku Vision — per-rep visual form analysis
   const onVisionFeedback = useCallback((result) => {
     if (result.feedback) {
-      speakIfIdle(result.feedback, { rate: 1.2 });
+      if (result.isUrgent) {
+        speakPriority(result.feedback, { rate: 1.1 });
+      } else {
+        speakIfIdle(result.feedback, { rate: 1.2 });
+      }
     }
-  }, [speakIfIdle]);
+  }, [speakIfIdle, speakPriority]);
 
   const { feedPhaseData, startVision, stopVision, resetSession: resetVisionSession } = useHaikuVision({ onVisionFeedback });
 

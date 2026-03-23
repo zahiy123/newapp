@@ -92,24 +92,116 @@ async function callClaudeHaiku(system, content, maxTokens = 2048, retries = 2) {
   }
 }
 
+// === BIOMECHANICAL KNOWLEDGE LIBRARY ===
+// Exercise-specific checklists injected into vision analysis for surgical precision
+const BIOMECHANICS_DB = {
+  // Fitness exercises
+  'squat': 'CHECKPOINTS: knees track over toes (no valgus), heels planted, spine neutral, depth below parallel, weight mid-foot, core braced',
+  'push-up': 'CHECKPOINTS: elbows 45° from body, chest touches floor, full lockout, core tight (no hip sag), head neutral',
+  'pushup': 'CHECKPOINTS: elbows 45° from body, chest touches floor, full lockout, core tight (no hip sag), head neutral',
+  'burpee': 'CHECKPOINTS: soft landing on balls of feet, chest to floor in push-up, explosive hip extension on jump, arms overhead at peak',
+  'plank': 'CHECKPOINTS: straight line head-to-heels, no hip sag or pike, shoulders over wrists, core engaged, glutes active',
+  'lunge': 'CHECKPOINTS: front knee over ankle (not past toes), back knee toward floor, torso upright, hip flexor stretch at bottom',
+  'dips': 'CHECKPOINTS: shoulders stay above elbows, elbows 90° at bottom, no shoulder shrug, controlled descent, full lockout',
+  'bridge': 'CHECKPOINTS: feet hip-width, drive through heels, squeeze glutes at top, neutral spine, no rib flare',
+  'crunch': 'CHECKPOINTS: lower back stays on floor, curl shoulders toward hips, exhale on contraction, no neck pulling',
+  'mountain climber': 'CHECKPOINTS: hands under shoulders, hips level (no bouncing), drive knees to chest, maintain plank spine',
+  'wall sit': 'CHECKPOINTS: back flat on wall, thighs parallel to floor, knees 90°, weight in heels, core braced',
+  'shoulder press': 'CHECKPOINTS: elbows under wrists, press straight up (not forward), full lockout overhead, core tight, no back arch',
+  'row': 'CHECKPOINTS: pull elbows back (not up), squeeze shoulder blades together, neutral spine, controlled eccentric',
+  'bicep curl': 'CHECKPOINTS: elbows pinned at sides, full range of motion, no swinging/momentum, controlled descent',
+  'lateral raise': 'CHECKPOINTS: slight elbow bend, raise to shoulder height (not above), thumbs slightly up, no shrugging',
+  // Football (soccer)
+  'kick': 'CHECKPOINTS: plant foot 15cm beside ball, ankle locked rigid, hip rotation drives power, follow-through high and across body, eyes on ball at contact',
+  'dribble': 'CHECKPOINTS: ball within 1m of feet, use inside/outside/sole, low center of gravity, head up scanning, soft touches',
+  'pass': 'CHECKPOINTS: plant foot points to target, inside-foot contact at ball center, follow-through toward target, body over ball for ground pass',
+  'shoot': 'CHECKPOINTS: approach at 30-45° angle, plant foot beside ball, strike with laces (instep), lean over ball, follow-through toward target',
+  'first touch': 'CHECKPOINTS: cushion ball (withdraw foot on contact), body behind ball line, open body to field, soft surface contact',
+  'juggle': 'CHECKPOINTS: locked ankle, contact on laces/top of foot, slight backspin, consistent height, alternating feet',
+  // Basketball
+  'basketball shoot': 'CHECKPOINTS (BEEF): Balance feet shoulder-width, Eyes on back of rim, Elbow under ball at 90° (not flared), Follow-through gooseneck and hold',
+  'free throw': 'CHECKPOINTS: feet shoulder-width behind line, ball in shooting pocket, elbow 90°, one-motion release, follow-through hold 2s',
+  'layup': 'CHECKPOINTS: two-step gather, opposite knee drives up, extend arm fully, soft touch off backboard high, protect ball with off-hand',
+  'crossover': 'CHECKPOINTS: low dribble below knee, pound ball hard into floor, push off opposite foot, sell with head/shoulder fake, eyes up',
+  'defensive slide': 'CHECKPOINTS: low stance, wide base, slide feet (no crossing), hands active, hips square to offensive player',
+  // Amputee football (crutch-based)
+  'crutch-kick': 'CHECKPOINTS: crutches at shoulder-width+ base, shoulders aligned over crutches, weight shifted fully to crutches before kick, core braced, single-leg hip rotation, balanced follow-through',
+  'crutch-sprint': 'CHECKPOINTS: crutch plant ahead of body, swing-through gait rhythm, core engaged, shoulders not hunched, firm grip (not white-knuckle)',
+  'crutch-balance': 'CHECKPOINTS: triangular base (2 crutch tips + standing foot), weight centered over triangle, shoulders relaxed, micro-adjustments via wrists',
+  'crutch-pivot': 'CHECKPOINTS: plant crutches firmly, rotate on standing foot, maintain triangular base throughout turn, core stabilizes rotation',
+  'crutch-pass': 'CHECKPOINTS: stable crutch base, body weight on crutches, passing foot swings through ball, follow-through to target while maintaining balance',
+  // Tennis
+  'forehand': 'CHECKPOINTS: early unit turn, racket back with non-dominant hand, contact point in front of body, full follow-through over shoulder, weight transfer forward',
+  'backhand': 'CHECKPOINTS: early shoulder turn, firm two-hand grip, contact in front of body, follow-through across body, balanced wide stance',
+  'serve': 'CHECKPOINTS: ball toss at 1 o\'clock position, trophy pose (racket behind head), full extension at contact, pronation on follow-through, land on front foot',
+  'volley': 'CHECKPOINTS: split step before contact, short backswing, firm wrist, punch through ball, recover to ready position',
+};
+
+// Fuzzy match: find best biomechanics checklist for an exercise name (Hebrew or English)
+function getBiomechanicsChecklist(exercise, sport) {
+  if (!exercise) return '';
+  const name = exercise.toLowerCase().replace(/[^\w\s\u0590-\u05FF]/g, '');
+  // Direct key match
+  if (BIOMECHANICS_DB[name]) return BIOMECHANICS_DB[name];
+  // Partial match: check if any key is contained in the exercise name
+  for (const [key, val] of Object.entries(BIOMECHANICS_DB)) {
+    if (name.includes(key) || key.includes(name)) return val;
+  }
+  // Hebrew exercise name mapping
+  const hebrewMap = {
+    'סקוואט': 'squat', 'שכיבות סמיכה': 'push-up', 'פלאנק': 'plank',
+    'לאנג': 'lunge', 'דיפס': 'dips', 'בורפי': 'burpee', 'גשר': 'bridge',
+    'כפיפות בטן': 'crunch', 'מטפס הרים': 'mountain climber', 'ישיבה על הקיר': 'wall sit',
+    'כתפיים': 'shoulder press', 'משיכת משקולת': 'row', 'כפיפות מרפק': 'bicep curl',
+    'הרמה צידית': 'lateral raise', 'בעיטה': 'kick', 'כדרור': 'dribble', 'מסירה': 'pass',
+    'זריקה': 'basketball shoot', 'עליה לסל': 'layup', 'הגנה': 'defensive slide',
+    'פורהנד': 'forehand', 'בקהנד': 'backhand', 'הגשה': 'serve',
+  };
+  for (const [heb, eng] of Object.entries(hebrewMap)) {
+    if (name.includes(heb) && BIOMECHANICS_DB[eng]) return BIOMECHANICS_DB[eng];
+  }
+  // Sport-based fallback for crutch exercises
+  if (sport === 'footballAmputee' && (name.includes('קביים') || name.includes('crutch'))) {
+    return BIOMECHANICS_DB['crutch-balance'];
+  }
+  return '';
+}
+
 export async function analyzeRepFrames({ frames, sport, exercise, playerProfile, repNumber }) {
   const safeFallback = { is_correct: true, feedback: '', score: 0 };
   try {
     if (!frames || frames.length !== 3) return safeFallback;
 
     const sportContext = SPORT_CONTEXTS[sport] || SPORT_CONTEXTS.fitness || '';
+    const playerName = playerProfile?.name || 'ספורטאי';
     const playerInfo = playerProfile
-      ? `Player: ${playerProfile.name || 'Unknown'}, Age: ${playerProfile.age || '?'}, Disability: ${playerProfile.disability || 'none'}`
+      ? `Player: ${playerName}, Age: ${playerProfile.age || '?'}, Disability: ${playerProfile.disability || 'none'}`
       : '';
+    const biomechanics = getBiomechanicsChecklist(exercise, sport);
+    const biomechanicsSection = biomechanics ? `\nBIOMECHANICS FOR ${exercise}:\n${biomechanics}` : '';
 
-    const system = `You are a real-time exercise form analyst for ${exercise}.
+    const system = `You are analyzing rep #${repNumber} of ${exercise} for ${playerName}.
 ${sportContext}
 ${playerInfo}
+${biomechanicsSection}
 
-Analyze 3 frames from rep #${repNumber}: Frame 1 = start of movement, Frame 2 = peak effort/depth, Frame 3 = return.
-Respond ONLY with a JSON object: {"is_correct": boolean, "feedback": "short Hebrew feedback", "score": 1-10}
-If form is good, feedback should be a short Hebrew encouragement. If form needs correction, give ONE specific Hebrew tip.
-Keep feedback under 15 words. Score 7+ means good form.`;
+ANALYSIS PROTOCOL:
+Compare the 3 frames (start → peak effort → return) against the biomechanics checkpoints.
+Identify the ONE most impactful issue (or confirm good form).
+
+RESPONSE FORMAT — return ONLY valid JSON:
+{"is_correct":boolean,"feedback":"Hebrew coaching sentence","score":1-10,"isUrgent":boolean,"issue_key":"string"}
+
+FEEDBACK RULES:
+- MAX 20 words Hebrew. TTS-friendly: no brackets, no lists, no special chars.
+- Start with the athlete's name or warm encouragement, then the specific technical fix.
+- Include a QUANTITATIVE cue when possible (angle, distance, direction).
+- Good form example: "${playerName}, ביצוע מדויק! הברכיים בדיוק מעל האצבעות, תמשיך ככה"
+- Bad form example: "${playerName}, אנרגיה מעולה! תרד עוד קצת, הברכיים צריכות לצאת החוצה"
+- Urgent example: "${playerName}, עצור! הקביים מחליקות, תרחיב את הבסיס"
+- isUrgent=true ONLY for: fall risk, joint danger, equipment instability.
+- issue_key: short English key like "knee_valgus", "ankle_unlocked", "crutch_narrow", "good_form".
+- Score: 7-10 = good form, 4-6 = needs work, 1-3 = safety concern.`;
 
     const contentBlocks = [
       { type: 'text', text: `Frame 1 (start of rep #${repNumber}):` },
@@ -118,12 +210,12 @@ Keep feedback under 15 words. Score 7+ means good form.`;
       { type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: frames[1] } },
       { type: 'text', text: `Frame 3 (return/completion):` },
       { type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: frames[2] } },
-      { type: 'text', text: 'Analyze the form across these 3 frames. Return ONLY the JSON.' }
+      { type: 'text', text: 'Analyze form across these 3 frames. Return ONLY the JSON.' }
     ];
 
     const message = await client.messages.create({
       model: HAIKU_VISION_MODEL,
-      max_tokens: 200,
+      max_tokens: 150,
       system,
       messages: [{ role: 'user', content: contentBlocks }]
     });
@@ -132,7 +224,7 @@ Keep feedback under 15 words. Score 7+ means good form.`;
     if (parsed && typeof parsed.is_correct === 'boolean') return parsed;
     return safeFallback;
   } catch (err) {
-    if (err.status === 429) return safeFallback; // skip silently on rate limit
+    if (err.status === 429) return safeFallback;
     console.error('analyzeRepFrames error:', err.message);
     return safeFallback;
   }
@@ -160,7 +252,17 @@ SAFETY RULES:
 - Include grip strength exercises for crutch endurance
 - Progressively build crutch sprint distance
 - Core work is essential to prevent lower back strain
-- Rest between high-intensity crutch drills must be adequate`,
+- Rest between high-intensity crutch drills must be adequate
+
+ADVANCED CRUTCH BIOMECHANICS:
+- Crutch base must be >= shoulder width for stability during kicks
+- Crutch leverage sprint: plant crutches ahead of body, swing-through gait for max speed
+- Pre-kick sequence: shift weight fully to crutches → brace core → hip rotation → kick with standing leg
+- Balance triangle: 2 crutch tips + standing foot form stable equilateral triangle
+- Shoulder fatigue monitoring: hunched shoulders = immediate rest needed
+- Wrist angle: neutral position (not hyperextended) during all weight-bearing phases
+- Ball control: trap ball with sole while crutches provide tripod stability, then pass/shoot
+- Turning technique: pivot on standing foot, use crutches as compass points for direction change`,
 
   footballAmputeeGK: `You are an expert AMPUTEE FOOTBALL GOALKEEPER coach.
 In amputee football, the goalkeeper has an upper limb deficiency. The goalkeeper uses one arm.
@@ -190,7 +292,15 @@ DRILL DESIGN:
 SAFETY:
 - Proper warm-up before explosive movements
 - Gradual increase in sprint intensity
-- Ankle and knee stability exercises as injury prevention`,
+- Ankle and knee stability exercises as injury prevention
+
+BIOMECHANICS FOCUS:
+- Kicking: plant foot 15cm beside ball, ankle locked rigid, hip rotation drives power, follow-through high across body
+- Running technique: arm drive opposite to legs, heel-to-toe transition, forward lean 5-10 degrees
+- Passing: inside-foot technique, plant foot points to target, weight transfer through ball, follow-through to target
+- First touch: cushion ball (withdraw foot on contact), body behind ball line, open body to next action
+- Shooting: approach at 30-45 degree angle, strike with laces for power or inside for placement, lean over ball
+- Dribbling: ball within 1m, alternate inside/outside/sole, low center of gravity, periodic head-up scanning`,
 
   basketballWheelchair: `You are an expert wheelchair basketball coach specializing in personalized training.
 
@@ -268,7 +378,22 @@ SAFETY:
 - Proper warm-up before jumping and cutting movements
 - Ankle stability exercises as injury prevention
 - Gradual increase in intensity for sprint/agility drills
-- Rest between high-intensity shooting/driving series`,
+- Rest between high-intensity shooting/driving series
+
+SHOOTING BIOMECHANICS (BEEF METHOD):
+- Balance: feet shoulder-width apart, square to basket, weight on balls of feet
+- Eyes: focus on back of rim throughout entire shot
+- Elbow: directly under ball at 90 degree set point, NOT flared out, forms L-shape
+- Follow-through: full arm extension, wrist snap (gooseneck), hold finish until ball hits rim
+- One-motion shot: legs drive upward → elbow extends → wrist flicks (continuous kinetic chain)
+- Release point: ball leaves hand above the shooting eye, index+middle finger last contact
+- Off-hand: guide hand stays on side of ball, comes off cleanly at release (no thumb flick)
+
+DRIBBLING BIOMECHANICS:
+- Pound dribble below knee height for control, waist height for speed
+- Fingertip control (not palm), push ball down rather than slapping
+- Crossover: hard pound at 45 degree angle, low and quick, sell with shoulder/head fake
+- Eyes up: scan court while dribbling, use peripheral vision for ball`,
 
   tennis: `You are an expert tennis coach specializing in personalized solo training.
 
@@ -295,7 +420,13 @@ SAFETY:
 - Thorough shoulder warm-up before serving
 - Wrist and elbow care: avoid overloading with excessive topspin early
 - Proper footwear for court surface
-- Rest between intense serving sessions to protect shoulder`,
+- Rest between intense serving sessions to protect shoulder
+
+STROKE BIOMECHANICS:
+- Forehand: early unit turn with shoulders, racket back via non-dominant hand, contact in front of body at waist height, full follow-through over opposite shoulder, weight transfers from back to front foot
+- Backhand (two-hand): early shoulder turn, dominant hand at base of grip, contact in front, follow-through across body to opposite shoulder
+- Serve: ball toss at 1 o'clock position (for right-hander), trophy position with racket behind head, full vertical extension at contact, pronation through ball on follow-through, land on front foot inside baseline
+- Volley: split step as opponent contacts ball, short backswing (no full swing), firm wrist, punch through ball, recover to ready position immediately`,
   fitness: `You are an expert personal fitness coach specializing in GENERAL FITNESS ONLY.
 This is NOT a sport program. ABSOLUTELY NO balls, NO dribbling, NO shooting, NO passing, NO sport-specific drills of any kind.
 Every exercise must be pure fitness: strength, cardio, aerobic conditioning, flexibility, or core work.
@@ -331,7 +462,18 @@ SAFETY:
 - Proper warm-up before strength work
 - Correct form over heavy weight
 - Adequate rest between strength sets
-- Cool-down with stretching after cardio`
+- Cool-down with stretching after cardio
+
+EXERCISE BIOMECHANICS:
+- Squat: knees track over toes (no valgus collapse inward), heels planted on floor, spine neutral (not rounded), depth to parallel minimum, core braced throughout, weight in mid-foot to heels
+- Push-up: elbows at 45 degrees from torso (not flared 90), chest touches floor for full ROM, full lockout at top, rigid plank body line (no hip sag or pike), head in neutral alignment
+- Plank: straight line from head to heels, no hip sag or pike, shoulders stacked directly over wrists, core and glutes actively engaged
+- Lunge: front knee tracks over ankle (not past toes), back knee descends toward floor, torso stays upright, front shin roughly vertical
+- Burpee: soft landing on balls of feet from jump, chest contacts floor in push-up phase, explosive hip drive to standing, full extension with arms overhead at top
+- Dips: shoulders stay above elbow level at bottom, elbows bend to 90 degrees, no shoulder shrug or forward lean, controlled descent 2-3 seconds
+- Bridge: drive through heels, squeeze glutes at top, neutral spine (no rib flare), hold peak contraction 1-2 seconds
+- Mountain climber: hands under shoulders, hips stay level (no bouncing up/down), drive knees to chest alternating, maintain plank spine throughout
+- Crunch: lower back stays pressed to floor, curl shoulders toward hips, exhale forcefully on contraction, no neck pulling with hands`
 };
 
 const LOCATION_RULES = {
@@ -1251,18 +1393,21 @@ COACHING TONE:
 ${ageStyle}
 
 RULES:
-- Return 1-2 Hebrew sentences that sound SPOKEN, not written. Like a real coach shouting/encouraging.
-- Maximum 20 words total.
-- If form is good (goodFormPct > 70%) → push harder with energy! ("יאללה עוד אחד! מצוין!")
-- If form is bad (badFormPct > 40%) → correct the TOP issue with a specific fix ("תרד יותר עמוק בסקוואט, הברכיים מעל האצבעות!")
-- If athlete is struggling → motivate! ("אתה יכול! רק עוד 3!")
-- Use the athlete's name: ${data.playerName || 'אלוף'}
+- Return 1-2 Hebrew sentences: warm encouragement BLENDED with ONE specific biomechanical cue.
+- Maximum 25 words total. Each sentence max 12 words — TTS engines cut long sentences.
+- NO brackets, NO lists, NO bullet points, NO special characters. Write FLOWING spoken Hebrew only.
+- NO parentheses or quotation marks. Write as if you're talking out loud.
+- ALWAYS start with the athlete's name: ${data.playerName || 'אלוף'}
+- Include QUANTITATIVE detail when possible: angles, distances, directions, percentages.
 - Be specific to the exercise: ${data.exercise}
-- Sound like a REAL coach, not a robot. Use slang: יאללה, אחלה, ככה, בול, שריפה.
-${data.disability && data.disability !== 'none' ? `- Athlete has disability: ${data.disability}. Be sensitive and adaptive.` : ''}
+- Sound like a REAL Israeli coach. Use slang: יאללה, אחלה, ככה, בול, שריפה, אש.
+- If form is good (goodFormPct > 70%) → push harder with energy AND give an optimization cue. Example: ${data.playerName || 'אלוף'} אש! ביצוע מושלם, עכשיו נסה לרדת עוד קצת בסקוואט!
+- If form is bad (badFormPct > 40%) → encourage THEN correct the TOP issue with a specific spoken fix. Example: ${data.playerName || 'אלוף'} יופי של אנרגיה! הברכיים צריכות לצאת החוצה, לא פנימה!
+- If athlete is struggling → motivate with warmth! Example: ${data.playerName || 'אלוף'} אתה אלוף! רק עוד שלוש חזרות, אני איתך!
+${data.disability && data.disability !== 'none' ? `- Athlete has disability: ${data.disability}. Be sensitive, adaptive, and celebrate every rep. Give disability-specific biomechanical cues.` : ''}
 
-Return ONLY valid JSON: {"feedback":"Hebrew coaching sentence","isUrgent":false}
-isUrgent=true only for safety/critical form issues.`;
+Return ONLY valid JSON: {"feedback":"Hebrew spoken coaching sentence","isUrgent":false}
+isUrgent=true only for safety/critical form issues (fall risk, joint danger, equipment instability).`;
 
   const content = `Exercise: ${data.exercise}
 Duration: ${data.duration}s

@@ -143,16 +143,18 @@ router.post('/realtime-feedback', async (req, res) => {
 const repAnalysisInFlight = new Set();
 
 router.post('/analyze-rep', async (req, res) => {
-  const { playerName, exercise, frames, sport, playerProfile, repNumber } = req.body;
+  const { playerName, exercise, frames, sport, playerProfile, repNumber, qaMode } = req.body;
   const safeFallback = { is_correct: true, feedback: '', score: 0 };
   const key = `rep-${playerName}-${exercise}`;
 
-  if (shouldThrottle(key, 3000)) {
-    return res.json(safeFallback);
-  }
-
-  if (repAnalysisInFlight.has(key)) {
-    return res.json(safeFallback);
+  // QA mode: skip throttle and in-flight checks for testing
+  if (!qaMode) {
+    if (shouldThrottle(key, 3000)) {
+      return res.json(safeFallback);
+    }
+    if (repAnalysisInFlight.has(key)) {
+      return res.json(safeFallback);
+    }
   }
 
   if (!frames || !Array.isArray(frames) || frames.length !== 3) {
@@ -161,8 +163,23 @@ router.post('/analyze-rep', async (req, res) => {
 
   repAnalysisInFlight.add(key);
 
+  // Debug mode: save frames when DEBUG_VISION env is set OR when qaMode is requested
+  const shouldDebug = process.env.DEBUG_VISION === 'true' || qaMode === true;
+  if (shouldDebug) {
+    try {
+      const { saveDebugFrames } = await import('../services/debugFrames.js');
+      await saveDebugFrames(frames, exercise, playerName, repNumber);
+    } catch (debugErr) {
+      console.warn('[DEBUG_VISION] Save failed:', debugErr.message);
+    }
+  }
+
   try {
     const result = await analyzeRepFrames({ frames, sport, exercise, playerProfile, repNumber });
+    // Attach debug metadata in QA mode
+    if (shouldDebug) {
+      result._debug = { framesDir: 'server/debug_frames', savedAt: Date.now(), repNumber };
+    }
     res.json(result);
   } catch (error) {
     console.error('Rep analysis error:', error.message);
@@ -202,6 +219,18 @@ router.post('/adapt-workout', async (req, res) => {
   } catch (error) {
     console.error('Workout adaptation error:', error.message);
     res.json({ adapted: false, plan: req.body.remainingPlan, reasoning: 'Error' });
+  }
+});
+
+// === QA DEBUG ENDPOINT ===
+// GET /api/coach/debug-frames — list saved debug frames (only works with DEBUG_VISION or in dev)
+router.get('/debug-frames', async (req, res) => {
+  try {
+    const { getDebugStats } = await import('../services/debugFrames.js');
+    const stats = getDebugStats();
+    res.json(stats);
+  } catch (error) {
+    res.json({ totalFrames: 0, error: error.message });
   }
 });
 
