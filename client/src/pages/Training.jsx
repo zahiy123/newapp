@@ -1143,8 +1143,11 @@ export default function Training() {
   }, [landmarks, phase, warmUpIdx]);
 
   const handleStartCamera = useCallback(async () => {
-    unlockAudio(); // Unlock mobile audio on first user tap
+    unlockAudio(); // Unlock mobile audio on camera permission tap — this IS the user gesture
+    setAudioUnlocked(true); // Hide manual audio button immediately
     await startCamera();
+    // Re-unlock after camera resolves (Android sometimes re-suspends during permission dialog)
+    unlockAudio();
     setTimeout(() => { if (videoRef.current) startLoop(videoRef.current); }, 500);
     // Start session timer
     if (!sessionDataRef.current.startTime) {

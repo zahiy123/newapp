@@ -7,18 +7,63 @@ export function useSpeech(lang = 'he-IL', age) {
   const currentUtteranceRef = useRef(null);
   const speechStartedAtRef = useRef(0);
   const audioUnlockedRef = useRef(false);
+  const preferredVoiceRef = useRef(null);
+  const audioCtxRef = useRef(null);
   const isHe = lang.startsWith('he');
   const lifeStage = getLifeStage(age);
+
+  // Android: voices load async — listen for onvoiceschanged to pick Hebrew voice
+  const pickVoice = useCallback(() => {
+    if (!window.speechSynthesis) return;
+    const voices = window.speechSynthesis.getVoices();
+    if (!voices.length) return;
+    // Prefer exact lang match (he-IL or en-US), fallback to lang prefix
+    const exact = voices.find(v => v.lang === lang);
+    const prefix = voices.find(v => v.lang.startsWith(lang.split('-')[0]));
+    preferredVoiceRef.current = exact || prefix || null;
+  }, [lang]);
+
+  // Listen for voices loaded (critical for Android Chrome)
+  useRef(() => {
+    pickVoice();
+    if (window.speechSynthesis?.onvoiceschanged !== undefined) {
+      window.speechSynthesis.onvoiceschanged = pickVoice;
+    }
+  });
+  // Also try on mount
+  if (!preferredVoiceRef.current) pickVoice();
+
+  // Ensure AudioContext is alive — call before every speak on Android
+  const ensureAudioContext = useCallback(() => {
+    try {
+      if (!audioCtxRef.current) {
+        audioCtxRef.current = new (window.AudioContext || window.webkitAudioContext)();
+      }
+      if (audioCtxRef.current.state === 'suspended') {
+        audioCtxRef.current.resume();
+      }
+    } catch {}
+  }, []);
 
   // Low-level helper: speak a single utterance, does NOT clear queue
   const _utterSpeak = useCallback((text, options = {}) => {
     if (!window.speechSynthesis || !text) return;
 
+    // Android Chrome: resume speechSynthesis + AudioContext before every speak
+    try { window.speechSynthesis.resume(); } catch {}
+    ensureAudioContext();
+
     const utterance = new SpeechSynthesisUtterance(text);
     utterance.lang = lang;
-    utterance.rate = options.rate || 1;
+    // Clamp rate to safe range for Google TTS engine
+    const rawRate = options.rate || 1;
+    utterance.rate = Math.min(Math.max(rawRate, 0.8), 1.2);
     utterance.pitch = options.pitch || 1;
-    utterance.volume = options.volume || 1;
+    utterance.volume = 1; // Always max volume on mobile
+    // Use preferred voice if available
+    if (preferredVoiceRef.current) {
+      utterance.voice = preferredVoiceRef.current;
+    }
 
     speaking.current = true;
     speechStartedAtRef.current = Date.now();
@@ -37,45 +82,59 @@ export function useSpeech(lang = 'he-IL', age) {
     };
 
     window.speechSynthesis.speak(utterance);
-  }, [lang]);
+  }, [lang, ensureAudioContext]);
 
   // Unlock audio on mobile — must be called from a user gesture (tap/click)
   const unlockAudio = useCallback(() => {
-    if (audioUnlockedRef.current) return;
     if (!window.speechSynthesis) return;
 
-    // 1. Silent utterance to unlock speechSynthesis
+    // Always re-unlock (Android can re-suspend between interactions)
+    // 1. Resume speechSynthesis
+    try { window.speechSynthesis.resume(); } catch {}
+
+    // 2. Silent utterance to unlock speechSynthesis pipeline
+    window.speechSynthesis.cancel();
     const utterance = new SpeechSynthesisUtterance('.');
     utterance.volume = 0.01;
     utterance.lang = lang;
+    if (preferredVoiceRef.current) utterance.voice = preferredVoiceRef.current;
     window.speechSynthesis.speak(utterance);
 
-    // 2. Also unlock AudioContext (needed for some iOS versions)
+    // 3. Create/resume AudioContext
     try {
-      const ctx = new (window.AudioContext || window.webkitAudioContext)();
+      if (!audioCtxRef.current) {
+        audioCtxRef.current = new (window.AudioContext || window.webkitAudioContext)();
+      }
+      const ctx = audioCtxRef.current;
+      if (ctx.state === 'suspended') ctx.resume();
+      // Play silent buffer
       const buf = ctx.createBuffer(1, 1, 22050);
       const src = ctx.createBufferSource();
       src.buffer = buf;
       src.connect(ctx.destination);
       src.start(0);
-      if (ctx.state === 'suspended') ctx.resume();
     } catch {}
 
-    // 3. Mobile Safari workaround: speechSynthesis pauses after ~15s
-    // Periodically nudge it to stay alive
-    if (/iPhone|iPad|iPod/i.test(navigator.userAgent)) {
-      if (!window._speechKeepAlive) {
-        window._speechKeepAlive = setInterval(() => {
-          if (window.speechSynthesis.speaking) {
-            window.speechSynthesis.pause();
-            window.speechSynthesis.resume();
-          }
-        }, 10000);
-      }
+    // 4. Keepalive for both iOS Safari and Android Chrome
+    if (!window._speechKeepAlive) {
+      window._speechKeepAlive = setInterval(() => {
+        if (!window.speechSynthesis) return;
+        if (window.speechSynthesis.speaking) {
+          window.speechSynthesis.pause();
+          window.speechSynthesis.resume();
+        }
+        // Also keep AudioContext alive
+        try {
+          if (audioCtxRef.current?.state === 'suspended') audioCtxRef.current.resume();
+        } catch {}
+      }, 10000);
     }
 
+    // 5. Pick voice if not yet found (Android late-load)
+    if (!preferredVoiceRef.current) pickVoice();
+
     audioUnlockedRef.current = true;
-  }, [lang]);
+  }, [lang, pickVoice]);
 
   // Internal helper: cancel previous speech, clear queue, then speak
   const _doSpeak = useCallback((text, options = {}) => {
