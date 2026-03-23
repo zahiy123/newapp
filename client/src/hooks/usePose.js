@@ -26,7 +26,11 @@ export function usePose(canvasRef, beforeDrawRef) {
   const landmarkerRef = useRef(null);
   const animFrameRef = useRef(null);
   const [ready, setReady] = useState(false);
+  // Landmarks: ref for 60fps canvas drawing, state throttled for React consumers
+  const landmarksRef = useRef(null);
   const [landmarks, setLandmarks] = useState(null);
+  const lastStateUpdateRef = useRef(0);
+  const ANALYSIS_INTERVAL_MS = 50; // Push to React state at ~20fps (every 50ms)
 
   useEffect(() => {
     let cancelled = false;
@@ -41,7 +45,10 @@ export function usePose(canvasRef, beforeDrawRef) {
           delegate: 'GPU'
         },
         runningMode: 'VIDEO',
-        numPoses: 1
+        numPoses: 1,
+        minPoseDetectionConfidence: 0.3,
+        minPosePresenceConfidence: 0.3,
+        minTrackingConfidence: 0.3
       });
       if (cancelled) return;
       landmarkerRef.current = landmarker;
@@ -56,9 +63,18 @@ export function usePose(canvasRef, beforeDrawRef) {
 
     const result = landmarkerRef.current.detectForVideo(videoEl, performance.now());
     const lm = result.landmarks?.[0] || null;
-    setLandmarks(lm);
 
-    // Draw on canvas
+    // Always update ref immediately (60fps — for canvas drawing)
+    landmarksRef.current = lm;
+
+    // Throttle React state updates to ~20fps (analysis doesn't need 60fps)
+    const now = performance.now();
+    if (now - lastStateUpdateRef.current >= ANALYSIS_INTERVAL_MS) {
+      lastStateUpdateRef.current = now;
+      setLandmarks(lm);
+    }
+
+    // Draw on canvas at full 60fps — uses ref, not state
     if (canvasRef?.current && lm) {
       const canvas = canvasRef.current;
       canvas.width = videoEl.videoWidth;
@@ -89,5 +105,5 @@ export function usePose(canvasRef, beforeDrawRef) {
     }
   }, []);
 
-  return { ready, landmarks, detect, startLoop, stopLoop, LM, angle, midpoint };
+  return { ready, landmarks, landmarksRef, detect, startLoop, stopLoop, LM, angle, midpoint };
 }

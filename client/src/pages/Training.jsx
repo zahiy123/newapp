@@ -605,18 +605,32 @@ export default function Training() {
     }
 
     // === TECHNIQUE FEEDBACK: Only if firstRepStarted ===
+    // Track whether a NEW rep just happened in this frame
+    const isNewRep = newState.feedback?.type === 'count' && newState.reps > (prevState.reps || 0);
+
     if (newState.feedback && firstRepStarted) {
       const fb = newState.feedback;
 
+      // Good/warning form tracking — only accumulate counters, don't speak yet
       if (fb.type === 'good' && isMoving) {
         goodFormCountRef.current++;
-        const now = Date.now();
-        if (now - lastEncouragementRef.current > 5000) {
-          speakPositiveReinforcement(playerName);
-          lastEncouragementRef.current = now;
-        }
       } else if (fb.type === 'warning' && isMoving) {
         badFormCountRef.current++;
+      } else if (fb.type !== 'good' && fb.type !== 'warning') {
+        badFormCountRef.current = 0;
+      }
+
+      // === SPEECH: Only trigger encouragement/correction AFTER a confirmed new rep ===
+      if (isNewRep) {
+        // Encouragement: speak after rep if form was mostly good
+        if (goodFormCountRef.current >= 5) {
+          const now = Date.now();
+          if (now - lastEncouragementRef.current > 8000) {
+            speakPositiveReinforcement(playerName);
+            lastEncouragementRef.current = now;
+          }
+        }
+        // Correction: speak after rep if bad form accumulated
         if (badFormCountRef.current >= 5 && !formStoppedRef.current) {
           formStoppedRef.current = true;
           speakCorrection(currentExercise?.tips);
@@ -625,16 +639,15 @@ export default function Training() {
             formStoppedRef.current = false;
             badFormCountRef.current = 0;
           }, 3000);
-          exerciseStateRef.current = newState;
-          return;
         }
-      } else if (fb.type !== 'good' && fb.type !== 'warning') {
+        // Reset form counters after each rep
+        goodFormCountRef.current = 0;
         badFormCountRef.current = 0;
       }
 
       // Suppress good/warning feedback when NOT moving
       if (!isMoving && (fb.type === 'good' || fb.type === 'warning')) {
-        // Silence
+        // Silence — don't speak or update UI for continuous form feedback
       } else if (fb.text !== lastSpokenRef.current) {
         // Show coaching text if available, otherwise show default text
         const coachingText = fb.coaching ? (isHe ? fb.coaching.he : fb.coaching.en) : null;
@@ -660,21 +673,19 @@ export default function Training() {
             handleSetComplete();
             return;
           }
-        } else if (fb.type === 'warning' && coachingText) {
-          // For warnings, always speak the coaching text (more detailed)
+        } else if (fb.type === 'warning' && coachingText && isNewRep) {
+          // For warnings, speak coaching text ONLY on new rep (not every frame)
           speakPriority(coachingText, { rate: 1.2, pitch: 1.05 });
           lastSpokenRef.current = fb.text;
-        } else {
-          speakIfIdle(fb.text);
-          lastSpokenRef.current = fb.text;
         }
+        // Removed: generic speakIfIdle for non-count feedback — was causing loops
       }
     }
 
-    // Mind-muscle cue: every 15s during good-form movement
+    // Mind-muscle cue: every 20s during good-form movement (was 15s, increased to reduce noise)
     if (firstRepStarted && isMoving && newState.feedback?.type !== 'warning') {
       const now = Date.now();
-      if (now - lastMindMuscleCueRef.current > 15000) {
+      if (now - lastMindMuscleCueRef.current > 20000) {
         lastMindMuscleCueRef.current = now;
         speakMindMuscleCue(analyzerRef.current?.cueKey || 'default', newState.phase || 'up', playerName);
       }

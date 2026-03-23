@@ -4,6 +4,7 @@ const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:3001';
 const MAX_SESSION_IMAGES = 960;
 const MAX_CONSECUTIVE_FAILURES = 5;
 const FRAME2_DELAY_MS = 150;
+const MIN_PHASE_HOLD_MS = 200; // Phase must be held 200ms to be considered real (noise filter)
 
 export function useHaikuVision({ onVisionFeedback } = {}) {
   // All refs — no useState to avoid re-renders at 60fps
@@ -18,6 +19,7 @@ export function useHaikuVision({ onVisionFeedback } = {}) {
   const lastPhaseRef = useRef(null);
   const frame2TimerRef = useRef(null);
   const repCountRef = useRef(0);
+  const phaseStartTimeRef = useRef(0); // When current phase started (noise filter)
 
   // Session limits
   const sessionImageCountRef = useRef(0);
@@ -74,10 +76,23 @@ export function useHaikuVision({ onVisionFeedback } = {}) {
   const feedPhaseData = useCallback((newState) => {
     if (!enabledRef.current || disabledRef.current) return;
     if (!newState) return;
+    // Only process when athlete is actually moving (ignore idle phase flickers)
+    if (!newState.moving && !newState.firstRepStarted) return;
 
     const currentPhase = newState.phase;
     const prevPhase = lastPhaseRef.current;
     const reps = newState.reps ?? 0;
+    const now = Date.now();
+
+    // Track phase timing — filter out noise flickers (<200ms)
+    if (currentPhase !== prevPhase) {
+      const phaseHeld = now - phaseStartTimeRef.current;
+      if (phaseHeld < MIN_PHASE_HOLD_MS && prevPhase != null) {
+        // Phase flip too fast — likely noise, ignore
+        return;
+      }
+      phaseStartTimeRef.current = now;
+    }
 
     // Phase transition: up → down → capture Frame 1 (start of movement)
     if (prevPhase === 'up' && currentPhase === 'down') {
