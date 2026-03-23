@@ -43,10 +43,37 @@ export function useSpeech(lang = 'he-IL', age) {
   const unlockAudio = useCallback(() => {
     if (audioUnlockedRef.current) return;
     if (!window.speechSynthesis) return;
-    const utterance = new SpeechSynthesisUtterance('');
-    utterance.volume = 0;
+
+    // 1. Silent utterance to unlock speechSynthesis
+    const utterance = new SpeechSynthesisUtterance('.');
+    utterance.volume = 0.01;
     utterance.lang = lang;
     window.speechSynthesis.speak(utterance);
+
+    // 2. Also unlock AudioContext (needed for some iOS versions)
+    try {
+      const ctx = new (window.AudioContext || window.webkitAudioContext)();
+      const buf = ctx.createBuffer(1, 1, 22050);
+      const src = ctx.createBufferSource();
+      src.buffer = buf;
+      src.connect(ctx.destination);
+      src.start(0);
+      if (ctx.state === 'suspended') ctx.resume();
+    } catch {}
+
+    // 3. Mobile Safari workaround: speechSynthesis pauses after ~15s
+    // Periodically nudge it to stay alive
+    if (/iPhone|iPad|iPod/i.test(navigator.userAgent)) {
+      if (!window._speechKeepAlive) {
+        window._speechKeepAlive = setInterval(() => {
+          if (window.speechSynthesis.speaking) {
+            window.speechSynthesis.pause();
+            window.speechSynthesis.resume();
+          }
+        }, 10000);
+      }
+    }
+
     audioUnlockedRef.current = true;
   }, [lang]);
 

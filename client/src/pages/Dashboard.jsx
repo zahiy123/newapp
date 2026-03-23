@@ -158,7 +158,7 @@ export default function Dashboard() {
   async function fetchWeek(payload, weekNumber, retries = 1) {
     for (let attempt = 0; attempt <= retries; attempt++) {
       const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), 30000);
+      const timeout = setTimeout(() => controller.abort(), 60000);
       try {
         const res = await fetch(apiUrl('/api/coach/training-week'), {
           method: 'POST',
@@ -425,10 +425,13 @@ export default function Dashboard() {
       )}
 
       {error && (
-        <div className="bg-red-50 border border-red-200 rounded-xl p-4 text-red-600 text-sm">
-          {error}
-          <button onClick={() => generatePlan()} className="block mt-2 text-blue-600 hover:underline font-medium">
-            {t('dashboard.retry')}
+        <div className="bg-red-50 border border-red-200 rounded-xl p-4 text-center space-y-3">
+          <p className="text-red-600 text-sm">{error}</p>
+          <button
+            onClick={() => { setError(''); generatePlan(); }}
+            className="px-6 py-3 min-h-[48px] bg-gradient-to-r from-blue-500 to-indigo-600 text-white rounded-lg font-bold text-base hover:opacity-90 transition"
+          >
+            {isHe ? 'נסה שוב' : 'Try Again'}
           </button>
         </div>
       )}

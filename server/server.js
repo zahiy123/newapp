@@ -9,12 +9,18 @@ const PORT = process.env.PORT || 3001;
 app.use(cors());
 app.use(express.json({ limit: '10mb' }));
 
-app.use('/api/coach', coachRoutes);
+// Set 90s timeout for coach routes (AI generation can be slow)
+app.use('/api/coach', (req, res, next) => {
+  req.setTimeout(90000);
+  res.setTimeout(90000);
+  next();
+}, coachRoutes);
 
 app.get('/api/health', (req, res) => {
   res.json({ status: 'ok' });
 });
 
-app.listen(PORT, () => {
+const server = app.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
 });
+server.timeout = 90000; // 90s default server timeout

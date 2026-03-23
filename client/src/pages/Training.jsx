@@ -1300,6 +1300,7 @@ export default function Training() {
   }
 
   function handleStartBriefing() {
+    unlockAudio(); // Ensure mobile audio is unlocked on every exercise start
     exerciseStateRef.current = { _userProfile: userProfile }; setDisplayReps(0);
     setTimer(0);
     setFeedback(null);
@@ -1316,6 +1317,7 @@ export default function Training() {
   }
 
   function handleStartAfterBriefing() {
+    unlockAudio(); // Re-unlock on user tap for iOS
     stopSpeech();
     sittingWarnedRef.current = false;
 
@@ -1765,7 +1767,7 @@ export default function Training() {
 
         {/* Warm-up — minimal camera overlay (timer + feedback only) */}
         {phase === PHASE.WARM_UP && feedback && (
-          <div className={`absolute top-4 left-4 right-4 ${feedbackColor[feedback.type] || 'bg-blue-500'} text-white px-4 py-3 rounded-xl text-center font-bold text-lg shadow-lg z-10`}>
+          <div className={`absolute top-4 left-4 right-4 ${feedbackColor[feedback.type] || 'bg-blue-500'} text-white px-4 py-3 rounded-xl text-center font-bold text-lg shadow-lg z-[5] pointer-events-none`}>
             {feedback.text}
           </div>
         )}
@@ -1867,9 +1869,9 @@ export default function Training() {
           </div>
         )}
 
-        {/* Live feedback overlay */}
+        {/* Live feedback overlay — z-[5] to stay below bottom controls z-20 */}
         {feedback && phase === PHASE.EXERCISING && (
-          <div className={`absolute top-4 left-4 right-4 ${feedbackColor[feedback.type] || 'bg-blue-500'} text-white px-4 py-3 rounded-xl text-center font-bold text-lg shadow-lg z-10`}>
+          <div className={`absolute top-4 left-4 right-4 ${feedbackColor[feedback.type] || 'bg-blue-500'} text-white px-4 py-3 rounded-xl text-center font-bold text-lg shadow-lg z-[5] pointer-events-none`}>
             {feedback.type === 'count' && <span className="text-3xl sm:text-4xl block">{feedback.count}</span>}
             {feedback.text}
           </div>
@@ -1919,7 +1921,7 @@ export default function Training() {
 
       {/* Exercise info & controls — below camera normally, overlay in fullscreen/mobile */}
       <div className={(isFullscreen || isMobile)
-        ? 'absolute bottom-0 inset-x-0 z-20 bg-black/60 backdrop-blur-sm p-3 max-h-[40vh] overflow-y-auto pb-[env(safe-area-inset-bottom)]'
+        ? 'absolute bottom-0 inset-x-0 z-20 bg-black/60 backdrop-blur-sm p-3 max-h-[45vh] flex flex-col pb-[env(safe-area-inset-bottom)]'
         : ''}>
 
         {cameraError && !isFullscreen && !isMobile && (
@@ -2010,42 +2012,46 @@ export default function Training() {
 
             {currentExercise && phase !== PHASE.WARM_UP && (
               <div className={(isFullscreen || isMobile)
-                ? 'bg-white/10 rounded-xl p-3 space-y-2'
+                ? 'bg-white/10 rounded-xl p-3 space-y-2 flex flex-col'
                 : 'bg-white rounded-xl shadow-lg p-5 border-2 border-blue-500 space-y-3'}>
-                <div className="flex items-center justify-between">
-                  <span className={`text-xs font-medium ${(isFullscreen || isMobile) ? 'text-blue-300' : 'text-blue-600'}`}>
-                    {t('training.currentExercise')} ({currentIdx + 1}/{exercises.length})
-                  </span>
-                  <span className={`text-xs ${(isFullscreen || isMobile) ? 'text-white/50' : 'text-gray-400'}`}>
-                    {totalSets} {t('dashboard.sets')} | {currentExercise.reps} {t('dashboard.reps')} | {restDuration}{t('dashboard.secRest')}
-                  </span>
-                </div>
-                <h2 className={`text-lg font-bold ${(isFullscreen || isMobile) ? 'text-white' : 'text-gray-800'}`}>{currentExercise.name}</h2>
-                {!(isFullscreen || isMobile) && (
-                  <>
-                    <p className="text-sm text-gray-500">{currentExercise.description}</p>
-                    <div className="text-xs text-yellow-700 bg-yellow-50 rounded-lg px-3 py-2">
-                      {LOCATION_ICONS[currentLocation]} {locationProps.setup}
-                    </div>
-                    {currentExercise.tips && <p className="text-xs text-blue-500">{currentExercise.tips}</p>}
-                  </>
-                )}
-
-                {setsPerformance.length > 0 && (
-                  <div className="flex items-center gap-2">
-                    <span className={`text-xs ${isFullscreen ? 'text-white/50' : 'text-gray-400'}`}>{t('training.setsCompleted')}:</span>
-                    {setsPerformance.map((sp, i) => (
-                      <div key={i} className={`w-6 h-6 rounded-full flex items-center justify-center text-white text-xs font-bold ${
-                        sp.quality === 'perfect' ? 'bg-green-500' : sp.quality === 'good' ? 'bg-blue-500' : 'bg-orange-500'
-                      }`}>{i + 1}</div>
-                    ))}
-                    {Array.from({ length: totalSets - setsPerformance.length }, (_, i) => (
-                      <div key={`r-${i}`} className={`w-6 h-6 rounded-full border-2 ${isFullscreen ? 'border-white/30' : 'border-gray-200'}`}></div>
-                    ))}
+                {/* Scrollable info area */}
+                <div className={(isFullscreen || isMobile) ? 'overflow-y-auto max-h-[18vh] space-y-2' : 'space-y-3'}>
+                  <div className="flex items-center justify-between">
+                    <span className={`text-xs font-medium ${(isFullscreen || isMobile) ? 'text-blue-300' : 'text-blue-600'}`}>
+                      {t('training.currentExercise')} ({currentIdx + 1}/{exercises.length})
+                    </span>
+                    <span className={`text-xs ${(isFullscreen || isMobile) ? 'text-white/50' : 'text-gray-400'}`}>
+                      {totalSets} {t('dashboard.sets')} | {currentExercise.reps} {t('dashboard.reps')} | {restDuration}{t('dashboard.secRest')}
+                    </span>
                   </div>
-                )}
+                  <h2 className={`text-lg font-bold ${(isFullscreen || isMobile) ? 'text-white' : 'text-gray-800'}`}>{currentExercise.name}</h2>
+                  {!(isFullscreen || isMobile) && (
+                    <>
+                      <p className="text-sm text-gray-500">{currentExercise.description}</p>
+                      <div className="text-xs text-yellow-700 bg-yellow-50 rounded-lg px-3 py-2">
+                        {LOCATION_ICONS[currentLocation]} {locationProps.setup}
+                      </div>
+                      {currentExercise.tips && <p className="text-xs text-blue-500">{currentExercise.tips}</p>}
+                    </>
+                  )}
 
-                <div className="flex flex-wrap gap-3 pt-2">
+                  {setsPerformance.length > 0 && (
+                    <div className="flex items-center gap-2">
+                      <span className={`text-xs ${isFullscreen ? 'text-white/50' : 'text-gray-400'}`}>{t('training.setsCompleted')}:</span>
+                      {setsPerformance.map((sp, i) => (
+                        <div key={i} className={`w-6 h-6 rounded-full flex items-center justify-center text-white text-xs font-bold ${
+                          sp.quality === 'perfect' ? 'bg-green-500' : sp.quality === 'good' ? 'bg-blue-500' : 'bg-orange-500'
+                        }`}>{i + 1}</div>
+                      ))}
+                      {Array.from({ length: totalSets - setsPerformance.length }, (_, i) => (
+                        <div key={`r-${i}`} className={`w-6 h-6 rounded-full border-2 ${isFullscreen ? 'border-white/30' : 'border-gray-200'}`}></div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                {/* Sticky action buttons — always visible */}
+                <div className="flex flex-wrap gap-3 pt-2 flex-shrink-0">
                   <button onClick={handlePrevExercise} disabled={currentIdx === 0}
                     className={`px-4 py-2 min-h-[44px] rounded-lg text-sm disabled:opacity-30 ${isFullscreen ? 'border border-white/30 text-white' : 'border border-gray-300'}`}>
                     {t('training.prevExercise')}

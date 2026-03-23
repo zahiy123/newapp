@@ -76,7 +76,8 @@ async function callClaudeHaiku(system, content, maxTokens = 2048, retries = 2) {
         model: HAIKU_VISION_MODEL,
         max_tokens: maxTokens,
         system,
-        messages: [{ role: 'user', content }]
+        messages: [{ role: 'user', content }],
+        timeout: 60000 // 60s timeout per attempt
       });
       return message.content[0].text;
     } catch (err) {
@@ -494,11 +495,13 @@ ${sport === 'fitness'
 - Sport drills: dribbling, passing, shooting, agility, tactical movement for this specific sport.
 - SOLO TRAINING: Include household items as simulated defenders/targets in tips.`}
 
-CRITICAL: Return ONLY raw JSON. NO markdown, NO backticks, NO prose, NO long sentences. Minimal JSON only.
-description: max 8 words. tips: max 8 words. warmup/cooldown: max 6 words.
+CRITICAL: Return ONLY raw JSON. NO markdown, NO backticks, NO prose.
+DESCRIPTION STYLE: Write simple, clear action instructions in Hebrew. NOT "ביצוע פלנק סטטי" but "הישאר במצב שכיבת סמיכה על המרפקים עם גב ישר". Max 12 words.
+TIPS: One short safety/form tip per exercise. Max 10 words. Example: "שמור על גב ישר, אל תעגל את הכתפיים".
+warmup/cooldown: max 8 words.
 ${sport === 'fitness' ? (hasStrength ? '3-4' : '3') : '3-4'} exercises per day${sport !== 'fitness' ? ` (${hasStrength ? '3' : '2-3'} sport drills + max 1 strength)` : ' (all fitness exercises, NO sport drills)'}.
 
-{"weekNumber":${weekNumber},"theme":"${theme}","days":[{"day":"יום א","focus":"מיקוד","exercises":[{"name":"שם","description":"קצר מאוד","sets":${prog.sets},"reps":"${prog.reps}","restSeconds":${prog.rest},"tips":"טיפ קצר"}],"warmup":"חימום קצר","cooldown":"שחרור","durationMinutes":50}]}
+{"weekNumber":${weekNumber},"theme":"${theme}","days":[{"day":"יום א","focus":"מיקוד","exercises":[{"name":"שם","description":"הסבר פשוט איך לבצע","sets":${prog.sets},"reps":"${prog.reps}","restSeconds":${prog.rest},"tips":"דגש בטיחות קצר"}],"warmup":"חימום פשוט","cooldown":"שחרור ומתיחות","durationMinutes":50}]}
 
 Hebrew only. ${daysPerWeek} days.`;
 }
