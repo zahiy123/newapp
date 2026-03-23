@@ -1568,8 +1568,8 @@ export default function Training() {
   }
 
   return (
-    <div className={isFullscreen ? 'fixed inset-0 bg-black z-40' : 'max-w-4xl mx-auto space-y-4'}>
-      {!isFullscreen && (
+    <div className={isFullscreen ? 'fixed inset-0 bg-black z-40' : isMobile ? 'fixed inset-0 flex flex-col bg-black' : 'max-w-4xl mx-auto space-y-4'}>
+      {!isFullscreen && !isMobile && (
         <div className="flex items-center justify-between flex-wrap gap-2">
           <h1 className="text-xl font-bold text-gray-800">{t('training.title')}</h1>
           <div className="flex items-center gap-3">
@@ -1586,9 +1586,9 @@ export default function Training() {
       {/* Camera + Pose Overlay */}
       <div className={isFullscreen
         ? 'relative w-full h-full bg-black overflow-hidden'
-        : isMobile ? 'relative w-full bg-black rounded-xl overflow-hidden min-h-[60vh]'
+        : isMobile ? 'relative w-full bg-black overflow-hidden flex-shrink-0'
         : 'relative bg-black rounded-xl overflow-hidden'}
-        style={isFullscreen || isMobile ? undefined : { aspectRatio: '4/3' }}>
+        style={isFullscreen ? undefined : isMobile ? { height: '40vh' } : { aspectRatio: '4/3' }}>
         <video ref={videoRef} className="w-full h-full object-cover" playsInline muted style={{ transform: 'scaleX(-1)' }} />
         <canvas ref={canvasRef} className="absolute inset-0 w-full h-full" style={{ transform: 'scaleX(-1)' }} />
 
@@ -1919,165 +1919,260 @@ export default function Training() {
         )}
       </div>
 
-      {/* Exercise info & controls — below camera normally, overlay in fullscreen/mobile */}
-      <div className={(isFullscreen || isMobile)
-        ? 'absolute bottom-0 inset-x-0 z-20 bg-black/60 backdrop-blur-sm p-3 max-h-[45vh] flex flex-col pb-[env(safe-area-inset-bottom)]'
-        : ''}>
+      {/* === MOBILE LAYOUT: 3-zone split (action buttons + exercise list below video) === */}
+      {isMobile && !isFullscreen && exercises.length > 0 && (
+        <>
+          {/* ZONE 2: Action buttons — fixed middle strip, always visible, z-50 */}
+          <div className="flex-shrink-0 bg-gray-900 px-3 py-2 z-50 relative" style={{ minHeight: '20vh' }}>
+            {/* Feedback badge — small floating tag, doesn't block buttons */}
+            {feedback && (phase === PHASE.EXERCISING || phase === PHASE.WARM_UP) && (
+              <div className={`${feedbackColor[feedback.type] || 'bg-blue-500'} text-white px-3 py-1 rounded-lg text-center text-sm font-bold mb-2 pointer-events-none`}>
+                {feedback.type === 'count' && <span className="text-xl mr-1">{feedback.count}</span>}
+                {feedback.text}
+              </div>
+            )}
 
-        {cameraError && !isFullscreen && !isMobile && (
-          <div className="bg-red-50 text-red-600 p-3 rounded-lg text-sm">{t('training.cameraError')}: {cameraError}</div>
-        )}
+            {/* Current exercise name + set info */}
+            {currentExercise && phase !== PHASE.WARM_UP && (
+              <div className="flex items-center justify-between mb-2">
+                <h2 className="text-white font-bold text-base truncate max-w-[60%]">{currentExercise.name}</h2>
+                <span className="text-white/60 text-xs flex-shrink-0">
+                  {t('training.set')} {currentSet}/{totalSets} | {displayReps}/{currentExercise.reps}
+                </span>
+              </div>
+            )}
 
-        {exercises.length === 0 ? (
-          !(isFullscreen || isMobile) && <div className="text-center text-gray-500 py-8">{t('training.noExercises')}</div>
-        ) : (
-          <div className={(isFullscreen || isMobile) ? 'space-y-2' : 'space-y-3'}>
-            {/* Warm-up exercise card — looks identical to regular exercise */}
             {phase === PHASE.WARM_UP && currentWarmUp && (
-              <div className={(isFullscreen || isMobile)
-                ? 'bg-white/10 rounded-xl p-3 space-y-2'
-                : 'bg-white rounded-xl shadow-lg p-5 border-2 border-orange-500 space-y-3'}>
-                <div className="flex items-center justify-between">
-                  <span className={`text-xs font-medium ${(isFullscreen || isMobile) ? 'text-orange-300' : 'text-orange-600'}`}>
-                    {isHe ? 'חימום' : 'Warm-up'} ({warmUpIdx + 1}/{warmUpExercises.length})
-                  </span>
-                  <span className={`text-xs ${(isFullscreen || isMobile) ? 'text-white/50' : 'text-gray-400'}`}>
-                    {currentWarmUp.duration}{isHe ? ' שניות' : 's'}
-                  </span>
-                </div>
-                <h2 className={`text-lg font-bold ${(isFullscreen || isMobile) ? 'text-white' : 'text-gray-800'}`}>
+              <div className="flex items-center justify-between mb-2">
+                <h2 className="text-white font-bold text-base truncate max-w-[60%]">
                   {isHe ? currentWarmUp.name.he : currentWarmUp.name.en}
                 </h2>
-                {!(isFullscreen || isMobile) && (
-                  <p className="text-sm text-gray-500">{isHe ? currentWarmUp.description.he : currentWarmUp.description.en}</p>
-                )}
+                <span className="text-4xl font-bold text-white">{warmUpTimer}</span>
+              </div>
+            )}
 
-                {/* Big timer display */}
-                <div className="flex items-center justify-center py-2">
-                  <span className={`text-5xl font-bold ${warmUpPaused ? 'text-yellow-500 animate-pulse' : (isFullscreen || isMobile) ? 'text-white' : 'text-gray-800'}`}>
-                    {warmUpTimer}
-                  </span>
-                </div>
+            {/* Sets performance dots */}
+            {setsPerformance.length > 0 && phase !== PHASE.WARM_UP && (
+              <div className="flex items-center gap-1.5 mb-2">
+                {setsPerformance.map((sp, i) => (
+                  <div key={i} className={`w-5 h-5 rounded-full flex items-center justify-center text-white text-[10px] font-bold ${
+                    sp.quality === 'perfect' ? 'bg-green-500' : sp.quality === 'good' ? 'bg-blue-500' : 'bg-orange-500'
+                  }`}>{i + 1}</div>
+                ))}
+                {Array.from({ length: totalSets - setsPerformance.length }, (_, i) => (
+                  <div key={`r-${i}`} className="w-5 h-5 rounded-full border-2 border-white/30"></div>
+                ))}
+              </div>
+            )}
 
-                {/* Progress dots */}
-                <div className="flex items-center justify-center gap-2">
-                  {warmUpExercises.map((_, i) => (
-                    <div key={i} className={`w-3 h-3 rounded-full ${i < warmUpIdx ? 'bg-green-500' : i === warmUpIdx ? 'bg-orange-400 animate-pulse' : 'bg-gray-300'}`} />
-                  ))}
-                </div>
-
-                {/* Buttons */}
-                <div className="flex flex-wrap gap-3 pt-2">
-                  <button
-                    onClick={handlePauseExercise}
-                    className="px-4 py-2 min-h-[44px] bg-yellow-500 text-white rounded-lg text-sm font-medium"
-                  >
-                    {isHe ? '⏸ השהה' : '⏸ Pause'}
-                  </button>
-                  <button
-                    onClick={() => {
-                      clearInterval(warmUpTimerRef.current);
-                      if (warmUpIdx < warmUpExercises.length - 1) {
-                        setWarmUpIdx(warmUpIdx + 1);
-                      } else {
-                        setWarmUpDone(true);
-                        sessionDataRef.current.warmUpCompleted = true;
-                        speakWarmUpComplete(playerName);
-                        setFeedback(null);
-                        setTimeout(() => setPhase(PHASE.IDLE), 2500);
-                      }
-                    }}
-                    className="flex-1 py-2 min-h-[44px] bg-blue-600 text-white rounded-lg font-medium"
-                  >
-                    {warmUpIdx < warmUpExercises.length - 1
-                      ? (isHe ? 'הבא ▶' : 'Next ▶')
-                      : (isHe ? 'סיים חימום ▶' : 'Finish warm-up ▶')}
-                  </button>
-                  <button
-                    onClick={() => {
-                      clearInterval(warmUpTimerRef.current);
+            {/* Action buttons row */}
+            {phase === PHASE.WARM_UP ? (
+              <div className="flex gap-2">
+                <button onClick={handlePauseExercise} className="px-3 py-2 min-h-[48px] bg-yellow-500 text-white rounded-lg text-sm font-medium">
+                  {isHe ? 'השהה' : 'Pause'}
+                </button>
+                <button
+                  onClick={() => {
+                    clearInterval(warmUpTimerRef.current);
+                    if (warmUpIdx < warmUpExercises.length - 1) {
+                      setWarmUpIdx(warmUpIdx + 1);
+                    } else {
                       setWarmUpDone(true);
                       sessionDataRef.current.warmUpCompleted = true;
                       speakWarmUpComplete(playerName);
                       setFeedback(null);
                       setTimeout(() => setPhase(PHASE.IDLE), 2500);
-                    }}
-                    className={`px-4 py-2 min-h-[44px] rounded-lg text-sm ${isFullscreen ? 'border border-white/30 text-white' : 'border border-gray-300 text-gray-500'}`}
-                  >
-                    {isHe ? 'דלג' : 'Skip'}
+                    }
+                  }}
+                  className="flex-1 py-2 min-h-[48px] bg-blue-600 text-white rounded-lg font-bold text-base"
+                >
+                  {warmUpIdx < warmUpExercises.length - 1 ? (isHe ? 'הבא' : 'Next') : (isHe ? 'סיים חימום' : 'Finish warm-up')}
+                </button>
+                <button
+                  onClick={() => {
+                    clearInterval(warmUpTimerRef.current);
+                    setWarmUpDone(true);
+                    sessionDataRef.current.warmUpCompleted = true;
+                    speakWarmUpComplete(playerName);
+                    setFeedback(null);
+                    setTimeout(() => setPhase(PHASE.IDLE), 2500);
+                  }}
+                  className="px-3 py-2 min-h-[48px] border border-white/30 text-white rounded-lg text-sm"
+                >
+                  {isHe ? 'דלג' : 'Skip'}
+                </button>
+              </div>
+            ) : (
+              <div className="flex gap-2">
+                <button onClick={handlePrevExercise} disabled={currentIdx === 0}
+                  className="px-3 py-2 min-h-[48px] rounded-lg text-sm disabled:opacity-30 border border-white/30 text-white">
+                  {t('training.prevExercise')}
+                </button>
+                {phase === PHASE.PAUSED ? (
+                  <button onClick={handleResumeExercise} className="flex-1 py-3 min-h-[52px] bg-green-500 text-white rounded-lg font-bold text-lg">
+                    {isHe ? '\u25B6 \u05D4\u05DE\u05E9\u05DA' : '\u25B6 Resume'}
                   </button>
-                </div>
+                ) : phase === PHASE.IDLE || phase === PHASE.EXERCISE_DONE ? (
+                  <button onClick={handleStartBriefing} disabled={!cameraActive || !poseReady}
+                    className="flex-1 py-3 min-h-[52px] bg-gradient-to-r from-green-500 to-emerald-600 text-white rounded-lg font-bold text-lg shadow-lg disabled:opacity-50">
+                    {t('training.startExercise')}
+                  </button>
+                ) : phase === PHASE.EXERCISING ? (
+                  <button onClick={handlePauseExercise} className="flex-1 py-3 min-h-[52px] bg-yellow-500 text-white rounded-lg font-bold text-lg">
+                    {t('training.pauseExercise')}
+                  </button>
+                ) : null}
+                <button onClick={handleNextExercise} className="px-3 py-2 min-h-[48px] bg-blue-600 text-white rounded-lg text-sm font-medium">
+                  {currentIdx < exercises.length - 1 ? t('training.nextExercise') : t('training.finishWorkout')}
+                </button>
               </div>
             )}
 
-            {currentExercise && phase !== PHASE.WARM_UP && (
-              <div className={(isFullscreen || isMobile)
-                ? 'bg-white/10 rounded-xl p-3 space-y-2 flex flex-col'
-                : 'bg-white rounded-xl shadow-lg p-5 border-2 border-blue-500 space-y-3'}>
-                {/* Scrollable info area */}
-                <div className={(isFullscreen || isMobile) ? 'overflow-y-auto max-h-[18vh] space-y-2' : 'space-y-3'}>
-                  <div className="flex items-center justify-between">
-                    <span className={`text-xs font-medium ${(isFullscreen || isMobile) ? 'text-blue-300' : 'text-blue-600'}`}>
-                      {t('training.currentExercise')} ({currentIdx + 1}/{exercises.length})
-                    </span>
-                    <span className={`text-xs ${(isFullscreen || isMobile) ? 'text-white/50' : 'text-gray-400'}`}>
-                      {totalSets} {t('dashboard.sets')} | {currentExercise.reps} {t('dashboard.reps')} | {restDuration}{t('dashboard.secRest')}
-                    </span>
-                  </div>
-                  <h2 className={`text-lg font-bold ${(isFullscreen || isMobile) ? 'text-white' : 'text-gray-800'}`}>{currentExercise.name}</h2>
-                  {!(isFullscreen || isMobile) && (
-                    <>
-                      <p className="text-sm text-gray-500">{currentExercise.description}</p>
-                      <div className="text-xs text-yellow-700 bg-yellow-50 rounded-lg px-3 py-2">
-                        {LOCATION_ICONS[currentLocation]} {locationProps.setup}
-                      </div>
-                      {currentExercise.tips && <p className="text-xs text-blue-500">{currentExercise.tips}</p>}
-                    </>
-                  )}
+            {/* Mobile end workout */}
+            <button
+              onClick={() => { recordExerciseResult(); saveSession('partial'); handleStopCamera(); navigate('/'); }}
+              className="w-full mt-2 text-xs text-white/40 hover:text-white/60 underline"
+            >
+              {isHe ? 'סיים אימון' : 'End workout'}
+            </button>
+          </div>
 
+          {/* ZONE 3: Exercise list — scrollable bottom, z-10 */}
+          <div className="flex-1 bg-gray-950 overflow-y-auto px-3 py-2 pb-[env(safe-area-inset-bottom)]" style={{ maxHeight: '40vh' }}>
+            <div className="flex gap-2 overflow-x-auto pb-2">
+              {exercises.map((ex, i) => (
+                <button
+                  key={i}
+                  onClick={() => {
+                    stopSpeech(); setCurrentIdx(i); setPhase(PHASE.IDLE); setTimer(0);
+                    exerciseStateRef.current = { _userProfile: userProfile }; setDisplayReps(0); setSetsPerformance([]); setCurrentSet(1); resetAllTracking();
+                  }}
+                  className={`flex-shrink-0 px-3 py-2 rounded-lg text-xs font-medium transition truncate max-w-[150px] ${
+                    i === currentIdx ? 'bg-blue-500 text-white' : 'bg-white/10 text-white/70 hover:bg-white/20'
+                  }`}
+                >
+                  {i + 1}. {ex.name}
+                </button>
+              ))}
+            </div>
+            {/* Current exercise details */}
+            {currentExercise && (
+              <div className="bg-white/5 rounded-lg p-3 space-y-2 mt-1">
+                <p className="text-white/80 text-sm">{currentExercise.description}</p>
+                {currentExercise.tips && (
+                  <p className="text-blue-300 text-xs">{currentExercise.tips}</p>
+                )}
+              </div>
+            )}
+          </div>
+        </>
+      )}
+
+      {/* === FULLSCREEN LAYOUT: overlay at bottom (unchanged) === */}
+      {isFullscreen && (
+        <div className="absolute bottom-0 inset-x-0 z-20 bg-black/60 backdrop-blur-sm p-3 max-h-[45vh] flex flex-col pb-[env(safe-area-inset-bottom)]">
+          {exercises.length > 0 && (
+            <div className="space-y-2">
+              {phase === PHASE.WARM_UP && currentWarmUp && (
+                <div className="bg-white/10 rounded-xl p-3 space-y-2">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-medium text-orange-300">
+                      {isHe ? 'חימום' : 'Warm-up'} ({warmUpIdx + 1}/{warmUpExercises.length})
+                    </span>
+                    <span className="text-xs text-white/50">{currentWarmUp.duration}{isHe ? ' שניות' : 's'}</span>
+                  </div>
+                  <h2 className="text-lg font-bold text-white">{isHe ? currentWarmUp.name.he : currentWarmUp.name.en}</h2>
+                  <div className="flex items-center justify-center py-2">
+                    <span className={`text-5xl font-bold ${warmUpPaused ? 'text-yellow-500 animate-pulse' : 'text-white'}`}>{warmUpTimer}</span>
+                  </div>
+                  <div className="flex items-center justify-center gap-2">
+                    {warmUpExercises.map((_, i) => (
+                      <div key={i} className={`w-3 h-3 rounded-full ${i < warmUpIdx ? 'bg-green-500' : i === warmUpIdx ? 'bg-orange-400 animate-pulse' : 'bg-gray-300'}`} />
+                    ))}
+                  </div>
+                  <div className="flex flex-wrap gap-3 pt-2">
+                    <button onClick={handlePauseExercise} className="px-4 py-2 min-h-[44px] bg-yellow-500 text-white rounded-lg text-sm font-medium">
+                      {isHe ? '⏸ השהה' : '⏸ Pause'}
+                    </button>
+                    <button
+                      onClick={() => {
+                        clearInterval(warmUpTimerRef.current);
+                        if (warmUpIdx < warmUpExercises.length - 1) {
+                          setWarmUpIdx(warmUpIdx + 1);
+                        } else {
+                          setWarmUpDone(true);
+                          sessionDataRef.current.warmUpCompleted = true;
+                          speakWarmUpComplete(playerName);
+                          setFeedback(null);
+                          setTimeout(() => setPhase(PHASE.IDLE), 2500);
+                        }
+                      }}
+                      className="flex-1 py-2 min-h-[44px] bg-blue-600 text-white rounded-lg font-medium"
+                    >
+                      {warmUpIdx < warmUpExercises.length - 1 ? (isHe ? 'הבא ▶' : 'Next ▶') : (isHe ? 'סיים חימום ▶' : 'Finish warm-up ▶')}
+                    </button>
+                    <button
+                      onClick={() => {
+                        clearInterval(warmUpTimerRef.current);
+                        setWarmUpDone(true);
+                        sessionDataRef.current.warmUpCompleted = true;
+                        speakWarmUpComplete(playerName);
+                        setFeedback(null);
+                        setTimeout(() => setPhase(PHASE.IDLE), 2500);
+                      }}
+                      className="px-4 py-2 min-h-[44px] rounded-lg text-sm border border-white/30 text-white"
+                    >
+                      {isHe ? 'דלג' : 'Skip'}
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {currentExercise && phase !== PHASE.WARM_UP && (
+                <div className="bg-white/10 rounded-xl p-3 space-y-2">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-medium text-blue-300">{t('training.currentExercise')} ({currentIdx + 1}/{exercises.length})</span>
+                    <span className="text-xs text-white/50">{totalSets} {t('dashboard.sets')} | {currentExercise.reps} {t('dashboard.reps')} | {restDuration}{t('dashboard.secRest')}</span>
+                  </div>
+                  <h2 className="text-lg font-bold text-white">{currentExercise.name}</h2>
                   {setsPerformance.length > 0 && (
                     <div className="flex items-center gap-2">
-                      <span className={`text-xs ${isFullscreen ? 'text-white/50' : 'text-gray-400'}`}>{t('training.setsCompleted')}:</span>
+                      <span className="text-xs text-white/50">{t('training.setsCompleted')}:</span>
                       {setsPerformance.map((sp, i) => (
                         <div key={i} className={`w-6 h-6 rounded-full flex items-center justify-center text-white text-xs font-bold ${
                           sp.quality === 'perfect' ? 'bg-green-500' : sp.quality === 'good' ? 'bg-blue-500' : 'bg-orange-500'
                         }`}>{i + 1}</div>
                       ))}
                       {Array.from({ length: totalSets - setsPerformance.length }, (_, i) => (
-                        <div key={`r-${i}`} className={`w-6 h-6 rounded-full border-2 ${isFullscreen ? 'border-white/30' : 'border-gray-200'}`}></div>
+                        <div key={`r-${i}`} className="w-6 h-6 rounded-full border-2 border-white/30"></div>
                       ))}
                     </div>
                   )}
+                  <div className="flex flex-wrap gap-3 pt-2">
+                    <button onClick={handlePrevExercise} disabled={currentIdx === 0}
+                      className="px-4 py-2 min-h-[44px] rounded-lg text-sm disabled:opacity-30 border border-white/30 text-white">
+                      {t('training.prevExercise')}
+                    </button>
+                    {phase === PHASE.PAUSED ? (
+                      <button onClick={handleResumeExercise} className="flex-1 py-2 min-h-[44px] bg-green-500 text-white rounded-lg font-bold">
+                        {isHe ? '\u25B6 \u05D4\u05DE\u05E9\u05DA' : '\u25B6 Resume'}
+                      </button>
+                    ) : phase === PHASE.IDLE || phase === PHASE.EXERCISE_DONE ? (
+                      <button onClick={handleStartBriefing} disabled={!cameraActive || !poseReady} className="flex-1 py-2 min-h-[44px] bg-green-500 text-white rounded-lg font-medium disabled:opacity-50">
+                        {t('training.startExercise')}
+                      </button>
+                    ) : phase === PHASE.EXERCISING ? (
+                      <button onClick={handlePauseExercise} className="flex-1 py-2 min-h-[44px] bg-yellow-500 text-white rounded-lg font-medium">
+                        {t('training.pauseExercise')}
+                      </button>
+                    ) : null}
+                    <button onClick={handleNextExercise} className="px-4 py-2 min-h-[44px] bg-blue-600 text-white rounded-lg text-sm">
+                      {currentIdx < exercises.length - 1 ? t('training.nextExercise') : t('training.finishWorkout')}
+                    </button>
+                  </div>
                 </div>
+              )}
 
-                {/* Sticky action buttons — always visible */}
-                <div className="flex flex-wrap gap-3 pt-2 flex-shrink-0">
-                  <button onClick={handlePrevExercise} disabled={currentIdx === 0}
-                    className={`px-4 py-2 min-h-[44px] rounded-lg text-sm disabled:opacity-30 ${isFullscreen ? 'border border-white/30 text-white' : 'border border-gray-300'}`}>
-                    {t('training.prevExercise')}
-                  </button>
-                  {phase === PHASE.PAUSED ? (
-                    <button onClick={handleResumeExercise} className="flex-1 py-2 min-h-[44px] bg-green-500 text-white rounded-lg font-bold">
-                      {isHe ? '\u25B6 \u05D4\u05DE\u05E9\u05DA' : '\u25B6 Resume'}
-                    </button>
-                  ) : phase === PHASE.IDLE || phase === PHASE.EXERCISE_DONE ? (
-                    <button onClick={handleStartBriefing} disabled={!cameraActive || !poseReady} className="flex-1 py-2 min-h-[44px] bg-green-500 text-white rounded-lg font-medium disabled:opacity-50">
-                      {t('training.startExercise')}
-                    </button>
-                  ) : phase === PHASE.EXERCISING || phase === PHASE.WARM_UP ? (
-                    <button onClick={handlePauseExercise} className="flex-1 py-2 min-h-[44px] bg-yellow-500 text-white rounded-lg font-medium">
-                      {t('training.pauseExercise')}
-                    </button>
-                  ) : null}
-                  <button onClick={handleNextExercise} className="px-4 py-2 min-h-[44px] bg-blue-600 text-white rounded-lg text-sm">
-                    {currentIdx < exercises.length - 1 ? t('training.nextExercise') : t('training.finishWorkout')}
-                  </button>
-                </div>
-              </div>
-            )}
-
-            {/* Exercise list — horizontal scroll in fullscreen, grid otherwise */}
-            {isFullscreen ? (
               <div className="flex gap-2 overflow-x-auto pb-1">
                 {exercises.map((ex, i) => (
                   <button
@@ -2094,7 +2189,128 @@ export default function Training() {
                   </button>
                 ))}
               </div>
-            ) : (
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* === DESKTOP LAYOUT: normal flow below camera === */}
+      {!isFullscreen && !isMobile && (
+        <div>
+          {cameraError && (
+            <div className="bg-red-50 text-red-600 p-3 rounded-lg text-sm">{t('training.cameraError')}: {cameraError}</div>
+          )}
+
+          {exercises.length === 0 ? (
+            <div className="text-center text-gray-500 py-8">{t('training.noExercises')}</div>
+          ) : (
+            <div className="space-y-3">
+              {phase === PHASE.WARM_UP && currentWarmUp && (
+                <div className="bg-white rounded-xl shadow-lg p-5 border-2 border-orange-500 space-y-3">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-medium text-orange-600">
+                      {isHe ? 'חימום' : 'Warm-up'} ({warmUpIdx + 1}/{warmUpExercises.length})
+                    </span>
+                    <span className="text-xs text-gray-400">{currentWarmUp.duration}{isHe ? ' שניות' : 's'}</span>
+                  </div>
+                  <h2 className="text-lg font-bold text-gray-800">{isHe ? currentWarmUp.name.he : currentWarmUp.name.en}</h2>
+                  <p className="text-sm text-gray-500">{isHe ? currentWarmUp.description.he : currentWarmUp.description.en}</p>
+                  <div className="flex items-center justify-center py-2">
+                    <span className={`text-5xl font-bold ${warmUpPaused ? 'text-yellow-500 animate-pulse' : 'text-gray-800'}`}>{warmUpTimer}</span>
+                  </div>
+                  <div className="flex items-center justify-center gap-2">
+                    {warmUpExercises.map((_, i) => (
+                      <div key={i} className={`w-3 h-3 rounded-full ${i < warmUpIdx ? 'bg-green-500' : i === warmUpIdx ? 'bg-orange-400 animate-pulse' : 'bg-gray-300'}`} />
+                    ))}
+                  </div>
+                  <div className="flex flex-wrap gap-3 pt-2">
+                    <button onClick={handlePauseExercise} className="px-4 py-2 min-h-[44px] bg-yellow-500 text-white rounded-lg text-sm font-medium">
+                      {isHe ? '⏸ השהה' : '⏸ Pause'}
+                    </button>
+                    <button
+                      onClick={() => {
+                        clearInterval(warmUpTimerRef.current);
+                        if (warmUpIdx < warmUpExercises.length - 1) {
+                          setWarmUpIdx(warmUpIdx + 1);
+                        } else {
+                          setWarmUpDone(true);
+                          sessionDataRef.current.warmUpCompleted = true;
+                          speakWarmUpComplete(playerName);
+                          setFeedback(null);
+                          setTimeout(() => setPhase(PHASE.IDLE), 2500);
+                        }
+                      }}
+                      className="flex-1 py-2 min-h-[44px] bg-blue-600 text-white rounded-lg font-medium"
+                    >
+                      {warmUpIdx < warmUpExercises.length - 1 ? (isHe ? 'הבא ▶' : 'Next ▶') : (isHe ? 'סיים חימום ▶' : 'Finish warm-up ▶')}
+                    </button>
+                    <button
+                      onClick={() => {
+                        clearInterval(warmUpTimerRef.current);
+                        setWarmUpDone(true);
+                        sessionDataRef.current.warmUpCompleted = true;
+                        speakWarmUpComplete(playerName);
+                        setFeedback(null);
+                        setTimeout(() => setPhase(PHASE.IDLE), 2500);
+                      }}
+                      className="px-4 py-2 min-h-[44px] rounded-lg text-sm border border-gray-300 text-gray-500"
+                    >
+                      {isHe ? 'דלג' : 'Skip'}
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {currentExercise && phase !== PHASE.WARM_UP && (
+                <div className="bg-white rounded-xl shadow-lg p-5 border-2 border-blue-500 space-y-3">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-medium text-blue-600">{t('training.currentExercise')} ({currentIdx + 1}/{exercises.length})</span>
+                    <span className="text-xs text-gray-400">{totalSets} {t('dashboard.sets')} | {currentExercise.reps} {t('dashboard.reps')} | {restDuration}{t('dashboard.secRest')}</span>
+                  </div>
+                  <h2 className="text-lg font-bold text-gray-800">{currentExercise.name}</h2>
+                  <p className="text-sm text-gray-500">{currentExercise.description}</p>
+                  <div className="text-xs text-yellow-700 bg-yellow-50 rounded-lg px-3 py-2">
+                    {LOCATION_ICONS[currentLocation]} {locationProps.setup}
+                  </div>
+                  {currentExercise.tips && <p className="text-xs text-blue-500">{currentExercise.tips}</p>}
+                  {setsPerformance.length > 0 && (
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs text-gray-400">{t('training.setsCompleted')}:</span>
+                      {setsPerformance.map((sp, i) => (
+                        <div key={i} className={`w-6 h-6 rounded-full flex items-center justify-center text-white text-xs font-bold ${
+                          sp.quality === 'perfect' ? 'bg-green-500' : sp.quality === 'good' ? 'bg-blue-500' : 'bg-orange-500'
+                        }`}>{i + 1}</div>
+                      ))}
+                      {Array.from({ length: totalSets - setsPerformance.length }, (_, i) => (
+                        <div key={`r-${i}`} className="w-6 h-6 rounded-full border-2 border-gray-200"></div>
+                      ))}
+                    </div>
+                  )}
+                  <div className="flex flex-wrap gap-3 pt-2">
+                    <button onClick={handlePrevExercise} disabled={currentIdx === 0}
+                      className="px-4 py-2 min-h-[44px] rounded-lg text-sm disabled:opacity-30 border border-gray-300">
+                      {t('training.prevExercise')}
+                    </button>
+                    {phase === PHASE.PAUSED ? (
+                      <button onClick={handleResumeExercise} className="flex-1 py-2 min-h-[44px] bg-green-500 text-white rounded-lg font-bold">
+                        {isHe ? '\u25B6 \u05D4\u05DE\u05E9\u05DA' : '\u25B6 Resume'}
+                      </button>
+                    ) : phase === PHASE.IDLE || phase === PHASE.EXERCISE_DONE ? (
+                      <button onClick={handleStartBriefing} disabled={!cameraActive || !poseReady} className="flex-1 py-2 min-h-[44px] bg-green-500 text-white rounded-lg font-medium disabled:opacity-50">
+                        {t('training.startExercise')}
+                      </button>
+                    ) : phase === PHASE.EXERCISING ? (
+                      <button onClick={handlePauseExercise} className="flex-1 py-2 min-h-[44px] bg-yellow-500 text-white rounded-lg font-medium">
+                        {t('training.pauseExercise')}
+                      </button>
+                    ) : null}
+                    <button onClick={handleNextExercise} className="px-4 py-2 min-h-[44px] bg-blue-600 text-white rounded-lg text-sm">
+                      {currentIdx < exercises.length - 1 ? t('training.nextExercise') : t('training.finishWorkout')}
+                    </button>
+                  </div>
+                </div>
+              )}
+
               <div className="grid gap-2">
                 {exercises.map((ex, i) => (
                   <button
@@ -2108,16 +2324,16 @@ export default function Training() {
                     }`}
                   >
                     <div className="flex items-center justify-between">
-                      <span className="font-medium text-sm text-gray-800">{i + 1}. {ex.name}</span>
+                      <span className="font-medium text-sm text-gray-800 truncate max-w-[70%]">{i + 1}. {ex.name}</span>
                       <span className="text-xs text-gray-400">{ex.sets}x{ex.reps}</span>
                     </div>
                   </button>
                 ))}
               </div>
-            )}
-          </div>
-        )}
-      </div>
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Level-Up Modal for longevity (51+) athletes */}
       {showLevelUpModal && (
