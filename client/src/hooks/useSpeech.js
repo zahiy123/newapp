@@ -1,4 +1,4 @@
-import { useCallback, useRef } from 'react';
+import { useCallback, useRef, useEffect } from 'react';
 import { getCoachingRate, getCoachingPitch, getLifeStage } from '../utils/ageAdaptive';
 
 export function useSpeech(lang = 'he-IL', age) {
@@ -9,41 +9,77 @@ export function useSpeech(lang = 'he-IL', age) {
   const audioUnlockedRef = useRef(false);
   const preferredVoiceRef = useRef(null);
   const audioCtxRef = useRef(null);
+  const silentSourceRef = useRef(null);
   const isHe = lang.startsWith('he');
   const lifeStage = getLifeStage(age);
 
-  // Android: voices load async — listen for onvoiceschanged to pick Hebrew voice
+  // Pick Hebrew/English voice — broad search for Android compatibility
   const pickVoice = useCallback(() => {
     if (!window.speechSynthesis) return;
     const voices = window.speechSynthesis.getVoices();
     if (!voices.length) return;
-    // Prefer exact lang match (he-IL or en-US), fallback to lang prefix
+    console.log('[Speech] Available voices:', voices.length, voices.map(v => `${v.name}(${v.lang})`).slice(0, 10));
+    const langBase = lang.split('-')[0]; // 'he' or 'en'
+    // Search order: exact match → prefix match → name contains "Hebrew"/"Israel"
     const exact = voices.find(v => v.lang === lang);
-    const prefix = voices.find(v => v.lang.startsWith(lang.split('-')[0]));
-    preferredVoiceRef.current = exact || prefix || null;
+    const prefix = voices.find(v => v.lang.startsWith(langBase));
+    const byName = voices.find(v => v.name.toLowerCase().includes(langBase === 'he' ? 'hebrew' : 'english')
+      || v.name.toLowerCase().includes(langBase === 'he' ? 'israel' : 'united states'));
+    const chosen = exact || prefix || byName || null;
+    preferredVoiceRef.current = chosen;
+    console.log('[Speech] Picked voice:', chosen?.name, chosen?.lang);
   }, [lang]);
 
-  // Listen for voices loaded (critical for Android Chrome)
-  useRef(() => {
+  // useEffect for onvoiceschanged — critical for Android Chrome
+  useEffect(() => {
     pickVoice();
-    if (window.speechSynthesis?.onvoiceschanged !== undefined) {
-      window.speechSynthesis.onvoiceschanged = pickVoice;
+    if (window.speechSynthesis) {
+      window.speechSynthesis.onvoiceschanged = () => {
+        console.log('[Speech] onvoiceschanged fired');
+        pickVoice();
+      };
     }
-  });
-  // Also try on mount
-  if (!preferredVoiceRef.current) pickVoice();
+    return () => {
+      if (window.speechSynthesis) window.speechSynthesis.onvoiceschanged = null;
+    };
+  }, [pickVoice]);
 
-  // Ensure AudioContext is alive — call before every speak on Android
-  const ensureAudioContext = useCallback(() => {
+  // Get or create AudioContext
+  const getAudioCtx = useCallback(() => {
     try {
       if (!audioCtxRef.current) {
         audioCtxRef.current = new (window.AudioContext || window.webkitAudioContext)();
+        console.log('[Speech] AudioContext created, state:', audioCtxRef.current.state);
       }
       if (audioCtxRef.current.state === 'suspended') {
         audioCtxRef.current.resume();
       }
-    } catch {}
+      return audioCtxRef.current;
+    } catch (e) {
+      console.warn('[Speech] AudioContext error:', e);
+      return null;
+    }
   }, []);
+
+  // Start a silent audio loop — keeps Android audio channel alive
+  const startSilentLoop = useCallback(() => {
+    if (silentSourceRef.current) return; // already running
+    const ctx = getAudioCtx();
+    if (!ctx) return;
+    try {
+      // Create a silent oscillator at near-zero gain — holds the audio channel open
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      gain.gain.value = 0.001; // practically silent
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.start();
+      silentSourceRef.current = { osc, gain };
+      console.log('[Speech] Silent audio loop started');
+    } catch (e) {
+      console.warn('[Speech] Silent loop error:', e);
+    }
+  }, [getAudioCtx]);
 
   // Low-level helper: speak a single utterance, does NOT clear queue
   const _utterSpeak = useCallback((text, options = {}) => {
@@ -51,15 +87,15 @@ export function useSpeech(lang = 'he-IL', age) {
 
     // Android Chrome: resume speechSynthesis + AudioContext before every speak
     try { window.speechSynthesis.resume(); } catch {}
-    ensureAudioContext();
+    getAudioCtx(); // ensure AudioContext is alive
 
     const utterance = new SpeechSynthesisUtterance(text);
     utterance.lang = lang;
-    // Clamp rate to safe range for Google TTS engine
+    // Clamp rate to safe range for Google TTS engine (0.8-1.2)
     const rawRate = options.rate || 1;
     utterance.rate = Math.min(Math.max(rawRate, 0.8), 1.2);
     utterance.pitch = options.pitch || 1;
-    utterance.volume = 1; // Always max volume on mobile
+    utterance.volume = 1; // Always max volume
     // Use preferred voice if available
     if (preferredVoiceRef.current) {
       utterance.voice = preferredVoiceRef.current;
@@ -68,13 +104,19 @@ export function useSpeech(lang = 'he-IL', age) {
     speaking.current = true;
     speechStartedAtRef.current = Date.now();
     currentUtteranceRef.current = utterance;
+
+    utterance.onstart = () => {
+      console.log('[Speech] onstart:', text.substring(0, 40));
+    };
     utterance.onend = () => {
+      console.log('[Speech] onend:', text.substring(0, 40));
       speaking.current = false;
       currentUtteranceRef.current = null;
       speechStartedAtRef.current = 0;
       processQueue();
     };
-    utterance.onerror = () => {
+    utterance.onerror = (e) => {
+      console.warn('[Speech] onerror:', e.error, text.substring(0, 40));
       speaking.current = false;
       currentUtteranceRef.current = null;
       speechStartedAtRef.current = 0;
@@ -82,59 +124,52 @@ export function useSpeech(lang = 'he-IL', age) {
     };
 
     window.speechSynthesis.speak(utterance);
-  }, [lang, ensureAudioContext]);
+  }, [lang, getAudioCtx]);
 
   // Unlock audio on mobile — must be called from a user gesture (tap/click)
   const unlockAudio = useCallback(() => {
     if (!window.speechSynthesis) return;
+    console.log('[Speech] unlockAudio called');
 
-    // Always re-unlock (Android can re-suspend between interactions)
     // 1. Resume speechSynthesis
     try { window.speechSynthesis.resume(); } catch {}
 
-    // 2. Silent utterance to unlock speechSynthesis pipeline
+    // 2. Cancel any stuck queue, then speak silent dot to unlock pipeline
     window.speechSynthesis.cancel();
     const utterance = new SpeechSynthesisUtterance('.');
     utterance.volume = 0.01;
     utterance.lang = lang;
     if (preferredVoiceRef.current) utterance.voice = preferredVoiceRef.current;
+    utterance.onstart = () => console.log('[Speech] unlock utterance started');
+    utterance.onend = () => console.log('[Speech] unlock utterance ended');
+    utterance.onerror = (e) => console.warn('[Speech] unlock utterance error:', e.error);
     window.speechSynthesis.speak(utterance);
 
-    // 3. Create/resume AudioContext
-    try {
-      if (!audioCtxRef.current) {
-        audioCtxRef.current = new (window.AudioContext || window.webkitAudioContext)();
-      }
-      const ctx = audioCtxRef.current;
-      if (ctx.state === 'suspended') ctx.resume();
-      // Play silent buffer
-      const buf = ctx.createBuffer(1, 1, 22050);
-      const src = ctx.createBufferSource();
-      src.buffer = buf;
-      src.connect(ctx.destination);
-      src.start(0);
-    } catch {}
+    // 3. Create AudioContext + start silent loop to hold the channel
+    getAudioCtx();
+    startSilentLoop();
 
-    // 4. Keepalive for both iOS Safari and Android Chrome
+    // 4. Keepalive interval for both iOS Safari and Android Chrome
     if (!window._speechKeepAlive) {
       window._speechKeepAlive = setInterval(() => {
         if (!window.speechSynthesis) return;
+        // Nudge speechSynthesis to prevent 15s auto-pause (iOS/Android)
         if (window.speechSynthesis.speaking) {
           window.speechSynthesis.pause();
           window.speechSynthesis.resume();
         }
-        // Also keep AudioContext alive
+        // Keep AudioContext alive
         try {
           if (audioCtxRef.current?.state === 'suspended') audioCtxRef.current.resume();
         } catch {}
-      }, 10000);
+      }, 5000); // Every 5s (more aggressive)
     }
 
     // 5. Pick voice if not yet found (Android late-load)
     if (!preferredVoiceRef.current) pickVoice();
 
     audioUnlockedRef.current = true;
-  }, [lang, pickVoice]);
+  }, [lang, pickVoice, getAudioCtx, startSilentLoop]);
 
   // Internal helper: cancel previous speech, clear queue, then speak
   const _doSpeak = useCallback((text, options = {}) => {
@@ -182,38 +217,49 @@ export function useSpeech(lang = 'he-IL', age) {
     }
   }
 
-  // Pre-exercise briefing with location-aware equipment setup
-  const speakBriefing = useCallback((exerciseName, description, tips, locationProps) => {
+  // Pre-exercise briefing — full coach persona: explain, safety, motivate
+  const speakBriefing = useCallback((exerciseName, description, tips, locationProps, playerName) => {
     if (!window.speechSynthesis) return;
+    // Resume + ensure audio before briefing
+    try { window.speechSynthesis.resume(); } catch {}
+    getAudioCtx();
     window.speechSynthesis.cancel();
     queueRef.current = [];
 
+    const name = playerName || (isHe ? 'אלוף' : 'champ');
+
+    // Part 1: Energetic intro with exercise name
     const intro = isHe
-      ? `לפני שנתחיל, הנה איך לבצע ${exerciseName}.`
-      : `Before we start, here is how to do ${exerciseName}.`;
+      ? `יאללה ${name}! עכשיו נעשה ${exerciseName}!`
+      : `Let's go ${name}! Now we're doing ${exerciseName}!`;
 
-    const desc = description ? `${description}.` : '';
+    // Part 2: How to do it (description)
+    const desc = description
+      ? (isHe ? `ככה עושים את זה: ${description}.` : `Here's how: ${description}.`)
+      : '';
 
-    // Location-aware equipment setup instruction
+    // Part 3: Safety tip
+    const safetyText = tips
+      ? (isHe ? `דגש בטיחות: ${tips}.` : `Safety note: ${tips}.`)
+      : '';
+
+    // Part 4: Setup instruction
     const setupText = locationProps?.setup
       ? (isHe ? `הכנה: ${locationProps.setup}.` : `Setup: ${locationProps.setup}.`)
       : '';
 
-    const tipText = tips
-      ? (isHe ? `טיפ חשוב: ${tips}` : `Important tip: ${tips}`)
-      : '';
+    // Part 5: Motivational start cue
+    const startCue = isHe
+      ? `${name}, אני צופה בך. בוא נתחיל!`
+      : `${name}, I'm watching you. Let's start!`;
 
-    const equipDetect = isHe
-      ? 'אני אנסה לזהות את הציוד.'
-      : 'I will try to detect your equipment.';
-
-    // Queue all segments, then start first one (don't use _doSpeak which clears queue)
+    // Queue all segments
     if (desc) queueRef.current.push({ text: desc, options: {} });
+    if (safetyText) queueRef.current.push({ text: safetyText, options: {} });
     if (setupText) queueRef.current.push({ text: setupText, options: {} });
-    if (tipText) queueRef.current.push({ text: tipText, options: {} });
-    queueRef.current.push({ text: equipDetect, options: {} });
-    _utterSpeak(intro);
-  }, [lang, _utterSpeak, isHe]);
+    queueRef.current.push({ text: startCue, options: { rate: 1.1 } });
+    _utterSpeak(intro, { rate: 1.1 });
+  }, [lang, _utterSpeak, isHe, getAudioCtx]);
 
   // Encouragement for good form (only when actively moving) - low priority, don't cut
   const speakEncouragement = useCallback(() => {

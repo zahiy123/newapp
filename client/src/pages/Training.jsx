@@ -840,7 +840,7 @@ export default function Training() {
       if (!videoRef.current || !objReady) {
         // Skip scan if camera/detector not ready
         setPhase(PHASE.BRIEFING);
-        speakBriefing(currentExercise?.name, currentExercise?.description, currentExercise?.tips, locationProps);
+        speakBriefing(currentExercise?.name, currentExercise?.description, currentExercise?.tips, locationProps, playerName);
         return;
       }
 
@@ -911,7 +911,7 @@ export default function Training() {
           autoAdvanceTimer = setTimeout(() => {
             if (!cancelled) {
               setPhase(PHASE.BRIEFING);
-              speakBriefing(currentExercise?.name, currentExercise?.description, currentExercise?.tips, locationProps);
+              speakBriefing(currentExercise?.name, currentExercise?.description, currentExercise?.tips, locationProps, playerName);
             }
           }, 4000);
         }
@@ -1316,7 +1316,7 @@ export default function Training() {
     }
 
     setPhase(PHASE.BRIEFING);
-    speakBriefing(currentExercise.name, currentExercise.description, currentExercise.tips, locationProps);
+    speakBriefing(currentExercise.name, currentExercise.description, currentExercise.tips, locationProps, playerName);
   }
 
   function handleStartAfterBriefing() {
@@ -1682,7 +1682,7 @@ export default function Training() {
                   </p>
                   <div className="inline-block w-8 h-8 border-4 border-blue-500 border-t-transparent rounded-full animate-spin"></div>
                   <button
-                    onClick={() => { environmentScannedRef.current = true; setPhase(PHASE.BRIEFING); speakBriefing(currentExercise?.name, currentExercise?.description, currentExercise?.tips, locationProps); }}
+                    onClick={() => { environmentScannedRef.current = true; setPhase(PHASE.BRIEFING); speakBriefing(currentExercise?.name, currentExercise?.description, currentExercise?.tips, locationProps, playerName); }}
                     className="text-xs text-gray-400 hover:text-gray-600 underline"
                   >
                     {isHe ? 'דלג' : 'Skip'}

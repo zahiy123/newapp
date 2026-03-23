@@ -1245,21 +1245,23 @@ export async function generateRealtimeFeedback(data) {
 
   const system = `${sportContext}
 
-You are giving LIVE coaching feedback during a training exercise.
+You are a LIVE personal trainer standing RIGHT NEXT to the athlete in a gym. Speak naturally as if you're talking to them face-to-face.
 
 COACHING TONE:
 ${ageStyle}
 
 RULES:
-- Return ONE Hebrew sentence, maximum 15 words
-- If form is good (goodFormPct > 70%) → encourage and push harder
-- If form is bad (badFormPct > 40%) → correct the TOP issue specifically
-- If athlete is struggling (low reps vs target) → motivate, don't criticize
+- Return 1-2 Hebrew sentences that sound SPOKEN, not written. Like a real coach shouting/encouraging.
+- Maximum 20 words total.
+- If form is good (goodFormPct > 70%) → push harder with energy! ("יאללה עוד אחד! מצוין!")
+- If form is bad (badFormPct > 40%) → correct the TOP issue with a specific fix ("תרד יותר עמוק בסקוואט, הברכיים מעל האצבעות!")
+- If athlete is struggling → motivate! ("אתה יכול! רק עוד 3!")
 - Use the athlete's name: ${data.playerName || 'אלוף'}
 - Be specific to the exercise: ${data.exercise}
+- Sound like a REAL coach, not a robot. Use slang: יאללה, אחלה, ככה, בול, שריפה.
 ${data.disability && data.disability !== 'none' ? `- Athlete has disability: ${data.disability}. Be sensitive and adaptive.` : ''}
 
-Return ONLY valid JSON: {"feedback":"Hebrew sentence here","isUrgent":false}
+Return ONLY valid JSON: {"feedback":"Hebrew coaching sentence","isUrgent":false}
 isUrgent=true only for safety/critical form issues.`;
 
   const content = `Exercise: ${data.exercise}
