@@ -143,7 +143,7 @@ router.post('/realtime-feedback', async (req, res) => {
 const repAnalysisInFlight = new Set();
 
 router.post('/analyze-rep', async (req, res) => {
-  const { playerName, exercise, frames, sport, playerProfile, repNumber, qaMode } = req.body;
+  const { playerName, exercise, frames, sport, playerProfile, repNumber, qaMode, jointAngles } = req.body;
   const safeFallback = { is_correct: true, feedback: '', score: 0 };
   const key = `rep-${playerName}-${exercise}`;
 
@@ -175,7 +175,7 @@ router.post('/analyze-rep', async (req, res) => {
   }
 
   try {
-    const result = await analyzeRepFrames({ frames, sport, exercise, playerProfile, repNumber });
+    const result = await analyzeRepFrames({ frames, sport, exercise, playerProfile, repNumber, jointAngles });
     // Attach debug metadata in QA mode
     if (shouldDebug) {
       result._debug = { framesDir: 'server/debug_frames', savedAt: Date.now(), repNumber };

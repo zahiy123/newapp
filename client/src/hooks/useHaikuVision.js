@@ -14,8 +14,10 @@ export function useHaikuVision({ onVisionFeedback } = {}) {
   const captureFrameFnRef = useRef(null);
   const videoElRef = useRef(null);
 
-  // Per-rep frame capture
+  // Per-rep frame capture + angle snapshots
   const framesRef = useRef([]);
+  const anglesRef = useRef([]);          // Joint angle snapshots alongside frames
+  const latestAnglesRef = useRef(null);  // Most recent angles from feedPhaseData
   const lastPhaseRef = useRef(null);
   const frame2TimerRef = useRef(null);
   const repCountRef = useRef(0);
@@ -36,7 +38,7 @@ export function useHaikuVision({ onVisionFeedback } = {}) {
     return frame;
   }, []);
 
-  const sendFramesToServer = useCallback(async (frames, repNumber) => {
+  const sendFramesToServer = useCallback(async (frames, repNumber, anglesAtFrames) => {
     if (inFlightRef.current || disabledRef.current) return;
     inFlightRef.current = true;
 
@@ -47,6 +49,7 @@ export function useHaikuVision({ onVisionFeedback } = {}) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           frames,
+          jointAngles: anglesAtFrames || [],
           sport: ctx?.sport || 'fitness',
           exercise: ctx?.exerciseName || '',
           playerProfile: ctx?.playerProfile,
@@ -73,11 +76,14 @@ export function useHaikuVision({ onVisionFeedback } = {}) {
     }
   }, [onVisionFeedback]);
 
-  const feedPhaseData = useCallback((newState) => {
+  const feedPhaseData = useCallback((newState, angles) => {
     if (!enabledRef.current || disabledRef.current) return;
     if (!newState) return;
     // Only process when athlete is actually moving (ignore idle phase flickers)
     if (!newState.moving && !newState.firstRepStarted) return;
+
+    // Always store latest angles for Frame 2 capture (happens in setTimeout)
+    if (angles) latestAnglesRef.current = angles;
 
     const currentPhase = newState.phase;
     const prevPhase = lastPhaseRef.current;
@@ -97,17 +103,22 @@ export function useHaikuVision({ onVisionFeedback } = {}) {
     // Phase transition: up → down → capture Frame 1 (start of movement)
     if (prevPhase === 'up' && currentPhase === 'down') {
       framesRef.current = [];
+      anglesRef.current = [];
       clearTimeout(frame2TimerRef.current);
 
       const f1 = captureCurrentFrame();
       if (f1) {
         framesRef.current.push(f1);
+        anglesRef.current.push(angles || null);
 
         // Schedule Frame 2 capture after delay (peak effort)
         frame2TimerRef.current = setTimeout(() => {
           if (!enabledRef.current || disabledRef.current) return;
           const f2 = captureCurrentFrame();
-          if (f2) framesRef.current.push(f2);
+          if (f2) {
+            framesRef.current.push(f2);
+            anglesRef.current.push(latestAnglesRef.current || null);
+          }
         }, FRAME2_DELAY_MS);
       }
     }
@@ -115,15 +126,20 @@ export function useHaikuVision({ onVisionFeedback } = {}) {
     // Phase transition: down → up → capture Frame 3 (return)
     if (prevPhase === 'down' && currentPhase === 'up') {
       const f3 = captureCurrentFrame();
-      if (f3) framesRef.current.push(f3);
+      if (f3) {
+        framesRef.current.push(f3);
+        anglesRef.current.push(angles || null);
+      }
 
       // If we have 3 frames and reps increased, fire analysis
       if (framesRef.current.length === 3 && reps > repCountRef.current) {
         const framesToSend = [...framesRef.current];
+        const anglesToSend = [...anglesRef.current];
         repCountRef.current = reps;
         framesRef.current = [];
-        // Fire and forget
-        sendFramesToServer(framesToSend, reps);
+        anglesRef.current = [];
+        // Fire and forget — with angle snapshots
+        sendFramesToServer(framesToSend, reps, anglesToSend);
       }
     }
 

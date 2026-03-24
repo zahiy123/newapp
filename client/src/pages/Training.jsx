@@ -734,14 +734,16 @@ export default function Training() {
       moving: isMoving,
       headDown: newState.headDown,
       feedback: newState.feedback,
-      formIssues: newState.formIssues,
+      formIssues: newState._formIssues,
+      jointAngles: prevAnglesRef.current,
       ballDetected: ballData?.detected,
     });
 
     exerciseStateRef.current = newState;
     // Only send frames to vision server if movement is sufficient (>=15% body height)
     if (movementSufficientRef.current) {
-      feedPhaseData(newState);
+      const repAngles = computeJointAngles(stableLandmarks);
+      feedPhaseData(newState, repAngles);
     }
   }, [landmarks, phase]);
 

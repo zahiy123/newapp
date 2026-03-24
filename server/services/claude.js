@@ -167,7 +167,15 @@ function getBiomechanicsChecklist(exercise, sport) {
   return '';
 }
 
-export async function analyzeRepFrames({ frames, sport, exercise, playerProfile, repNumber }) {
+// Format joint angles object into readable string for AI prompts
+function formatAngles(a) {
+  if (!a || typeof a !== 'object') return 'N/A';
+  const entries = Object.entries(a).filter(([, v]) => typeof v === 'number');
+  if (entries.length === 0) return 'N/A';
+  return entries.map(([k, v]) => `${k}: ${Math.round(v)}°`).join(', ');
+}
+
+export async function analyzeRepFrames({ frames, sport, exercise, playerProfile, repNumber, jointAngles }) {
   const safeFallback = { is_correct: true, feedback: '', score: 0 };
   try {
     if (!frames || frames.length !== 3) return safeFallback;
@@ -210,8 +218,23 @@ FEEDBACK RULES:
       { type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: frames[1] } },
       { type: 'text', text: `Frame 3 (return/completion):` },
       { type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: frames[2] } },
-      { type: 'text', text: 'Analyze form across these 3 frames. Return ONLY the JSON.' }
     ];
+
+    // Inject measured joint angles if available (from MediaPipe pose detection)
+    if (jointAngles && Array.isArray(jointAngles) && jointAngles.length > 0) {
+      contentBlocks.push({
+        type: 'text',
+        text: `MEASURED JOINT ANGLES (from MediaPipe pose detection — use these EXACT numbers for quantitative feedback):
+Frame 1 (start): ${formatAngles(jointAngles[0])}
+Frame 2 (peak): ${formatAngles(jointAngles[1])}
+Frame 3 (return): ${formatAngles(jointAngles[2])}
+Compare these against the biomechanics checkpoints. Reference specific angles in your Hebrew feedback.`
+      });
+    }
+
+    contentBlocks.push(
+      { type: 'text', text: 'Analyze form across these 3 frames. Return ONLY the JSON.' }
+    );
 
     const message = await client.messages.create({
       model: HAIKU_VISION_MODEL,
@@ -1409,12 +1432,18 @@ ${data.disability && data.disability !== 'none' ? `- Athlete has disability: ${d
 Return ONLY valid JSON: {"feedback":"Hebrew spoken coaching sentence","isUrgent":false}
 isUrgent=true only for safety/critical form issues (fall risk, joint danger, equipment instability).`;
 
+  const biomechanics = getBiomechanicsChecklist(data.exercise, data.sport);
+  const anglesSection = data.jointAngles ? `\nCURRENT JOINT ANGLES: ${formatAngles(data.jointAngles)}` : '';
+  const romSection = data.angleRanges?.min && Object.keys(data.angleRanges.min).length > 0
+    ? `\nROM THIS WINDOW: deepest=${formatAngles(data.angleRanges.min)}, highest=${formatAngles(data.angleRanges.max)}`
+    : '';
+
   const content = `Exercise: ${data.exercise}
 Duration: ${data.duration}s
 Reps: ${data.reps}/${data.targetReps} (set ${data.sets}/${data.targetSets})
 Good form: ${data.goodFormPct}%, Bad form: ${data.badFormPct}%
 Top issues: ${(data.topIssues || []).join(', ') || 'none'}
-Skill level: ${data.skillLevel || 'intermediate'}`;
+Skill level: ${data.skillLevel || 'intermediate'}${biomechanics ? `\n\nBIOMECHANICS CHECKLIST:\n${biomechanics}` : ''}${anglesSection}${romSection}${anglesSection || romSection ? '\nUse these EXACT angle numbers for quantitative coaching cues in Hebrew.' : ''}`;
 
   try {
     const text = await callClaude(system, content, 150, 0); // 0 retries for speed

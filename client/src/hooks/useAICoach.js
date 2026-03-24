@@ -30,6 +30,9 @@ export function useAICoach({ onCoaching }) {
       movingFrames: 0,
       headDownFrames: 0,
       ballDetections: 0,
+      latestAngles: null,
+      minAngles: {},
+      maxAngles: {},
       windowStartTime: Date.now(),
     };
   }
@@ -63,6 +66,17 @@ export function useAICoach({ onCoaching }) {
     }
 
     if (data.ballDetected) acc.ballDetections++;
+
+    // Track joint angles for quantitative feedback
+    if (data.jointAngles && typeof data.jointAngles === 'object') {
+      acc.latestAngles = data.jointAngles;
+      for (const [k, v] of Object.entries(data.jointAngles)) {
+        if (typeof v === 'number') {
+          acc.minAngles[k] = Math.min(acc.minAngles[k] ?? 999, v);
+          acc.maxAngles[k] = Math.max(acc.maxAngles[k] ?? 0, v);
+        }
+      }
+    }
   }, []);
 
   /**
@@ -106,6 +120,8 @@ export function useAICoach({ onCoaching }) {
       goodFormPct,
       badFormPct,
       topIssues,
+      jointAngles: acc.latestAngles || {},
+      angleRanges: { min: acc.minAngles, max: acc.maxAngles },
       age: ctx.age,
       disability: ctx.disability,
       playerName: ctx.playerName,
