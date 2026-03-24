@@ -178,41 +178,57 @@ function formatAngles(a) {
 export async function analyzeRepFrames({ frames, sport, exercise, playerProfile, repNumber, jointAngles }) {
   const safeFallback = { is_correct: true, feedback: '', score: 0 };
   try {
+    const playerName = playerProfile?.name || 'ספורטאי';
+    const hasAngles = jointAngles && Array.isArray(jointAngles) && jointAngles.length > 0;
+
+    // FAST PATH: text-only when we have joint angles (no image = ~0.5s vs ~2.5s)
+    if (hasAngles) {
+      const system = `Rep #${repNumber} of ${exercise} for ${playerName}.
+Angles: start=${formatAngles(jointAngles[0])}, peak=${formatAngles(jointAngles[1] || jointAngles[0])}, end=${formatAngles(jointAngles[2] || jointAngles[0])}
+Return ONLY JSON: {"is_correct":true,"feedback":"5-7 words Hebrew","score":1-10,"issue_key":"string"}
+is_correct=true if rep completed (angles show full ROM). false only if ROM < 50% or dangerous.
+feedback: Hebrew technique cue referencing angle numbers. Max 7 words. No generic praise.`;
+
+      console.log(`[VISION-FAST] Text-only analysis for ${exercise} rep#${repNumber}`);
+      const t0 = Date.now();
+      const message = await client.messages.create({
+        model: HAIKU_VISION_MODEL,
+        max_tokens: 80,
+        system,
+        messages: [{ role: 'user', content: 'Analyze and return JSON.' }]
+      });
+      console.log(`[VISION-FAST] Response in ${Date.now() - t0}ms`);
+
+      const parsed = extractJSON(message.content[0].text);
+      if (parsed && typeof parsed.is_correct === 'boolean') return parsed;
+      return safeFallback;
+    }
+
+    // SLOW PATH: image-based when no joint angles available
     if (!frames || frames.length < 1) return safeFallback;
 
-    const playerName = playerProfile?.name || 'ספורטאי';
-
-    // Fast-track prompt: minimal tokens for <1s response
-    const anglesText = jointAngles?.length
-      ? `\nAngles: start=${formatAngles(jointAngles[0])}, peak=${formatAngles(jointAngles[1] || jointAngles[0])}, end=${formatAngles(jointAngles[2] || jointAngles[0])}`
-      : '';
-
-    const system = `Rep #${repNumber} of ${exercise} for ${playerName}.${anglesText}
-Return ONLY JSON: {"is_correct":true/false,"feedback":"5-7 words Hebrew","score":1-10,"issue_key":"string"}
-is_correct=true if rep completed. false only if incomplete/dangerous.
-feedback: Hebrew technique cue with angle numbers. No generic praise. Max 7 words.`;
-
-    // Strip ANY data URL prefix and whitespace — Claude API expects raw base64 only
     const cleanBase64 = (b) => {
       if (typeof b !== 'string' || !b) return '';
       const cleaned = b.replace(/^data:image\/\w+;base64,/, '').trim();
       return cleaned.replace(/\s/g, '');
     };
 
-    // Send only frame 2 (peak effort) — 1 image = 3× faster than 3 images
     const peakFrame = cleanBase64(frames[1] || frames[0]);
-    console.log(`[VISION] Frame cleaned: ${peakFrame.length} chars | start: ${peakFrame.slice(0, 8)}...`);
+    console.log(`[VISION-IMG] Frame cleaned: ${peakFrame.length} chars`);
 
-    const contentBlocks = [
-      { type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: peakFrame } },
-      { type: 'text', text: 'Analyze form. Return ONLY JSON.' }
-    ];
+    const system = `Rep #${repNumber} of ${exercise} for ${playerName}.
+Return ONLY JSON: {"is_correct":true,"feedback":"5-7 words Hebrew","score":1-10,"issue_key":"string"}
+is_correct=true if rep completed. false only if incomplete/dangerous.
+feedback: Hebrew technique cue. Max 7 words. No generic praise.`;
 
     const message = await client.messages.create({
       model: HAIKU_VISION_MODEL,
       max_tokens: 80,
       system,
-      messages: [{ role: 'user', content: contentBlocks }]
+      messages: [{ role: 'user', content: [
+        { type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: peakFrame } },
+        { type: 'text', text: 'Analyze form. Return ONLY JSON.' }
+      ]}]
     });
 
     const parsed = extractJSON(message.content[0].text);
