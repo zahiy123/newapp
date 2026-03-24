@@ -175,38 +175,67 @@ function formatAngles(a) {
   return entries.map(([k, v]) => `${k}: ${Math.round(v)}°`).join(', ');
 }
 
-// Exercise-specific scoring rubrics so Haiku knows what's good vs bad
-const SCORING_RUBRICS = {
-  // Squat variants
-  'סקוואט': 'SCORING: knee at peak: <90°=score 8-10 (deep), 90-120°=score 5-7 (half), >120°=score 2-4 (shallow/bad). hip should match knee depth.',
-  'squat': 'SCORING: knee at peak: <90°=score 8-10 (deep), 90-120°=score 5-7 (half), >120°=score 2-4 (shallow/bad). hip should match knee depth.',
-  // Push-up
-  'פוש אפ': 'SCORING: elbow at bottom: <90°=score 8-10 (full), 90-120°=score 5-7 (partial), >120°=score 2-4 (barely bent).',
-  'push': 'SCORING: elbow at bottom: <90°=score 8-10 (full), 90-120°=score 5-7 (partial), >120°=score 2-4 (barely bent).',
-  // Pull-up
-  'מתח': 'SCORING: elbow at top: <90°=score 8-10 (chin over bar), 90-120°=score 5-7 (partial), >120°=score 2-4 (barely pulled).',
-  'pull': 'SCORING: elbow at top: <90°=score 8-10 (chin over bar), 90-120°=score 5-7 (partial), >120°=score 2-4 (barely pulled).',
-  // Kicks
-  'בעיטה': 'SCORING: knee flexion at peak: <50°=score 8-10 (powerful kick), 50-90°=score 5-7 (moderate), >90°=score 2-4 (weak/no backswing). hip extension matters.',
-  'kick': 'SCORING: knee flexion at peak: <50°=score 8-10 (powerful kick), 50-90°=score 5-7 (moderate), >90°=score 2-4 (weak/no backswing).',
-  // Crutch running
-  'ריצה עם קביים': 'SCORING: trunk tilt: <10°=score 8-10 (stable), 10-25°=score 5-7 (some wobble), >25°=score 2-4 (unstable/dangerous). shoulder symmetry matters.',
-  'קביים': 'SCORING: trunk tilt: <10°=score 8-10 (stable), 10-25°=score 5-7 (some wobble), >25°=score 2-4 (unstable/dangerous).',
-  // Shooting (basketball)
-  'זריקה': 'SCORING: elbow at release: full extension(>160°)=score 8-10, partial(120-160°)=score 5-7, bent(<120°)=score 2-4 (flat shot). wrist follow-through matters.',
-  'shooting': 'SCORING: elbow at release: full extension(>160°)=score 8-10, partial(120-160°)=score 5-7, bent(<120°)=score 2-4.',
-  // Dips
-  'מקבילים': 'SCORING: elbow at bottom: <90°=score 8-10, 90-120°=score 5-7, >120°=score 2-4.',
-  'dip': 'SCORING: elbow at bottom: <90°=score 8-10, 90-120°=score 5-7, >120°=score 2-4.',
-};
+// Server-side scoring: compute score from joint angles deterministically
+// Haiku only generates Hebrew feedback text — score is computed here
+const SCORING_RULES = [
+  // Squat: knee at peak (index 1) — lower = deeper = better
+  { keywords: ['סקוואט', 'squat'], joint: 'knee', phase: 1, dir: 'lower',
+    thresholds: [90, 120] }, // <90=8-10, 90-120=5-7, >120=2-4
+  // Push-up: elbow at peak (bottom position)
+  { keywords: ['פוש', 'push', 'שכיבות'], joint: 'elbow', phase: 1, dir: 'lower',
+    thresholds: [90, 120] },
+  // Pull-up: elbow at peak (top position)
+  { keywords: ['מתח', 'pull', 'chin', 'סנטר'], joint: 'elbow', phase: 1, dir: 'lower',
+    thresholds: [90, 120] },
+  // Dips: elbow at bottom
+  { keywords: ['מקבילים', 'dip'], joint: 'elbow', phase: 1, dir: 'lower',
+    thresholds: [90, 120] },
+  // Kicks: knee at peak — lower = more backswing = better
+  { keywords: ['בעיטה', 'kick'], joint: 'knee', phase: 1, dir: 'lower',
+    thresholds: [50, 90] },
+  // Crutch running: trunk at peak — lower = more stable = better
+  { keywords: ['קביים', 'crutch', 'ריצה עם'], joint: 'trunk', phase: 1, dir: 'lower',
+    thresholds: [10, 25] },
+  // Basketball shooting: elbow at end (release) — higher = more extension = better
+  { keywords: ['זריקה', 'shoot', 'כדורסל'], joint: 'elbow', phase: 2, dir: 'higher',
+    thresholds: [120, 160] }, // >160=8-10, 120-160=5-7, <120=2-4
+];
 
-function getScoringRubric(exercise) {
+function computeScoreFromAngles(exercise, jointAngles) {
+  if (!jointAngles || !Array.isArray(jointAngles) || jointAngles.length === 0) return null;
   const ex = (exercise || '').toLowerCase();
-  for (const [key, rubric] of Object.entries(SCORING_RUBRICS)) {
-    if (ex.includes(key.toLowerCase())) return rubric;
+
+  for (const rule of SCORING_RULES) {
+    if (!rule.keywords.some(k => ex.includes(k))) continue;
+
+    const phaseData = jointAngles[rule.phase] || jointAngles[1] || jointAngles[0];
+    if (!phaseData) continue;
+
+    const angle = phaseData[rule.joint];
+    if (typeof angle !== 'number') continue;
+
+    const [lowThresh, highThresh] = rule.thresholds;
+
+    if (rule.dir === 'lower') {
+      // Lower angle = better (squat depth, elbow bend, trunk stability)
+      if (angle < lowThresh) return 8 + Math.round(2 * (1 - angle / lowThresh)); // 8-10
+      if (angle <= highThresh) return 5 + Math.round(2 * (highThresh - angle) / (highThresh - lowThresh)); // 5-7
+      return 2 + Math.round(2 * Math.max(0, 1 - (angle - highThresh) / 60)); // 2-4
+    } else {
+      // Higher angle = better (shooting extension)
+      if (angle > highThresh) return 8 + Math.round(2 * Math.min(1, (angle - highThresh) / 20)); // 8-10
+      if (angle >= lowThresh) return 5 + Math.round(2 * (angle - lowThresh) / (highThresh - lowThresh)); // 5-7
+      return 2 + Math.round(2 * Math.max(0, angle / lowThresh)); // 2-4
+    }
   }
-  // Generic fallback: score based on ROM percentage
-  return 'SCORING: full ROM=score 8-10, partial ROM(50-80%)=score 5-7, minimal ROM(<50%)=score 2-4. Be strict.';
+
+  return null; // No matching rule — let Haiku score
+}
+
+function qualityLabel(score) {
+  if (score >= 8) return 'EXCELLENT form';
+  if (score >= 5) return 'MEDIOCRE form — needs correction';
+  return 'BAD form — major issues';
 }
 
 export async function analyzeRepFrames({ frames, sport, exercise, playerProfile, repNumber, jointAngles }) {
@@ -214,33 +243,41 @@ export async function analyzeRepFrames({ frames, sport, exercise, playerProfile,
   try {
     const playerName = playerProfile?.name || 'ספורטאי';
     const hasAngles = jointAngles && Array.isArray(jointAngles) && jointAngles.length > 0;
-    const rubric = getScoringRubric(exercise);
+
+    // Compute score server-side from angles (deterministic, no AI needed)
+    const serverScore = hasAngles ? computeScoreFromAngles(exercise, jointAngles) : null;
 
     // FAST PATH: text-only when we have joint angles (no image = ~0.5s vs ~2.5s)
     if (hasAngles) {
+      const scoreHint = serverScore !== null
+        ? `\nServer scored this ${serverScore}/10 (${qualityLabel(serverScore)}). Generate feedback matching this quality level.`
+        : '';
       const system = `Rep #${repNumber} of ${exercise} for ${playerName}.
-Angles: start=${formatAngles(jointAngles[0])}, peak=${formatAngles(jointAngles[1] || jointAngles[0])}, end=${formatAngles(jointAngles[2] || jointAngles[0])}
-${rubric}
-BE CRITICAL. Low scores for bad form. Never say "טוב" if score<6.
-Return ONLY JSON: {"is_correct":true,"feedback":"5-7 words Hebrew","score":1-10,"issue_key":"string"}
-is_correct=true always (we count all reps). score reflects QUALITY strictly per rubric above.
-feedback: Hebrew critique with angle numbers. If bad, say what's wrong. Max 7 words.`;
+Angles: start=${formatAngles(jointAngles[0])}, peak=${formatAngles(jointAngles[1] || jointAngles[0])}, end=${formatAngles(jointAngles[2] || jointAngles[0])}${scoreHint}
+Return ONLY JSON: {"feedback":"5-7 words Hebrew","issue_key":"string"}
+feedback: Hebrew coaching cue with angle numbers. If score<6, be harsh and say what's wrong. If score>=8, brief praise. Max 7 words.`;
 
-      console.log(`[VISION-FAST] Text-only analysis for ${exercise} rep#${repNumber}`);
+      console.log(`[VISION-FAST] Text-only for ${exercise} rep#${repNumber} serverScore=${serverScore}`);
       const t0 = Date.now();
       const message = await client.messages.create({
         model: HAIKU_VISION_MODEL,
         max_tokens: 80,
         system,
-        messages: [{ role: 'user', content: 'Analyze angles strictly per rubric. Return JSON.' }]
+        messages: [{ role: 'user', content: 'Generate Hebrew feedback. Return JSON only.' }]
       });
       const rawText = message.content[0].text;
       console.log(`[VISION-FAST] Response in ${Date.now() - t0}ms: ${rawText}`);
 
       const parsed = extractJSON(rawText);
-      if (parsed && typeof parsed.is_correct === 'boolean') return parsed;
-      console.warn(`[VISION-FAST] Failed to parse JSON from: ${rawText}`);
-      return safeFallback;
+      const feedback = parsed?.feedback || '';
+      const issueKey = parsed?.issue_key || '';
+      // Use server score (deterministic) — Haiku only provides feedback text
+      return {
+        is_correct: true,
+        feedback,
+        score: serverScore ?? (parsed?.score || 5),
+        issue_key: issueKey,
+      };
     }
 
     // SLOW PATH: image-based when no joint angles available
@@ -256,11 +293,9 @@ feedback: Hebrew critique with angle numbers. If bad, say what's wrong. Max 7 wo
     console.log(`[VISION-IMG] Frame cleaned: ${peakFrame.length} chars`);
 
     const system = `Rep #${repNumber} of ${exercise} for ${playerName}.
-${rubric}
-BE CRITICAL. Low scores for bad form.
 Return ONLY JSON: {"is_correct":true,"feedback":"5-7 words Hebrew","score":1-10,"issue_key":"string"}
-is_correct=true always. score reflects QUALITY strictly per rubric.
-feedback: Hebrew critique. Max 7 words. No generic praise.`;
+is_correct=true always. score: 8-10=great form, 5-7=partial, 2-4=bad form.
+feedback: Hebrew critique. Max 7 words. Be strict about form quality.`;
 
     const message = await client.messages.create({
       model: HAIKU_VISION_MODEL,
