@@ -211,13 +211,16 @@ FEEDBACK RULES:
 - issue_key: short English key like "knee_valgus", "ankle_unlocked", "crutch_narrow", "good_form".
 - Score: 7-10 = good form, 4-6 = needs work, 1-3 = safety concern.`;
 
+    // Strip data URL prefix if present — Claude API expects raw base64 only
+    const cleanBase64 = (b) => (typeof b === 'string' && b.startsWith('data:')) ? b.split(',')[1] : b;
+
     const contentBlocks = [
       { type: 'text', text: `Frame 1 (start of rep #${repNumber}):` },
-      { type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: frames[0] } },
+      { type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: cleanBase64(frames[0]) } },
       { type: 'text', text: `Frame 2 (peak effort/depth):` },
-      { type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: frames[1] } },
+      { type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: cleanBase64(frames[1]) } },
       { type: 'text', text: `Frame 3 (return/completion):` },
-      { type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: frames[2] } },
+      { type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: cleanBase64(frames[2]) } },
     ];
 
     // Inject measured joint angles if available (from MediaPipe pose detection)

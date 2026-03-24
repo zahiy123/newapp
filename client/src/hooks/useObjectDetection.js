@@ -89,7 +89,9 @@ export function useObjectDetection() {
       .filter(d => d.score > 0.3);
   }, []);
 
-  // Capture a video frame as base64 JPEG for Claude Vision
+  // Capture a video frame as raw base64 JPEG for Claude Vision API
+  // Returns ONLY the base64 data (no data:image/jpeg;base64, prefix)
+  // Returns null if frame is empty/black (prevents wasting API calls)
   const captureFrame = useCallback((videoEl) => {
     if (!videoEl || videoEl.readyState < 2) return null;
     const canvas = document.createElement('canvas');
@@ -97,7 +99,26 @@ export function useObjectDetection() {
     canvas.height = Math.min(videoEl.videoHeight, 480);
     const ctx = canvas.getContext('2d');
     ctx.drawImage(videoEl, 0, 0, canvas.width, canvas.height);
-    return canvas.toDataURL('image/jpeg', 0.7); // 70% quality JPEG
+
+    // Validate: check if frame is not black/empty (sample 20 pixels)
+    try {
+      const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+      const d = imageData.data;
+      let nonBlack = 0;
+      const step = Math.floor(d.length / (20 * 4)); // Sample ~20 pixels evenly
+      for (let i = 0; i < d.length; i += step * 4) {
+        if (d[i] > 10 || d[i + 1] > 10 || d[i + 2] > 10) nonBlack++;
+      }
+      if (nonBlack < 3) return null; // Frame is mostly black — skip
+    } catch (e) {
+      // getImageData may fail on tainted canvas — send frame anyway
+    }
+
+    const dataUrl = canvas.toDataURL('image/jpeg', 0.7);
+    // Strip the data:image/jpeg;base64, prefix — Claude API expects raw base64
+    const base64 = dataUrl.split(',')[1];
+    if (!base64 || base64.length < 100) return null; // Too small = invalid
+    return base64;
   }, []);
 
   const startLoop = useCallback((videoEl) => {
