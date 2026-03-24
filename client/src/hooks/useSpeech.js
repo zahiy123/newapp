@@ -295,9 +295,10 @@ export function useSpeech(lang = 'he-IL', age) {
     _utterSpeak(chunks[0], options);
   }, [_utterSpeak, splitToChunks, unstickSpeaking]);
 
-  // Queued speak: always adds to queue, never cancels
+  // Queued speak: always adds to queue, never cancels (used for vision coaching after count)
   const speakQueued = useCallback((text, options = {}) => {
     if (!window.speechSynthesis || !text) return;
+    unstickSpeaking();
     const chunks = splitToChunks(text);
     if (chunks.length === 0) return;
     if (!speaking.current && queueRef.current.length === 0) {
@@ -310,7 +311,7 @@ export function useSpeech(lang = 'he-IL', age) {
         queueRef.current.push({ text: chunk, options });
       }
     }
-  }, [_utterSpeak, splitToChunks]);
+  }, [_utterSpeak, splitToChunks, unstickSpeaking]);
 
   // Pre-exercise briefing — full coach persona: explain, safety, motivate
   // Uses chunking for each segment to prevent TTS cuts on mobile

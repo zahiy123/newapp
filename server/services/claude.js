@@ -178,89 +178,39 @@ function formatAngles(a) {
 export async function analyzeRepFrames({ frames, sport, exercise, playerProfile, repNumber, jointAngles }) {
   const safeFallback = { is_correct: true, feedback: '', score: 0 };
   try {
-    if (!frames || frames.length !== 3) return safeFallback;
+    if (!frames || frames.length < 1) return safeFallback;
 
-    const sportContext = SPORT_CONTEXTS[sport] || SPORT_CONTEXTS.fitness || '';
     const playerName = playerProfile?.name || 'ספורטאי';
-    const playerInfo = playerProfile
-      ? `Player: ${playerName}, Age: ${playerProfile.age || '?'}, Disability: ${playerProfile.disability || 'none'}`
+
+    // Fast-track prompt: minimal tokens for <1s response
+    const anglesText = jointAngles?.length
+      ? `\nAngles: start=${formatAngles(jointAngles[0])}, peak=${formatAngles(jointAngles[1] || jointAngles[0])}, end=${formatAngles(jointAngles[2] || jointAngles[0])}`
       : '';
-    const biomechanics = getBiomechanicsChecklist(exercise, sport);
-    const biomechanicsSection = biomechanics ? `\nBIOMECHANICS FOR ${exercise}:\n${biomechanics}` : '';
 
-    const system = `You are analyzing rep #${repNumber} of ${exercise} for ${playerName}.
-${sportContext}
-${playerInfo}
-${biomechanicsSection}
-
-ANALYSIS PROTOCOL:
-Compare the 3 frames (start → peak effort → return) against the biomechanics checkpoints.
-Identify the ONE most impactful biomechanical issue to improve. ALWAYS give a specific technique correction — never just say "good job".
-
-RESPONSE FORMAT — return ONLY valid JSON:
-{"is_correct":boolean,"feedback":"Hebrew coaching sentence","score":1-10,"isUrgent":boolean,"issue_key":"string"}
-
-is_correct RULES:
-- is_correct=true if the athlete completed a full rep (went down AND came back up). Even imperfect form counts as a completed rep.
-- is_correct=false ONLY if: movement was incomplete (didn't go down enough to count), or dangerous (injury risk).
-- When in doubt, return is_correct=true. A rep with bad form is still a rep.
-
-FEEDBACK RULES:
-- MAX 25 words Hebrew. TTS-friendly: no brackets, no lists, no special chars.
-- ALWAYS include a SPECIFIC TECHNIQUE CUE — even when form is good, tell them what to focus on next.
-- Reference EXACT joint angles from the measured data when available.
-- Good form: tell them what made it good AND give the next optimization target.
-  Example: "${playerName}, מרפק ב-80 מעלות, מצוין! עכשיו תנסה להוריד את החזה קצת יותר לרצפה"
-- Needs work: name the exact joint/body part and the fix with a number.
-  Example: "${playerName}, הגב שוקע ב-15 מעלות, תמתח את הבטן ותישר את הגב כמו קרש"
-- Urgent: "${playerName}, עצור! הקביים מחליקות, תרחיב את הבסיס"
-- NEVER give generic feedback like "עבודה טובה" or "תמשיך ככה" without a technique detail.
-- isUrgent=true ONLY for: fall risk, joint danger, equipment instability.
-- issue_key: short English key like "knee_valgus", "hip_sag", "elbow_flare", "depth_shallow", "good_form".
-- Score: 8-10 = excellent form, 5-7 = needs specific fix, 1-4 = safety/major issue.`;
+    const system = `Rep #${repNumber} of ${exercise} for ${playerName}.${anglesText}
+Return ONLY JSON: {"is_correct":true/false,"feedback":"5-7 words Hebrew","score":1-10,"issue_key":"string"}
+is_correct=true if rep completed. false only if incomplete/dangerous.
+feedback: Hebrew technique cue with angle numbers. No generic praise. Max 7 words.`;
 
     // Strip ANY data URL prefix and whitespace — Claude API expects raw base64 only
     const cleanBase64 = (b) => {
       if (typeof b !== 'string' || !b) return '';
-      // Remove data:image/...;base64, prefix (any image type)
       const cleaned = b.replace(/^data:image\/\w+;base64,/, '').trim();
-      // Remove any newlines/spaces that may have crept in
       return cleaned.replace(/\s/g, '');
     };
 
-    const f1 = cleanBase64(frames[0]);
-    const f2 = cleanBase64(frames[1]);
-    const f3 = cleanBase64(frames[2]);
-    console.log(`[VISION] Frames cleaned: ${f1.length}, ${f2.length}, ${f3.length} chars | starts: ${f1.slice(0, 8)}... ${f2.slice(0, 8)}... ${f3.slice(0, 8)}...`);
+    // Send only frame 2 (peak effort) — 1 image = 3× faster than 3 images
+    const peakFrame = cleanBase64(frames[1] || frames[0]);
+    console.log(`[VISION] Frame cleaned: ${peakFrame.length} chars | start: ${peakFrame.slice(0, 8)}...`);
 
     const contentBlocks = [
-      { type: 'text', text: `Frame 1 (start of rep #${repNumber}):` },
-      { type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: f1 } },
-      { type: 'text', text: `Frame 2 (peak effort/depth):` },
-      { type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: f2 } },
-      { type: 'text', text: `Frame 3 (return/completion):` },
-      { type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: f3 } },
+      { type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: peakFrame } },
+      { type: 'text', text: 'Analyze form. Return ONLY JSON.' }
     ];
-
-    // Inject measured joint angles if available (from MediaPipe pose detection)
-    if (jointAngles && Array.isArray(jointAngles) && jointAngles.length > 0) {
-      contentBlocks.push({
-        type: 'text',
-        text: `MEASURED JOINT ANGLES (from MediaPipe pose detection — use these EXACT numbers for quantitative feedback):
-Frame 1 (start): ${formatAngles(jointAngles[0])}
-Frame 2 (peak): ${formatAngles(jointAngles[1])}
-Frame 3 (return): ${formatAngles(jointAngles[2])}
-Compare these against the biomechanics checkpoints. Reference specific angles in your Hebrew feedback.`
-      });
-    }
-
-    contentBlocks.push(
-      { type: 'text', text: 'Analyze form across these 3 frames. Return ONLY the JSON.' }
-    );
 
     const message = await client.messages.create({
       model: HAIKU_VISION_MODEL,
-      max_tokens: 300,
+      max_tokens: 80,
       system,
       messages: [{ role: 'user', content: contentBlocks }]
     });

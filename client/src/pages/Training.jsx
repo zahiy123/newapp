@@ -100,7 +100,7 @@ export default function Training() {
   const [equipmentLabel, setEquipmentLabel] = useState('');
   const equipCheckTimerRef = useRef(null);
   const {
-    speak, speakPriority, speakIfIdle, speakBriefing, speakEncouragement, speakCorrection,
+    speak, speakPriority, speakIfIdle, speakQueued, speakBriefing, speakEncouragement, speakCorrection,
     speakOptimization, speakRestTip, speakSetStart, speakCount,
     speakPostBriefingNudge, speakMidSetQuit, speakHeadUp,
     speakHowToStart, speakSitting, speakReadyWhenYouAre, speakActiveProd,
@@ -140,10 +140,10 @@ export default function Training() {
   const onVisionFeedback = useCallback((result) => {
     if (result.feedback) {
       const text = stripName(result.feedback);
-      // Always use speakPriority — this is per-rep Haiku feedback, must be heard
-      speakPriority(text, { rate: result.isUrgent ? 1.1 : 1.2 });
+      // Queue after count speech — never cancel the "3!" announcement
+      speakQueued(text, { rate: 1.2 });
     }
-  }, [speakPriority, stripName]);
+  }, [speakQueued, stripName]);
 
   const { feedPhaseData, startVision, stopVision, resetSession: resetVisionSession } = useHaikuVision({ onVisionFeedback });
 

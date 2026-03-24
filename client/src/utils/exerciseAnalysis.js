@@ -2959,9 +2959,114 @@ export function analyzeRunningForm(landmarks, prevState = {}) {
   };
 }
 
+// --- Pull-ups: elbow angle tracking (hanging → chin-over-bar → hanging) ---
+export function analyzePullUps(landmarks, prevState = {}) {
+  if (!landmarks) return { ...prevState, feedback: null };
+
+  const vis = validateLandmarks(landmarks, ['arms', 'shoulders']);
+  if (!vis.valid) {
+    return { ...prevState, feedback: { type: 'visibility', missingParts: vis.missingParts, direction: vis.direction }, posture: prevState.posture || 'unknown', _prevLandmarks: landmarks };
+  }
+
+  const moving = detectMovement(landmarks, prevState._prevLandmarks, prevState);
+  const headDown = detectHeadDown(landmarks);
+
+  const lShoulder = landmarks[LM.LEFT_SHOULDER];
+  const rShoulder = landmarks[LM.RIGHT_SHOULDER];
+  const lElbow = landmarks[LM.LEFT_ELBOW];
+  const rElbow = landmarks[LM.RIGHT_ELBOW];
+  const lWrist = landmarks[LM.LEFT_WRIST];
+  const rWrist = landmarks[LM.RIGHT_WRIST];
+
+  // Use most visible side
+  let shoulder, elbow, wrist;
+  if ((lElbow?.visibility || 0) >= (rElbow?.visibility || 0)) {
+    shoulder = lShoulder; elbow = lElbow; wrist = lWrist;
+  } else {
+    shoulder = rShoulder; elbow = rElbow; wrist = rWrist;
+  }
+
+  if (!shoulder || !elbow || !wrist || elbow.visibility < 0.3) {
+    return { ...prevState, feedback: null, moving, headDown: false, posture: 'unknown', _prevLandmarks: landmarks };
+  }
+
+  const rawElbowAngle = angle(shoulder, elbow, wrist);
+  const elbowAngle = smoothAngle(rawElbowAngle, prevState, '_smoothElbow');
+  const reps = prevState.reps || 0;
+  const phase = prevState.phase || 'down'; // Start hanging (arms extended = 'down')
+  const firstRepStarted = prevState.firstRepStarted || false;
+  const phaseStartAngle = prevState._phaseStartAngle ?? elbowAngle;
+  const repCounted = prevState._repCounted || false;
+  let newRepCounted = repCounted;
+
+  let newPhase = phase;
+  let newReps = reps;
+  let feedback = null;
+  let lastRepTime = prevState.lastRepTime || null;
+  let newFirstRep = firstRepStarted;
+  let newPhaseStartAngle = phaseStartAngle;
+
+  // Pull-up phases: down = hanging (elbow > 140°), up = chin over bar (elbow < 90°)
+  const downThreshold = 140;
+  const upThreshold = 90;
+
+  if (phase === 'down' && elbowAngle < upThreshold) {
+    // Pulled up — arms flexed
+    newPhase = 'up';
+    newFirstRep = true;
+    newPhaseStartAngle = elbowAngle;
+    newRepCounted = false;
+    feedback = { type: 'info', text: 'למעלה!' };
+  } else if (phase === 'up') {
+    // Count when returning to hang (75% back to extension)
+    const earlyThreshold = phaseStartAngle + (downThreshold - phaseStartAngle) * 0.75;
+    if (!repCounted && elbowAngle > earlyThreshold && meetsMinROM(prevState, 'elbow', elbowAngle, phaseStartAngle) && canCountRep(lastRepTime)) {
+      newReps = reps + 1;
+      lastRepTime = Date.now();
+      newRepCounted = true;
+      const romDelta = Math.abs(elbowAngle - phaseStartAngle);
+      let coaching = null;
+      if (romDelta > 80) {
+        coaching = { he: 'טווח תנועה מלא! סנטר מעל המוט, מעולה', en: 'Full ROM! Chin over bar, excellent' };
+      } else if (romDelta > 50) {
+        coaching = { he: 'טוב! נסה למשוך גבוה יותר, סנטר מעל המוט', en: 'Good! Try pulling higher, chin over bar' };
+      } else {
+        coaching = { he: 'משוך גבוה יותר! הסנטר צריך לעבור את המוט', en: 'Pull higher! Chin needs to clear the bar' };
+      }
+      feedback = { type: 'count', text: `${newReps}!`, count: newReps, coaching };
+    }
+    // Phase reset at full hang
+    if (elbowAngle > downThreshold) {
+      newPhase = 'down';
+      newRepCounted = false;
+      newPhaseStartAngle = elbowAngle;
+    }
+  }
+
+  // Form check: body swinging (shoulder X drift between frames)
+  if (newFirstRep && prevState._prevLandmarks) {
+    const prevShoulder = prevState._prevLandmarks[LM.LEFT_SHOULDER];
+    if (prevShoulder?.visibility > 0.3 && shoulder?.visibility > 0.3) {
+      const xDrift = Math.abs(shoulder.x - prevShoulder.x);
+      if (xDrift > 0.04) {
+        feedback = { type: 'warning', text: 'הגוף מתנדנד! שמור על גוף ישר',
+                     coaching: { he: 'הגוף מתנדנד - כווץ את הבטן ושמור על גוף ישר כמו קרש', en: 'Body swinging - engage core and keep body straight like a plank' } };
+      }
+    }
+  }
+
+  return {
+    reps: newReps, phase: newPhase, feedback, elbowAngle: Math.round(elbowAngle),
+    moving, headDown: newFirstRep ? headDown : false, lastRepTime,
+    firstRepStarted: newFirstRep, posture: 'standing', _phaseStartAngle: newPhaseStartAngle, _smoothElbow: elbowAngle, _repCounted: newRepCounted, _prevLandmarks: landmarks
+  };
+}
+
 // Table-based analyzer mapping with keyword matching + required orientation
 const O = ORIENTATION; // shorthand
 const ANALYZER_MAP = [
+  // === PULL-UPS (must be before push-ups so 'pull' doesn't match 'push') ===
+  { keywords: ['pull', 'pullup', 'chin', 'מתח', 'מתחים', 'סנטר'], analyze: analyzePullUps, type: 'reps', cueKey: 'pull', orientation: O.STANDING },
   // === STANDING fitness exercises ===
   { keywords: ['ביספ', 'כפיפות מרפק', 'bicep curl', 'כפיפות ידיים'], analyze: analyzeBicepCurl, type: 'reps', cueKey: 'bicep', orientation: O.STANDING },
   { keywords: ['טריצפס', 'הרחבת מרפק', 'tricep extension', 'tricep'], analyze: analyzeTricepExtension, type: 'reps', cueKey: 'tricep', orientation: O.STANDING },
