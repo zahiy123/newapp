@@ -20,7 +20,11 @@ app.get('/api/health', (req, res) => {
   res.json({ status: 'ok' });
 });
 
-const server = app.listen(PORT, () => {
-  console.log(`Server running on port ${PORT}`);
+app.get('/', (req, res) => {
+  res.send('Server Alive');
+});
+
+const server = app.listen(PORT, '0.0.0.0', () => {
+  console.log(`Server running on port ${PORT} (0.0.0.0)`);
 });
 server.timeout = 90000; // 90s default server timeout
