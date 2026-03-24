@@ -195,21 +195,24 @@ ${biomechanicsSection}
 
 ANALYSIS PROTOCOL:
 Compare the 3 frames (start → peak effort → return) against the biomechanics checkpoints.
-Identify the ONE most impactful issue (or confirm good form).
+Identify the ONE most impactful biomechanical issue to improve. ALWAYS give a specific technique correction — never just say "good job".
 
 RESPONSE FORMAT — return ONLY valid JSON:
 {"is_correct":boolean,"feedback":"Hebrew coaching sentence","score":1-10,"isUrgent":boolean,"issue_key":"string"}
 
 FEEDBACK RULES:
-- MAX 20 words Hebrew. TTS-friendly: no brackets, no lists, no special chars.
-- Start with the athlete's name or warm encouragement, then the specific technical fix.
-- Include a QUANTITATIVE cue when possible (angle, distance, direction).
-- Good form example: "${playerName}, ביצוע מדויק! הברכיים בדיוק מעל האצבעות, תמשיך ככה"
-- Bad form example: "${playerName}, אנרגיה מעולה! תרד עוד קצת, הברכיים צריכות לצאת החוצה"
-- Urgent example: "${playerName}, עצור! הקביים מחליקות, תרחיב את הבסיס"
+- MAX 25 words Hebrew. TTS-friendly: no brackets, no lists, no special chars.
+- ALWAYS include a SPECIFIC TECHNIQUE CUE — even when form is good, tell them what to focus on next.
+- Reference EXACT joint angles from the measured data when available.
+- Good form: tell them what made it good AND give the next optimization target.
+  Example: "${playerName}, מרפק ב-80 מעלות, מצוין! עכשיו תנסה להוריד את החזה קצת יותר לרצפה"
+- Needs work: name the exact joint/body part and the fix with a number.
+  Example: "${playerName}, הגב שוקע ב-15 מעלות, תמתח את הבטן ותישר את הגב כמו קרש"
+- Urgent: "${playerName}, עצור! הקביים מחליקות, תרחיב את הבסיס"
+- NEVER give generic feedback like "עבודה טובה" or "תמשיך ככה" without a technique detail.
 - isUrgent=true ONLY for: fall risk, joint danger, equipment instability.
-- issue_key: short English key like "knee_valgus", "ankle_unlocked", "crutch_narrow", "good_form".
-- Score: 7-10 = good form, 4-6 = needs work, 1-3 = safety concern.`;
+- issue_key: short English key like "knee_valgus", "hip_sag", "elbow_flare", "depth_shallow", "good_form".
+- Score: 8-10 = excellent form, 5-7 = needs specific fix, 1-4 = safety/major issue.`;
 
     // Strip data URL prefix if present — Claude API expects raw base64 only
     const cleanBase64 = (b) => (typeof b === 'string' && b.startsWith('data:')) ? b.split(',')[1] : b;
@@ -241,7 +244,7 @@ Compare these against the biomechanics checkpoints. Reference specific angles in
 
     const message = await client.messages.create({
       model: HAIKU_VISION_MODEL,
-      max_tokens: 100,
+      max_tokens: 300,
       system,
       messages: [{ role: 'user', content: contentBlocks }]
     });
@@ -1419,17 +1422,19 @@ COACHING TONE:
 ${ageStyle}
 
 RULES:
-- Return 1-2 Hebrew sentences: warm encouragement BLENDED with ONE specific biomechanical cue.
+- Return 1-2 Hebrew sentences. EVERY sentence MUST contain a SPECIFIC TECHNIQUE CUE for ${data.exercise}.
+- NEVER give generic praise like "עבודה טובה" or "תמשיך ככה" alone. ALWAYS add what to improve or maintain.
 - Maximum 25 words total. Each sentence max 12 words — TTS engines cut long sentences.
 - NO brackets, NO lists, NO bullet points, NO special characters. Write FLOWING spoken Hebrew only.
 - NO parentheses or quotation marks. Write as if you're talking out loud.
-- ALWAYS start with the athlete's name: ${data.playerName || 'אלוף'}
-- Include QUANTITATIVE detail when possible: angles, distances, directions, percentages.
-- Be specific to the exercise: ${data.exercise}
+- Reference EXACT joint angles from the data below when available. Example: "המרפק ב-95 מעלות, תנסה להגיע ל-75"
 - Sound like a REAL Israeli coach. Use slang: יאללה, אחלה, ככה, בול, שריפה, אש.
-- If form is good (goodFormPct > 70%) → push harder with energy AND give an optimization cue. Example: ${data.playerName || 'אלוף'} אש! ביצוע מושלם, עכשיו נסה לרדת עוד קצת בסקוואט!
-- If form is bad (badFormPct > 40%) → encourage THEN correct the TOP issue with a specific spoken fix. Example: ${data.playerName || 'אלוף'} יופי של אנרגיה! הברכיים צריכות לצאת החוצה, לא פנימה!
-- If athlete is struggling → motivate with warmth! Example: ${data.playerName || 'אלוף'} אתה אלוף! רק עוד שלוש חזרות, אני איתך!
+- If form is good (goodFormPct > 70%) → name what's good + give next optimization target with numbers.
+  Example: אש! הגב ישר ב-170 מעלות, עכשיו תנסה להוריד את המרפקים ל-90
+- If form is bad (badFormPct > 40%) → name the EXACT issue + the fix with angle/distance.
+  Example: יופי של אנרגיה! המרפק רק ב-120, תרד עוד קצת עד 90 מעלות
+- If athlete is struggling → motivate + give ONE easy technique cue.
+  Example: אתה אלוף! רק תשמור על הגב ישר ונשלים עוד שלוש
 ${data.disability && data.disability !== 'none' ? `- Athlete has disability: ${data.disability}. Be sensitive, adaptive, and celebrate every rep. Give disability-specific biomechanical cues.` : ''}
 
 Return ONLY valid JSON: {"feedback":"Hebrew spoken coaching sentence","isUrgent":false}

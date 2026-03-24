@@ -117,8 +117,10 @@ const realtimeInFlight = new Set();
 router.post('/realtime-feedback', async (req, res) => {
   const { playerName, exercise } = req.body;
   const key = `rt-${playerName}-${exercise}`;
+  console.log(`[COACH] /realtime-feedback → ${playerName} | ${exercise} | goodForm=${req.body.goodFormPct}% | reps=${req.body.reps}`);
 
   if (shouldThrottle(key, 15000)) {
+    console.log(`[COACH] /realtime-feedback THROTTLED (${key})`);
     return res.json({ feedback: '', isUrgent: false });
   }
 
@@ -129,9 +131,10 @@ router.post('/realtime-feedback', async (req, res) => {
 
   try {
     const result = await generateRealtimeFeedback(req.body);
+    console.log(`[COACH] /realtime-feedback ← feedback="${result.feedback?.slice(0, 60)}" urgent=${result.isUrgent}`);
     res.json(result);
   } catch (error) {
-    console.error('Realtime feedback error:', error.message);
+    console.error('[COACH] /realtime-feedback ERROR:', error.message);
     res.json({ feedback: '', isUrgent: false });
   } finally {
     realtimeInFlight.delete(key);
@@ -146,18 +149,23 @@ router.post('/analyze-rep', async (req, res) => {
   const { playerName, exercise, frames, sport, playerProfile, repNumber, qaMode, jointAngles } = req.body;
   const safeFallback = { is_correct: true, feedback: '', score: 0 };
   const key = `rep-${playerName}-${exercise}`;
+  const framesSizes = frames ? frames.map(f => typeof f === 'string' ? Math.round(f.length / 1024) : 0) : [];
+  console.log(`[COACH] /analyze-rep → ${playerName} | ${exercise} | rep#${repNumber} | sport=${sport} | frames=${framesSizes}KB | angles=${jointAngles?.length || 0}`);
 
   // QA mode: skip throttle and in-flight checks for testing
   if (!qaMode) {
     if (shouldThrottle(key, 3000)) {
+      console.log(`[COACH] /analyze-rep THROTTLED (${key})`);
       return res.json(safeFallback);
     }
     if (repAnalysisInFlight.has(key)) {
+      console.log(`[COACH] /analyze-rep IN-FLIGHT (${key})`);
       return res.json(safeFallback);
     }
   }
 
   if (!frames || !Array.isArray(frames) || frames.length !== 3) {
+    console.warn(`[COACH] /analyze-rep INVALID FRAMES: ${frames?.length || 0} frames`);
     return res.json(safeFallback);
   }
 
@@ -175,14 +183,16 @@ router.post('/analyze-rep', async (req, res) => {
   }
 
   try {
+    const t0 = Date.now();
     const result = await analyzeRepFrames({ frames, sport, exercise, playerProfile, repNumber, jointAngles });
+    console.log(`[COACH] /analyze-rep ← score=${result.score} correct=${result.is_correct} issue=${result.issue_key} time=${Date.now() - t0}ms feedback="${result.feedback?.slice(0, 60)}"`);
     // Attach debug metadata in QA mode
     if (shouldDebug) {
       result._debug = { framesDir: 'server/debug_frames', savedAt: Date.now(), repNumber };
     }
     res.json(result);
   } catch (error) {
-    console.error('Rep analysis error:', error.message);
+    console.error('[COACH] /analyze-rep ERROR:', error.message, error.stack?.slice(0, 200));
     res.json(safeFallback);
   } finally {
     repAnalysisInFlight.delete(key);
