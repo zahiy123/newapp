@@ -197,10 +197,12 @@ feedback: Hebrew technique cue referencing angle numbers. Max 7 words. No generi
         system,
         messages: [{ role: 'user', content: 'Analyze and return JSON.' }]
       });
-      console.log(`[VISION-FAST] Response in ${Date.now() - t0}ms`);
+      const rawText = message.content[0].text;
+      console.log(`[VISION-FAST] Response in ${Date.now() - t0}ms: ${rawText}`);
 
-      const parsed = extractJSON(message.content[0].text);
+      const parsed = extractJSON(rawText);
       if (parsed && typeof parsed.is_correct === 'boolean') return parsed;
+      console.warn(`[VISION-FAST] Failed to parse JSON from: ${rawText}`);
       return safeFallback;
     }
 
