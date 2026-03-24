@@ -219,10 +219,27 @@ export function useSpeech(lang = 'he-IL', age) {
   // Keep ref in sync so _utterSpeak's onend can call it
   processQueueRef.current = processQueue;
 
+  // Safety: reset stuck speaking flag if onend/onerror never fired (Android Chrome bug)
+  // Check before every speak attempt — if stuck for > 8s, force reset
+  const unstickSpeaking = useCallback(() => {
+    if (speaking.current && speechStartedAtRef.current > 0) {
+      const elapsed = Date.now() - speechStartedAtRef.current;
+      if (elapsed > 8000) {
+        console.warn('[Speech] Force-resetting stuck speaking flag after', elapsed, 'ms');
+        window.speechSynthesis.cancel();
+        speaking.current = false;
+        speechStartedAtRef.current = 0;
+        currentUtteranceRef.current = null;
+        queueRef.current = [];
+      }
+    }
+  }, []);
+
   // Internal helper: cancel previous speech, clear queue, then speak
   // Used ONLY for priority/urgent messages
   const _doSpeak = useCallback((text, options = {}) => {
     if (!window.speechSynthesis || !text) return;
+    unstickSpeaking();
     window.speechSynthesis.cancel();
     queueRef.current = [];
     speaking.current = false;
@@ -237,12 +254,13 @@ export function useSpeech(lang = 'he-IL', age) {
       }
       _utterSpeak(chunks[0], options);
     }
-  }, [_utterSpeak, splitToChunks]);
+  }, [_utterSpeak, splitToChunks, unstickSpeaking]);
 
   // Default speak: queues text WITHOUT canceling current speech
   // If nothing is playing, starts immediately. If busy, adds to queue.
   const speak = useCallback((text, options = {}) => {
     if (!window.speechSynthesis || !text) return;
+    unstickSpeaking();
     const chunks = splitToChunks(text);
     if (chunks.length === 0) return;
     if (!speaking.current) {
@@ -257,7 +275,7 @@ export function useSpeech(lang = 'he-IL', age) {
         queueRef.current.push({ text: chunk, options });
       }
     }
-  }, [_utterSpeak, splitToChunks]);
+  }, [_utterSpeak, splitToChunks, unstickSpeaking]);
 
   // Priority speak: always cuts previous speech (for urgent nudges/warnings)
   const speakPriority = useCallback((text, options = {}) => {
@@ -267,6 +285,7 @@ export function useSpeech(lang = 'he-IL', age) {
   // Idle speak: only speaks if not currently speaking (for encouragement/info feedback)
   const speakIfIdle = useCallback((text, options = {}) => {
     if (!window.speechSynthesis || !text) return;
+    unstickSpeaking();
     if (speaking.current) return; // skip entirely if busy
     const chunks = splitToChunks(text);
     if (chunks.length === 0) return;
@@ -274,7 +293,7 @@ export function useSpeech(lang = 'he-IL', age) {
       queueRef.current.push({ text: chunks[i], options });
     }
     _utterSpeak(chunks[0], options);
-  }, [_utterSpeak, splitToChunks]);
+  }, [_utterSpeak, splitToChunks, unstickSpeaking]);
 
   // Queued speak: always adds to queue, never cancels
   const speakQueued = useCallback((text, options = {}) => {

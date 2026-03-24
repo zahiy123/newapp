@@ -200,6 +200,11 @@ Identify the ONE most impactful biomechanical issue to improve. ALWAYS give a sp
 RESPONSE FORMAT — return ONLY valid JSON:
 {"is_correct":boolean,"feedback":"Hebrew coaching sentence","score":1-10,"isUrgent":boolean,"issue_key":"string"}
 
+is_correct RULES:
+- is_correct=true if the athlete completed a full rep (went down AND came back up). Even imperfect form counts as a completed rep.
+- is_correct=false ONLY if: movement was incomplete (didn't go down enough to count), or dangerous (injury risk).
+- When in doubt, return is_correct=true. A rep with bad form is still a rep.
+
 FEEDBACK RULES:
 - MAX 25 words Hebrew. TTS-friendly: no brackets, no lists, no special chars.
 - ALWAYS include a SPECIFIC TECHNIQUE CUE — even when form is good, tell them what to focus on next.

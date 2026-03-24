@@ -140,13 +140,10 @@ export default function Training() {
   const onVisionFeedback = useCallback((result) => {
     if (result.feedback) {
       const text = stripName(result.feedback);
-      if (result.isUrgent) {
-        speakPriority(text, { rate: 1.1 });
-      } else {
-        speakIfIdle(text, { rate: 1.2 });
-      }
+      // Always use speakPriority — this is per-rep Haiku feedback, must be heard
+      speakPriority(text, { rate: result.isUrgent ? 1.1 : 1.2 });
     }
-  }, [speakIfIdle, speakPriority, stripName]);
+  }, [speakPriority, stripName]);
 
   const { feedPhaseData, startVision, stopVision, resetSession: resetVisionSession } = useHaikuVision({ onVisionFeedback });
 

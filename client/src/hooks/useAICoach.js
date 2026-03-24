@@ -174,7 +174,8 @@ export function useAICoach({ onCoaching }) {
     resetAccumulator();
 
     if (intervalRef.current) clearInterval(intervalRef.current);
-    intervalRef.current = setInterval(sendToAPI, AI_INTERVAL_MS);
+    // DISABLED: /realtime-feedback creates load and noise — all coaching now comes from per-rep Haiku Vision
+    // intervalRef.current = setInterval(sendToAPI, AI_INTERVAL_MS);
   }, [sendToAPI]);
 
   /**
