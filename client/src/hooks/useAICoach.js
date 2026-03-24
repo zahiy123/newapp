@@ -1,8 +1,8 @@
 import { useRef, useCallback, useEffect } from 'react';
+import { apiUrl } from '../utils/api';
 
 const AI_INTERVAL_MS = 20000; // Send to Claude every 20s
 const MAX_FAILURES = 3;
-const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:3001';
 
 /**
  * useAICoach — Accumulates pose/form data over ~20s windows,
@@ -133,7 +133,7 @@ export function useAICoach({ onCoaching }) {
     inFlightRef.current = true;
 
     try {
-      const resp = await fetch(`${API_BASE}/api/coach/realtime-feedback`, {
+      const resp = await fetch(apiUrl('/api/coach/realtime-feedback'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),

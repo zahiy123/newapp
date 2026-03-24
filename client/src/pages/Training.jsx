@@ -114,23 +114,39 @@ export default function Training() {
     stop: stopSpeech, isSpeaking
   } = useSpeech(lang, userProfile?.age);
 
+  // Strip player name from AI-generated text if it was spoken recently (60s cooldown)
+  const nameSpokenRef = useRef(0);
+  const NAME_COOLDOWN = 60000;
+  const stripName = useCallback((text) => {
+    const name = playerName;
+    if (!name || !text) return text;
+    const now = Date.now();
+    if (now - nameSpokenRef.current < NAME_COOLDOWN) {
+      // Remove name + optional comma/space from start or anywhere in text
+      return text.replace(new RegExp(`^${name}[,،]?\\s*`, 'u'), '').replace(new RegExp(`\\s*${name}[,،]?`, 'gu'), '').trim();
+    }
+    nameSpokenRef.current = now;
+    return text;
+  }, [playerName]);
+
   // AI Coach hook — periodic Claude-powered feedback
   const onAICoaching = useCallback((text, isUrgent) => {
-    speakAICoaching(text, userProfile?.age, isUrgent);
-  }, [speakAICoaching, userProfile?.age]);
+    speakAICoaching(stripName(text), userProfile?.age, isUrgent);
+  }, [speakAICoaching, userProfile?.age, stripName]);
 
   const { startAICoaching, stopAICoaching, feedPoseData } = useAICoach({ onCoaching: onAICoaching });
 
   // Haiku Vision — per-rep visual form analysis
   const onVisionFeedback = useCallback((result) => {
     if (result.feedback) {
+      const text = stripName(result.feedback);
       if (result.isUrgent) {
-        speakPriority(result.feedback, { rate: 1.1 });
+        speakPriority(text, { rate: 1.1 });
       } else {
-        speakIfIdle(result.feedback, { rate: 1.2 });
+        speakIfIdle(text, { rate: 1.2 });
       }
     }
-  }, [speakIfIdle, speakPriority]);
+  }, [speakIfIdle, speakPriority, stripName]);
 
   const { feedPhaseData, startVision, stopVision, resetSession: resetVisionSession } = useHaikuVision({ onVisionFeedback });
 
@@ -485,7 +501,7 @@ export default function Training() {
         return; // Truly static — skip everything
       }
       // Store movement flag for vision hook gating
-      movementSufficientRef.current = movementPct >= 0.15;
+      movementSufficientRef.current = movementPct >= 0.10;
     }
     prevLandmarksRef.current = stableLandmarks;
 
@@ -602,8 +618,9 @@ export default function Training() {
       lastNudgeTimeRef.current = 0;
     }
 
-    // === HEAD-DOWN: Only check after first rep started ===
-    if (firstRepStarted && newState.headDown) {
+    // === HEAD-DOWN: Only for ball sports (football, basketball, tennis) — NOT fitness ===
+    const isBallSport = analyzerRef.current?.ballAware || ['football', 'footballAmputee', 'basketball', 'tennis'].includes(userProfile?.sport);
+    if (isBallSport && firstRepStarted && newState.headDown) {
       headDownCountRef.current++;
       const now = Date.now();
       if (headDownCountRef.current >= 5 && now - lastHeadUpWarningRef.current > 10000) {

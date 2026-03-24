@@ -1,6 +1,5 @@
 import { useRef, useCallback } from 'react';
-
-const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:3001';
+import { apiUrl } from '../utils/api';
 const MAX_SESSION_IMAGES = 960;
 const MAX_CONSECUTIVE_FAILURES = 5;
 const FRAME2_DELAY_MS = 150;
@@ -44,7 +43,7 @@ export function useHaikuVision({ onVisionFeedback } = {}) {
 
     const ctx = contextRef.current;
     try {
-      const resp = await fetch(`${API_BASE}/api/coach/analyze-rep`, {
+      const resp = await fetch(apiUrl('/api/coach/analyze-rep'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

@@ -1,6 +1,5 @@
 import { useState, useEffect } from 'react';
-
-const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:3001';
+import { apiUrl } from '../utils/api';
 
 // Biomechanical overlay data for each frame scenario
 const QA_SCENARIOS = [
@@ -396,7 +395,7 @@ export default function DebugFrameGallery() {
   const [activeTab, setActiveTab] = useState(0);
 
   useEffect(() => {
-    fetch(`${API_BASE}/api/coach/debug-frames`)
+    fetch(apiUrl('/api/coach/debug-frames'))
       .then(r => r.json())
       .then(setStats)
       .catch(() => setStats({ totalFrames: 0, error: 'Server not running' }));

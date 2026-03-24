@@ -12,6 +12,40 @@ export function useSpeech(lang = 'he-IL', age) {
   const silentSourceRef = useRef(null);
   const isHe = lang.startsWith('he');
   const lifeStage = getLifeStage(age);
+  const processingQueueRef = useRef(false);
+  const processQueueRef = useRef(null); // ref to processQueue function (avoids circular deps)
+  const nameSpokenAtRef = useRef(0); // Timestamp when name was last spoken (60s cooldown)
+  const NAME_COOLDOWN_MS = 60000; // Say name at most once per 60s
+
+  // Split long text into TTS-safe chunks (max ~15 words per chunk)
+  // Mobile TTS engines crash on long sentences — this prevents mid-sentence cuts
+  const splitToChunks = useCallback((text) => {
+    if (!text) return [];
+    // Split on sentence-ending punctuation first, then on commas
+    const sentences = text.split(/(?<=[.!?؟])\s+/).filter(Boolean);
+    const chunks = [];
+    for (const sentence of sentences) {
+      const words = sentence.split(/\s+/);
+      if (words.length <= 15) {
+        chunks.push(sentence.trim());
+      } else {
+        // Split long sentence on commas or semicolons
+        const parts = sentence.split(/(?<=[,;،])\s+/).filter(Boolean);
+        let current = '';
+        for (const part of parts) {
+          const combined = current ? `${current} ${part}` : part;
+          if (combined.split(/\s+/).length > 15 && current) {
+            chunks.push(current.trim());
+            current = part;
+          } else {
+            current = combined;
+          }
+        }
+        if (current) chunks.push(current.trim());
+      }
+    }
+    return chunks.filter(c => c.length > 0);
+  }, []);
 
   // Pick Hebrew/English voice — broad search for Android compatibility
   const pickVoice = useCallback(() => {
@@ -113,14 +147,14 @@ export function useSpeech(lang = 'he-IL', age) {
       speaking.current = false;
       currentUtteranceRef.current = null;
       speechStartedAtRef.current = 0;
-      processQueue();
+      if (processQueueRef.current) processQueueRef.current();
     };
     utterance.onerror = (e) => {
       console.warn('[Speech] onerror:', e.error, text.substring(0, 40));
       speaking.current = false;
       currentUtteranceRef.current = null;
       speechStartedAtRef.current = 0;
-      processQueue();
+      if (processQueueRef.current) processQueueRef.current();
     };
 
     window.speechSynthesis.speak(utterance);
@@ -171,23 +205,59 @@ export function useSpeech(lang = 'he-IL', age) {
     audioUnlockedRef.current = true;
   }, [lang, pickVoice, getAudioCtx, startSilentLoop]);
 
+  // Process queue: speak next item if nothing is playing
+  const processQueue = useCallback(() => {
+    if (processingQueueRef.current) return;
+    if (queueRef.current.length === 0) return;
+    if (speaking.current) return;
+    processingQueueRef.current = true;
+    const next = queueRef.current.shift();
+    processingQueueRef.current = false;
+    if (next) _utterSpeak(next.text, next.options);
+  }, [_utterSpeak]);
+
+  // Keep ref in sync so _utterSpeak's onend can call it
+  processQueueRef.current = processQueue;
+
   // Internal helper: cancel previous speech, clear queue, then speak
+  // Used ONLY for priority/urgent messages
   const _doSpeak = useCallback((text, options = {}) => {
     if (!window.speechSynthesis || !text) return;
     window.speechSynthesis.cancel();
     queueRef.current = [];
-    _utterSpeak(text, options);
-  }, [_utterSpeak]);
+    speaking.current = false;
+    // Chunk the text for TTS stability
+    const chunks = splitToChunks(text);
+    if (chunks.length <= 1) {
+      _utterSpeak(text, options);
+    } else {
+      // Queue all chunks after the first
+      for (let i = 1; i < chunks.length; i++) {
+        queueRef.current.push({ text: chunks[i], options });
+      }
+      _utterSpeak(chunks[0], options);
+    }
+  }, [_utterSpeak, splitToChunks]);
 
-  // Default speak: if currently speaking and < 2s in, skip (don't cut)
+  // Default speak: queues text WITHOUT canceling current speech
+  // If nothing is playing, starts immediately. If busy, adds to queue.
   const speak = useCallback((text, options = {}) => {
     if (!window.speechSynthesis || !text) return;
-    if (speaking.current) {
-      const elapsed = Date.now() - speechStartedAtRef.current;
-      if (elapsed < 2000) return; // don't cut short speech
+    const chunks = splitToChunks(text);
+    if (chunks.length === 0) return;
+    if (!speaking.current) {
+      // Not speaking — start first chunk, queue the rest
+      for (let i = 1; i < chunks.length; i++) {
+        queueRef.current.push({ text: chunks[i], options });
+      }
+      _utterSpeak(chunks[0], options);
+    } else {
+      // Currently speaking — queue all chunks
+      for (const chunk of chunks) {
+        queueRef.current.push({ text: chunk, options });
+      }
     }
-    _doSpeak(text, options);
-  }, [_doSpeak]);
+  }, [_utterSpeak, splitToChunks]);
 
   // Priority speak: always cuts previous speech (for urgent nudges/warnings)
   const speakPriority = useCallback((text, options = {}) => {
@@ -198,26 +268,33 @@ export function useSpeech(lang = 'he-IL', age) {
   const speakIfIdle = useCallback((text, options = {}) => {
     if (!window.speechSynthesis || !text) return;
     if (speaking.current) return; // skip entirely if busy
-    _doSpeak(text, options);
-  }, [_doSpeak]);
+    const chunks = splitToChunks(text);
+    if (chunks.length === 0) return;
+    for (let i = 1; i < chunks.length; i++) {
+      queueRef.current.push({ text: chunks[i], options });
+    }
+    _utterSpeak(chunks[0], options);
+  }, [_utterSpeak, splitToChunks]);
 
+  // Queued speak: always adds to queue, never cancels
   const speakQueued = useCallback((text, options = {}) => {
     if (!window.speechSynthesis || !text) return;
-    if (speaking.current) {
-      queueRef.current.push({ text, options });
-      return;
+    const chunks = splitToChunks(text);
+    if (chunks.length === 0) return;
+    if (!speaking.current && queueRef.current.length === 0) {
+      for (let i = 1; i < chunks.length; i++) {
+        queueRef.current.push({ text: chunks[i], options });
+      }
+      _utterSpeak(chunks[0], options);
+    } else {
+      for (const chunk of chunks) {
+        queueRef.current.push({ text: chunk, options });
+      }
     }
-    _doSpeak(text, options);
-  }, [_doSpeak]);
-
-  function processQueue() {
-    if (queueRef.current.length > 0) {
-      const next = queueRef.current.shift();
-      _utterSpeak(next.text, next.options);
-    }
-  }
+  }, [_utterSpeak, splitToChunks]);
 
   // Pre-exercise briefing — full coach persona: explain, safety, motivate
+  // Uses chunking for each segment to prevent TTS cuts on mobile
   const speakBriefing = useCallback((exerciseName, description, tips, locationProps, playerName) => {
     if (!window.speechSynthesis) return;
     // Resume + ensure audio before briefing
@@ -225,6 +302,7 @@ export function useSpeech(lang = 'he-IL', age) {
     getAudioCtx();
     window.speechSynthesis.cancel();
     queueRef.current = [];
+    speaking.current = false;
 
     const name = playerName || (isHe ? 'אלוף' : 'champ');
 
@@ -233,7 +311,7 @@ export function useSpeech(lang = 'he-IL', age) {
       ? `יאללה ${name}! עכשיו נעשה ${exerciseName}!`
       : `Let's go ${name}! Now we're doing ${exerciseName}!`;
 
-    // Part 2: How to do it (description)
+    // Part 2: How to do it (description) — chunked
     const desc = description
       ? (isHe ? `ככה עושים את זה: ${description}.` : `Here's how: ${description}.`)
       : '';
@@ -253,13 +331,20 @@ export function useSpeech(lang = 'he-IL', age) {
       ? `${name}, אני צופה בך. בוא נתחיל!`
       : `${name}, I'm watching you. Let's start!`;
 
-    // Queue all segments
-    if (desc) queueRef.current.push({ text: desc, options: {} });
-    if (safetyText) queueRef.current.push({ text: safetyText, options: {} });
-    if (setupText) queueRef.current.push({ text: setupText, options: {} });
-    queueRef.current.push({ text: startCue, options: { rate: 1.1 } });
+    // Queue all segments — chunk each one for stability
+    const queueChunked = (text, options = {}) => {
+      const chunks = splitToChunks(text);
+      for (const chunk of chunks) {
+        queueRef.current.push({ text: chunk, options });
+      }
+    };
+
+    if (desc) queueChunked(desc);
+    if (safetyText) queueChunked(safetyText);
+    if (setupText) queueChunked(setupText);
+    queueChunked(startCue, { rate: 1.1 });
     _utterSpeak(intro, { rate: 1.1 });
-  }, [lang, _utterSpeak, isHe, getAudioCtx]);
+  }, [lang, _utterSpeak, isHe, getAudioCtx, splitToChunks]);
 
   // Encouragement for good form (only when actively moving) - low priority, don't cut
   const speakEncouragement = useCallback(() => {
@@ -448,6 +533,7 @@ export function useSpeech(lang = 'he-IL', age) {
     if (!window.speechSynthesis) return;
     window.speechSynthesis.cancel();
     queueRef.current = [];
+    speaking.current = false;
 
     const intro = isHe
       ? `${name}, אולי לא ברור לך איך להתחיל? בוא נסביר מהר.`
@@ -456,9 +542,13 @@ export function useSpeech(lang = 'he-IL', age) {
       ? `${desc} סדר את ${equipment}. ${setup}. יאללה, עכשיו!`
       : `${desc} Set up your ${equipment}. ${setup}. Now let's go!`;
 
-    queueRef.current.push({ text: howTo, options: { rate: 1.35, pitch: 1.1 } });
-    _utterSpeak(intro, { rate: 1.35, pitch: 1.1 });
-  }, [lang, _utterSpeak, isHe]);
+    // Chunk the howTo for stability
+    const chunks = splitToChunks(howTo);
+    for (const chunk of chunks) {
+      queueRef.current.push({ text: chunk, options: { rate: 1.2, pitch: 1.1 } });
+    }
+    _utterSpeak(intro, { rate: 1.2, pitch: 1.1 });
+  }, [lang, _utterSpeak, isHe, splitToChunks]);
 
   // === WARM-UP SPEECH ===
 
@@ -749,26 +839,22 @@ export function useSpeech(lang = 'he-IL', age) {
   }, [isHe, speak]);
 
   // Positive reinforcement — frequent encouragement when user IS moving
+  // Name is said only once per 60s to avoid annoying repetition
   const speakPositiveReinforcement = useCallback((playerName) => {
+    const now = Date.now();
+    const useName = now - nameSpokenAtRef.current > NAME_COOLDOWN_MS;
     const name = playerName || (isHe ? 'אלוף' : 'champ');
-    const phrases = isHe
-      ? [
-        `יפה מאוד ${name}!`,
-        `תמשיך ככה!`,
-        `אני רואה אותך עובד!`,
-        `מצוין, ממשיכים!`,
-        `כל הכבוד ${name}, ביצוע יפה!`,
-        `ככה ${name}! בדיוק ככה!`,
-      ]
-      : [
-        `Great job ${name}!`,
-        `Keep it up!`,
-        `I can see you working!`,
-        `Excellent, keep going!`,
-        `Well done ${name}, nice form!`,
-        `That's it ${name}! Just like that!`,
-      ];
-    const phrase = phrases[Math.floor(Math.random() * phrases.length)];
+
+    const withName = isHe
+      ? [`יפה מאוד ${name}!`, `כל הכבוד ${name}, ביצוע יפה!`, `ככה ${name}! בדיוק ככה!`]
+      : [`Great job ${name}!`, `Well done ${name}, nice form!`, `That's it ${name}! Just like that!`];
+    const noName = isHe
+      ? ['תמשיך ככה!', 'אני רואה אותך עובד!', 'מצוין, ממשיכים!', 'ביצוע חזק!', 'ככה! בדיוק ככה!']
+      : ['Keep it up!', 'I can see you working!', 'Excellent, keep going!', 'Strong form!', 'Just like that!'];
+
+    const pool = useName ? withName : noName;
+    const phrase = pool[Math.floor(Math.random() * pool.length)];
+    if (useName) nameSpokenAtRef.current = now;
     speakIfIdle(phrase, { rate: 1.1 });
   }, [isHe, speakIfIdle]);
 
