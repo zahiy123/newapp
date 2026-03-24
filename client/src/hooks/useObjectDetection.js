@@ -114,7 +114,7 @@ export function useObjectDetection() {
       // getImageData may fail on tainted canvas — send frame anyway
     }
 
-    const dataUrl = canvas.toDataURL('image/jpeg', 0.7);
+    const dataUrl = canvas.toDataURL('image/jpeg', 0.5);
     // Strip the data:image/jpeg;base64, prefix — Claude API expects raw base64
     const base64 = dataUrl.split(',')[1];
     if (!base64 || base64.length < 100) return null; // Too small = invalid

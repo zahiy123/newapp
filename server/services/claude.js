@@ -241,7 +241,7 @@ Compare these against the biomechanics checkpoints. Reference specific angles in
 
     const message = await client.messages.create({
       model: HAIKU_VISION_MODEL,
-      max_tokens: 150,
+      max_tokens: 100,
       system,
       messages: [{ role: 'user', content: contentBlocks }]
     });

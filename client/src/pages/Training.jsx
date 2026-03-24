@@ -494,11 +494,18 @@ export default function Training() {
         return Math.max(max, Math.sqrt(dx * dx + dy * dy));
       }, 0);
       const movementPct = maxDisplacement / bodyHeight;
-      // If movement is less than 15% of body height, skip sending to server
-      // but still allow local analysis (rep counting needs continuous tracking)
+
+      // Skeleton jump filter: if body center moved > 30% body height in one frame,
+      // it's likely a different person crossing — reject this frame entirely
+      if (movementPct > 0.30) {
+        prevLandmarksRef.current = stableLandmarks;
+        return; // Skeleton jumped — ignore (probably someone walked past)
+      }
+
+      // Truly static — skip everything
       if (movementPct < 0.001) {
         prevLandmarksRef.current = stableLandmarks;
-        return; // Truly static — skip everything
+        return;
       }
       // Store movement flag for vision hook gating
       movementSufficientRef.current = movementPct >= 0.10;
@@ -1942,11 +1949,10 @@ export default function Training() {
           </div>
         )}
 
-        {/* Live feedback overlay — z-[5] to stay below bottom controls z-20 */}
-        {feedback && phase === PHASE.EXERCISING && (
-          <div className={`absolute top-4 left-4 right-4 ${feedbackColor[feedback.type] || 'bg-blue-500'} text-white px-4 py-3 rounded-xl text-center font-bold text-lg shadow-lg z-[5] pointer-events-none`}>
-            {feedback.type === 'count' && <span className="text-3xl sm:text-4xl block">{feedback.count}</span>}
-            {feedback.text}
+        {/* Live feedback: rep count only on video overlay — text feedback moved to bottom area */}
+        {feedback && feedback.type === 'count' && phase === PHASE.EXERCISING && (
+          <div className="absolute top-4 left-1/2 -translate-x-1/2 bg-green-500 text-white px-6 py-2 rounded-xl text-center font-bold shadow-lg z-[5] pointer-events-none">
+            <span className="text-3xl sm:text-4xl">{feedback.count}</span>
           </div>
         )}
 
