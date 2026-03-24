@@ -231,6 +231,8 @@ export default function Training() {
 
   // Kalman Filter landmark stabilizer
   const stabilizerRef = useRef(new LandmarkStabilizer());
+  const prevLandmarksRef = useRef(null);       // Previous frame landmarks for movement gate
+  const movementSufficientRef = useRef(false); // Movement >= 15% body height (gates server calls)
   const anglesHistoryRef = useRef([]);
   const prevAnglesRef = useRef(null);
   const performanceReportRef = useRef(null);
@@ -455,6 +457,37 @@ export default function Training() {
     // Smooth raw MediaPipe landmarks before any analysis
     const stableLandmarks = stabilizerRef.current.stabilize(landmarks);
     if (!stableLandmarks) return;
+
+    // === CONFIDENCE + MOVEMENT GATE ===
+    // Skip all analysis/speech/server calls unless pose is trustworthy and athlete is moving
+    const keyIndices = [11, 12, 13, 14, 23, 24, 25, 26]; // shoulders, elbows, hips, knees
+    const avgConfidence = keyIndices.reduce((sum, i) => sum + (stableLandmarks[i]?.visibility || 0), 0) / keyIndices.length;
+    if (avgConfidence < 0.5) return; // Pose not reliable enough
+
+    // Body height = shoulder midpoint Y to ankle midpoint Y (normalized coords)
+    const shoulderY = ((stableLandmarks[11]?.y || 0) + (stableLandmarks[12]?.y || 0)) / 2;
+    const ankleY = ((stableLandmarks[27]?.y || 0) + (stableLandmarks[28]?.y || 0)) / 2;
+    const bodyHeight = Math.abs(ankleY - shoulderY) || 0.001;
+
+    // Movement magnitude: max displacement of key joints from previous frame
+    const prevLm = prevLandmarksRef.current;
+    if (prevLm) {
+      const maxDisplacement = keyIndices.reduce((max, i) => {
+        const dx = (stableLandmarks[i]?.x || 0) - (prevLm[i]?.x || 0);
+        const dy = (stableLandmarks[i]?.y || 0) - (prevLm[i]?.y || 0);
+        return Math.max(max, Math.sqrt(dx * dx + dy * dy));
+      }, 0);
+      const movementPct = maxDisplacement / bodyHeight;
+      // If movement is less than 15% of body height, skip sending to server
+      // but still allow local analysis (rep counting needs continuous tracking)
+      if (movementPct < 0.001) {
+        prevLandmarksRef.current = stableLandmarks;
+        return; // Truly static — skip everything
+      }
+      // Store movement flag for vision hook gating
+      movementSufficientRef.current = movementPct >= 0.15;
+    }
+    prevLandmarksRef.current = stableLandmarks;
 
     const { analyze, ballAware, orientation } = analyzerRef.current;
     const prevState = exerciseStateRef.current;
@@ -706,7 +739,10 @@ export default function Training() {
     });
 
     exerciseStateRef.current = newState;
-    feedPhaseData(newState);
+    // Only send frames to vision server if movement is sufficient (>=15% body height)
+    if (movementSufficientRef.current) {
+      feedPhaseData(newState);
+    }
   }, [landmarks, phase]);
 
   // === INACTIVITY NUDGES: AGGRESSIVE & FAST ===

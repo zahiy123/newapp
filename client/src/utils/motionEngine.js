@@ -42,14 +42,20 @@ export class KalmanFilter {
 export class LandmarkStabilizer {
   constructor(config = {}) {
     this.filters = {};
+    this.prevSmoothed = {};
     this.config = {
       processNoise: config.processNoise || 0.001,
-      measurementNoise: config.measurementNoise || 0.05,
+      // Increased from 0.05 → 0.12: trust Kalman prediction more on noisy mobile cameras
+      measurementNoise: config.measurementNoise || 0.12,
     };
+    // EMA alpha: 0 = full smoothing (all previous), 1 = no smoothing (all current)
+    // 0.4 provides a good balance for real-world mobile jitter
+    this.emaAlpha = config.emaAlpha || 0.4;
   }
 
   /**
    * Stabilize a full frame of raw MediaPipe landmarks.
+   * Two-layer smoothing: Kalman filter → Exponential Moving Average
    * @param {Array} rawLandmarks - Array of 33 landmarks from MediaPipe
    * @returns {Array} Stabilized landmarks with the same structure
    */
@@ -67,20 +73,31 @@ export class LandmarkStabilizer {
           y: new KalmanFilter({ ...this.config, estimate: lm.y }),
           z: new KalmanFilter({ ...this.config, estimate: lm.z || 0 }),
         };
+        this.prevSmoothed[idx] = { x: lm.x, y: lm.y, z: lm.z || 0 };
       }
 
-      return {
-        x: this.filters[idx].x.update(lm.x),
-        y: this.filters[idx].y.update(lm.y),
-        z: this.filters[idx].z.update(lm.z || 0),
-        visibility: lm.visibility,
-      };
+      // Layer 1: Kalman filter
+      const kx = this.filters[idx].x.update(lm.x);
+      const ky = this.filters[idx].y.update(lm.y);
+      const kz = this.filters[idx].z.update(lm.z || 0);
+
+      // Layer 2: Exponential Moving Average on Kalman output
+      // Visibility-adaptive alpha: lower visibility → more smoothing (less trust)
+      const visAlpha = this.emaAlpha * Math.min(lm.visibility / 0.7, 1.0);
+      const prev = this.prevSmoothed[idx];
+      const sx = prev.x + visAlpha * (kx - prev.x);
+      const sy = prev.y + visAlpha * (ky - prev.y);
+      const sz = prev.z + visAlpha * (kz - prev.z);
+      this.prevSmoothed[idx] = { x: sx, y: sy, z: sz };
+
+      return { x: sx, y: sy, z: sz, visibility: lm.visibility };
     });
   }
 
   /** Reset all filters (call when exercise changes or calibration starts) */
   reset() {
     this.filters = {};
+    this.prevSmoothed = {};
   }
 }
 

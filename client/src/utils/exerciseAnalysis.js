@@ -30,10 +30,10 @@ function angle(a, b, c) {
 // Returns true if the angle delta between phase start and current meets the minimum threshold.
 // Uses calibration data if available (30% of calibrated range), otherwise uses fixed minimums.
 const MIN_ROM_DEFAULTS = {
-  knee: 25,       // squat, lunge: at least 25° of knee bend
-  elbow: 30,      // pushup, curl, dips: at least 30° of elbow bend
-  shoulder: 20,   // shoulder press: at least 20°
-  yDelta: 0.04,   // Y-position based: at least 4% of frame height
+  knee: 20,       // squat, lunge: at least 20° of knee bend (was 25°, lowered for kids)
+  elbow: 20,      // pushup, curl, dips: at least 20° of elbow bend (was 30°, lowered for kids)
+  shoulder: 15,   // shoulder press: at least 15° (was 20°)
+  yDelta: 0.03,   // Y-position based: at least 3% of frame height (was 4%)
 };
 
 function meetsMinROM(prevState, joint, currentAngle, phaseStartAngle) {
@@ -41,18 +41,19 @@ function meetsMinROM(prevState, joint, currentAngle, phaseStartAngle) {
   const delta = Math.abs(currentAngle - phaseStartAngle);
   const cal = prevState?._calibration;
 
-  // If we have calibration data for this joint, require 50% of calibrated range
+  // If we have calibration data for this joint, require 40% of calibrated range (was 50%)
+  // Lower threshold accommodates kids and athletes with limited ROM
   if (cal) {
     // Check both left and right variants
     const calData = cal[joint] || cal[`left${joint.charAt(0).toUpperCase() + joint.slice(1)}`]
       || cal[`right${joint.charAt(0).toUpperCase() + joint.slice(1)}`];
-    if (calData && calData.range > 10) {
-      return delta >= calData.range * 0.5;
+    if (calData && calData.range > 8) {
+      return delta >= calData.range * 0.4;
     }
   }
 
   // Fallback to fixed minimum
-  return delta >= (MIN_ROM_DEFAULTS[joint] || 20);
+  return delta >= (MIN_ROM_DEFAULTS[joint] || 15);
 }
 
 // Minimum time between reps (ms) — prevents impossibly fast "reps" from jitter
@@ -339,12 +340,22 @@ export function checkMovementQuality(prevState, joint, currentAngle, phaseStartA
  */
 // Smoothing is now handled by Kalman filter in Training.jsx (LandmarkStabilizer).
 // These functions are pass-through wrappers to avoid breaking existing call sites.
-function smoothAngle(rawAngle, _prevState, _key) {
-  return rawAngle;
+// EMA smoothing for computed angles — reduces jitter in rep detection
+// alpha: 0.5 gives fast response with jitter removal (angles change slower than raw coords)
+const ANGLE_EMA_ALPHA = 0.5;
+
+function smoothAngle(rawAngle, prevState, key) {
+  const prev = prevState?.[key];
+  if (prev == null || isNaN(prev)) return rawAngle;
+  return prev + ANGLE_EMA_ALPHA * (rawAngle - prev);
 }
 
-function smoothY(rawY, _prevState, _key) {
-  return rawY;
+const Y_EMA_ALPHA = 0.5;
+
+function smoothY(rawY, prevState, key) {
+  const prev = prevState?.[key];
+  if (prev == null || isNaN(prev)) return rawY;
+  return prev + Y_EMA_ALPHA * (rawY - prev);
 }
 
 function getStandingLeg(landmarks) {
@@ -2522,16 +2533,37 @@ export function analyzePushUps(landmarks, prevState = {}) {
   let newFirstRep = firstRepStarted;
   let newPhaseStartAngle = phaseStartAngle;
 
-  if (phase === 'up' && elbowAngle < 100) {
+  // === ADAPTIVE THRESHOLDS ===
+  // Use calibration data when available (handles kids/small ROM),
+  // otherwise fall back to generous defaults
+  const cal = prevState._calibration;
+  const calElbow = cal?.leftElbow || cal?.rightElbow;
+  // Calibrated thresholds: DOWN when angle drops 20% below max, UP when 90% back to max
+  // Defaults: DOWN < 120° (was 100° — too strict for kids), UP > 155° (was 160°)
+  const downThreshold = calElbow?.range > 15
+    ? calElbow.max - calElbow.range * 0.2
+    : 120;
+  const upThreshold = calElbow?.range > 15
+    ? calElbow.max - calElbow.range * 0.1
+    : 155;
+
+  // Velocity-based direction change detection (supplement to angle thresholds)
+  const prevAngle = prevState._smoothElbow ?? elbowAngle;
+  const angleDelta = elbowAngle - prevAngle; // negative = bending, positive = extending
+  const velocityDown = angleDelta < -1.5; // bending fast
+  const velocityUp = angleDelta > 1.5;    // extending fast
+
+  if (phase === 'up' && (elbowAngle < downThreshold || (velocityDown && elbowAngle < downThreshold + 15))) {
     newPhase = 'down';
     newFirstRep = true;
     newPhaseStartAngle = elbowAngle;
     newRepCounted = false;
     feedback = { type: 'info', text: 'ירידה טובה!' };
   } else if (phase === 'down') {
-    // Early count at 80% of return phase
-    const earlyThreshold = phaseStartAngle + (160 - phaseStartAngle) * 0.8;
-    if (!repCounted && elbowAngle > earlyThreshold && meetsMinROM(prevState, 'elbow', elbowAngle, phaseStartAngle) && canCountRep(lastRepTime)) {
+    // Early count at 75% of return phase (was 80% — more sensitive for kids)
+    const earlyThreshold = phaseStartAngle + (upThreshold - phaseStartAngle) * 0.75;
+    // Reduced MIN_ROM for calibrated users: 40% of range instead of 50% (meetsMinROM still applies)
+    if (!repCounted && (elbowAngle > earlyThreshold || (velocityUp && elbowAngle > phaseStartAngle + 15)) && meetsMinROM(prevState, 'elbow', elbowAngle, phaseStartAngle) && canCountRep(lastRepTime)) {
       newReps = reps + 1;
       lastRepTime = Date.now();
       newRepCounted = true;
@@ -2541,13 +2573,15 @@ export function analyzePushUps(landmarks, prevState = {}) {
         coaching = { he: 'טכניקה מושלמת! ירידה מלאה עם גוף ישר כמו קרש', en: 'Perfect technique! Full depth with a plank-straight body' };
       } else if (romDelta > 50) {
         coaching = { he: 'טוב! נסה לרדת עוד קצת - החזה כמעט נוגע ברצפה', en: 'Good! Try going lower - chest almost touching the floor' };
+      } else if (romDelta > 20) {
+        coaching = { he: 'יפה! כל חזרה חשובה! נסה לרדת עוד קצת בפעם הבאה', en: 'Nice! Every rep counts! Try going a bit lower next time' };
       } else {
-        coaching = { he: 'רד יותר! המרפקים צריכים להגיע ל-90 מעלות לפחות', en: 'Go lower! Elbows should reach at least 90 degrees' };
+        coaching = { he: 'רד יותר! המרפקים צריכים להתכופף יותר', en: 'Go lower! Your elbows need more bend' };
       }
       feedback = { type: 'count', text: `${newReps}!`, count: newReps, coaching };
     }
-    // Phase reset at full extension
-    if (elbowAngle > 160) {
+    // Phase reset at extension (adaptive)
+    if (elbowAngle > upThreshold) {
       newPhase = 'up';
       newRepCounted = false;
       newPhaseStartAngle = elbowAngle;
