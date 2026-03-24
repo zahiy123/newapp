@@ -214,16 +214,27 @@ FEEDBACK RULES:
 - issue_key: short English key like "knee_valgus", "hip_sag", "elbow_flare", "depth_shallow", "good_form".
 - Score: 8-10 = excellent form, 5-7 = needs specific fix, 1-4 = safety/major issue.`;
 
-    // Strip data URL prefix if present — Claude API expects raw base64 only
-    const cleanBase64 = (b) => (typeof b === 'string' && b.startsWith('data:')) ? b.split(',')[1] : b;
+    // Strip ANY data URL prefix and whitespace — Claude API expects raw base64 only
+    const cleanBase64 = (b) => {
+      if (typeof b !== 'string' || !b) return '';
+      // Remove data:image/...;base64, prefix (any image type)
+      const cleaned = b.replace(/^data:image\/\w+;base64,/, '').trim();
+      // Remove any newlines/spaces that may have crept in
+      return cleaned.replace(/\s/g, '');
+    };
+
+    const f1 = cleanBase64(frames[0]);
+    const f2 = cleanBase64(frames[1]);
+    const f3 = cleanBase64(frames[2]);
+    console.log(`[VISION] Frames cleaned: ${f1.length}, ${f2.length}, ${f3.length} chars | starts: ${f1.slice(0, 8)}... ${f2.slice(0, 8)}... ${f3.slice(0, 8)}...`);
 
     const contentBlocks = [
       { type: 'text', text: `Frame 1 (start of rep #${repNumber}):` },
-      { type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: cleanBase64(frames[0]) } },
+      { type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: f1 } },
       { type: 'text', text: `Frame 2 (peak effort/depth):` },
-      { type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: cleanBase64(frames[1]) } },
+      { type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: f2 } },
       { type: 'text', text: `Frame 3 (return/completion):` },
-      { type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: cleanBase64(frames[2]) } },
+      { type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: f3 } },
     ];
 
     // Inject measured joint angles if available (from MediaPipe pose detection)

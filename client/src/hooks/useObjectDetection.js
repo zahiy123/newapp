@@ -115,8 +115,8 @@ export function useObjectDetection() {
     }
 
     const dataUrl = canvas.toDataURL('image/jpeg', 0.5);
-    // Strip the data:image/jpeg;base64, prefix — Claude API expects raw base64
-    const base64 = dataUrl.split(',')[1];
+    // Strip ANY data URL prefix — Claude API expects raw base64 only
+    const base64 = dataUrl.replace(/^data:image\/\w+;base64,/, '').trim();
     if (!base64 || base64.length < 100) return null; // Too small = invalid
     return base64;
   }, []);
