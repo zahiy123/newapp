@@ -175,19 +175,56 @@ function formatAngles(a) {
   return entries.map(([k, v]) => `${k}: ${Math.round(v)}°`).join(', ');
 }
 
+// Exercise-specific scoring rubrics so Haiku knows what's good vs bad
+const SCORING_RUBRICS = {
+  // Squat variants
+  'סקוואט': 'SCORING: knee at peak: <90°=score 8-10 (deep), 90-120°=score 5-7 (half), >120°=score 2-4 (shallow/bad). hip should match knee depth.',
+  'squat': 'SCORING: knee at peak: <90°=score 8-10 (deep), 90-120°=score 5-7 (half), >120°=score 2-4 (shallow/bad). hip should match knee depth.',
+  // Push-up
+  'פוש אפ': 'SCORING: elbow at bottom: <90°=score 8-10 (full), 90-120°=score 5-7 (partial), >120°=score 2-4 (barely bent).',
+  'push': 'SCORING: elbow at bottom: <90°=score 8-10 (full), 90-120°=score 5-7 (partial), >120°=score 2-4 (barely bent).',
+  // Pull-up
+  'מתח': 'SCORING: elbow at top: <90°=score 8-10 (chin over bar), 90-120°=score 5-7 (partial), >120°=score 2-4 (barely pulled).',
+  'pull': 'SCORING: elbow at top: <90°=score 8-10 (chin over bar), 90-120°=score 5-7 (partial), >120°=score 2-4 (barely pulled).',
+  // Kicks
+  'בעיטה': 'SCORING: knee flexion at peak: <50°=score 8-10 (powerful kick), 50-90°=score 5-7 (moderate), >90°=score 2-4 (weak/no backswing). hip extension matters.',
+  'kick': 'SCORING: knee flexion at peak: <50°=score 8-10 (powerful kick), 50-90°=score 5-7 (moderate), >90°=score 2-4 (weak/no backswing).',
+  // Crutch running
+  'ריצה עם קביים': 'SCORING: trunk tilt: <10°=score 8-10 (stable), 10-25°=score 5-7 (some wobble), >25°=score 2-4 (unstable/dangerous). shoulder symmetry matters.',
+  'קביים': 'SCORING: trunk tilt: <10°=score 8-10 (stable), 10-25°=score 5-7 (some wobble), >25°=score 2-4 (unstable/dangerous).',
+  // Shooting (basketball)
+  'זריקה': 'SCORING: elbow at release: full extension(>160°)=score 8-10, partial(120-160°)=score 5-7, bent(<120°)=score 2-4 (flat shot). wrist follow-through matters.',
+  'shooting': 'SCORING: elbow at release: full extension(>160°)=score 8-10, partial(120-160°)=score 5-7, bent(<120°)=score 2-4.',
+  // Dips
+  'מקבילים': 'SCORING: elbow at bottom: <90°=score 8-10, 90-120°=score 5-7, >120°=score 2-4.',
+  'dip': 'SCORING: elbow at bottom: <90°=score 8-10, 90-120°=score 5-7, >120°=score 2-4.',
+};
+
+function getScoringRubric(exercise) {
+  const ex = (exercise || '').toLowerCase();
+  for (const [key, rubric] of Object.entries(SCORING_RUBRICS)) {
+    if (ex.includes(key.toLowerCase())) return rubric;
+  }
+  // Generic fallback: score based on ROM percentage
+  return 'SCORING: full ROM=score 8-10, partial ROM(50-80%)=score 5-7, minimal ROM(<50%)=score 2-4. Be strict.';
+}
+
 export async function analyzeRepFrames({ frames, sport, exercise, playerProfile, repNumber, jointAngles }) {
   const safeFallback = { is_correct: true, feedback: '', score: 0 };
   try {
     const playerName = playerProfile?.name || 'ספורטאי';
     const hasAngles = jointAngles && Array.isArray(jointAngles) && jointAngles.length > 0;
+    const rubric = getScoringRubric(exercise);
 
     // FAST PATH: text-only when we have joint angles (no image = ~0.5s vs ~2.5s)
     if (hasAngles) {
       const system = `Rep #${repNumber} of ${exercise} for ${playerName}.
 Angles: start=${formatAngles(jointAngles[0])}, peak=${formatAngles(jointAngles[1] || jointAngles[0])}, end=${formatAngles(jointAngles[2] || jointAngles[0])}
+${rubric}
+BE CRITICAL. Low scores for bad form. Never say "טוב" if score<6.
 Return ONLY JSON: {"is_correct":true,"feedback":"5-7 words Hebrew","score":1-10,"issue_key":"string"}
-is_correct=true if rep completed (angles show full ROM). false only if ROM < 50% or dangerous.
-feedback: Hebrew technique cue referencing angle numbers. Max 7 words. No generic praise.`;
+is_correct=true always (we count all reps). score reflects QUALITY strictly per rubric above.
+feedback: Hebrew critique with angle numbers. If bad, say what's wrong. Max 7 words.`;
 
       console.log(`[VISION-FAST] Text-only analysis for ${exercise} rep#${repNumber}`);
       const t0 = Date.now();
@@ -195,7 +232,7 @@ feedback: Hebrew technique cue referencing angle numbers. Max 7 words. No generi
         model: HAIKU_VISION_MODEL,
         max_tokens: 80,
         system,
-        messages: [{ role: 'user', content: 'Analyze and return JSON.' }]
+        messages: [{ role: 'user', content: 'Analyze angles strictly per rubric. Return JSON.' }]
       });
       const rawText = message.content[0].text;
       console.log(`[VISION-FAST] Response in ${Date.now() - t0}ms: ${rawText}`);
@@ -219,9 +256,11 @@ feedback: Hebrew technique cue referencing angle numbers. Max 7 words. No generi
     console.log(`[VISION-IMG] Frame cleaned: ${peakFrame.length} chars`);
 
     const system = `Rep #${repNumber} of ${exercise} for ${playerName}.
+${rubric}
+BE CRITICAL. Low scores for bad form.
 Return ONLY JSON: {"is_correct":true,"feedback":"5-7 words Hebrew","score":1-10,"issue_key":"string"}
-is_correct=true if rep completed. false only if incomplete/dangerous.
-feedback: Hebrew technique cue. Max 7 words. No generic praise.`;
+is_correct=true always. score reflects QUALITY strictly per rubric.
+feedback: Hebrew critique. Max 7 words. No generic praise.`;
 
     const message = await client.messages.create({
       model: HAIKU_VISION_MODEL,
@@ -229,7 +268,7 @@ feedback: Hebrew technique cue. Max 7 words. No generic praise.`;
       system,
       messages: [{ role: 'user', content: [
         { type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: peakFrame } },
-        { type: 'text', text: 'Analyze form. Return ONLY JSON.' }
+        { type: 'text', text: 'Analyze form strictly. Return JSON.' }
       ]}]
     });
 
