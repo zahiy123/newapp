@@ -78,11 +78,24 @@ export function useHaikuVision({ onVisionFeedback } = {}) {
     }
   }, [onVisionFeedback]);
 
-  const feedPhaseData = useCallback((newState, angles) => {
+  const feedPhaseData = useCallback((newState, angles, landmarks) => {
     if (!enabledRef.current || disabledRef.current) return;
     if (!newState) return;
     // Only process when athlete is actually moving (ignore idle phase flickers)
     if (!newState.moving && !newState.firstRepStarted) return;
+
+    // Confidence gate: if landmarks are provided, check average visibility
+    // Skip processing when pose detection confidence is too low (camera shake/occlusion)
+    if (landmarks && Array.isArray(landmarks) && landmarks.length > 0) {
+      const visibilities = landmarks.filter(l => l && typeof l.visibility === 'number').map(l => l.visibility);
+      if (visibilities.length > 0) {
+        const avgVisibility = visibilities.reduce((a, b) => a + b, 0) / visibilities.length;
+        if (avgVisibility < 0.5) {
+          // Low confidence pose — likely camera noise or partial occlusion
+          return;
+        }
+      }
+    }
 
     // Always store latest angles for Frame 2 capture (happens in setTimeout)
     if (angles) latestAnglesRef.current = angles;

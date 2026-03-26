@@ -1,4 +1,7 @@
 import Anthropic from '@anthropic-ai/sdk';
+import fs from 'fs';
+import path from 'path';
+import { fileURLToPath } from 'url';
 
 const client = new Anthropic({
   apiKey: process.env.ANTHROPIC_API_KEY
@@ -261,10 +264,45 @@ function qualityLabel(score) {
   return 'BAD';
 }
 
+const __analyzerDirname = path.dirname(fileURLToPath(import.meta.url));
+
 const cleanBase64 = (b) => {
   if (typeof b !== 'string' || !b) return '';
   return b.replace(/^data:image\/\w+;base64,/, '').trim().replace(/\s/g, '');
 };
+
+// Load saved debug frames from disk as base64 (fallback when client sends placeholders)
+function loadDebugFrames(playerName, exercise, repNumber) {
+  try {
+    const debugDir = path.join(__analyzerDirname, '..', 'debug_frames');
+    if (!fs.existsSync(debugDir)) return [];
+
+    const files = fs.readdirSync(debugDir)
+      .filter(f => f.endsWith('.jpg'))
+      .sort()
+      .reverse(); // Most recent first
+
+    // Find the 3 most recent frames matching this exercise+rep (or just the latest 3)
+    const safeName = (playerName || '').replace(/[^a-zA-Z0-9\u0590-\u05FF_-]/g, '_');
+    const safeExercise = (exercise || '').replace(/[^a-zA-Z0-9\u0590-\u05FF_-]/g, '_');
+    const pattern = `rep${repNumber}_`;
+
+    // Try exact match first, then any recent frames
+    let matched = files.filter(f => f.includes(safeExercise) && f.includes(pattern));
+    if (matched.length < 3) matched = files.filter(f => f.includes(safeExercise));
+    if (matched.length < 3) matched = files.slice(0, 3);
+
+    // Take the 3 frames (f1, f2, f3) — sort by name to get correct order
+    const sorted = matched.slice(0, 3).sort();
+    return sorted.map(f => {
+      const data = fs.readFileSync(path.join(debugDir, f));
+      return data.toString('base64');
+    });
+  } catch (err) {
+    console.warn('[VISION] Failed to load debug frames:', err.message);
+    return [];
+  }
+}
 
 export async function analyzeRepFrames({ frames, sport, exercise, playerProfile, repNumber, jointAngles }) {
   const safeFallback = { is_correct: true, instruction: '', pro_tip: '', feedback: '', score: 0, angles: {} };
@@ -282,53 +320,78 @@ export async function analyzeRepFrames({ frames, sport, exercise, playerProfile,
       ? `\nServer quality: ${serverScore}/10 (${qualityLabel(serverScore)}). Match your tone to this level.`
       : '';
 
-    // ALWAYS use vision (images) when frames are available
-    const hasValidFrames = frames && Array.isArray(frames) && frames.length >= 1;
-    const peakFrame = hasValidFrames ? cleanBase64(frames[1] || frames[0]) : '';
-    const useVision = peakFrame.length > 500; // Real frame = thousands of chars, placeholder = ~11 chars
+    // Build clean frame array — validate each frame is real base64 (>500 chars)
+    let cleanFrames = [];
+    if (frames && Array.isArray(frames)) {
+      cleanFrames = frames.map(f => cleanBase64(f)).filter(f => f.length > 500);
+    }
+
+    // If frames are placeholders/empty, try loading from debug_frames on disk
+    if (cleanFrames.length === 0) {
+      console.log(`[VISION] No valid frames from client, loading from debug_frames...`);
+      const diskFrames = loadDebugFrames(playerName, exercise, repNumber);
+      if (diskFrames.length > 0) {
+        cleanFrames = diskFrames.filter(f => f.length > 500);
+        console.log(`[VISION] Loaded ${cleanFrames.length} frames from disk (${cleanFrames.map(f => Math.round(f.length/1024) + 'KB').join(', ')})`);
+      }
+    }
 
     const system = `Rep #${repNumber} of ${exercise} for ${playerName}. Sport: ${sport || 'fitness'}.${anglesStr}${scoreHint}
-Return ONLY JSON: {"instruction":"הנחיה פיזית אחת ברורה","pro_tip":"טיפ מקצועי על הגוף","issue_key":"string"}
+Return ONLY valid JSON: {"instruction":"הנחיה פיזית אחת ברורה","pro_tip":"טיפ מקצועי על הגוף","issue_key":"string_no_spaces"}
 instruction: One clear Hebrew physical cue (what to fix NOW). Max 8 words. Reference angles if available.
 pro_tip: One Hebrew biomechanics tip (deeper insight). Max 10 words.
 If score>=8: instruction=brief praise, pro_tip=how to maintain.
 If score 5-7: instruction=what to correct, pro_tip=why it matters.
-If score<5: instruction=urgent fix, pro_tip=injury risk warning.`;
+If score<5: instruction=urgent fix, pro_tip=injury risk warning.
+IMPORTANT: Return COMPLETE valid JSON. Do not truncate.`;
 
     const t0 = Date.now();
     let message;
 
-    if (useVision) {
-      // VISION PATH: always preferred — see the actual movement
-      console.log(`[VISION-IMG] Analyzing ${exercise} rep#${repNumber} serverScore=${serverScore} frame=${Math.round(peakFrame.length/1024)}KB`);
+    if (cleanFrames.length > 0) {
+      // VISION PATH: send all available frames (up to 3) as images
+      const imageBlocks = cleanFrames.slice(0, 3).map((f, i) => ({
+        type: 'image',
+        source: { type: 'base64', media_type: 'image/jpeg', data: f }
+      }));
+      const frameLabels = ['start', 'peak', 'end'];
+      const textPrompt = cleanFrames.length === 3
+        ? `Analyze these 3 frames (${frameLabels.join(', ')}). Return JSON with instruction and pro_tip in Hebrew.`
+        : `Analyze this frame. Return JSON with instruction and pro_tip in Hebrew.`;
+
+      console.log(`[VISION-IMG] ${cleanFrames.length} frames for ${exercise} rep#${repNumber} serverScore=${serverScore} sizes=${cleanFrames.map(f => Math.round(f.length/1024) + 'KB').join(',')}`);
       message = await client.messages.create({
         model: HAIKU_VISION_MODEL,
-        max_tokens: 120,
+        max_tokens: 1024,
         system,
         messages: [{ role: 'user', content: [
-          { type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: peakFrame } },
-          { type: 'text', text: 'Analyze the form in this image. Return JSON with instruction and pro_tip in Hebrew.' }
+          ...imageBlocks,
+          { type: 'text', text: textPrompt }
         ]}]
       });
     } else {
-      // TEXT-ONLY fallback: only when no valid frames (shouldn't happen normally)
-      console.log(`[VISION-TEXT] Text-only fallback for ${exercise} rep#${repNumber} serverScore=${serverScore}`);
+      // LAST RESORT: text-only when absolutely no images available
+      console.warn(`[VISION-TEXT] NO IMAGES AVAILABLE for ${exercise} rep#${repNumber} — text-only (degraded mode)`);
       message = await client.messages.create({
         model: HAIKU_VISION_MODEL,
-        max_tokens: 120,
+        max_tokens: 1024,
         system,
-        messages: [{ role: 'user', content: 'Analyze based on angles. Return JSON with instruction and pro_tip in Hebrew.' }]
+        messages: [{ role: 'user', content: 'No images available. Analyze based on angles only. Return JSON with instruction and pro_tip in Hebrew.' }]
       });
     }
 
     const rawText = message.content[0].text;
     const elapsed = Date.now() - t0;
-    console.log(`[VISION] Response in ${elapsed}ms: ${rawText.slice(0, 150)}`);
+    console.log(`[VISION] Response in ${elapsed}ms (${rawText.length} chars): ${rawText}`);
 
     const parsed = extractJSON(rawText);
+    if (!parsed) {
+      console.warn(`[VISION] JSON parse FAILED from: ${rawText}`);
+      return safeFallback;
+    }
+
     const instruction = parsed?.instruction || '';
     const proTip = parsed?.pro_tip || '';
-    // Combine instruction + pro_tip into feedback for backward compatibility (TTS speaks this)
     const feedback = instruction + (proTip ? '. ' + proTip : '');
 
     return {

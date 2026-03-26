@@ -764,7 +764,7 @@ export default function Training() {
     // Only send frames to vision server if movement is sufficient (>=15% body height)
     if (movementSufficientRef.current) {
       const repAngles = computeJointAngles(stableLandmarks);
-      feedPhaseData(newState, repAngles);
+      feedPhaseData(newState, repAngles, stableLandmarks);
     }
   }, [landmarks, phase]);
 
