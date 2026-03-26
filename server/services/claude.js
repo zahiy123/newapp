@@ -176,7 +176,7 @@ function formatAngles(a) {
 }
 
 // Server-side scoring: compute score from joint angles deterministically
-// Haiku only generates Hebrew feedback text — score is computed here
+// Haiku provides Hebrew feedback (instruction + pro_tip) — score is computed here
 const SCORING_RULES = [
   // Squat: knee at peak (index 1) — lower = deeper = better
   { keywords: ['סקוואט', 'squat'], joint: 'knee', phase: 1, dir: 'lower',
@@ -201,6 +201,20 @@ const SCORING_RULES = [
     thresholds: [120, 160] }, // >160=8-10, 120-160=5-7, <120=2-4
 ];
 
+// Extract a joint value from angle data — handles both 'elbow' and 'leftElbow'/'rightElbow' keys
+function getJointAngle(phaseData, jointName) {
+  if (!phaseData || typeof phaseData !== 'object') return null;
+  // Direct match
+  if (typeof phaseData[jointName] === 'number') return phaseData[jointName];
+  // Left/right variants — pick the one that exists (prefer min for "lower is better")
+  const leftKey = `left${jointName.charAt(0).toUpperCase() + jointName.slice(1)}`;
+  const rightKey = `right${jointName.charAt(0).toUpperCase() + jointName.slice(1)}`;
+  const left = typeof phaseData[leftKey] === 'number' ? phaseData[leftKey] : null;
+  const right = typeof phaseData[rightKey] === 'number' ? phaseData[rightKey] : null;
+  if (left !== null && right !== null) return Math.min(left, right); // Use more bent side
+  return left ?? right ?? null;
+}
+
 function computeScoreFromAngles(exercise, jointAngles) {
   if (!jointAngles || !Array.isArray(jointAngles) || jointAngles.length === 0) return null;
   const ex = (exercise || '').toLowerCase();
@@ -211,105 +225,121 @@ function computeScoreFromAngles(exercise, jointAngles) {
     const phaseData = jointAngles[rule.phase] || jointAngles[1] || jointAngles[0];
     if (!phaseData) continue;
 
-    const angle = phaseData[rule.joint];
+    const angle = getJointAngle(phaseData, rule.joint);
     if (typeof angle !== 'number') continue;
 
     const [lowThresh, highThresh] = rule.thresholds;
 
     if (rule.dir === 'lower') {
-      // Lower angle = better (squat depth, elbow bend, trunk stability)
-      if (angle < lowThresh) return 8 + Math.round(2 * (1 - angle / lowThresh)); // 8-10
-      if (angle <= highThresh) return 5 + Math.round(2 * (highThresh - angle) / (highThresh - lowThresh)); // 5-7
-      return 2 + Math.round(2 * Math.max(0, 1 - (angle - highThresh) / 60)); // 2-4
+      if (angle < lowThresh) return Math.min(10, 8 + Math.round(2 * (1 - angle / lowThresh)));
+      if (angle <= highThresh) return 5 + Math.round(2 * (highThresh - angle) / (highThresh - lowThresh));
+      return 2 + Math.round(2 * Math.max(0, 1 - (angle - highThresh) / 60));
     } else {
-      // Higher angle = better (shooting extension)
-      if (angle > highThresh) return 8 + Math.round(2 * Math.min(1, (angle - highThresh) / 20)); // 8-10
-      if (angle >= lowThresh) return 5 + Math.round(2 * (angle - lowThresh) / (highThresh - lowThresh)); // 5-7
-      return 2 + Math.round(2 * Math.max(0, angle / lowThresh)); // 2-4
+      if (angle > highThresh) return Math.min(10, 8 + Math.round(2 * Math.min(1, (angle - highThresh) / 20)));
+      if (angle >= lowThresh) return 5 + Math.round(2 * (angle - lowThresh) / (highThresh - lowThresh));
+      return 2 + Math.round(2 * Math.max(0, angle / lowThresh));
     }
   }
 
   return null; // No matching rule — let Haiku score
 }
 
-function qualityLabel(score) {
-  if (score >= 8) return 'EXCELLENT form';
-  if (score >= 5) return 'MEDIOCRE form — needs correction';
-  return 'BAD form — major issues';
+// Extract key angles from a phase data object for the response
+function extractKeyAngles(jointAngles) {
+  if (!jointAngles || !Array.isArray(jointAngles)) return {};
+  const peak = jointAngles[1] || jointAngles[0] || {};
+  const result = {};
+  for (const [k, v] of Object.entries(peak)) {
+    if (typeof v === 'number') result[k] = Math.round(v);
+  }
+  return result;
 }
 
+function qualityLabel(score) {
+  if (score >= 8) return 'EXCELLENT';
+  if (score >= 5) return 'MEDIOCRE';
+  return 'BAD';
+}
+
+const cleanBase64 = (b) => {
+  if (typeof b !== 'string' || !b) return '';
+  return b.replace(/^data:image\/\w+;base64,/, '').trim().replace(/\s/g, '');
+};
+
 export async function analyzeRepFrames({ frames, sport, exercise, playerProfile, repNumber, jointAngles }) {
-  const safeFallback = { is_correct: true, feedback: '', score: 0 };
+  const safeFallback = { is_correct: true, instruction: '', pro_tip: '', feedback: '', score: 0, angles: {} };
   try {
     const playerName = playerProfile?.name || 'ספורטאי';
     const hasAngles = jointAngles && Array.isArray(jointAngles) && jointAngles.length > 0;
 
-    // Compute score server-side from angles (deterministic, no AI needed)
+    // Compute score server-side from angles (deterministic, reliable)
     const serverScore = hasAngles ? computeScoreFromAngles(exercise, jointAngles) : null;
+    const keyAngles = hasAngles ? extractKeyAngles(jointAngles) : {};
+    const anglesStr = hasAngles
+      ? `\nAngles: start=${formatAngles(jointAngles[0])}, peak=${formatAngles(jointAngles[1] || jointAngles[0])}, end=${formatAngles(jointAngles[2] || jointAngles[0])}`
+      : '';
+    const scoreHint = serverScore !== null
+      ? `\nServer quality: ${serverScore}/10 (${qualityLabel(serverScore)}). Match your tone to this level.`
+      : '';
 
-    // FAST PATH: text-only when we have joint angles (no image = ~0.5s vs ~2.5s)
-    if (hasAngles) {
-      const scoreHint = serverScore !== null
-        ? `\nServer scored this ${serverScore}/10 (${qualityLabel(serverScore)}). Generate feedback matching this quality level.`
-        : '';
-      const system = `Rep #${repNumber} of ${exercise} for ${playerName}.
-Angles: start=${formatAngles(jointAngles[0])}, peak=${formatAngles(jointAngles[1] || jointAngles[0])}, end=${formatAngles(jointAngles[2] || jointAngles[0])}${scoreHint}
-Return ONLY JSON: {"feedback":"5-7 words Hebrew","issue_key":"string"}
-feedback: Hebrew coaching cue with angle numbers. If score<6, be harsh and say what's wrong. If score>=8, brief praise. Max 7 words.`;
+    // ALWAYS use vision (images) when frames are available
+    const hasValidFrames = frames && Array.isArray(frames) && frames.length >= 1;
+    const peakFrame = hasValidFrames ? cleanBase64(frames[1] || frames[0]) : '';
+    const useVision = peakFrame.length > 500; // Real frame = thousands of chars, placeholder = ~11 chars
 
-      console.log(`[VISION-FAST] Text-only for ${exercise} rep#${repNumber} serverScore=${serverScore}`);
-      const t0 = Date.now();
-      const message = await client.messages.create({
+    const system = `Rep #${repNumber} of ${exercise} for ${playerName}. Sport: ${sport || 'fitness'}.${anglesStr}${scoreHint}
+Return ONLY JSON: {"instruction":"הנחיה פיזית אחת ברורה","pro_tip":"טיפ מקצועי על הגוף","issue_key":"string"}
+instruction: One clear Hebrew physical cue (what to fix NOW). Max 8 words. Reference angles if available.
+pro_tip: One Hebrew biomechanics tip (deeper insight). Max 10 words.
+If score>=8: instruction=brief praise, pro_tip=how to maintain.
+If score 5-7: instruction=what to correct, pro_tip=why it matters.
+If score<5: instruction=urgent fix, pro_tip=injury risk warning.`;
+
+    const t0 = Date.now();
+    let message;
+
+    if (useVision) {
+      // VISION PATH: always preferred — see the actual movement
+      console.log(`[VISION-IMG] Analyzing ${exercise} rep#${repNumber} serverScore=${serverScore} frame=${Math.round(peakFrame.length/1024)}KB`);
+      message = await client.messages.create({
         model: HAIKU_VISION_MODEL,
-        max_tokens: 80,
+        max_tokens: 120,
         system,
-        messages: [{ role: 'user', content: 'Generate Hebrew feedback. Return JSON only.' }]
+        messages: [{ role: 'user', content: [
+          { type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: peakFrame } },
+          { type: 'text', text: 'Analyze the form in this image. Return JSON with instruction and pro_tip in Hebrew.' }
+        ]}]
       });
-      const rawText = message.content[0].text;
-      console.log(`[VISION-FAST] Response in ${Date.now() - t0}ms: ${rawText}`);
-
-      const parsed = extractJSON(rawText);
-      const feedback = parsed?.feedback || '';
-      const issueKey = parsed?.issue_key || '';
-      // Use server score (deterministic) — Haiku only provides feedback text
-      return {
-        is_correct: true,
-        feedback,
-        score: serverScore ?? (parsed?.score || 5),
-        issue_key: issueKey,
-      };
+    } else {
+      // TEXT-ONLY fallback: only when no valid frames (shouldn't happen normally)
+      console.log(`[VISION-TEXT] Text-only fallback for ${exercise} rep#${repNumber} serverScore=${serverScore}`);
+      message = await client.messages.create({
+        model: HAIKU_VISION_MODEL,
+        max_tokens: 120,
+        system,
+        messages: [{ role: 'user', content: 'Analyze based on angles. Return JSON with instruction and pro_tip in Hebrew.' }]
+      });
     }
 
-    // SLOW PATH: image-based when no joint angles available
-    if (!frames || frames.length < 1) return safeFallback;
+    const rawText = message.content[0].text;
+    const elapsed = Date.now() - t0;
+    console.log(`[VISION] Response in ${elapsed}ms: ${rawText.slice(0, 150)}`);
 
-    const cleanBase64 = (b) => {
-      if (typeof b !== 'string' || !b) return '';
-      const cleaned = b.replace(/^data:image\/\w+;base64,/, '').trim();
-      return cleaned.replace(/\s/g, '');
+    const parsed = extractJSON(rawText);
+    const instruction = parsed?.instruction || '';
+    const proTip = parsed?.pro_tip || '';
+    // Combine instruction + pro_tip into feedback for backward compatibility (TTS speaks this)
+    const feedback = instruction + (proTip ? '. ' + proTip : '');
+
+    return {
+      is_correct: true,
+      instruction,
+      pro_tip: proTip,
+      feedback,
+      score: serverScore ?? (parsed?.score || 5),
+      issue_key: parsed?.issue_key || '',
+      angles: keyAngles,
     };
-
-    const peakFrame = cleanBase64(frames[1] || frames[0]);
-    console.log(`[VISION-IMG] Frame cleaned: ${peakFrame.length} chars`);
-
-    const system = `Rep #${repNumber} of ${exercise} for ${playerName}.
-Return ONLY JSON: {"is_correct":true,"feedback":"5-7 words Hebrew","score":1-10,"issue_key":"string"}
-is_correct=true always. score: 8-10=great form, 5-7=partial, 2-4=bad form.
-feedback: Hebrew critique. Max 7 words. Be strict about form quality.`;
-
-    const message = await client.messages.create({
-      model: HAIKU_VISION_MODEL,
-      max_tokens: 80,
-      system,
-      messages: [{ role: 'user', content: [
-        { type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: peakFrame } },
-        { type: 'text', text: 'Analyze form strictly. Return JSON.' }
-      ]}]
-    });
-
-    const parsed = extractJSON(message.content[0].text);
-    if (parsed && typeof parsed.is_correct === 'boolean') return parsed;
-    return safeFallback;
   } catch (err) {
     if (err.status === 429) return safeFallback;
     console.error('analyzeRepFrames error:', err.message);

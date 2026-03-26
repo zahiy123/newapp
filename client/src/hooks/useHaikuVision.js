@@ -3,7 +3,8 @@ import { apiUrl } from '../utils/api';
 const MAX_SESSION_IMAGES = 960;
 const MAX_CONSECUTIVE_FAILURES = 5;
 const FRAME2_DELAY_MS = 150;
-const MIN_PHASE_HOLD_MS = 200; // Phase must be held 200ms to be considered real (noise filter)
+const MIN_PHASE_HOLD_MS = 200;   // Phase must be held 200ms to be considered real (noise filter)
+const MIN_PHASE_DURATION_MS = 800; // Full down phase must last 800ms+ to count as real rep (camera shake filter)
 
 export function useHaikuVision({ onVisionFeedback } = {}) {
   // All refs — no useState to avoid re-renders at 60fps
@@ -20,7 +21,9 @@ export function useHaikuVision({ onVisionFeedback } = {}) {
   const lastPhaseRef = useRef(null);
   const frame2TimerRef = useRef(null);
   const repCountRef = useRef(0);
-  const phaseStartTimeRef = useRef(0); // When current phase started (noise filter)
+  const phaseStartTimeRef = useRef(0);   // When current phase started (noise filter)
+  const downPhaseStartRef = useRef(0);   // When down phase started (duration gate)
+  const downStartAnglesRef = useRef(null); // Angles at down phase start (consistency check)
 
   // Session limits
   const sessionImageCountRef = useRef(0);
@@ -104,6 +107,8 @@ export function useHaikuVision({ onVisionFeedback } = {}) {
       framesRef.current = [];
       anglesRef.current = [];
       clearTimeout(frame2TimerRef.current);
+      downPhaseStartRef.current = now;
+      downStartAnglesRef.current = angles || null;
 
       const f1 = captureCurrentFrame();
       if (f1) {
@@ -124,6 +129,37 @@ export function useHaikuVision({ onVisionFeedback } = {}) {
 
     // Phase transition: down → up → capture Frame 3 (return)
     if (prevPhase === 'down' && currentPhase === 'up') {
+      const downDuration = now - downPhaseStartRef.current;
+
+      // Camera shake filter: down phase must last >= 800ms to be a real rep
+      if (downDuration < MIN_PHASE_DURATION_MS) {
+        // Too fast — camera noise, not a real rep. Discard frames.
+        framesRef.current = [];
+        anglesRef.current = [];
+        lastPhaseRef.current = currentPhase;
+        return;
+      }
+
+      // Angle consistency check: ensure real angle change occurred (not just camera movement)
+      const startAngles = downStartAnglesRef.current;
+      const endAngles = angles;
+      if (startAngles && endAngles) {
+        // Check if any key joint angle changed by >= 30° (real movement)
+        const keys = Object.keys(startAngles);
+        const hasRealMovement = keys.some(k => {
+          const s = startAngles[k];
+          const e = endAngles[k];
+          return typeof s === 'number' && typeof e === 'number' && Math.abs(s - e) >= 30;
+        });
+        if (!hasRealMovement) {
+          // Angles barely changed — camera shift, not a real rep
+          framesRef.current = [];
+          anglesRef.current = [];
+          lastPhaseRef.current = currentPhase;
+          return;
+        }
+      }
+
       const f3 = captureCurrentFrame();
       if (f3) {
         framesRef.current.push(f3);
