@@ -6,6 +6,28 @@ const FRAME2_DELAY_MS = 150;
 const MIN_PHASE_HOLD_MS = 200;   // Phase must be held 200ms to be considered real (noise filter)
 const MIN_PHASE_DURATION_MS = 800; // Full down phase must last 800ms+ to count as real rep (camera shake filter)
 
+// Key landmark indices: shoulders(11,12), elbows(13,14), wrists(15,16), hips(23,24), knees(25,26), ankles(27,28)
+const KEY_LANDMARK_INDICES = [11, 12, 13, 14, 15, 16, 23, 24, 25, 26, 27, 28];
+
+function condenseLandmarks(landmarksArray) {
+  if (!landmarksArray || !Array.isArray(landmarksArray)) return null;
+  return landmarksArray.map(landmarks => {
+    if (!landmarks || !Array.isArray(landmarks)) return null;
+    const points = {};
+    for (const idx of KEY_LANDMARK_INDICES) {
+      const lm = landmarks[idx];
+      if (lm) {
+        points[idx] = {
+          x: Math.round(lm.x * 1000) / 1000,
+          y: Math.round(lm.y * 1000) / 1000,
+          z: Math.round((lm.z || 0) * 1000) / 1000,
+        };
+      }
+    }
+    return points;
+  });
+}
+
 export function useHaikuVision({ onVisionFeedback } = {}) {
   // All refs — no useState to avoid re-renders at 60fps
   const enabledRef = useRef(false);
@@ -14,10 +36,12 @@ export function useHaikuVision({ onVisionFeedback } = {}) {
   const captureFrameFnRef = useRef(null);
   const videoElRef = useRef(null);
 
-  // Per-rep frame capture + angle snapshots
+  // Per-rep frame capture + angle snapshots + landmark telemetry
   const framesRef = useRef([]);
   const anglesRef = useRef([]);          // Joint angle snapshots alongside frames
+  const landmarksRef = useRef([]);       // Raw landmark snapshots alongside frames
   const latestAnglesRef = useRef(null);  // Most recent angles from feedPhaseData
+  const latestLandmarksRef = useRef(null); // Most recent landmarks from feedPhaseData
   const lastPhaseRef = useRef(null);
   const frame2TimerRef = useRef(null);
   const repCountRef = useRef(0);
@@ -40,12 +64,13 @@ export function useHaikuVision({ onVisionFeedback } = {}) {
     return frame;
   }, []);
 
-  const sendFramesToServer = useCallback(async (frames, repNumber, anglesAtFrames) => {
+  const sendFramesToServer = useCallback(async (frames, repNumber, anglesAtFrames, landmarksAtFrames) => {
     if (inFlightRef.current || disabledRef.current) return;
     inFlightRef.current = true;
 
     const ctx = contextRef.current;
     const url = apiUrl('/api/coach/analyze-rep');
+    const telemetry = condenseLandmarks(landmarksAtFrames);
     console.log(`[HaikuVision] Sending ${frames.length} frames for rep #${repNumber} to ${url}`);
     try {
       const resp = await fetch(url, {
@@ -54,6 +79,7 @@ export function useHaikuVision({ onVisionFeedback } = {}) {
         body: JSON.stringify({
           frames,
           jointAngles: anglesAtFrames || [],
+          telemetry: telemetry || [],
           sport: ctx?.sport || 'fitness',
           exercise: ctx?.exerciseName || '',
           playerProfile: ctx?.playerProfile,
@@ -99,8 +125,9 @@ export function useHaikuVision({ onVisionFeedback } = {}) {
       }
     }
 
-    // Always store latest angles for Frame 2 capture (happens in setTimeout)
+    // Always store latest angles + landmarks for Frame 2 capture (happens in setTimeout)
     if (angles) latestAnglesRef.current = angles;
+    if (landmarks) latestLandmarksRef.current = landmarks;
 
     const currentPhase = newState.phase;
     const prevPhase = lastPhaseRef.current;
@@ -121,6 +148,7 @@ export function useHaikuVision({ onVisionFeedback } = {}) {
     if (prevPhase === 'up' && currentPhase === 'down') {
       framesRef.current = [];
       anglesRef.current = [];
+      landmarksRef.current = [];
       clearTimeout(frame2TimerRef.current);
       downPhaseStartRef.current = now;
       downStartAnglesRef.current = angles || null;
@@ -129,6 +157,7 @@ export function useHaikuVision({ onVisionFeedback } = {}) {
       if (f1) {
         framesRef.current.push(f1);
         anglesRef.current.push(angles || null);
+        landmarksRef.current.push(landmarks || null);
 
         // Schedule Frame 2 capture after delay (peak effort)
         frame2TimerRef.current = setTimeout(() => {
@@ -137,6 +166,7 @@ export function useHaikuVision({ onVisionFeedback } = {}) {
           if (f2) {
             framesRef.current.push(f2);
             anglesRef.current.push(latestAnglesRef.current || null);
+            landmarksRef.current.push(latestLandmarksRef.current || null);
           }
         }, FRAME2_DELAY_MS);
       }
@@ -151,6 +181,7 @@ export function useHaikuVision({ onVisionFeedback } = {}) {
         // Too fast — camera noise, not a real rep. Discard frames.
         framesRef.current = [];
         anglesRef.current = [];
+        landmarksRef.current = [];
         lastPhaseRef.current = currentPhase;
         return;
       }
@@ -170,6 +201,7 @@ export function useHaikuVision({ onVisionFeedback } = {}) {
           // Angles barely changed — camera shift, not a real rep
           framesRef.current = [];
           anglesRef.current = [];
+          landmarksRef.current = [];
           lastPhaseRef.current = currentPhase;
           return;
         }
@@ -179,17 +211,20 @@ export function useHaikuVision({ onVisionFeedback } = {}) {
       if (f3) {
         framesRef.current.push(f3);
         anglesRef.current.push(angles || null);
+        landmarksRef.current.push(landmarks || null);
       }
 
       // If we have 3 frames and reps increased, fire analysis
       if (framesRef.current.length === 3 && reps > repCountRef.current) {
         const framesToSend = [...framesRef.current];
         const anglesToSend = [...anglesRef.current];
+        const landmarksToSend = [...landmarksRef.current];
         repCountRef.current = reps;
         framesRef.current = [];
         anglesRef.current = [];
-        // Fire and forget — with angle snapshots
-        sendFramesToServer(framesToSend, reps, anglesToSend);
+        landmarksRef.current = [];
+        // Fire and forget — with angle snapshots + landmark telemetry
+        sendFramesToServer(framesToSend, reps, anglesToSend, landmarksToSend);
       }
     }
 

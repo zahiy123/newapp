@@ -146,7 +146,7 @@ router.post('/realtime-feedback', async (req, res) => {
 const repAnalysisInFlight = new Set();
 
 router.post('/analyze-rep', async (req, res) => {
-  const { playerName, exercise, frames, sport, playerProfile, repNumber, qaMode, jointAngles } = req.body;
+  const { playerName, exercise, frames, sport, playerProfile, repNumber, qaMode, jointAngles, telemetry } = req.body;
   const safeFallback = { is_correct: true, feedback: '', score: 0 };
   const key = `rep-${playerName}-${exercise}`;
   const framesSizes = frames ? frames.map(f => typeof f === 'string' ? Math.round(f.length / 1024) : 0) : [];
@@ -184,8 +184,9 @@ router.post('/analyze-rep', async (req, res) => {
 
   try {
     const t0 = Date.now();
-    const result = await analyzeRepFrames({ frames, sport, exercise, playerProfile, repNumber, jointAngles });
-    console.log(`[COACH] /analyze-rep ← score=${result.score} correct=${result.is_correct} issue=${result.issue_key} time=${Date.now() - t0}ms feedback="${result.feedback?.slice(0, 60)}"`);
+    const result = await analyzeRepFrames({ frames, sport, exercise, playerProfile, repNumber, jointAngles, telemetry });
+    const elapsed = Date.now() - t0;
+    console.log(`[COACH-RESULT] exercise=${exercise} | rep=${repNumber} | score=${result.score} | issue=${result.issue_key || 'none'} | instruction="${result.instruction || ''}" | pro_tip="${result.pro_tip || ''}" | elapsed=${elapsed}ms`);
     // Attach debug metadata in QA mode
     if (shouldDebug) {
       result._debug = { framesDir: 'server/debug_frames', savedAt: Date.now(), repNumber };
