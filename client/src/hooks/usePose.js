@@ -46,9 +46,9 @@ export function usePose(canvasRef, beforeDrawRef) {
         },
         runningMode: 'VIDEO',
         numPoses: 1,
-        minPoseDetectionConfidence: 0.3,
-        minPosePresenceConfidence: 0.3,
-        minTrackingConfidence: 0.3
+        minPoseDetectionConfidence: 0.2,
+        minPosePresenceConfidence: 0.2,
+        minTrackingConfidence: 0.2
       });
       if (cancelled) return;
       landmarkerRef.current = landmarker;

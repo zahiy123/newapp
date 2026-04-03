@@ -45,8 +45,10 @@ export function useHaikuVision({ onVisionFeedback } = {}) {
     inFlightRef.current = true;
 
     const ctx = contextRef.current;
+    const url = apiUrl('/api/coach/analyze-rep');
+    console.log(`[HaikuVision] Sending ${frames.length} frames for rep #${repNumber} to ${url}`);
     try {
-      const resp = await fetch(apiUrl('/api/coach/analyze-rep'), {
+      const resp = await fetch(url, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -90,7 +92,7 @@ export function useHaikuVision({ onVisionFeedback } = {}) {
       const visibilities = landmarks.filter(l => l && typeof l.visibility === 'number').map(l => l.visibility);
       if (visibilities.length > 0) {
         const avgVisibility = visibilities.reduce((a, b) => a + b, 0) / visibilities.length;
-        if (avgVisibility < 0.5) {
+        if (avgVisibility < 0.2) {
           // Low confidence pose — likely camera noise or partial occlusion
           return;
         }
