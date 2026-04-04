@@ -2,7 +2,7 @@ import { useRef, useCallback } from 'react';
 import { apiUrl } from '../utils/api';
 const MAX_SESSION_IMAGES = 960;
 const MAX_CONSECUTIVE_FAILURES = 5;
-const FRAME2_DELAY_MS = 150;
+// Frame 2 is now captured at down→up transition (peak), no timer needed
 const MIN_PHASE_HOLD_MS = 200;   // Phase must be held 200ms to be considered real (noise filter)
 const MIN_PHASE_DURATION_MS = 800; // Full down phase must last 800ms+ to count as real rep (camera shake filter)
 
@@ -43,7 +43,7 @@ export function useHaikuVision({ onVisionFeedback } = {}) {
   const latestAnglesRef = useRef(null);  // Most recent angles from feedPhaseData
   const latestLandmarksRef = useRef(null); // Most recent landmarks from feedPhaseData
   const lastPhaseRef = useRef(null);
-  const frame2TimerRef = useRef(null);
+  // frame2TimerRef removed — Frame 2 captured instantly at phase transition
   const repCountRef = useRef(0);
   const phaseStartTimeRef = useRef(0);   // When current phase started (noise filter)
   const downPhaseStartRef = useRef(0);   // When down phase started (duration gate)
@@ -149,7 +149,6 @@ export function useHaikuVision({ onVisionFeedback } = {}) {
       framesRef.current = [];
       anglesRef.current = [];
       landmarksRef.current = [];
-      clearTimeout(frame2TimerRef.current);
       downPhaseStartRef.current = now;
       downStartAnglesRef.current = angles || null;
 
@@ -158,17 +157,6 @@ export function useHaikuVision({ onVisionFeedback } = {}) {
         framesRef.current.push(f1);
         anglesRef.current.push(angles || null);
         landmarksRef.current.push(landmarks || null);
-
-        // Schedule Frame 2 capture after delay (peak effort)
-        frame2TimerRef.current = setTimeout(() => {
-          if (!enabledRef.current || disabledRef.current) return;
-          const f2 = captureCurrentFrame();
-          if (f2) {
-            framesRef.current.push(f2);
-            anglesRef.current.push(latestAnglesRef.current || null);
-            landmarksRef.current.push(latestLandmarksRef.current || null);
-          }
-        }, FRAME2_DELAY_MS);
       }
     }
 
@@ -207,15 +195,16 @@ export function useHaikuVision({ onVisionFeedback } = {}) {
         }
       }
 
-      const f3 = captureCurrentFrame();
-      if (f3) {
-        framesRef.current.push(f3);
+      // Capture Frame 2 (peak effort — at transition point)
+      const f2 = captureCurrentFrame();
+      if (f2) {
+        framesRef.current.push(f2);
         anglesRef.current.push(angles || null);
         landmarksRef.current.push(landmarks || null);
       }
 
-      // If we have 3 frames and reps increased, fire analysis
-      if (framesRef.current.length === 3 && reps > repCountRef.current) {
+      // If we have 2 frames and reps increased, fire analysis
+      if (framesRef.current.length >= 2 && reps > repCountRef.current) {
         const framesToSend = [...framesRef.current];
         const anglesToSend = [...anglesRef.current];
         const landmarksToSend = [...landmarksRef.current];
@@ -223,7 +212,7 @@ export function useHaikuVision({ onVisionFeedback } = {}) {
         framesRef.current = [];
         anglesRef.current = [];
         landmarksRef.current = [];
-        // Fire and forget — with angle snapshots + landmark telemetry
+        // Fire and forget — 2 frames (start + peak) + angles + telemetry
         sendFramesToServer(framesToSend, reps, anglesToSend, landmarksToSend);
       }
     }
@@ -244,7 +233,6 @@ export function useHaikuVision({ onVisionFeedback } = {}) {
 
   const stopVision = useCallback(() => {
     enabledRef.current = false;
-    clearTimeout(frame2TimerRef.current);
     framesRef.current = [];
     lastPhaseRef.current = null;
   }, []);

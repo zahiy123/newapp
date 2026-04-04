@@ -95,8 +95,8 @@ export function useObjectDetection() {
   const captureFrame = useCallback((videoEl) => {
     if (!videoEl || videoEl.readyState < 2) return null;
     const canvas = document.createElement('canvas');
-    canvas.width = Math.min(videoEl.videoWidth, 640); // Cap at 640px to save bandwidth
-    canvas.height = Math.min(videoEl.videoHeight, 480);
+    canvas.width = Math.min(videoEl.videoWidth, 320); // 320px — small enough for fast Haiku analysis
+    canvas.height = Math.min(videoEl.videoHeight, 240);
     const ctx = canvas.getContext('2d');
     ctx.drawImage(videoEl, 0, 0, canvas.width, canvas.height);
 
@@ -114,7 +114,7 @@ export function useObjectDetection() {
       // getImageData may fail on tainted canvas — send frame anyway
     }
 
-    const dataUrl = canvas.toDataURL('image/jpeg', 0.5);
+    const dataUrl = canvas.toDataURL('image/jpeg', 0.3);
     // Strip ANY data URL prefix — Claude API expects raw base64 only
     const base64 = dataUrl.replace(/^data:image\/\w+;base64,/, '').trim();
     if (!base64 || base64.length < 100) return null; // Too small = invalid

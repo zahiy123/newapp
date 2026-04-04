@@ -314,25 +314,23 @@ export async function analyzeRepFrames({ frames, sport, exercise, playerProfile,
     const serverScore = hasAngles ? computeScoreFromAngles(exercise, jointAngles) : null;
     const keyAngles = hasAngles ? extractKeyAngles(jointAngles) : {};
 
-    // Format angles for prompt
+    // Compact angle summary (one line)
     const anglesBlock = hasAngles
-      ? `\nJoint angles (measured from pose detection):\n  Frame 1 (start): ${formatAngles(jointAngles[0])}\n  Frame 2 (peak):  ${formatAngles(jointAngles[1] || jointAngles[0])}\n  Frame 3 (end):   ${formatAngles(jointAngles[2] || jointAngles[0])}`
+      ? `\nAngles: start=${formatAngles(jointAngles[0])}, peak=${formatAngles(jointAngles[1] || jointAngles[0])}` + (jointAngles[2] ? `, end=${formatAngles(jointAngles[2])}` : '')
       : '';
 
-    // Format telemetry keypoints if available
+    // Compact telemetry (only if available)
     const telemetryBlock = telemetry && Array.isArray(telemetry) && telemetry.length > 0
-      ? `\nRaw keypoints (x,y,z — 0-1 normalized): ${JSON.stringify(telemetry)}`
+      ? `\nKeypoints: ${JSON.stringify(telemetry)}`
       : '';
 
     const scoreHint = serverScore !== null
-      ? `\nServer quality rating: ${serverScore}/10 (${qualityLabel(serverScore)}). Your tone MUST match this level.`
+      ? `\nQuality: ${serverScore}/10 (${qualityLabel(serverScore)}). Match tone.`
       : '';
 
-    // Wire in biomechanics checklist for surgical precision
+    // Wire in biomechanics checklist
     const biomechanics = getBiomechanicsChecklist(exercise, sport);
-    const biomechanicsBlock = biomechanics
-      ? `\nBIOMECHANICS CHECKLIST for this exercise:\n${biomechanics}`
-      : '';
+    const bioBlock = biomechanics ? `\nCheck: ${biomechanics}` : '';
 
     // Build clean frame array — validate each frame is real base64 (>500 chars)
     let cleanFrames = [];
@@ -350,59 +348,39 @@ export async function analyzeRepFrames({ frames, sport, exercise, playerProfile,
       }
     }
 
-    // === MASTER COACH SYSTEM PROMPT ===
-    const system = `You are a Master Coach (מאמן על). Analyze the 3 frames (start, peak, end) of rep #${repNumber} of "${exercise}" for ${playerName}. Sport: ${sport || 'fitness'}.
-
-STEP 1 — Identify: What exercise is being performed? Confirm from the images + context.
-STEP 2 — Cross-reference: Compare what you SEE in the images vs. the joint angles provided.${anglesBlock}${telemetryBlock}
-STEP 3 — Biomechanics checklist: Evaluate against these checkpoints:${biomechanicsBlock || '\n(No specific checklist — use general movement quality principles)'}
-STEP 4 — Score and diagnose.${scoreHint}
-
-Return ONLY valid JSON:
-{"score":1,"issue_key":"snake_case_key","instruction":"עברית עד 7 מילים","pro_tip":"עברית עד 7 מילים"}
-
-Score guide:
-- 8-10: Excellent form. instruction=praise, pro_tip=maintenance tip
-- 5-7: Needs correction. instruction=what to fix, pro_tip=why it matters
-- 1-4: Bad form. instruction=urgent fix, pro_tip=injury warning
-
-issue_key must be descriptive: lean_back, high_hips, elbow_flare, partial_rom, no_follow_through, etc.
-If form is good: issue_key="good_form"
-
-CRITICAL: instruction and pro_tip MUST be in Hebrew, max 7 words each (for TTS).
-IMPORTANT: Return COMPLETE valid JSON. Do not truncate.`;
+    // === COMPACT MASTER COACH PROMPT ===
+    const system = `Coach rep#${repNumber} "${exercise}" ${playerName}. Sport:${sport||'fitness'}.${anglesBlock}${telemetryBlock}${bioBlock}${scoreHint}
+Return ONLY JSON: {"score":1-10,"issue_key":"snake_case","instruction":"Hebrew max 7 words","pro_tip":"Hebrew max 7 words"}
+8-10=praise+maintain. 5-7=fix+why. 1-4=urgent+injury. good form→issue_key="good_form".`;
 
     const t0 = Date.now();
     let message;
 
     if (cleanFrames.length > 0) {
-      // VISION PATH: send all available frames (up to 3) as images
-      const imageBlocks = cleanFrames.slice(0, 3).map((f) => ({
+      // VISION PATH: send 2 frames (start + peak)
+      const imageBlocks = cleanFrames.slice(0, 2).map((f) => ({
         type: 'image',
         source: { type: 'base64', media_type: 'image/jpeg', data: f }
       }));
-      const textPrompt = cleanFrames.length === 3
-        ? 'Analyze these 3 frames (start, peak, end). Follow the 4 steps. Return JSON.'
-        : 'Analyze this frame. Follow the 4 steps. Return JSON.';
 
-      console.log(`[VISION-IMG] ${cleanFrames.length} frames for ${exercise} rep#${repNumber} serverScore=${serverScore} biomechanics=${!!biomechanics} sizes=${cleanFrames.map(f => Math.round(f.length/1024) + 'KB').join(',')}`);
+      console.log(`[VISION-IMG] ${cleanFrames.length} frames for ${exercise} rep#${repNumber} serverScore=${serverScore} bio=${!!biomechanics} sizes=${cleanFrames.map(f => Math.round(f.length/1024) + 'KB').join(',')}`);
       message = await client.messages.create({
         model: HAIKU_VISION_MODEL,
-        max_tokens: 1024,
+        max_tokens: 256,
         system,
         messages: [{ role: 'user', content: [
           ...imageBlocks,
-          { type: 'text', text: textPrompt }
+          { type: 'text', text: 'Analyze start+peak frames. Return JSON only.' }
         ]}]
       });
     } else {
-      // LAST RESORT: text-only when absolutely no images available
-      console.warn(`[VISION-TEXT] NO IMAGES AVAILABLE for ${exercise} rep#${repNumber} — text-only (degraded mode)`);
+      // TEXT-ONLY: angles + telemetry only
+      console.warn(`[VISION-TEXT] No images for ${exercise} rep#${repNumber} — text-only`);
       message = await client.messages.create({
         model: HAIKU_VISION_MODEL,
-        max_tokens: 1024,
+        max_tokens: 256,
         system,
-        messages: [{ role: 'user', content: 'No images available. Analyze based on angles and telemetry only. Follow the 4 steps. Return JSON.' }]
+        messages: [{ role: 'user', content: 'No images. Use angles+keypoints. Return JSON only.' }]
       });
     }
 

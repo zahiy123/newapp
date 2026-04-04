@@ -1,6 +1,7 @@
 // Final Acceptance Test — 12 HTTP POST requests to Render
-const tinyJpeg = '/9j/4AAQSkZJRgABAQEASABIAAD/2wBDAAgGBgcGBQgHBwcJCQgKDBQNDAsLDBkSEw8UHRofHh0aHBwgJC4nICIsIxwcKDcpLDAxNDQ0Hyc5PTgyPC4zNDL/2wBDAQkJCQwLDBgNDRgyIRwhMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjL/wAARCAABAAEDASIAAhEBAxEB/8QAHwAAAQUBAQEBAQEAAAAAAAAAAAECAwQFBgcICQoL/8QAtRAAAgEDAwIEAwUFBAQAAAF9AQIDAAQRBRIhMUEGE1FhByJxFDKBkaEII0KxwRVS0fAkM2JyggkKFhcYGRolJicoKSo0NTY3ODk6Q0RFRkdISUpTVFVWV1hZWmNkZWZnaGlqc3R1dnd4eXqDhIWGh4iJipKTlJWWl5iZmqKjpKWmp6ipqrKztLW2t7i5usLDxMXGx8jJytLT1NXW19jZ2uHi4+Tl5ufo6erx8vP09fb3+Pn6/8QAHwEAAwEBAQEBAQEBAQAAAAAAAAECAwQFBgcICQoL/8QAtREAAgECBAQDBAcFBAQAAQJ3AAECAxEEBSExBhJBUQdhcRMiMoEIFEKRobHBCSMzUvAVYnLRChYkNOEl8RcYI4Q/SFhSRFEj/9oADAMBAAIRAxEAPwC0AAAAAP/Z';
-const placeholder = tinyJpeg.repeat(3);
+// Use empty frames to force TEXT-ONLY mode (angles + telemetry analysis)
+// Real vision testing requires actual camera frames from the app
+const placeholder = 'empty';
 
 const scenarios = [
   // FOOTBALL - KICK
@@ -100,7 +101,7 @@ const url = 'https://newapp-nujg.onrender.com/api/coach/analyze-rep';
 
 async function sendOne(s, i) {
   const body = {
-    frames: [placeholder, placeholder, placeholder],
+    frames: [placeholder, placeholder],
     jointAngles: s.jointAngles,
     telemetry: s.telemetry,
     sport: s.sport,

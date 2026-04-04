@@ -164,8 +164,8 @@ router.post('/analyze-rep', async (req, res) => {
     }
   }
 
-  if (!frames || !Array.isArray(frames) || frames.length !== 3) {
-    console.warn(`[COACH] /analyze-rep INVALID FRAMES: ${frames?.length || 0} frames`);
+  if (!frames || !Array.isArray(frames) || frames.length < 2) {
+    console.warn(`[COACH] /analyze-rep INVALID FRAMES: ${frames?.length || 0} frames (need >=2)`);
     return res.json(safeFallback);
   }
 
