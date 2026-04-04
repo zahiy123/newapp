@@ -67,8 +67,12 @@ function canCountRep(lastRepTime) {
 // --- Landmark Visibility Validation ---
 // Checks if required body part groups are visible to the camera.
 // Returns { valid: true } or { valid: false, missingParts: ['legs'] }
-export function validateLandmarks(landmarks, requiredGroups = []) {
+export function validateLandmarks(landmarks, requiredGroups = [], amputationProfile) {
   if (!landmarks || requiredGroups.length === 0) return { valid: true };
+
+  // Determine which side is amputated to skip it in validation
+  const ampSide = amputationProfile?.amputationSide;
+  const ampDisability = amputationProfile?.disability;
 
   const missing = [];
 
@@ -82,7 +86,14 @@ export function validateLandmarks(landmarks, requiredGroups = []) {
         const rAnkle = landmarks[LM.RIGHT_ANKLE];
         const leftOk = lKnee?.visibility > 0.3 && lAnkle?.visibility > 0.3;
         const rightOk = rKnee?.visibility > 0.3 && rAnkle?.visibility > 0.3;
-        visible = leftOk || rightOk;
+        // For one-leg amputees, only require the intact leg
+        if (ampDisability === 'one_leg' && ampSide === 'left') {
+          visible = rightOk;
+        } else if (ampDisability === 'one_leg' && ampSide === 'right') {
+          visible = leftOk;
+        } else {
+          visible = leftOk || rightOk;
+        }
         break;
       }
       case 'arms': {
@@ -92,7 +103,14 @@ export function validateLandmarks(landmarks, requiredGroups = []) {
         const rWrist = landmarks[LM.RIGHT_WRIST];
         const leftOk = lElbow?.visibility > 0.3 && lWrist?.visibility > 0.3;
         const rightOk = rElbow?.visibility > 0.3 && rWrist?.visibility > 0.3;
-        visible = leftOk || rightOk;
+        // For one-arm amputees, only require the intact arm
+        if (ampDisability === 'one_arm' && ampSide === 'left') {
+          visible = rightOk;
+        } else if (ampDisability === 'one_arm' && ampSide === 'right') {
+          visible = leftOk;
+        } else {
+          visible = leftOk || rightOk;
+        }
         break;
       }
       case 'hips': {

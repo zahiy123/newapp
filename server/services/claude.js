@@ -348,8 +348,16 @@ export async function analyzeRepFrames({ frames, sport, exercise, playerProfile,
       }
     }
 
+    // Amputation context for vision analysis
+    const disability = playerProfile?.disability || 'none';
+    const ampSide = playerProfile?.amputationSide || '';
+    const ampLevel = playerProfile?.amputationLevel || '';
+    const ampBlock = disability !== 'none' && ampSide && ampSide !== 'none'
+      ? `\nAmputation: ${disability}, side=${ampSide}, level=${ampLevel}. IGNORE missing limb in analysis. Focus on compensation patterns: trunk lean, hip shift, crutch base width.`
+      : '';
+
     // === COMPACT MASTER COACH PROMPT ===
-    const system = `Coach rep#${repNumber} "${exercise}" ${playerName}. Sport:${sport||'fitness'}.${anglesBlock}${telemetryBlock}${bioBlock}${scoreHint}
+    const system = `Coach rep#${repNumber} "${exercise}" ${playerName}. Sport:${sport||'fitness'}.${anglesBlock}${telemetryBlock}${bioBlock}${ampBlock}${scoreHint}
 Return ONLY JSON: {"score":1-10,"issue_key":"snake_case","instruction":"Hebrew max 7 words","pro_tip":"Hebrew max 7 words"}
 8-10=praise+maintain. 5-7=fix+why. 1-4=urgent+injury. good form→issue_key="good_form".`;
 
@@ -732,6 +740,9 @@ Prefer resistance band exercises when possible.`,
 PREFERRED: סקוואט, לאנג'ים, גשר ישבן, כפיפות בטן, פלאנק, מטפס הרים, ישיבה על הקיר, פלאנק צידי, כפיפות מרפק (one arm).
 AVOID: שכיבות סמיכה (unless modified), מתיחת גומייה. Focus on core and legs.`,
     one_leg: `For ONE-LEG amputee athletes (crutches): ONLY upper body + core + adapted exercises.
+AMPUTATION SIDE: ${profile.amputationSide || 'unknown'}. LEVEL: ${profile.amputationLevel || 'unknown'}.
+COMPENSATION ANALYSIS: Watch for hip shift to the amputated side during standing exercises. Core engagement compensates for missing leg stability.
+IGNORE all analysis of the amputated leg — focus on standing leg alignment, crutch positioning, and trunk stability.
 PREFERRED: שכיבות סמיכה, דיפס, פלאנק, כפיפות מרפק, כפיפות בטן, גשר ישבן, פלאנק צידי, כתפיים עם משקולות, הרמה צידית, הרחבת מרפק, משיכת משקולת.
 AVOID: סקוואט, לאנג'ים, מטפס הרים (require two legs). Squat only if described as single-leg with crutch support.`,
     two_legs: `For WHEELCHAIR athletes: ONLY upper body exercises done seated.
@@ -793,7 +804,7 @@ AVOID: סקוואט, לאנג'ים, גשר ישבן, מטפס הרים, ישיב
   return `Create week ${weekNumber}/4. Theme: "${theme}"
 
 PLAYER: ${profile.name}, Age ${profile.age}, ${profile.gender}, ${profile.height}cm, ${profile.weight}kg
-Disability: ${profile.disability}. ${aidInfo}
+Disability: ${profile.disability}.${profile.amputationSide && profile.amputationSide !== 'none' ? ` Side: ${profile.amputationSide}. Level: ${profile.amputationLevel}.` : ''} ${aidInfo}
 Level: ${skillLevel} — ${levelDirective}
 ${ageRule}
 Sport: ${sport}. Goals: ${topGoals}. Days/week: ${daysPerWeek}.
@@ -1502,7 +1513,7 @@ export async function generateTips({ profile, sport, goals, location }) {
 
   const text = await callClaudeHaiku(sportContext,
     `Give 4 training tips and 4 safety notes for a ${skillLevel}-level ${sport} player.
-Disability: ${profile.disability}. ${aidInfo} Location: ${location}.${hasStrength ? ' Include strength advice.' : ''}
+Disability: ${profile.disability}.${profile.amputationSide && profile.amputationSide !== 'none' ? ` Side: ${profile.amputationSide}. Level: ${profile.amputationLevel}.` : ''} ${aidInfo} Location: ${location}.${hasStrength ? ' Include strength advice.' : ''}
 ONLY raw JSON, no markdown: {"generalTips":["tip1","tip2","tip3","tip4"],"safetyNotes":["note1","note2","note3","note4"]}
 Hebrew only. Max 10 words per tip/note.`, 512);
 

@@ -20,6 +20,8 @@ export default function Profile() {
     weight: '',
     disability: 'none',
     disabilityOther: '',
+    amputationSide: 'none',
+    amputationLevel: '',
     skillLevel: 'beginner',
     mobilityAid: 'none',
     trainingDays: 3,
@@ -189,6 +191,47 @@ export default function Profile() {
               placeholder={t('profile.disabilityOther')}
               className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
             />
+          </div>
+        )}
+
+        {/* Amputation Side + Level - only for one_leg / one_arm */}
+        {(form.disability === 'one_leg' || form.disability === 'one_arm') && (
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">{t('profile.amputationSide')}</label>
+              <select
+                name="amputationSide"
+                value={form.amputationSide}
+                onChange={handleChange}
+                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
+              >
+                <option value="none">---</option>
+                <option value="left">{t('profile.amputationLeft')}</option>
+                <option value="right">{t('profile.amputationRight')}</option>
+              </select>
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">{t('profile.amputationLevel')}</label>
+              <select
+                name="amputationLevel"
+                value={form.amputationLevel}
+                onChange={handleChange}
+                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
+              >
+                <option value="">---</option>
+                {form.disability === 'one_leg' ? (
+                  <>
+                    <option value="above_knee">{t('profile.aboveKnee')}</option>
+                    <option value="below_knee">{t('profile.belowKnee')}</option>
+                  </>
+                ) : (
+                  <>
+                    <option value="above_elbow">{t('profile.aboveElbow')}</option>
+                    <option value="below_elbow">{t('profile.belowElbow')}</option>
+                  </>
+                )}
+              </select>
+            </div>
           </div>
         )}
 

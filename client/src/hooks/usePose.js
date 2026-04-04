@@ -22,7 +22,34 @@ function midpoint(a, b) {
   return { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2, z: (a.z + b.z) / 2 };
 }
 
-export function usePose(canvasRef, beforeDrawRef) {
+// Returns Set of landmark indices to hide for the amputated limb
+function getAmputatedIndices(profile) {
+  if (!profile || profile.disability === 'none') return new Set();
+  const { disability, amputationSide, amputationLevel } = profile;
+  if (!amputationSide || amputationSide === 'none') return new Set();
+  const indices = new Set();
+
+  if (disability === 'one_leg') {
+    if (amputationSide === 'left') {
+      indices.add(25); indices.add(27); indices.add(29); indices.add(31); // knee, ankle, foot landmarks
+      if (amputationLevel === 'above_knee') indices.add(23); // hip hidden for above-knee
+    } else if (amputationSide === 'right') {
+      indices.add(26); indices.add(28); indices.add(30); indices.add(32);
+      if (amputationLevel === 'above_knee') indices.add(24);
+    }
+  } else if (disability === 'one_arm') {
+    if (amputationSide === 'left') {
+      indices.add(15); indices.add(17); indices.add(19); indices.add(21); // wrist, hand landmarks
+      if (amputationLevel === 'above_elbow') indices.add(13); // elbow
+    } else if (amputationSide === 'right') {
+      indices.add(16); indices.add(18); indices.add(20); indices.add(22);
+      if (amputationLevel === 'above_elbow') indices.add(14);
+    }
+  }
+  return indices;
+}
+
+export function usePose(canvasRef, beforeDrawRef, amputationProfile) {
   const landmarkerRef = useRef(null);
   const animFrameRef = useRef(null);
   const [ready, setReady] = useState(false);
@@ -85,8 +112,19 @@ export function usePose(canvasRef, beforeDrawRef) {
         beforeDrawRef.current(ctx, lm, canvas.width, canvas.height);
       }
       const drawingUtils = new DrawingUtils(ctx);
-      drawingUtils.drawLandmarks(lm, { radius: 4, color: '#00FF00' });
-      drawingUtils.drawConnectors(lm, PoseLandmarker.POSE_CONNECTIONS, { color: '#00FFFF', lineWidth: 2 });
+      const hiddenIndices = getAmputatedIndices(amputationProfile);
+      if (hiddenIndices.size === 0) {
+        drawingUtils.drawLandmarks(lm, { radius: 4, color: '#00FF00' });
+        drawingUtils.drawConnectors(lm, PoseLandmarker.POSE_CONNECTIONS, { color: '#00FFFF', lineWidth: 2 });
+      } else {
+        const visibleLm = lm.filter((_, i) => !hiddenIndices.has(i));
+        drawingUtils.drawLandmarks(visibleLm, { radius: 4, color: '#00FF00' });
+        const filteredConnections = PoseLandmarker.POSE_CONNECTIONS.filter(
+          c => !hiddenIndices.has(c.start) && !hiddenIndices.has(c.end)
+        );
+        const mappedLm = lm.map((pt, i) => hiddenIndices.has(i) ? { ...pt, visibility: 0 } : pt);
+        drawingUtils.drawConnectors(mappedLm, filteredConnections, { color: '#00FFFF', lineWidth: 2 });
+      }
     }
   }, [canvasRef]);
 
