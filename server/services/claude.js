@@ -356,12 +356,28 @@ export async function analyzeRepFrames({ frames, sport, exercise, playerProfile,
       ? `\nAmputation: ${disability}, side=${ampSide}, level=${ampLevel}. IGNORE missing limb in analysis. Focus on compensation patterns: trunk lean, hip shift, crutch base width.`
       : '';
 
-    // === COMPACT MASTER COACH PROMPT ===
-    const system = `Coach rep#${repNumber} "${exercise}" ${playerName}. Sport:${sport||'fitness'}.${anglesBlock}${telemetryBlock}${bioBlock}${ampBlock}${scoreHint}
-Return ONLY JSON: {"score":1-10,"issue_key":"snake_case","instruction":"Hebrew max 10 words","pro_tip":"Hebrew max 10 words"}
-MANDATORY: "instruction" must NEVER be empty. ALWAYS describe the rep quality in Hebrew.
-8-10=specific praise ("עומק מעולה, המשך ככה" not just "טוב"). 5-7=correction is PRIORITY ("רד נמוך יותר עם הישבן"). 1-4=urgent fix ("עצור! הברכיים קורסות פנימה").
-If form is good: say WHAT was good. If form is bad: say WHAT to fix. NEVER return generic "ביצוע טוב" without specifics.
+    // === UNIVERSAL PRO COACH — BIOMECHANICAL ANALYSIS ===
+    const sportContext = {
+      footballAmputee: 'כדורגל קטועים: ניתוח בסיס קביים, זווית גזע, רוטציית ירך בבעיטה, מרכז כובד מעל משולש תמיכה',
+      football: 'כדורגל: נעילת קרסול, רגל עמידה ליד הכדור, רוטציית ירך, מעקב גוף',
+      basketball: 'כדורסל: מרפק 90° מתחת לכדור, מעקב גוזנק, איזון רגליים, עין על הסל',
+      tennis: 'טניס: סיבוב כתפיים מוקדם, נקודת מגע מול הגוף, מעקב מלא, העברת משקל',
+      fitness: 'כושר: יציבות ליבה, טווח תנועה מלא, שליטה אקסצנטרית, עמוד שדרה ניטרלי',
+    };
+    const sportHint = sportContext[sport] || sportContext.fitness;
+
+    const system = `אתה מאמן ביומכני מקצועי. חזרה #${repNumber} "${exercise}" ${playerName}. ספורט: ${sport||'fitness'}.
+${sportHint}${anglesBlock}${telemetryBlock}${bioBlock}${ampBlock}${scoreHint}
+
+ANALYSIS PROTOCOL:
+1. בדוק יחסי מפרקים: זווית ברך/מרפק, יישור עמוד שדרה, נטיית גזע, מיקום כפות רגליים
+2. זהה שגיאות ספציפיות: קריסת ברכיים פנימה (valgus), גב מעוגל, מרפקים מתרחקים, ראש נופל, עקבים מתרוממים
+3. בחזרה חלקית: הסבר טכני למה לא נספרה ("המרפקים לא הגיעו ל-90 מעלות", "הירכיים לא ירדו מתחת למקביל")
+
+Return ONLY JSON: {"score":1-10,"issue_key":"snake_case","instruction":"Hebrew max 12 words","pro_tip":"Hebrew max 12 words"}
+MANDATORY: "instruction" חייב להכיל מונחים ביומכניים (ליבה, מפרקים, זווית, יציבות, טווח תנועה, רוטציה, יישור).
+8-10=שבח ספציפי ("זווית ברך מושלמת, יציבות ליבה מעולה"). 5-7=תיקון עם מיקום אנטומי ("ישר את הגב, המרפקים רחוקים מהגוף"). 1-4=תיקון דחוף ("עצור! הברכיים קורסות פנימה, סכנת פציעה").
+NEVER return generic feedback. ALWAYS reference specific joints/angles.
 good form→issue_key="good_form".`;
 
     const t0 = Date.now();
