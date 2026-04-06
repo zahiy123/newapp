@@ -134,6 +134,9 @@ export default function Training() {
     return text;
   }, [playerName]);
 
+  // Ref to track current exercise for use in callbacks (avoids TDZ issues)
+  const currentExerciseRef = useRef(null);
+
   // === COMMAND COACHING HELPERS ===
   // Get Hebrew command text for the next rep
   function getCommandText(repNum, cueKey, type) {
@@ -192,7 +195,7 @@ export default function Training() {
 
       pollSpeechEnd(() => {
         const nextRep = commandRepRef.current + 1;
-        const targetReps = parseInt(currentExercise?.reps) || 10;
+        const targetReps = parseInt(currentExerciseRef.current?.reps) || 10;
         if (nextRep > targetReps) return; // set complete will handle
         commandRepRef.current = nextRep;
         commandPhaseRef.current = 'COMMANDING';
@@ -205,7 +208,7 @@ export default function Training() {
         speakQueued(text, { rate: 1.2 });
       }
     }
-  }, [speakPriority, speakQueued, stripName, currentExercise]);
+  }, [speakPriority, speakQueued, stripName]);
 
   const { feedPhaseData, startVision, stopVision, resetSession: resetVisionSession } = useHaikuVision({ onVisionFeedback });
 
@@ -404,6 +407,7 @@ export default function Training() {
   }, [phase, currentIdx, currentSet, displayReps, timer, searchParams]);
 
   const currentExercise = exercises[currentIdx];
+  currentExerciseRef.current = currentExercise;
 
   // Set up analyzer when exercise changes
   useEffect(() => {
