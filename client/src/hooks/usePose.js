@@ -87,6 +87,8 @@ export function usePose(canvasRef, beforeDrawRef, amputationProfile) {
 
   const detect = useCallback((videoEl) => {
     if (!landmarkerRef.current || !videoEl || videoEl.readyState < 2) return;
+    // Guard against NORM_RECT error: video must have valid dimensions
+    if (!videoEl.videoWidth || !videoEl.videoHeight) return;
 
     const result = landmarkerRef.current.detectForVideo(videoEl, performance.now());
     const lm = result.landmarks?.[0] || null;

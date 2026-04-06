@@ -2556,11 +2556,11 @@ export function analyzePushUps(landmarks, prevState = {}) {
   // otherwise fall back to generous defaults
   const cal = prevState._calibration;
   const calElbow = cal?.leftElbow || cal?.rightElbow;
-  // Calibrated thresholds: DOWN when angle drops 20% below max, UP when 90% back to max
-  // Defaults: DOWN < 120° (was 100° — too strict for kids), UP > 155° (was 160°)
+  // Calibrated thresholds: DOWN when angle drops 15% below max, UP when 90% back to max
+  // Defaults: DOWN < 140° (was 120° — too strict, camera often misses start of descent), UP > 155°
   const downThreshold = calElbow?.range > 15
-    ? calElbow.max - calElbow.range * 0.2
-    : 120;
+    ? calElbow.max - calElbow.range * 0.15
+    : 140;
   const upThreshold = calElbow?.range > 15
     ? calElbow.max - calElbow.range * 0.1
     : 155;
@@ -2568,10 +2568,10 @@ export function analyzePushUps(landmarks, prevState = {}) {
   // Velocity-based direction change detection (supplement to angle thresholds)
   const prevAngle = prevState._smoothElbow ?? elbowAngle;
   const angleDelta = elbowAngle - prevAngle; // negative = bending, positive = extending
-  const velocityDown = angleDelta < -1.5; // bending fast
+  const velocityDown = angleDelta < -1.0; // bending (was -1.5, more sensitive now)
   const velocityUp = angleDelta > 1.5;    // extending fast
 
-  if (phase === 'up' && (elbowAngle < downThreshold || (velocityDown && elbowAngle < downThreshold + 15))) {
+  if (phase === 'up' && (elbowAngle < downThreshold || (velocityDown && elbowAngle < downThreshold + 10))) {
     newPhase = 'down';
     newFirstRep = true;
     newPhaseStartAngle = elbowAngle;

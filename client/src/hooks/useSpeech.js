@@ -346,10 +346,10 @@ export function useSpeech(lang = 'he-IL', age) {
       ? (isHe ? `הכנה: ${locationProps.setup}.` : `Setup: ${locationProps.setup}.`)
       : '';
 
-    // Part 5: Motivational start cue
+    // Part 5: Motivational start cue (no name — already said in intro)
     const startCue = isHe
-      ? `${name}, אני צופה בך. בוא נתחיל!`
-      : `${name}, I'm watching you. Let's start!`;
+      ? `אני צופה בך. בוא נתחיל!`
+      : `I'm watching you. Let's start!`;
 
     // Queue all segments — chunk each one for stability
     const queueChunked = (text, options = {}) => {
@@ -940,15 +940,15 @@ export function useSpeech(lang = 'he-IL', age) {
   // Calibration start — encouraging prep
   const speakCalibrationStart = useCallback((playerName) => {
     const msg = isHe
-      ? `${playerName}, בוא נעשה תנועה אחת של הכנה כדי שאוכל להבין את הטווח שלך`
-      : `${playerName}, let's do one prep movement so I can understand your range`;
+      ? `בוא נעשה תנועה אחת של הכנה כדי שאוכל להבין את הטווח שלך`
+      : `Let's do one prep movement so I can understand your range`;
     speakPriority(msg);
   }, [isHe, speakPriority]);
 
   // Calibration done — quick confirmation
   const speakCalibrationDone = useCallback((playerName) => {
     const msg = isHe
-      ? `מעולה ${playerName}, תפסתי את הטווח שלך. יאללה נתחיל!`
+      ? `מעולה, תפסתי את הטווח שלך. יאללה נתחיל!`
       : `Great ${playerName}, I've got your range. Let's go!`;
     speakPriority(msg);
   }, [isHe, speakPriority]);

@@ -624,6 +624,11 @@ export default function Training() {
     const isMoving = newState.moving;
     const firstRepStarted = newState.firstRepStarted || false;
 
+    // === DEBUG: Log phase transitions ===
+    if (newState.phase !== prevState.phase) {
+      console.log(`[PHASE] ${prevState.phase || 'none'} → ${newState.phase} | reps=${newState.reps} | elbow=${newState.elbowAngle || newState.kneeAngle || '?'}° | moving=${isMoving} | confidence=${avgConfidence.toFixed(2)}`);
+    }
+
     // === BIOMECHANICS: Compute joint angles + performance report ===
     frameCountRef.current++;
     if (frameCountRef.current % 3 === 0) { // Every 3rd frame (~20fps) for efficiency
