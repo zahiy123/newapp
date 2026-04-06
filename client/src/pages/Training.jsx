@@ -159,14 +159,14 @@ export default function Training() {
     setTimeout(() => clearInterval(poll), 10000);
   }
 
-  // Speak the command for repNum, then transition to WAITING_FOR_REP when speech ends
+  // Speak the initial command for a rep, then transition to WAITING_FOR_REP
   function speakCommandAndWait(repNum) {
     const cueKey = analyzerRef.current?.cueKey;
     const type = analyzerRef.current?.type;
     const text = getCommandText(repNum, cueKey, type);
     if (!text) return;
     commandPhaseRef.current = 'COMMANDING';
-    speakPriority(text);
+    speakPriority(text, { rate: 1.25 });
     pollSpeechEnd(() => {
       if (commandPhaseRef.current === 'COMMANDING') {
         commandPhaseRef.current = 'WAITING_FOR_REP';
@@ -181,45 +181,48 @@ export default function Training() {
 
   const { startAICoaching, stopAICoaching, feedPoseData } = useAICoach({ onCoaching: onAICoaching });
 
-  // Haiku Vision — per-rep visual form analysis (command coaching aware)
+  // Haiku Vision — per-rep visual form analysis
+  // TTS structure: [חזרה X] + [AI feedback] + [command next rep]
   const onVisionFeedback = useCallback((result) => {
     const cmdPhase = commandPhaseRef.current;
-    console.log(`[CMD] onVisionFeedback received, cmdPhase=${cmdPhase}, repRef=${commandRepRef.current}, score=${result.score}, feedback=${result.feedback?.substring(0, 50)}`);
+    const curRep = commandRepRef.current;
+    const aiFeedback = result.feedback ? stripName(result.feedback) : 'המשך ככה';
+    console.log(`[CMD] onVisionFeedback: cmdPhase=${cmdPhase}, rep=${curRep}, score=${result.score}, fb="${aiFeedback}"`);
 
     if (cmdPhase === 'IDLE') {
-      // Hold exercises or command coaching not active — just speak feedback
-      if (result.feedback) {
-        const text = stripName(result.feedback);
-        speakQueued(text, { rate: 1.2 });
-      }
+      // Hold exercises or no command coaching — speak feedback directly
+      speakPriority(aiFeedback, { rate: 1.2 });
       return;
     }
 
-    // Active command coaching — clear timeout, speak feedback, then advance to next rep
+    // Active command coaching — build full sentence: [count] + [feedback] + [next command]
     clearTimeout(analyzeTimeoutRef.current);
     commandPhaseRef.current = 'SPEAKING_FEEDBACK';
 
-    const text = result.feedback ? stripName(result.feedback) : null;
-    if (text) {
-      speakPriority(text, { rate: 1.2 });
-    }
+    const targetReps = parseInt(currentExerciseRef.current?.reps) || 10;
+    const nextRep = curRep + 1;
+    const isLastRep = nextRep > targetReps;
 
-    // After feedback speech ends, command the next rep
+    // Build combined speech: "חזרה 2. רד נמוך יותר. עכשיו רד לחזרה 3"
+    const countPart = `חזרה ${curRep}.`;
+    const feedbackPart = aiFeedback;
+    const nextCommandPart = isLastRep ? '' : `. עכשיו ${getCommandText(nextRep, analyzerRef.current?.cueKey, analyzerRef.current?.type) || `רד לחזרה ${nextRep}`}`;
+    const fullSpeech = `${countPart} ${feedbackPart}${nextCommandPart}`;
+
+    console.log(`[CMD] Speaking: "${fullSpeech}"`);
+    speakPriority(fullSpeech, { rate: 1.25 });
+
+    // After full speech ends, transition to waiting for next rep
     pollSpeechEnd(() => {
-      const curRep = commandRepRef.current;
-      const nextRep = curRep + 1;
-      const targetReps = parseInt(currentExerciseRef.current?.reps) || 10;
-      console.log(`[CMD] Feedback done, advancing: curRep=${curRep}, nextRep=${nextRep}, target=${targetReps}`);
-      if (nextRep > targetReps) {
-        // Set complete will be handled by the count block
+      console.log(`[CMD] Speech done, advancing: curRep=${curRep}, nextRep=${nextRep}, target=${targetReps}`);
+      if (isLastRep) {
         commandPhaseRef.current = 'IDLE';
         return;
       }
       commandRepRef.current = nextRep;
-      commandPhaseRef.current = 'COMMANDING';
-      speakCommandAndWait(nextRep);
+      commandPhaseRef.current = 'WAITING_FOR_REP';
     });
-  }, [speakPriority, speakQueued, stripName]);
+  }, [speakPriority, stripName]);
 
   const { feedPhaseData, startVision, stopVision, resetSession: resetVisionSession } = useHaikuVision({ onVisionFeedback });
 
@@ -803,12 +806,11 @@ export default function Training() {
 
           // Always update display immediately so user sees counter change
           setDisplayReps(fb.count);
+          lastSpokenRef.current = fb.text;
 
           if (cmdPhase === 'IDLE' || isHoldExercise) {
-            // Non-command mode: speak count + coaching as before
+            // Non-command mode: speak count, coaching tip
             speakCount(fb.count);
-            lastSpokenRef.current = fb.text;
-
             if (coachingText) {
               const now = Date.now();
               if (now - lastCoachingTimeRef.current > 10000) {
@@ -817,27 +819,37 @@ export default function Training() {
               }
             }
           } else if (cmdPhase === 'WAITING_FOR_REP') {
-            // Command mode: rep accepted — transition to ANALYZING
+            // Command mode: rep accepted — sync ref, wait for server feedback
+            // (onVisionFeedback will speak: [count] + [feedback] + [next command])
             console.log(`[CMD] Rep accepted, switching to ANALYZING for rep #${fb.count}`);
-            commandRepRef.current = fb.count; // sync ref with actual count
+            commandRepRef.current = fb.count;
             commandPhaseRef.current = 'ANALYZING';
-            lastSpokenRef.current = fb.text;
 
-            // 5s timeout — fallback if server doesn't respond
+            // 5s fallback if server doesn't respond
             analyzeTimeoutRef.current = setTimeout(() => {
               if (commandPhaseRef.current !== 'ANALYZING') return;
+              // Speak count + generic + next command as fallback
               const nextRep = fb.count + 1;
               const targetReps2 = parseInt(currentExercise?.reps) || 10;
+              const fallbackCmd = nextRep <= targetReps2
+                ? `. עכשיו ${getCommandText(nextRep, analyzerRef.current?.cueKey, analyzerRef.current?.type) || `רד לחזרה ${nextRep}`}`
+                : '';
+              speakPriority(`חזרה ${fb.count}. המשך ככה${fallbackCmd}`, { rate: 1.25 });
               if (nextRep <= targetReps2) {
                 commandRepRef.current = nextRep;
                 commandPhaseRef.current = 'COMMANDING';
-                speakCommandAndWait(nextRep);
+                pollSpeechEnd(() => {
+                  if (commandPhaseRef.current === 'COMMANDING') {
+                    commandPhaseRef.current = 'WAITING_FOR_REP';
+                  }
+                });
+              } else {
+                commandPhaseRef.current = 'IDLE';
               }
             }, 5000);
           } else {
-            // COMMANDING / ANALYZING / SPEAKING_FEEDBACK — swallow but still show count
-            console.log(`[CMD] Rep counted (display only) — cmdPhase=${cmdPhase}, waiting`);
-            lastSpokenRef.current = fb.text;
+            // COMMANDING / ANALYZING / SPEAKING_FEEDBACK — display only, don't interrupt
+            console.log(`[CMD] Rep counted (display only) — cmdPhase=${cmdPhase}`);
           }
 
           const targetReps = parseInt(currentExercise?.reps) || 10;
@@ -861,6 +873,20 @@ export default function Training() {
       if (now - lastMindMuscleCueRef.current > 20000) {
         lastMindMuscleCueRef.current = now;
         speakMindMuscleCue(analyzerRef.current?.cueKey || 'default', newState.phase || 'up', playerName);
+      }
+    }
+
+    // === PARTIAL REP DETECTION ===
+    // If phase went down→up but no rep was counted, the movement was too shallow
+    if (firstRepStarted && prevState.phase === 'down' && newState.phase === 'up' && newState.reps === prevState.reps) {
+      const now = Date.now();
+      // Throttle: max once every 4s to avoid spam
+      if (now - lastNudgeTimeRef.current > 4000) {
+        lastNudgeTimeRef.current = now;
+        const partialMsg = 'תנועה קטנה מדי! רד נמוך יותר כדי שהחזרה תיספר';
+        speakPriority(partialMsg, { rate: 1.3 });
+        setFeedback({ type: 'warning', text: partialMsg });
+        console.log('[CMD] Partial rep detected — movement too shallow');
       }
     }
 

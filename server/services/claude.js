@@ -358,8 +358,11 @@ export async function analyzeRepFrames({ frames, sport, exercise, playerProfile,
 
     // === COMPACT MASTER COACH PROMPT ===
     const system = `Coach rep#${repNumber} "${exercise}" ${playerName}. Sport:${sport||'fitness'}.${anglesBlock}${telemetryBlock}${bioBlock}${ampBlock}${scoreHint}
-Return ONLY JSON: {"score":1-10,"issue_key":"snake_case","instruction":"Hebrew max 7 words","pro_tip":"Hebrew max 7 words"}
-8-10=praise+maintain. 5-7=fix+why. 1-4=urgent+injury. good form→issue_key="good_form".`;
+Return ONLY JSON: {"score":1-10,"issue_key":"snake_case","instruction":"Hebrew max 10 words","pro_tip":"Hebrew max 10 words"}
+MANDATORY: "instruction" must NEVER be empty. ALWAYS describe the rep quality in Hebrew.
+8-10=specific praise ("עומק מעולה, המשך ככה" not just "טוב"). 5-7=correction is PRIORITY ("רד נמוך יותר עם הישבן"). 1-4=urgent fix ("עצור! הברכיים קורסות פנימה").
+If form is good: say WHAT was good. If form is bad: say WHAT to fix. NEVER return generic "ביצוע טוב" without specifics.
+good form→issue_key="good_form".`;
 
     const t0 = Date.now();
     let message;
@@ -402,9 +405,9 @@ Return ONLY JSON: {"score":1-10,"issue_key":"snake_case","instruction":"Hebrew m
       return safeFallback;
     }
 
-    const instruction = parsed?.instruction || '';
+    const instruction = parsed?.instruction || 'המשך ככה';
     const proTip = parsed?.pro_tip || '';
-    const feedback = instruction + (proTip ? '. ' + proTip : '');
+    const feedback = instruction + (proTip && proTip !== instruction ? '. ' + proTip : '');
 
     return {
       is_correct: true,
