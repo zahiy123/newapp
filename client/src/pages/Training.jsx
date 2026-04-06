@@ -183,8 +183,12 @@ export default function Training() {
 
   // Haiku Vision — per-rep visual form analysis (command coaching aware)
   const onVisionFeedback = useCallback((result) => {
-    if (commandPhaseRef.current === 'ANALYZING') {
-      // Command coaching mode: clear timeout, speak feedback, then command next rep
+    const cmdPhase = commandPhaseRef.current;
+    console.log(`[CMD] onVisionFeedback received, cmdPhase=${cmdPhase}, score=${result.score}, feedback=${result.feedback?.substring(0, 50)}`);
+
+    // In any active command coaching state (not IDLE), handle the feedback and advance the loop
+    if (cmdPhase !== 'IDLE') {
+      // Clear any pending timeout (server responded in time)
       clearTimeout(analyzeTimeoutRef.current);
       commandPhaseRef.current = 'SPEAKING_FEEDBACK';
 
@@ -202,7 +206,7 @@ export default function Training() {
         speakCommandAndWait(nextRep);
       });
     } else {
-      // Fallback for non-command mode (hold exercises, IDLE)
+      // IDLE mode (hold exercises or command coaching not active)
       if (result.feedback) {
         const text = stripName(result.feedback);
         speakQueued(text, { rate: 1.2 });
@@ -789,12 +793,14 @@ export default function Training() {
           // Command coaching gate: only count reps when waiting for a command
           const cmdPhase = commandPhaseRef.current;
           const isHoldExercise = analyzerRef.current?.type === 'hold';
+          console.log(`[CMD] Rep detected count=${fb.count}, cmdPhase=${cmdPhase}, isHold=${isHoldExercise}`);
           if (cmdPhase !== 'IDLE' && cmdPhase !== 'WAITING_FOR_REP' && !isHoldExercise) {
             // Swallow the rep — coach hasn't commanded yet or is analyzing/speaking
-            // Don't update display or speak count
+            console.log(`[CMD] Rep SWALLOWED — cmdPhase=${cmdPhase}, not ready`);
           } else {
             // Rep counted — if in command mode, transition to ANALYZING
             if (cmdPhase === 'WAITING_FOR_REP') {
+              console.log(`[CMD] Rep accepted, switching to ANALYZING for rep #${fb.count}`);
               commandPhaseRef.current = 'ANALYZING';
               setFeedback({ type: 'info', text: isHe ? 'מנתח...' : 'Analyzing...' });
               analyzeTimeoutRef.current = setTimeout(() => {
@@ -851,8 +857,9 @@ export default function Training() {
       }
     }
 
-    // Update reps display when reps change
-    if (newState.reps !== undefined && newState.reps !== prevState.reps) {
+    // Update reps display when reps change — but respect command coaching gate
+    // (command coaching handles setDisplayReps in its own block)
+    if (commandPhaseRef.current === 'IDLE' && newState.reps !== undefined && newState.reps !== prevState.reps) {
       setDisplayReps(newState.reps);
     }
 
@@ -870,6 +877,7 @@ export default function Training() {
     // Only send frames to vision server if movement is sufficient (>=15% body height)
     if (movementSufficientRef.current) {
       const repAngles = computeJointAngles(stableLandmarks);
+      console.log(`[CMD] feedPhaseData: phase=${newState.phase}, reps=${newState.reps}, cmdPhase=${commandPhaseRef.current}`);
       feedPhaseData(newState, repAngles, stableLandmarks);
     }
   }, [landmarks, phase]);
