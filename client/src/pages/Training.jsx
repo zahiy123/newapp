@@ -184,34 +184,41 @@ export default function Training() {
   // Haiku Vision — per-rep visual form analysis (command coaching aware)
   const onVisionFeedback = useCallback((result) => {
     const cmdPhase = commandPhaseRef.current;
-    console.log(`[CMD] onVisionFeedback received, cmdPhase=${cmdPhase}, score=${result.score}, feedback=${result.feedback?.substring(0, 50)}`);
+    console.log(`[CMD] onVisionFeedback received, cmdPhase=${cmdPhase}, repRef=${commandRepRef.current}, score=${result.score}, feedback=${result.feedback?.substring(0, 50)}`);
 
-    // In any active command coaching state (not IDLE), handle the feedback and advance the loop
-    if (cmdPhase !== 'IDLE') {
-      // Clear any pending timeout (server responded in time)
-      clearTimeout(analyzeTimeoutRef.current);
-      commandPhaseRef.current = 'SPEAKING_FEEDBACK';
-
-      const text = result.feedback ? stripName(result.feedback) : null;
-      if (text) {
-        speakPriority(text, { rate: 1.2 });
-      }
-
-      pollSpeechEnd(() => {
-        const nextRep = commandRepRef.current + 1;
-        const targetReps = parseInt(currentExerciseRef.current?.reps) || 10;
-        if (nextRep > targetReps) return; // set complete will handle
-        commandRepRef.current = nextRep;
-        commandPhaseRef.current = 'COMMANDING';
-        speakCommandAndWait(nextRep);
-      });
-    } else {
-      // IDLE mode (hold exercises or command coaching not active)
+    if (cmdPhase === 'IDLE') {
+      // Hold exercises or command coaching not active — just speak feedback
       if (result.feedback) {
         const text = stripName(result.feedback);
         speakQueued(text, { rate: 1.2 });
       }
+      return;
     }
+
+    // Active command coaching — clear timeout, speak feedback, then advance to next rep
+    clearTimeout(analyzeTimeoutRef.current);
+    commandPhaseRef.current = 'SPEAKING_FEEDBACK';
+
+    const text = result.feedback ? stripName(result.feedback) : null;
+    if (text) {
+      speakPriority(text, { rate: 1.2 });
+    }
+
+    // After feedback speech ends, command the next rep
+    pollSpeechEnd(() => {
+      const curRep = commandRepRef.current;
+      const nextRep = curRep + 1;
+      const targetReps = parseInt(currentExerciseRef.current?.reps) || 10;
+      console.log(`[CMD] Feedback done, advancing: curRep=${curRep}, nextRep=${nextRep}, target=${targetReps}`);
+      if (nextRep > targetReps) {
+        // Set complete will be handled by the count block
+        commandPhaseRef.current = 'IDLE';
+        return;
+      }
+      commandRepRef.current = nextRep;
+      commandPhaseRef.current = 'COMMANDING';
+      speakCommandAndWait(nextRep);
+    });
   }, [speakPriority, speakQueued, stripName]);
 
   const { feedPhaseData, startVision, stopVision, resetSession: resetVisionSession } = useHaikuVision({ onVisionFeedback });
@@ -790,54 +797,54 @@ export default function Training() {
         setFeedback(coachingText ? { ...fb, text: coachingText } : fb);
 
         if (fb.type === 'count') {
-          // Command coaching gate: only count reps when waiting for a command
           const cmdPhase = commandPhaseRef.current;
           const isHoldExercise = analyzerRef.current?.type === 'hold';
           console.log(`[CMD] Rep detected count=${fb.count}, cmdPhase=${cmdPhase}, isHold=${isHoldExercise}`);
-          if (cmdPhase !== 'IDLE' && cmdPhase !== 'WAITING_FOR_REP' && !isHoldExercise) {
-            // Swallow the rep — coach hasn't commanded yet or is analyzing/speaking
-            console.log(`[CMD] Rep SWALLOWED — cmdPhase=${cmdPhase}, not ready`);
-          } else {
-            // Rep counted — if in command mode, transition to ANALYZING
-            if (cmdPhase === 'WAITING_FOR_REP') {
-              console.log(`[CMD] Rep accepted, switching to ANALYZING for rep #${fb.count}`);
-              commandPhaseRef.current = 'ANALYZING';
-              setFeedback({ type: 'info', text: isHe ? 'מנתח...' : 'Analyzing...' });
-              analyzeTimeoutRef.current = setTimeout(() => {
-                // 5s timeout — no vision response from server
-                if (commandPhaseRef.current !== 'ANALYZING') return;
-                commandPhaseRef.current = 'COMMANDING';
-                const nextRep = fb.count + 1;
-                const targetReps2 = parseInt(currentExercise?.reps) || 10;
-                if (nextRep <= targetReps2) {
-                  commandRepRef.current = nextRep;
-                  speakPriority(isHe ? 'ממשיכים, מוכן לחזרה הבאה' : 'Moving on, ready for the next rep');
-                  pollSpeechEnd(() => speakCommandAndWait(nextRep));
-                }
-              }, 5000);
-            } else {
-              // Non-command mode (IDLE or hold): speak count as before
-              speakCount(fb.count);
-            }
 
+          // Always update display immediately so user sees counter change
+          setDisplayReps(fb.count);
+
+          if (cmdPhase === 'IDLE' || isHoldExercise) {
+            // Non-command mode: speak count + coaching as before
+            speakCount(fb.count);
             lastSpokenRef.current = fb.text;
-            setDisplayReps(fb.count);
 
-            // Speak coaching tip after counting (max every 10s) — skip in command mode (vision handles it)
-            if (coachingText && cmdPhase === 'IDLE') {
+            if (coachingText) {
               const now = Date.now();
               if (now - lastCoachingTimeRef.current > 10000) {
                 lastCoachingTimeRef.current = now;
                 speakIfIdle(coachingText, { rate: 1.2 });
               }
             }
+          } else if (cmdPhase === 'WAITING_FOR_REP') {
+            // Command mode: rep accepted — transition to ANALYZING
+            console.log(`[CMD] Rep accepted, switching to ANALYZING for rep #${fb.count}`);
+            commandRepRef.current = fb.count; // sync ref with actual count
+            commandPhaseRef.current = 'ANALYZING';
+            lastSpokenRef.current = fb.text;
 
-            const targetReps = parseInt(currentExercise?.reps) || 10;
-            if (fb.count >= targetReps) {
-              exerciseStateRef.current = newState;
-              handleSetComplete();
-              return;
-            }
+            // 5s timeout — fallback if server doesn't respond
+            analyzeTimeoutRef.current = setTimeout(() => {
+              if (commandPhaseRef.current !== 'ANALYZING') return;
+              const nextRep = fb.count + 1;
+              const targetReps2 = parseInt(currentExercise?.reps) || 10;
+              if (nextRep <= targetReps2) {
+                commandRepRef.current = nextRep;
+                commandPhaseRef.current = 'COMMANDING';
+                speakCommandAndWait(nextRep);
+              }
+            }, 5000);
+          } else {
+            // COMMANDING / ANALYZING / SPEAKING_FEEDBACK — swallow but still show count
+            console.log(`[CMD] Rep counted (display only) — cmdPhase=${cmdPhase}, waiting`);
+            lastSpokenRef.current = fb.text;
+          }
+
+          const targetReps = parseInt(currentExercise?.reps) || 10;
+          if (fb.count >= targetReps) {
+            exerciseStateRef.current = newState;
+            handleSetComplete();
+            return;
           }
         } else if (fb.type === 'warning' && coachingText && isNewRep) {
           // For warnings, speak coaching text ONLY on new rep (not every frame)
@@ -855,12 +862,6 @@ export default function Training() {
         lastMindMuscleCueRef.current = now;
         speakMindMuscleCue(analyzerRef.current?.cueKey || 'default', newState.phase || 'up', playerName);
       }
-    }
-
-    // Update reps display when reps change — but respect command coaching gate
-    // (command coaching handles setDisplayReps in its own block)
-    if (commandPhaseRef.current === 'IDLE' && newState.reps !== undefined && newState.reps !== prevState.reps) {
-      setDisplayReps(newState.reps);
     }
 
     // Feed data to AI coach accumulator (O(1), no re-renders)

@@ -204,6 +204,7 @@ export function useHaikuVision({ onVisionFeedback } = {}) {
       }
 
       // If we have 2 frames and reps increased, fire analysis
+      console.log(`[HaikuVision] down→up check: frames=${framesRef.current.length}, reps=${reps}, repCount=${repCountRef.current}, inFlight=${inFlightRef.current}`);
       if (framesRef.current.length >= 2 && reps > repCountRef.current) {
         const framesToSend = [...framesRef.current];
         const anglesToSend = [...anglesRef.current];
