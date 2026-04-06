@@ -2,7 +2,6 @@ import { useRef, useCallback } from 'react';
 import { apiUrl } from '../utils/api';
 const MAX_SESSION_IMAGES = 960;
 const MAX_CONSECUTIVE_FAILURES = 5;
-// Frame 2 is now captured at down→up transition (peak), no timer needed
 const MIN_PHASE_HOLD_MS = 200;   // Phase must be held 200ms to be considered real (noise filter)
 const MIN_PHASE_DURATION_MS = 800; // Full down phase must last 800ms+ to count as real rep (camera shake filter)
 
@@ -38,16 +37,16 @@ export function useHaikuVision({ onVisionFeedback } = {}) {
 
   // Per-rep frame capture + angle snapshots + landmark telemetry
   const framesRef = useRef([]);
-  const anglesRef = useRef([]);          // Joint angle snapshots alongside frames
-  const landmarksRef = useRef([]);       // Raw landmark snapshots alongside frames
-  const latestAnglesRef = useRef(null);  // Most recent angles from feedPhaseData
-  const latestLandmarksRef = useRef(null); // Most recent landmarks from feedPhaseData
+  const anglesRef = useRef([]);
+  const landmarksRef = useRef([]);
+  const latestAnglesRef = useRef(null);
+  const latestLandmarksRef = useRef(null);
   const lastPhaseRef = useRef(null);
-  // frame2TimerRef removed — Frame 2 captured instantly at phase transition
-  const repCountRef = useRef(0);
-  const phaseStartTimeRef = useRef(0);   // When current phase started (noise filter)
-  const downPhaseStartRef = useRef(0);   // When down phase started (duration gate)
-  const downStartAnglesRef = useRef(null); // Angles at down phase start (consistency check)
+  const repCountRef = useRef(0);          // Last rep count the analyzer confirmed
+  const earlySentRepRef = useRef(0);      // Rep number we speculatively sent to server
+  const phaseStartTimeRef = useRef(0);
+  const downPhaseStartRef = useRef(0);
+  const downStartAnglesRef = useRef(null);
 
   // Session limits
   const sessionImageCountRef = useRef(0);
@@ -71,7 +70,7 @@ export function useHaikuVision({ onVisionFeedback } = {}) {
     const ctx = contextRef.current;
     const url = apiUrl('/api/coach/analyze-rep');
     const telemetry = condenseLandmarks(landmarksAtFrames);
-    console.log(`[HaikuVision] Sending ${frames.length} frames for rep #${repNumber} to ${url}`);
+    console.log(`[HaikuVision] EARLY SEND ${frames.length} frames for rep #${repNumber} to ${url}`);
     try {
       const resp = await fetch(url, {
         method: 'POST',
@@ -93,6 +92,7 @@ export function useHaikuVision({ onVisionFeedback } = {}) {
       consecutiveFailuresRef.current = 0;
 
       if (result.feedback && onVisionFeedback) {
+        console.log(`[HaikuVision] Server responded for rep #${repNumber}, delivering feedback`);
         onVisionFeedback(result);
       }
     } catch (err) {
@@ -109,23 +109,17 @@ export function useHaikuVision({ onVisionFeedback } = {}) {
   const feedPhaseData = useCallback((newState, angles, landmarks) => {
     if (!enabledRef.current || disabledRef.current) return;
     if (!newState) return;
-    // Only process when athlete is actually moving (ignore idle phase flickers)
     if (!newState.moving && !newState.firstRepStarted) return;
 
-    // Confidence gate: if landmarks are provided, check average visibility
-    // Skip processing when pose detection confidence is too low (camera shake/occlusion)
+    // Confidence gate
     if (landmarks && Array.isArray(landmarks) && landmarks.length > 0) {
       const visibilities = landmarks.filter(l => l && typeof l.visibility === 'number').map(l => l.visibility);
       if (visibilities.length > 0) {
         const avgVisibility = visibilities.reduce((a, b) => a + b, 0) / visibilities.length;
-        if (avgVisibility < 0.2) {
-          // Low confidence pose — likely camera noise or partial occlusion
-          return;
-        }
+        if (avgVisibility < 0.2) return;
       }
     }
 
-    // Always store latest angles + landmarks for Frame 2 capture (happens in setTimeout)
     if (angles) latestAnglesRef.current = angles;
     if (landmarks) latestLandmarksRef.current = landmarks;
 
@@ -134,17 +128,16 @@ export function useHaikuVision({ onVisionFeedback } = {}) {
     const reps = newState.reps ?? 0;
     const now = Date.now();
 
-    // Track phase timing — filter out noise flickers (<200ms)
+    // Noise flicker filter (<200ms)
     if (currentPhase !== prevPhase) {
       const phaseHeld = now - phaseStartTimeRef.current;
       if (phaseHeld < MIN_PHASE_HOLD_MS && prevPhase != null) {
-        // Phase flip too fast — likely noise, ignore
         return;
       }
       phaseStartTimeRef.current = now;
     }
 
-    // Phase transition: up → down → capture Frame 1 (start of movement)
+    // === PHASE: up → down — capture Frame 1 (start of descent) ===
     if (prevPhase === 'up' && currentPhase === 'down') {
       framesRef.current = [];
       anglesRef.current = [];
@@ -160,13 +153,13 @@ export function useHaikuVision({ onVisionFeedback } = {}) {
       }
     }
 
-    // Phase transition: down → up → capture Frame 3 (return)
+    // === PHASE: down → up — EARLY SEND at deepest point ===
+    // The user just hit peak depth and started rising. Send NOW before rep is counted.
     if (prevPhase === 'down' && currentPhase === 'up') {
       const downDuration = now - downPhaseStartRef.current;
 
-      // Camera shake filter: down phase must last >= 800ms to be a real rep
+      // Camera shake filter: down phase must last >= 800ms
       if (downDuration < MIN_PHASE_DURATION_MS) {
-        // Too fast — camera noise, not a real rep. Discard frames.
         framesRef.current = [];
         anglesRef.current = [];
         landmarksRef.current = [];
@@ -174,11 +167,10 @@ export function useHaikuVision({ onVisionFeedback } = {}) {
         return;
       }
 
-      // Angle consistency check: ensure real angle change occurred (not just camera movement)
+      // Angle consistency check: real movement >= 30° change
       const startAngles = downStartAnglesRef.current;
       const endAngles = angles;
       if (startAngles && endAngles) {
-        // Check if any key joint angle changed by >= 30° (real movement)
         const keys = Object.keys(startAngles);
         const hasRealMovement = keys.some(k => {
           const s = startAngles[k];
@@ -186,7 +178,6 @@ export function useHaikuVision({ onVisionFeedback } = {}) {
           return typeof s === 'number' && typeof e === 'number' && Math.abs(s - e) >= 30;
         });
         if (!hasRealMovement) {
-          // Angles barely changed — camera shift, not a real rep
           framesRef.current = [];
           anglesRef.current = [];
           landmarksRef.current = [];
@@ -195,7 +186,7 @@ export function useHaikuVision({ onVisionFeedback } = {}) {
         }
       }
 
-      // Capture Frame 2 (peak effort — at transition point)
+      // Capture Frame 2 (peak/deepest point)
       const f2 = captureCurrentFrame();
       if (f2) {
         framesRef.current.push(f2);
@@ -203,19 +194,26 @@ export function useHaikuVision({ onVisionFeedback } = {}) {
         landmarksRef.current.push(landmarks || null);
       }
 
-      // If we have 2 frames and reps increased, fire analysis
-      console.log(`[HaikuVision] down→up check: frames=${framesRef.current.length}, reps=${reps}, repCount=${repCountRef.current}, inFlight=${inFlightRef.current}`);
-      if (framesRef.current.length >= 2 && reps > repCountRef.current) {
+      // EARLY SEND: fire immediately at peak, don't wait for rep count
+      // Use anticipated rep number (current + 1) since analyzer hasn't counted yet
+      if (framesRef.current.length >= 2) {
+        const anticipatedRep = repCountRef.current + 1;
+        console.log(`[HaikuVision] Peak detected! Early sending for anticipated rep #${anticipatedRep} (down ${downDuration}ms, inFlight=${inFlightRef.current})`);
         const framesToSend = [...framesRef.current];
         const anglesToSend = [...anglesRef.current];
         const landmarksToSend = [...landmarksRef.current];
-        repCountRef.current = reps;
+        earlySentRepRef.current = anticipatedRep;
         framesRef.current = [];
         anglesRef.current = [];
         landmarksRef.current = [];
-        // Fire and forget — 2 frames (start + peak) + angles + telemetry
-        sendFramesToServer(framesToSend, reps, anglesToSend, landmarksToSend);
+        sendFramesToServer(framesToSend, anticipatedRep, anglesToSend, landmarksToSend);
       }
+    }
+
+    // Sync repCountRef when analyzer confirms the rep (after up phase completes)
+    if (reps > repCountRef.current) {
+      console.log(`[HaikuVision] Rep confirmed by analyzer: ${reps} (earlySent=${earlySentRepRef.current})`);
+      repCountRef.current = reps;
     }
 
     lastPhaseRef.current = currentPhase;
@@ -228,6 +226,7 @@ export function useHaikuVision({ onVisionFeedback } = {}) {
     framesRef.current = [];
     lastPhaseRef.current = null;
     repCountRef.current = 0;
+    earlySentRepRef.current = 0;
     consecutiveFailuresRef.current = 0;
     enabledRef.current = true;
   }, []);
@@ -243,6 +242,7 @@ export function useHaikuVision({ onVisionFeedback } = {}) {
     disabledRef.current = false;
     consecutiveFailuresRef.current = 0;
     repCountRef.current = 0;
+    earlySentRepRef.current = 0;
   }, []);
 
   const getSessionStats = useCallback(() => ({
