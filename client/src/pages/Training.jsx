@@ -182,44 +182,58 @@ export default function Training() {
   const { startAICoaching, stopAICoaching, feedPoseData } = useAICoach({ onCoaching: onAICoaching });
 
   // Haiku Vision — per-rep visual form analysis
-  // TTS structure: [חזרה X] + [AI feedback] + [command next rep]
+  // Confirmed rep TTS: "חזרה X. [feedback]. עכשיו רד לחזרה Y"
+  // Partial rep TTS:   "החזרה לא נספרה. [feedback]. נסה שוב את חזרה X"
   const onVisionFeedback = useCallback((result) => {
     const cmdPhase = commandPhaseRef.current;
     const curRep = commandRepRef.current;
     const aiFeedback = result.feedback ? stripName(result.feedback) : 'המשך ככה';
-    console.log(`[CMD] onVisionFeedback: cmdPhase=${cmdPhase}, rep=${curRep}, score=${result.score}, fb="${aiFeedback}"`);
+    const repConfirmed = result.repConfirmed !== false; // default true for backwards compat
+    console.log(`[CMD] onVisionFeedback: cmdPhase=${cmdPhase}, rep=${curRep}, confirmed=${repConfirmed}, score=${result.score}, fb="${aiFeedback}"`);
 
     if (cmdPhase === 'IDLE') {
-      // Hold exercises or no command coaching — speak feedback directly
-      speakPriority(aiFeedback, { rate: 1.2 });
+      // Hold exercises or no command coaching
+      if (repConfirmed) {
+        speakPriority(aiFeedback, { rate: 1.2 });
+      } else {
+        speakPriority(`החזרה לא נספרה. ${aiFeedback}. נסה שוב`, { rate: 1.25 });
+      }
       return;
     }
 
-    // Active command coaching — build full sentence: [count] + [feedback] + [next command]
+    // Active command coaching
     clearTimeout(analyzeTimeoutRef.current);
     commandPhaseRef.current = 'SPEAKING_FEEDBACK';
 
     const targetReps = parseInt(currentExerciseRef.current?.reps) || 10;
-    const nextRep = curRep + 1;
-    const isLastRep = nextRep > targetReps;
+    const cueKey = analyzerRef.current?.cueKey;
+    const cueType = analyzerRef.current?.type;
 
-    // Build combined speech: "חזרה 2. רד נמוך יותר. עכשיו רד לחזרה 3"
-    const countPart = `חזרה ${curRep}.`;
-    const feedbackPart = aiFeedback;
-    const nextCommandPart = isLastRep ? '' : `. עכשיו ${getCommandText(nextRep, analyzerRef.current?.cueKey, analyzerRef.current?.type) || `רד לחזרה ${nextRep}`}`;
-    const fullSpeech = `${countPart} ${feedbackPart}${nextCommandPart}`;
+    let fullSpeech;
+    if (repConfirmed) {
+      // Confirmed rep: "חזרה 2. רד נמוך יותר. עכשיו רד לחזרה 3"
+      const nextRep = curRep + 1;
+      const isLastRep = nextRep > targetReps;
+      const nextCmd = isLastRep ? '' : `. עכשיו ${getCommandText(nextRep, cueKey, cueType) || `רד לחזרה ${nextRep}`}`;
+      fullSpeech = `חזרה ${curRep}. ${aiFeedback}${nextCmd}`;
+    } else {
+      // Partial rep: "החזרה לא נספרה. [feedback]. נסה שוב את חזרה X"
+      fullSpeech = `החזרה לא נספרה. ${aiFeedback}. נסה שוב את חזרה ${curRep}`;
+    }
 
     console.log(`[CMD] Speaking: "${fullSpeech}"`);
     speakPriority(fullSpeech, { rate: 1.25 });
 
-    // After full speech ends, transition to waiting for next rep
     pollSpeechEnd(() => {
-      console.log(`[CMD] Speech done, advancing: curRep=${curRep}, nextRep=${nextRep}, target=${targetReps}`);
-      if (isLastRep) {
-        commandPhaseRef.current = 'IDLE';
-        return;
+      if (repConfirmed) {
+        const nextRep = curRep + 1;
+        if (nextRep > targetReps) {
+          commandPhaseRef.current = 'IDLE';
+          return;
+        }
+        commandRepRef.current = nextRep;
       }
-      commandRepRef.current = nextRep;
+      // Both confirmed and partial: go back to waiting for the (next or same) rep
       commandPhaseRef.current = 'WAITING_FOR_REP';
     });
   }, [speakPriority, stripName]);
@@ -877,16 +891,17 @@ export default function Training() {
     }
 
     // === PARTIAL REP DETECTION ===
-    // If phase went down→up but no rep was counted, the movement was too shallow
+    // If phase went down→up but no rep was counted, the movement was too shallow.
+    // The early-send in useHaikuVision already sent frames to the server — the server
+    // will respond via onVisionFeedback with repConfirmed=false, which speaks:
+    // "החזרה לא נספרה. [server feedback]. נסה שוב את חזרה X"
+    // As a fast local fallback (in case server is slow), show a UI warning:
     if (firstRepStarted && prevState.phase === 'down' && newState.phase === 'up' && newState.reps === prevState.reps) {
       const now = Date.now();
-      // Throttle: max once every 4s to avoid spam
       if (now - lastNudgeTimeRef.current > 4000) {
         lastNudgeTimeRef.current = now;
-        const partialMsg = 'תנועה קטנה מדי! רד נמוך יותר כדי שהחזרה תיספר';
-        speakPriority(partialMsg, { rate: 1.3 });
-        setFeedback({ type: 'warning', text: partialMsg });
-        console.log('[CMD] Partial rep detected — movement too shallow');
+        setFeedback({ type: 'warning', text: 'תנועה קטנה מדי — רד נמוך יותר' });
+        console.log('[CMD] Partial rep detected — waiting for server feedback');
       }
     }
 

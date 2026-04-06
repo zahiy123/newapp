@@ -63,7 +63,7 @@ export function useHaikuVision({ onVisionFeedback } = {}) {
     return frame;
   }, []);
 
-  const sendFramesToServer = useCallback(async (frames, repNumber, anglesAtFrames, landmarksAtFrames) => {
+  const sendFramesToServer = useCallback(async (frames, repNumber, anglesAtFrames, landmarksAtFrames, repCountAtSend) => {
     if (inFlightRef.current || disabledRef.current) return;
     inFlightRef.current = true;
 
@@ -91,9 +91,11 @@ export function useHaikuVision({ onVisionFeedback } = {}) {
       const result = await resp.json();
       consecutiveFailuresRef.current = 0;
 
-      if (result.feedback && onVisionFeedback) {
-        console.log(`[HaikuVision] Server responded for rep #${repNumber}, delivering feedback`);
-        onVisionFeedback(result);
+      if (onVisionFeedback) {
+        // Check if rep was confirmed by analyzer since we sent
+        const repConfirmed = repCountRef.current > repCountAtSend;
+        console.log(`[HaikuVision] Server responded for rep #${repNumber}, confirmed=${repConfirmed} (count: ${repCountAtSend}→${repCountRef.current})`);
+        onVisionFeedback({ ...result, repConfirmed, repNumber });
       }
     } catch (err) {
       consecutiveFailuresRef.current++;
@@ -206,7 +208,7 @@ export function useHaikuVision({ onVisionFeedback } = {}) {
         framesRef.current = [];
         anglesRef.current = [];
         landmarksRef.current = [];
-        sendFramesToServer(framesToSend, anticipatedRep, anglesToSend, landmarksToSend);
+        sendFramesToServer(framesToSend, anticipatedRep, anglesToSend, landmarksToSend, repCountRef.current);
       }
     }
 
