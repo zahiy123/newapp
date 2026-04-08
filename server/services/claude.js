@@ -366,19 +366,10 @@ export async function analyzeRepFrames({ frames, sport, exercise, playerProfile,
     };
     const sportHint = sportContext[sport] || sportContext.fitness;
 
-    const system = `אתה מאמן ביומכני מקצועי. חזרה #${repNumber} "${exercise}" ${playerName}. ספורט: ${sport||'fitness'}.
-${sportHint}${anglesBlock}${telemetryBlock}${bioBlock}${ampBlock}${scoreHint}
-
-ANALYSIS PROTOCOL:
-1. בדוק יחסי מפרקים: זווית ברך/מרפק, יישור עמוד שדרה, נטיית גזע, מיקום כפות רגליים
-2. זהה שגיאות ספציפיות: קריסת ברכיים פנימה (valgus), גב מעוגל, מרפקים מתרחקים, ראש נופל, עקבים מתרוממים
-3. בחזרה חלקית: הסבר טכני למה לא נספרה ("המרפקים לא הגיעו ל-90 מעלות", "הירכיים לא ירדו מתחת למקביל")
-
-Return ONLY JSON: {"score":1-10,"issue_key":"snake_case","instruction":"Hebrew max 12 words","pro_tip":"Hebrew max 12 words"}
-MANDATORY: "instruction" חייב להכיל מונחים ביומכניים (ליבה, מפרקים, זווית, יציבות, טווח תנועה, רוטציה, יישור).
-8-10=שבח ספציפי ("זווית ברך מושלמת, יציבות ליבה מעולה"). 5-7=תיקון עם מיקום אנטומי ("ישר את הגב, המרפקים רחוקים מהגוף"). 1-4=תיקון דחוף ("עצור! הברכיים קורסות פנימה, סכנת פציעה").
-NEVER return generic feedback. ALWAYS reference specific joints/angles.
-good form→issue_key="good_form".`;
+    const system = `Rep#${repNumber} "${exercise}" ${playerName}. ${sport||'fitness'}. ${sportHint}${anglesBlock}${telemetryBlock}${bioBlock}${ampBlock}${scoreHint}
+OUTPUT: ONLY a single JSON object. No text before or after. No markdown. No explanation.
+{"score":1-10,"issue_key":"snake_case","instruction":"עברית עד 12 מילים","pro_tip":"עברית עד 12 מילים"}
+instruction: מונחים ביומכניים (ליבה,זווית,יציבות,טווח תנועה,יישור). 8-10=שבח ספציפי. 5-7=תיקון אנטומי. 1-4=תיקון דחוף. good→issue_key="good_form".`;
 
     const t0 = Date.now();
     let message;
@@ -393,11 +384,11 @@ good form→issue_key="good_form".`;
       console.log(`[VISION-IMG] ${cleanFrames.length} frames for ${exercise} rep#${repNumber} serverScore=${serverScore} bio=${!!biomechanics} sizes=${cleanFrames.map(f => Math.round(f.length/1024) + 'KB').join(',')}`);
       message = await client.messages.create({
         model: HAIKU_VISION_MODEL,
-        max_tokens: 256,
+        max_tokens: 128,
         system,
         messages: [{ role: 'user', content: [
           ...imageBlocks,
-          { type: 'text', text: 'Analyze start+peak frames. Return JSON only.' }
+          { type: 'text', text: '{' }
         ]}]
       });
     } else {
@@ -405,14 +396,16 @@ good form→issue_key="good_form".`;
       console.warn(`[VISION-TEXT] No images for ${exercise} rep#${repNumber} — text-only`);
       message = await client.messages.create({
         model: HAIKU_VISION_MODEL,
-        max_tokens: 256,
+        max_tokens: 128,
         system,
-        messages: [{ role: 'user', content: 'No images. Use angles+keypoints. Return JSON only.' }]
+        messages: [{ role: 'user', content: '{' }]
       });
     }
 
-    const rawText = message.content[0].text;
+    let rawText = message.content[0].text;
     const elapsed = Date.now() - t0;
+    // The user message was '{' to force JSON-only output — prepend '{' if AI continued from it
+    if (!rawText.trimStart().startsWith('{')) rawText = '{' + rawText;
     console.log(`[VISION] Response in ${elapsed}ms (${rawText.length} chars): ${rawText}`);
 
     const parsed = extractJSON(rawText);

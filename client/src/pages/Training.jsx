@@ -115,7 +115,7 @@ export default function Training() {
     speakDisabilityTip, speakMindMuscleCue, speakAICoaching, speakEnvironmentScan,
     speakNotVisible, speakPositiveReinforcement,
     speakMissingBodyParts, speakSideCamera, speakResumeWelcome, speakCalibrationStart, speakCalibrationDone,
-    speakLevelUpPrompt, unlockAudio,
+    speakLevelUpPrompt, speakCritical, unlockAudio,
     stop: stopSpeech, isSpeaking
   } = useSpeech(lang, userProfile?.age);
 
@@ -192,16 +192,16 @@ export default function Training() {
     console.log(`[CMD] onVisionFeedback: cmdPhase=${cmdPhase}, rep=${curRep}, confirmed=${repConfirmed}, score=${result.score}, fb="${aiFeedback}"`);
 
     if (cmdPhase === 'IDLE') {
-      // Hold exercises or no command coaching
+      // Hold exercises or no command coaching — use speakCritical (hard cancel)
       if (repConfirmed) {
-        speakPriority(aiFeedback, { rate: 1.2 });
+        speakCritical(aiFeedback, { rate: 1.2 });
       } else {
-        speakPriority(`החזרה לא נספרה. ${aiFeedback}. נסה שוב`, { rate: 1.25 });
+        speakCritical(`החזרה לא נספרה. ${aiFeedback}. נסה שוב`, { rate: 1.25 });
       }
       return;
     }
 
-    // Active command coaching
+    // Active command coaching — speakCritical to hard-cancel any nudges/commands
     clearTimeout(analyzeTimeoutRef.current);
     commandPhaseRef.current = 'SPEAKING_FEEDBACK';
 
@@ -222,7 +222,7 @@ export default function Training() {
     }
 
     console.log(`[CMD] Speaking: "${fullSpeech}"`);
-    speakPriority(fullSpeech, { rate: 1.25 });
+    speakCritical(fullSpeech, { rate: 1.25 });
 
     pollSpeechEnd(() => {
       if (repConfirmed) {
@@ -236,7 +236,7 @@ export default function Training() {
       // Both confirmed and partial: go back to waiting for the (next or same) rep
       commandPhaseRef.current = 'WAITING_FOR_REP';
     });
-  }, [speakPriority, stripName]);
+  }, [speakCritical, stripName]);
 
   const { feedPhaseData, startVision, stopVision, resetSession: resetVisionSession } = useHaikuVision({ onVisionFeedback });
 

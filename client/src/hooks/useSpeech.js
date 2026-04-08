@@ -277,8 +277,30 @@ export function useSpeech(lang = 'he-IL', age) {
     }
   }, [_utterSpeak, splitToChunks, unstickSpeaking]);
 
-  // Priority speak: always cuts previous speech (for urgent nudges/warnings)
+  // Priority speak: queues at front if busy, only soft-cancels if stuck
+  // Does NOT hard-cancel current speech — avoids interrupted/onerror loops
   const speakPriority = useCallback((text, options = {}) => {
+    if (!window.speechSynthesis || !text) return;
+    unstickSpeaking();
+    const chunks = splitToChunks(text);
+    if (chunks.length === 0) return;
+    if (!speaking.current) {
+      // Not speaking — start immediately, queue rest
+      queueRef.current = []; // clear pending low-priority items
+      for (let i = 1; i < chunks.length; i++) {
+        queueRef.current.push({ text: chunks[i], options });
+      }
+      _utterSpeak(chunks[0], options);
+    } else {
+      // Currently speaking — prepend to front of queue (plays after current utterance ends)
+      const newItems = chunks.map(c => ({ text: c, options }));
+      queueRef.current = [...newItems, ...queueRef.current];
+    }
+  }, [_utterSpeak, splitToChunks, unstickSpeaking]);
+
+  // Critical speak: hard-cancels ALL speech immediately, then speaks
+  // Use ONLY for server feedback that must be heard NOW
+  const speakCritical = useCallback((text, options = {}) => {
     _doSpeak(text, options);
   }, [_doSpeak]);
 
@@ -975,6 +997,7 @@ export function useSpeech(lang = 'he-IL', age) {
   return {
     speak,
     speakPriority,
+    speakCritical,
     speakIfIdle,
     speakQueued,
     speakBriefing,
