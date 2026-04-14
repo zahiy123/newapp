@@ -80,13 +80,20 @@ export function useHaikuVision({ onVisionFeedback } = {}) {
   }, []);
 
   const sendFramesToServer = useCallback(async (frames, repNumber, anglesAtFrames, landmarksAtFrames, repCountAtSend) => {
-    if (inFlightRef.current || disabledRef.current) return;
+    if (disabledRef.current) {
+      console.warn(`[HaikuVision] NOT SENDING: disabled for session`);
+      return;
+    }
+    if (inFlightRef.current) {
+      console.warn(`[HaikuVision] NOT SENDING: already in-flight`);
+      return;
+    }
     inFlightRef.current = true;
 
     const ctx = contextRef.current;
     const url = apiUrl('/api/coach/analyze-rep');
     const telemetry = condenseLandmarks(landmarksAtFrames);
-    console.log(`[HaikuVision] SEND ${frames.length} frames for rep #${repNumber} | exercise=${ctx?.exerciseName} | sport=${ctx?.sport}`);
+    console.log(`[HaikuVision] SENDING TO SERVER: ${frames.length} frames for rep #${repNumber} | exercise=${ctx?.exerciseName} | sport=${ctx?.sport}`);
     try {
       const resp = await fetch(url, {
         method: 'POST',
@@ -114,9 +121,10 @@ export function useHaikuVision({ onVisionFeedback } = {}) {
         onVisionFeedback({ ...result, repConfirmed, repNumber });
       }
     } catch (err) {
+      console.error(`[HaikuVision] Fetch error:`, err.message);
       consecutiveFailuresRef.current++;
       if (consecutiveFailuresRef.current >= MAX_CONSECUTIVE_FAILURES) {
-        console.warn('useHaikuVision: too many failures, disabling for session');
+        console.warn('[HaikuVision] Too many failures, disabling for session');
         disabledRef.current = true;
       }
     } finally {
@@ -125,9 +133,12 @@ export function useHaikuVision({ onVisionFeedback } = {}) {
   }, [onVisionFeedback]);
 
   const feedPhaseData = useCallback((newState, angles, landmarks) => {
-    if (!enabledRef.current || disabledRef.current) return;
+    if (!enabledRef.current) return;
+    if (disabledRef.current) return;
     if (!newState) return;
-    if (!newState.moving && !newState.firstRepStarted) return;
+
+    // Allow any frame where we have angles — don't require moving/firstRepStarted
+    // The phase analyzer already detects phases; we just need angle data to track peaks
 
     // Confidence gate — visibility >= 0.3
     if (landmarks && Array.isArray(landmarks) && landmarks.length > 0) {
@@ -174,6 +185,9 @@ export function useHaikuVision({ onVisionFeedback } = {}) {
         framesRef.current.push(f1);
         anglesRef.current.push(angles || null);
         landmarksRef.current.push(landmarks || null);
+        console.log(`[HaikuVision] Frame 1 captured at up→down transition`);
+      } else {
+        console.warn(`[HaikuVision] NOT SENDING: Frame 1 capture failed at up→down`);
       }
     }
 
@@ -194,24 +208,25 @@ export function useHaikuVision({ onVisionFeedback } = {}) {
 
         // === PEAK DETECTION: angle started rising (trend reversal) → SEND NOW ===
         const prevAngle = prevAngleRef.current;
-        if (
-          !peakSentRef.current &&
-          prevAngle !== null &&
-          primaryAngle > prevAngle + 3 &&      // Rising by 3°+ = real reversal, not noise
-          peakFrameRef.current &&
-          framesRef.current.length >= 1
-        ) {
-          peakSentRef.current = true;
-          // Build 2-frame payload: start frame + peak frame
-          const sendFrames = [framesRef.current[0], peakFrameRef.current].filter(Boolean);
-          const sendAngles = [anglesRef.current[0], peakAnglesRef.current].filter(Boolean);
-          const sendLandmarks = [landmarksRef.current[0], peakLandmarksRef.current].filter(Boolean);
+        if (!peakSentRef.current && prevAngle !== null && primaryAngle > prevAngle + 3) {
+          if (!peakFrameRef.current) {
+            console.warn(`[HaikuVision] NOT SENDING: peak detected but no peak frame captured`);
+          } else if (framesRef.current.length < 1) {
+            console.warn(`[HaikuVision] NOT SENDING: peak detected but no start frame (frames=${framesRef.current.length})`);
+          } else {
+            peakSentRef.current = true;
+            const sendFrames = [framesRef.current[0], peakFrameRef.current].filter(Boolean);
+            const sendAngles = [anglesRef.current[0], peakAnglesRef.current].filter(Boolean);
+            const sendLandmarks = [landmarksRef.current[0], peakLandmarksRef.current].filter(Boolean);
 
-          if (sendFrames.length >= 2) {
-            const anticipatedRep = repCountRef.current + 1;
-            console.log(`[HaikuVision] PEAK DETECTED at ${Math.round(minAngleDuringDownRef.current)}°! Sending for rep #${anticipatedRep} (inFlight=${inFlightRef.current})`);
-            earlySentRepRef.current = anticipatedRep;
-            sendFramesToServer([...sendFrames], anticipatedRep, [...sendAngles], [...sendLandmarks], repCountRef.current);
+            if (sendFrames.length >= 2) {
+              const anticipatedRep = repCountRef.current + 1;
+              console.log(`[HaikuVision] PEAK DETECTED at ${Math.round(minAngleDuringDownRef.current)}°! Sending for rep #${anticipatedRep} (inFlight=${inFlightRef.current})`);
+              earlySentRepRef.current = anticipatedRep;
+              sendFramesToServer([...sendFrames], anticipatedRep, [...sendAngles], [...sendLandmarks], repCountRef.current);
+            } else {
+              console.warn(`[HaikuVision] NOT SENDING: peak detected but sendFrames=${sendFrames.length} after filter`);
+            }
           }
         }
 
@@ -219,36 +234,46 @@ export function useHaikuVision({ onVisionFeedback } = {}) {
       }
     }
 
-    // === PHASE: down → up — fallback send if peak wasn't detected during down ===
-    if (prevPhase === 'down' && currentPhase === 'up' && !peakSentRef.current) {
-      // Use peak frame if we have one, otherwise capture current
-      if (peakFrameRef.current) {
-        framesRef.current = [framesRef.current[0]].filter(Boolean);
-        framesRef.current.push(peakFrameRef.current);
-        anglesRef.current = [anglesRef.current[0]].filter(Boolean);
-        anglesRef.current.push(peakAnglesRef.current);
-        landmarksRef.current = [landmarksRef.current[0]].filter(Boolean);
-        landmarksRef.current.push(peakLandmarksRef.current);
+    // === PHASE: down → up — ALWAYS send if peak wasn't sent during down phase ===
+    if (prevPhase === 'down' && currentPhase === 'up') {
+      if (peakSentRef.current) {
+        console.log(`[HaikuVision] down→up: already sent at peak, skipping fallback`);
       } else {
-        const f2 = captureCurrentFrame();
-        if (f2) {
-          framesRef.current.push(f2);
-          anglesRef.current.push(angles || null);
-          landmarksRef.current.push(landmarks || null);
+        // Build best available 2-frame payload
+        if (peakFrameRef.current) {
+          framesRef.current = [framesRef.current[0]].filter(Boolean);
+          framesRef.current.push(peakFrameRef.current);
+          anglesRef.current = [anglesRef.current[0]].filter(Boolean);
+          anglesRef.current.push(peakAnglesRef.current);
+          landmarksRef.current = [landmarksRef.current[0]].filter(Boolean);
+          landmarksRef.current.push(peakLandmarksRef.current);
+        } else {
+          // No peak frame — capture current frame as fallback
+          const f2 = captureCurrentFrame();
+          if (f2) {
+            framesRef.current.push(f2);
+            anglesRef.current.push(angles || null);
+            landmarksRef.current.push(landmarks || null);
+          }
         }
-      }
 
-      if (framesRef.current.length >= 2) {
-        const anticipatedRep = repCountRef.current + 1;
-        console.log(`[HaikuVision] Fallback send at down→up for rep #${anticipatedRep} (peak=${Math.round(minAngleDuringDownRef.current)}°, inFlight=${inFlightRef.current})`);
-        const framesToSend = [...framesRef.current];
-        const anglesToSend = [...anglesRef.current];
-        const landmarksToSend = [...landmarksRef.current];
-        earlySentRepRef.current = anticipatedRep;
-        framesRef.current = [];
-        anglesRef.current = [];
-        landmarksRef.current = [];
-        sendFramesToServer(framesToSend, anticipatedRep, anglesToSend, landmarksToSend, repCountRef.current);
+        if (framesRef.current.length >= 2) {
+          const anticipatedRep = repCountRef.current + 1;
+          console.log(`[HaikuVision] FALLBACK SEND at down→up for rep #${anticipatedRep} (peak=${Math.round(minAngleDuringDownRef.current)}°, inFlight=${inFlightRef.current})`);
+          const framesToSend = [...framesRef.current];
+          const anglesToSend = [...anglesRef.current];
+          const landmarksToSend = [...landmarksRef.current];
+          earlySentRepRef.current = anticipatedRep;
+          framesRef.current = [];
+          anglesRef.current = [];
+          landmarksRef.current = [];
+          sendFramesToServer(framesToSend, anticipatedRep, anglesToSend, landmarksToSend, repCountRef.current);
+        } else {
+          console.warn(`[HaikuVision] NOT SENDING at down→up: only ${framesRef.current.length} frames available`);
+          framesRef.current = [];
+          anglesRef.current = [];
+          landmarksRef.current = [];
+        }
       }
     }
 
@@ -275,12 +300,14 @@ export function useHaikuVision({ onVisionFeedback } = {}) {
     peakSentRef.current = false;
     prevAngleRef.current = null;
     enabledRef.current = true;
+    console.log(`[HaikuVision] Vision STARTED | exercise=${context?.exerciseName} | sport=${context?.sport}`);
   }, []);
 
   const stopVision = useCallback(() => {
     enabledRef.current = false;
     framesRef.current = [];
     lastPhaseRef.current = null;
+    console.log(`[HaikuVision] Vision STOPPED`);
   }, []);
 
   const resetSession = useCallback(() => {

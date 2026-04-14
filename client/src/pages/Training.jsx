@@ -928,12 +928,9 @@ export default function Training() {
     });
 
     exerciseStateRef.current = newState;
-    // Only send frames to vision server if movement is sufficient (>=15% body height)
-    if (movementSufficientRef.current) {
-      const repAngles = computeJointAngles(stableLandmarks);
-      console.log(`[CMD] feedPhaseData: phase=${newState.phase}, reps=${newState.reps}, cmdPhase=${commandPhaseRef.current}`);
-      feedPhaseData(newState, repAngles, stableLandmarks);
-    }
+    // Always feed phase data — the hook handles its own gating
+    const repAngles = computeJointAngles(stableLandmarks);
+    feedPhaseData(newState, repAngles, stableLandmarks);
   }, [landmarks, phase]);
 
   // === INACTIVITY NUDGES: AGGRESSIVE & FAST ===
