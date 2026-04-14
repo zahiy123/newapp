@@ -237,23 +237,26 @@ export function useSpeech(lang = 'he-IL', age) {
 
   // Internal helper: cancel previous speech, clear queue, then speak
   // Used ONLY for priority/urgent messages
+  // Uses setTimeout(50ms) after cancel() to avoid browser "interrupted" onerror
   const _doSpeak = useCallback((text, options = {}) => {
     if (!window.speechSynthesis || !text) return;
     unstickSpeaking();
     window.speechSynthesis.cancel();
     queueRef.current = [];
     speaking.current = false;
-    // Chunk the text for TTS stability
-    const chunks = splitToChunks(text);
-    if (chunks.length <= 1) {
-      _utterSpeak(text, options);
-    } else {
-      // Queue all chunks after the first
-      for (let i = 1; i < chunks.length; i++) {
-        queueRef.current.push({ text: chunks[i], options });
+    currentUtteranceRef.current = null;
+    // Delay speak after cancel() — browsers need time to finish cancellation
+    setTimeout(() => {
+      const chunks = splitToChunks(text);
+      if (chunks.length <= 1) {
+        _utterSpeak(text, options);
+      } else {
+        for (let i = 1; i < chunks.length; i++) {
+          queueRef.current.push({ text: chunks[i], options });
+        }
+        _utterSpeak(chunks[0], options);
       }
-      _utterSpeak(chunks[0], options);
-    }
+    }, 150);
   }, [_utterSpeak, splitToChunks, unstickSpeaking]);
 
   // Default speak: queues text WITHOUT canceling current speech

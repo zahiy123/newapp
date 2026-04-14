@@ -3,7 +3,6 @@ import { apiUrl } from '../utils/api';
 const MAX_SESSION_IMAGES = 960;
 const MAX_CONSECUTIVE_FAILURES = 5;
 const MIN_PHASE_HOLD_MS = 200;   // Phase must be held 200ms to be considered real (noise filter)
-const MIN_PHASE_DURATION_MS = 800; // Full down phase must last 800ms+ to count as real rep (camera shake filter)
 
 // Key landmark indices: shoulders(11,12), elbows(13,14), wrists(15,16), hips(23,24), knees(25,26), ankles(27,28)
 const KEY_LANDMARK_INDICES = [11, 12, 13, 14, 15, 16, 23, 24, 25, 26, 27, 28];
@@ -62,6 +61,8 @@ export function useHaikuVision({ onVisionFeedback } = {}) {
   const peakFrameRef = useRef(null);      // Frame captured at deepest point
   const peakAnglesRef = useRef(null);
   const peakLandmarksRef = useRef(null);
+  const peakSentRef = useRef(false);      // Whether we already sent for this down phase
+  const prevAngleRef = useRef(null);      // Previous primary angle for trend detection
 
   // Session limits
   const sessionImageCountRef = useRef(0);
@@ -85,7 +86,7 @@ export function useHaikuVision({ onVisionFeedback } = {}) {
     const ctx = contextRef.current;
     const url = apiUrl('/api/coach/analyze-rep');
     const telemetry = condenseLandmarks(landmarksAtFrames);
-    console.log(`[HaikuVision] SEND ${frames.length} frames for rep #${repNumber} to ${url}`);
+    console.log(`[HaikuVision] SEND ${frames.length} frames for rep #${repNumber} | exercise=${ctx?.exerciseName} | sport=${ctx?.sport}`);
     try {
       const resp = await fetch(url, {
         method: 'POST',
@@ -128,12 +129,12 @@ export function useHaikuVision({ onVisionFeedback } = {}) {
     if (!newState) return;
     if (!newState.moving && !newState.firstRepStarted) return;
 
-    // Confidence gate
+    // Confidence gate — visibility >= 0.3
     if (landmarks && Array.isArray(landmarks) && landmarks.length > 0) {
       const visibilities = landmarks.filter(l => l && typeof l.visibility === 'number').map(l => l.visibility);
       if (visibilities.length > 0) {
         const avgVisibility = visibilities.reduce((a, b) => a + b, 0) / visibilities.length;
-        if (avgVisibility < 0.2) return;
+        if (avgVisibility < 0.3) return;
       }
     }
 
@@ -165,6 +166,8 @@ export function useHaikuVision({ onVisionFeedback } = {}) {
       peakFrameRef.current = null;
       peakAnglesRef.current = null;
       peakLandmarksRef.current = null;
+      peakSentRef.current = false;
+      prevAngleRef.current = null;
 
       const f1 = captureCurrentFrame();
       if (f1) {
@@ -174,56 +177,52 @@ export function useHaikuVision({ onVisionFeedback } = {}) {
       }
     }
 
-    // === DURING DOWN PHASE: track minimum angle and capture frame at deepest point ===
+    // === DURING DOWN PHASE: track minimum angle and detect peak (trend reversal) ===
     if (currentPhase === 'down') {
       const primaryAngle = getPrimaryAngle(angles);
-      if (primaryAngle !== null && primaryAngle < minAngleDuringDownRef.current) {
-        minAngleDuringDownRef.current = primaryAngle;
-        // Capture frame at new minimum — overwrite previous peak frame
-        const peakFrame = captureCurrentFrame();
-        if (peakFrame) {
-          peakFrameRef.current = peakFrame;
-          peakAnglesRef.current = angles || null;
-          peakLandmarksRef.current = landmarks || null;
+      if (primaryAngle !== null) {
+        // Track deepest point
+        if (primaryAngle < minAngleDuringDownRef.current) {
+          minAngleDuringDownRef.current = primaryAngle;
+          const peakFrame = captureCurrentFrame();
+          if (peakFrame) {
+            peakFrameRef.current = peakFrame;
+            peakAnglesRef.current = angles || null;
+            peakLandmarksRef.current = landmarks || null;
+          }
         }
+
+        // === PEAK DETECTION: angle started rising (trend reversal) → SEND NOW ===
+        const prevAngle = prevAngleRef.current;
+        if (
+          !peakSentRef.current &&
+          prevAngle !== null &&
+          primaryAngle > prevAngle + 3 &&      // Rising by 3°+ = real reversal, not noise
+          peakFrameRef.current &&
+          framesRef.current.length >= 1
+        ) {
+          peakSentRef.current = true;
+          // Build 2-frame payload: start frame + peak frame
+          const sendFrames = [framesRef.current[0], peakFrameRef.current].filter(Boolean);
+          const sendAngles = [anglesRef.current[0], peakAnglesRef.current].filter(Boolean);
+          const sendLandmarks = [landmarksRef.current[0], peakLandmarksRef.current].filter(Boolean);
+
+          if (sendFrames.length >= 2) {
+            const anticipatedRep = repCountRef.current + 1;
+            console.log(`[HaikuVision] PEAK DETECTED at ${Math.round(minAngleDuringDownRef.current)}°! Sending for rep #${anticipatedRep} (inFlight=${inFlightRef.current})`);
+            earlySentRepRef.current = anticipatedRep;
+            sendFramesToServer([...sendFrames], anticipatedRep, [...sendAngles], [...sendLandmarks], repCountRef.current);
+          }
+        }
+
+        prevAngleRef.current = primaryAngle;
       }
     }
 
-    // === PHASE: down → up — SEND with peak frame (deepest point) ===
-    if (prevPhase === 'down' && currentPhase === 'up') {
-      const downDuration = now - downPhaseStartRef.current;
-
-      // Camera shake filter: down phase must last >= 800ms
-      if (downDuration < MIN_PHASE_DURATION_MS) {
-        framesRef.current = [];
-        anglesRef.current = [];
-        landmarksRef.current = [];
-        lastPhaseRef.current = currentPhase;
-        return;
-      }
-
-      // Angle consistency check: real movement >= 30° change
-      const startAngles = downStartAnglesRef.current;
-      const endAngles = peakAnglesRef.current || angles;
-      if (startAngles && endAngles) {
-        const keys = Object.keys(startAngles);
-        const hasRealMovement = keys.some(k => {
-          const s = startAngles[k];
-          const e = endAngles[k];
-          return typeof s === 'number' && typeof e === 'number' && Math.abs(s - e) >= 30;
-        });
-        if (!hasRealMovement) {
-          framesRef.current = [];
-          anglesRef.current = [];
-          landmarksRef.current = [];
-          lastPhaseRef.current = currentPhase;
-          return;
-        }
-      }
-
-      // Use peak frame (captured at minimum angle) as Frame 2 instead of transition frame
+    // === PHASE: down → up — fallback send if peak wasn't detected during down ===
+    if (prevPhase === 'down' && currentPhase === 'up' && !peakSentRef.current) {
+      // Use peak frame if we have one, otherwise capture current
       if (peakFrameRef.current) {
-        // Replace any existing frame 2 with the peak frame
         framesRef.current = [framesRef.current[0]].filter(Boolean);
         framesRef.current.push(peakFrameRef.current);
         anglesRef.current = [anglesRef.current[0]].filter(Boolean);
@@ -231,7 +230,6 @@ export function useHaikuVision({ onVisionFeedback } = {}) {
         landmarksRef.current = [landmarksRef.current[0]].filter(Boolean);
         landmarksRef.current.push(peakLandmarksRef.current);
       } else {
-        // Fallback: capture current frame if no peak was tracked
         const f2 = captureCurrentFrame();
         if (f2) {
           framesRef.current.push(f2);
@@ -240,10 +238,9 @@ export function useHaikuVision({ onVisionFeedback } = {}) {
         }
       }
 
-      // SEND: fire with peak frame data
       if (framesRef.current.length >= 2) {
         const anticipatedRep = repCountRef.current + 1;
-        console.log(`[HaikuVision] Peak at ${Math.round(minAngleDuringDownRef.current)}°! Sending for rep #${anticipatedRep} (down ${downDuration}ms, inFlight=${inFlightRef.current})`);
+        console.log(`[HaikuVision] Fallback send at down→up for rep #${anticipatedRep} (peak=${Math.round(minAngleDuringDownRef.current)}°, inFlight=${inFlightRef.current})`);
         const framesToSend = [...framesRef.current];
         const anglesToSend = [...anglesRef.current];
         const landmarksToSend = [...landmarksRef.current];
@@ -275,6 +272,8 @@ export function useHaikuVision({ onVisionFeedback } = {}) {
     consecutiveFailuresRef.current = 0;
     minAngleDuringDownRef.current = Infinity;
     peakFrameRef.current = null;
+    peakSentRef.current = false;
+    prevAngleRef.current = null;
     enabledRef.current = true;
   }, []);
 

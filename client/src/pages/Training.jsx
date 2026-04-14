@@ -665,9 +665,11 @@ export default function Training() {
     }
 
     // === VISIBILITY FEEDBACK (from analyzer validateLandmarks) ===
+    // Muted during ANALYZING — don't interrupt AI coaching feedback
     if (newState.feedback?.type === 'visibility') {
       const now = Date.now();
-      if (now - visibilityWarningTimeRef.current > 10000) {
+      const isAnalyzing = commandPhaseRef.current === 'ANALYZING' || commandPhaseRef.current === 'SPEAKING_FEEDBACK';
+      if (!isAnalyzing && now - visibilityWarningTimeRef.current > 10000) {
         speakMissingBodyParts(newState.feedback.missingParts, playerName, newState.feedback.direction);
         visibilityWarningTimeRef.current = now;
         setFeedback({
@@ -681,9 +683,11 @@ export default function Training() {
 
     // === POSTURE GATE ===
     // Not visible — gentle guidance (blame yourself, not user)
+    // Muted during ANALYZING — don't interrupt AI coaching feedback
     if (posture === 'unknown') {
       const now = Date.now();
-      if (!notVisibleWarnedRef.current || now - lastNudgeTimeRef.current > 8000) {
+      const isAnalyzing = commandPhaseRef.current === 'ANALYZING' || commandPhaseRef.current === 'SPEAKING_FEEDBACK';
+      if (!isAnalyzing && (!notVisibleWarnedRef.current || now - lastNudgeTimeRef.current > 8000)) {
         notVisibleWarnedRef.current = true;
         lastNudgeTimeRef.current = now;
         speakNotVisible(playerName);
@@ -718,10 +722,12 @@ export default function Training() {
     notVisibleWarnedRef.current = false;
 
     // === PERSPECTIVE GATE — suggest side camera for lying exercises (non-blocking) ===
+    // Muted during ANALYZING — don't interrupt AI coaching feedback
     const perspCheck = checkPerspective(landmarks, orientation);
     if (!perspCheck.valid) {
       const now = Date.now();
-      if (now - perspectiveWarningTimeRef.current > 15000) {
+      const isAnalyzing = commandPhaseRef.current === 'ANALYZING' || commandPhaseRef.current === 'SPEAKING_FEEDBACK';
+      if (!isAnalyzing && now - perspectiveWarningTimeRef.current > 15000) {
         perspectiveWarningTimeRef.current = now;
         speakSideCamera();
       }
@@ -790,7 +796,8 @@ export default function Training() {
         // Encouragement: speak after rep if form was mostly good
         if (goodFormCountRef.current >= 5) {
           const now = Date.now();
-          if (now - lastEncouragementRef.current > 8000) {
+          const isAnalyzing = commandPhaseRef.current === 'ANALYZING' || commandPhaseRef.current === 'SPEAKING_FEEDBACK';
+          if (!isAnalyzing && now - lastEncouragementRef.current > 8000) {
             speakPositiveReinforcement(playerName);
             lastEncouragementRef.current = now;
           }

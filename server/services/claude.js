@@ -366,10 +366,13 @@ export async function analyzeRepFrames({ frames, sport, exercise, playerProfile,
     };
     const sportHint = sportContext[sport] || sportContext.fitness;
 
-    const system = `Rep#${repNumber} "${exercise}" ${playerName}. ${sport||'fitness'}. ${sportHint}${anglesBlock}${telemetryBlock}${bioBlock}${ampBlock}${scoreHint}
-OUTPUT: ONLY a single JSON object. No text before or after. No markdown. No explanation.
-{"score":1-10,"issue_key":"snake_case","instruction":"עברית עד 12 מילים","pro_tip":"עברית עד 12 מילים"}
-instruction: מונחים ביומכניים (ליבה,זווית,יציבות,טווח תנועה,יישור). 8-10=שבח ספציפי. 5-7=תיקון אנטומי. 1-4=תיקון דחוף. good→issue_key="good_form".`;
+    const system = `אתה מאמן ${sport||'fitness'}. המשתמש מבצע ${exercise}. אל תטיל ספק בסוג התרגיל - נתח את הטכניקה בלבד.
+Rep#${repNumber} ${playerName}. ${sportHint}${anglesBlock}${telemetryBlock}${bioBlock}${ampBlock}${scoreHint}
+OUTPUT: ONLY pipe-delimited: SCORE|INSTRUCTION|PRO_TIP
+No JSON. No markdown. No \`\`\`. No intro. Just 3 values separated by |
+SCORE: 1-10. INSTRUCTION: עברית לשון נוכח עד 12 מילים, מונחים ביומכניים. PRO_TIP: עברית עד 12 מילים.
+8-10=שבח ספציפי. 5-7=תיקון אנטומי. 1-4=תיקון דחוף.
+דוגמה: 8|רד נמוך יותר|שמור על גב ישר`;
 
     const t0 = Date.now();
     let message;
@@ -384,11 +387,11 @@ instruction: מונחים ביומכניים (ליבה,זווית,יציבות,�
       console.log(`[VISION-IMG] ${cleanFrames.length} frames for ${exercise} rep#${repNumber} serverScore=${serverScore} bio=${!!biomechanics} sizes=${cleanFrames.map(f => Math.round(f.length/1024) + 'KB').join(',')}`);
       message = await client.messages.create({
         model: HAIKU_VISION_MODEL,
-        max_tokens: 128,
+        max_tokens: 60,
         system,
         messages: [{ role: 'user', content: [
           ...imageBlocks,
-          { type: 'text', text: '{' }
+          { type: 'text', text: 'נתח' }
         ]}]
       });
     } else {
@@ -396,35 +399,47 @@ instruction: מונחים ביומכניים (ליבה,זווית,יציבות,�
       console.warn(`[VISION-TEXT] No images for ${exercise} rep#${repNumber} — text-only`);
       message = await client.messages.create({
         model: HAIKU_VISION_MODEL,
-        max_tokens: 128,
+        max_tokens: 60,
         system,
-        messages: [{ role: 'user', content: '{' }]
+        messages: [{ role: 'user', content: 'נתח' }]
       });
     }
 
-    let rawText = message.content[0].text;
+    let rawText = message.content[0].text.trim();
     const elapsed = Date.now() - t0;
-    // The user message was '{' to force JSON-only output — prepend '{' if AI continued from it
-    if (!rawText.trimStart().startsWith('{')) rawText = '{' + rawText;
     console.log(`[VISION] Response in ${elapsed}ms (${rawText.length} chars): ${rawText}`);
 
-    const parsed = extractJSON(rawText);
-    if (!parsed) {
-      console.warn(`[VISION] JSON parse FAILED from: ${rawText}`);
-      return safeFallback;
-    }
+    // Parse pipe-delimited: SCORE|INSTRUCTION|PRO_TIP
+    const parts = rawText.split('|').map(s => s.trim());
+    const parsedScore = parseInt(parts[0], 10);
+    let instruction, proTip, feedback;
 
-    const instruction = parsed?.instruction || 'המשך ככה';
-    const proTip = parsed?.pro_tip || '';
-    const feedback = instruction + (proTip && proTip !== instruction ? '. ' + proTip : '');
+    if (!isNaN(parsedScore) && parts.length >= 2) {
+      // Pipe format parsed successfully
+      instruction = parts[1] || 'המשך ככה';
+      proTip = parts[2] || '';
+      feedback = instruction + (proTip && proTip !== instruction ? '. ' + proTip : '');
+    } else {
+      // Fallback: try JSON extraction
+      console.warn(`[VISION] Pipe parse failed, trying JSON fallback: ${rawText}`);
+      const jsonText = rawText.includes('{') ? rawText : '{' + rawText;
+      const jsonParsed = extractJSON(jsonText);
+      if (jsonParsed) {
+        instruction = jsonParsed.instruction || 'המשך ככה';
+        proTip = jsonParsed.pro_tip || '';
+        feedback = instruction + (proTip && proTip !== instruction ? '. ' + proTip : '');
+      } else {
+        return safeFallback;
+      }
+    }
 
     return {
       is_correct: true,
       instruction,
       pro_tip: proTip,
       feedback,
-      score: serverScore ?? (parsed?.score || 5),
-      issue_key: parsed?.issue_key || '',
+      score: serverScore ?? (parsedScore || 5),
+      issue_key: '',
       angles: keyAngles,
     };
   } catch (err) {
