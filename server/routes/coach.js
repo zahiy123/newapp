@@ -149,23 +149,29 @@ router.post('/analyze-rep', async (req, res) => {
   const { playerName, exercise, frames, sport, playerProfile, repNumber, qaMode, jointAngles, telemetry } = req.body;
   const safeFallback = { is_correct: true, feedback: '', score: 0 };
   const key = `rep-${playerName}-${exercise}`;
-  const framesSizes = frames ? frames.map(f => typeof f === 'string' ? Math.round(f.length / 1024) : 0) : [];
-  console.log(`[Server] 📥 Received analysis request for exercise: ${exercise} | player=${playerName} | rep#${repNumber} | sport=${sport} | frames=${framesSizes.join(',')}KB | angles=${jointAngles?.length || 0}`);
 
-  // QA mode: skip throttle and in-flight checks for testing
+  // === DETAILED LOGGING FOR EVERY REQUEST ===
+  const frameCount = frames ? frames.length : 0;
+  const framesSizes = frames ? frames.map(f => typeof f === 'string' ? Math.round(f.length / 1024) : 0) : [];
+  const totalKB = framesSizes.reduce((a, b) => a + b, 0);
+  console.log(`[Server] ========================================`);
+  console.log(`[Server] 📥 Rep #${repNumber} received | exercise=${exercise} | player=${playerName} | sport=${sport}`);
+  console.log(`[Server] 📸 ${frameCount} images received | sizes=${framesSizes.join(',')}KB | total=${totalKB}KB | angles=${jointAngles?.length || 0}`);
+
+  // Throttle: reduced to 1s for rapid testing
   if (!qaMode) {
-    if (shouldThrottle(key, 3000)) {
-      console.log(`[COACH] /analyze-rep THROTTLED (${key})`);
+    if (shouldThrottle(key, 1000)) {
+      console.log(`[Server] ⚠️ THROTTLED rep #${repNumber} (${key}) — too fast, try again`);
       return res.json(safeFallback);
     }
     if (repAnalysisInFlight.has(key)) {
-      console.log(`[COACH] /analyze-rep IN-FLIGHT (${key})`);
+      console.log(`[Server] ⚠️ IN-FLIGHT rep #${repNumber} (${key}) — previous still processing`);
       return res.json(safeFallback);
     }
   }
 
-  if (!frames || !Array.isArray(frames) || frames.length < 2) {
-    console.warn(`[COACH] /analyze-rep INVALID FRAMES: ${frames?.length || 0} frames (need >=2)`);
+  if (!frames || !Array.isArray(frames) || frames.length < 1) {
+    console.warn(`[Server] ❌ REJECTED rep #${repNumber}: ${frameCount} frames (need >=1)`);
     return res.json(safeFallback);
   }
 
@@ -184,16 +190,21 @@ router.post('/analyze-rep', async (req, res) => {
 
   try {
     const t0 = Date.now();
+    console.log(`[Server] 🧠 Sending to AI for analysis...`);
     const result = await analyzeRepFrames({ frames, sport, exercise, playerProfile, repNumber, jointAngles, telemetry });
     const elapsed = Date.now() - t0;
-    console.log(`[COACH-RESULT] exercise=${exercise} | rep=${repNumber} | score=${result.score} | issue=${result.issue_key || 'none'} | instruction="${result.instruction || ''}" | pro_tip="${result.pro_tip || ''}" | elapsed=${elapsed}ms`);
-    // Attach debug metadata in QA mode
+    console.log(`[Server] 🧠 AI Feedback for rep #${repNumber}: score=${result.score} | "${result.feedback || result.instruction || '(empty)'}"`);
+    console.log(`[Server] ⏱️ Response Time: ${elapsed}ms`);
+    console.log(`[Server] ========================================`);
     if (shouldDebug) {
       result._debug = { framesDir: 'server/debug_frames', savedAt: Date.now(), repNumber };
     }
     res.json(result);
   } catch (error) {
-    console.error('[COACH] /analyze-rep ERROR:', error.message, error.stack?.slice(0, 200));
+    const elapsed = Date.now() - Date.now();
+    console.error(`[Server] ❌ ERROR on rep #${repNumber}: ${error.message}`);
+    console.error(`[Server] Stack: ${error.stack?.slice(0, 300)}`);
+    console.log(`[Server] ========================================`);
     res.json(safeFallback);
   } finally {
     repAnalysisInFlight.delete(key);
