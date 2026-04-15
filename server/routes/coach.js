@@ -177,8 +177,8 @@ router.post('/analyze-rep', async (req, res) => {
 
   repAnalysisInFlight.add(key);
 
-  // Debug mode: save frames when DEBUG_VISION env is set OR when qaMode is requested
-  const shouldDebug = process.env.DEBUG_VISION === 'true' || qaMode === true;
+  // Debug mode: always save frames during testing phase
+  const shouldDebug = true;
   if (shouldDebug) {
     try {
       const { saveDebugFrames } = await import('../services/debugFrames.js');

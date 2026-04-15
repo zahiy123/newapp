@@ -105,8 +105,7 @@ export function useHaikuVision({ onVisionFeedback } = {}) {
 
     const sendTs = Date.now();
     const peakToSendMs = triggerTs ? sendTs - triggerTs : 0;
-    console.log(`[HaikuVision] SENDING TO SERVER: rep #${repNumber} | exercise=${ctx?.exerciseName} | sport=${ctx?.sport} | peakToSend=${peakToSendMs}ms`);
-    console.log(`[HaikuVision] 🚀 Target URL: ${url}`);
+    console.log(`[HaikuVision] 🚀 Sending REAL camera frames to server... rep #${repNumber} | exercise=${ctx?.exerciseName} | sport=${ctx?.sport} | peakToSend=${peakToSendMs}ms`);
 
     try {
       const resp = await fetch(url, {
