@@ -79,7 +79,7 @@ export function useHaikuVision({ onVisionFeedback } = {}) {
     return frame;
   }, []);
 
-  const sendFramesToServer = useCallback(async (frames, repNumber, anglesAtFrames, landmarksAtFrames, repCountAtSend) => {
+  const sendFramesToServer = useCallback(async (frames, repNumber, anglesAtFrames, landmarksAtFrames, repCountAtSend, peakTimestamp) => {
     if (disabledRef.current) {
       console.warn(`[HaikuVision] NOT SENDING: disabled for session`);
       return;
@@ -93,7 +93,9 @@ export function useHaikuVision({ onVisionFeedback } = {}) {
     const ctx = contextRef.current;
     const url = apiUrl('/api/coach/analyze-rep');
     const telemetry = condenseLandmarks(landmarksAtFrames);
-    console.log(`[HaikuVision] SENDING TO SERVER: ${frames.length} frames for rep #${repNumber} | exercise=${ctx?.exerciseName} | sport=${ctx?.sport}`);
+    const sendTs = Date.now();
+    const peakToSendMs = peakTimestamp ? sendTs - peakTimestamp : 0;
+    console.log(`[HaikuVision] SENDING TO SERVER: ${frames.length} frames for rep #${repNumber} | exercise=${ctx?.exerciseName} | sport=${ctx?.sport} | peakToSend=${peakToSendMs}ms | ts=${sendTs}`);
     try {
       const resp = await fetch(url, {
         method: 'POST',
@@ -112,16 +114,24 @@ export function useHaikuVision({ onVisionFeedback } = {}) {
 
       if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
       const result = await resp.json();
+      const responseTs = Date.now();
+      const roundTripMs = responseTs - sendTs;
+      const totalLatencyMs = peakTimestamp ? responseTs - peakTimestamp : roundTripMs;
       consecutiveFailuresRef.current = 0;
 
+      // Check for empty/error response
+      if (!result.feedback && !result.instruction) {
+        console.warn(`[HaikuVision] ERROR: Server returned empty response for rep #${repNumber}:`, JSON.stringify(result));
+      }
+
       if (onVisionFeedback) {
-        // Check if rep was confirmed by analyzer since we sent
         const repConfirmed = repCountRef.current > repCountAtSend;
-        console.log(`[HaikuVision] Server responded for rep #${repNumber}, confirmed=${repConfirmed} (count: ${repCountAtSend}→${repCountRef.current})`);
+        console.log(`[HaikuVision] ✓ Rep #${repNumber} response | score=${result.score} | roundTrip=${roundTripMs}ms | peakToResponse=${totalLatencyMs}ms | confirmed=${repConfirmed} | feedback="${(result.feedback || '').slice(0, 60)}"`);
         onVisionFeedback({ ...result, repConfirmed, repNumber });
       }
     } catch (err) {
-      console.error(`[HaikuVision] Fetch error:`, err.message);
+      const errorMs = Date.now() - sendTs;
+      console.error(`[HaikuVision] ERROR: Fetch failed for rep #${repNumber} after ${errorMs}ms:`, err.message);
       consecutiveFailuresRef.current++;
       if (consecutiveFailuresRef.current >= MAX_CONSECUTIVE_FAILURES) {
         console.warn('[HaikuVision] Too many failures, disabling for session');
@@ -221,9 +231,10 @@ export function useHaikuVision({ onVisionFeedback } = {}) {
 
             if (sendFrames.length >= 2) {
               const anticipatedRep = repCountRef.current + 1;
-              console.log(`[HaikuVision] PEAK DETECTED at ${Math.round(minAngleDuringDownRef.current)}°! Sending for rep #${anticipatedRep} (inFlight=${inFlightRef.current})`);
+              const peakTs = Date.now();
+              console.log(`[HaikuVision] PEAK DETECTED at ${Math.round(minAngleDuringDownRef.current)}°! Sending for rep #${anticipatedRep} (inFlight=${inFlightRef.current}) ts=${peakTs}`);
               earlySentRepRef.current = anticipatedRep;
-              sendFramesToServer([...sendFrames], anticipatedRep, [...sendAngles], [...sendLandmarks], repCountRef.current);
+              sendFramesToServer([...sendFrames], anticipatedRep, [...sendAngles], [...sendLandmarks], repCountRef.current, peakTs);
             } else {
               console.warn(`[HaikuVision] NOT SENDING: peak detected but sendFrames=${sendFrames.length} after filter`);
             }
@@ -259,7 +270,8 @@ export function useHaikuVision({ onVisionFeedback } = {}) {
 
         if (framesRef.current.length >= 2) {
           const anticipatedRep = repCountRef.current + 1;
-          console.log(`[HaikuVision] FALLBACK SEND at down→up for rep #${anticipatedRep} (peak=${Math.round(minAngleDuringDownRef.current)}°, inFlight=${inFlightRef.current})`);
+          const fallbackTs = Date.now();
+          console.log(`[HaikuVision] FALLBACK SEND at down→up for rep #${anticipatedRep} (peak=${Math.round(minAngleDuringDownRef.current)}°, inFlight=${inFlightRef.current}) ts=${fallbackTs}`);
           const framesToSend = [...framesRef.current];
           const anglesToSend = [...anglesRef.current];
           const landmarksToSend = [...landmarksRef.current];
@@ -267,7 +279,7 @@ export function useHaikuVision({ onVisionFeedback } = {}) {
           framesRef.current = [];
           anglesRef.current = [];
           landmarksRef.current = [];
-          sendFramesToServer(framesToSend, anticipatedRep, anglesToSend, landmarksToSend, repCountRef.current);
+          sendFramesToServer(framesToSend, anticipatedRep, anglesToSend, landmarksToSend, repCountRef.current, fallbackTs);
         } else {
           console.warn(`[HaikuVision] NOT SENDING at down→up: only ${framesRef.current.length} frames available`);
           framesRef.current = [];
