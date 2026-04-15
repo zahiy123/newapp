@@ -150,7 +150,7 @@ router.post('/analyze-rep', async (req, res) => {
   const safeFallback = { is_correct: true, feedback: '', score: 0 };
   const key = `rep-${playerName}-${exercise}`;
   const framesSizes = frames ? frames.map(f => typeof f === 'string' ? Math.round(f.length / 1024) : 0) : [];
-  console.log(`[COACH] /analyze-rep → ${playerName} | ${exercise} | rep#${repNumber} | sport=${sport} | frames=${framesSizes}KB | angles=${jointAngles?.length || 0}`);
+  console.log(`[Server] 📥 Received analysis request for exercise: ${exercise} | player=${playerName} | rep#${repNumber} | sport=${sport} | frames=${framesSizes.join(',')}KB | angles=${jointAngles?.length || 0}`);
 
   // QA mode: skip throttle and in-flight checks for testing
   if (!qaMode) {
