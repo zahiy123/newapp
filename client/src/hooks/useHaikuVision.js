@@ -1,5 +1,5 @@
 import { useRef, useCallback } from 'react';
-import { apiUrl } from '../utils/api';
+const ANALYZE_REP_URL = 'https://newapp-nujg.onrender.com/api/coach/analyze-rep';
 const MAX_SESSION_IMAGES = 960;
 const MAX_CONSECUTIVE_FAILURES = 10;
 
@@ -90,7 +90,7 @@ export function useHaikuVision({ onVisionFeedback } = {}) {
     inFlightRef.current = true;
 
     const ctx = contextRef.current;
-    const url = apiUrl('/api/coach/analyze-rep');
+    const url = ANALYZE_REP_URL;
     const frames = [frame1, frame2].filter(Boolean);
     const jointAngles = [angles1, angles2].filter(Boolean);
     const telemetry = condenseLandmarks([landmarks1, landmarks2].filter(Boolean));
@@ -105,7 +105,8 @@ export function useHaikuVision({ onVisionFeedback } = {}) {
 
     const sendTs = Date.now();
     const peakToSendMs = triggerTs ? sendTs - triggerTs : 0;
-    console.log(`[HaikuVision] SENDING TO SERVER: rep #${repNumber} | exercise=${ctx?.exerciseName} | sport=${ctx?.sport} | url=${url} | peakToSend=${peakToSendMs}ms`);
+    console.log(`[HaikuVision] SENDING TO SERVER: rep #${repNumber} | exercise=${ctx?.exerciseName} | sport=${ctx?.sport} | peakToSend=${peakToSendMs}ms`);
+    console.log(`[HaikuVision] 🚀 Target URL: ${url}`);
 
     try {
       const resp = await fetch(url, {

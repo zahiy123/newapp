@@ -34,5 +34,6 @@ app.get('/', (req, res) => {
 
 const server = app.listen(PORT, '0.0.0.0', () => {
   console.log(`Server running on port ${PORT} (0.0.0.0)`);
+  console.log(`[Server] ✅ Route /api/coach/analyze-rep is READY`);
 });
 server.timeout = 90000; // 90s default server timeout
