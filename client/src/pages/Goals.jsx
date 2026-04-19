@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useAuth } from '../context/AuthContext';
 import { db } from '../services/firebase';
-import { doc, updateDoc, getDoc } from 'firebase/firestore';
+import { doc, setDoc, getDoc } from 'firebase/firestore';
 import { useNavigate } from 'react-router-dom';
 import { GOALS } from '../utils/sportLogic';
 
@@ -59,7 +59,7 @@ export default function Goals() {
       if (goalsChanged) {
         update.trainingPlan = null;
       }
-      await updateDoc(doc(db, 'users', user.uid), update);
+      await setDoc(doc(db, 'users', user.uid), update, { merge: true });
       await refreshProfile();
       navigate('/');
     } catch (err) {

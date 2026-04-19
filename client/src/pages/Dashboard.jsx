@@ -2,7 +2,7 @@ import { useState, useEffect, useRef, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useAuth } from '../context/AuthContext';
 import { db } from '../services/firebase';
-import { doc, getDoc, updateDoc, collection, getDocs } from 'firebase/firestore';
+import { doc, getDoc, setDoc, collection, getDocs } from 'firebase/firestore';
 import { apiUrl } from '../utils/api';
 import { Link, useNavigate } from 'react-router-dom';
 import {
@@ -102,7 +102,7 @@ export default function Dashboard() {
       const data = snap.data();
       if (data.trainingPlan?.weeks?.length > 0) {
         if (data.trainingPlan.sport && data.trainingPlan.sport !== data.sport) {
-          await updateDoc(doc(db, 'users', user.uid), { trainingPlan: null });
+          await setDoc(doc(db, 'users', user.uid), { trainingPlan: null }, { merge: true });
         } else {
           const clean = sanitizePlan(data.trainingPlan, userProfile.sport, userProfile.age);
           setTrainingPlan(clean);
@@ -245,10 +245,10 @@ export default function Dashboard() {
         setActiveWeek(0);
         setGenerating(false);
 
-        await updateDoc(doc(db, 'users', user.uid), {
+        await setDoc(doc(db, 'users', user.uid), {
           trainingPlan: plan,
           planCreatedAt: new Date().toISOString()
-        });
+        }, { merge: true });
         savePlan(plan, fp);
         startFromWeek = 2;
       }
@@ -261,7 +261,7 @@ export default function Dashboard() {
           const week = await fetchWeek(payload, w);
           plan.weeks.push(week);
           setTrainingPlan({ ...plan });
-          await updateDoc(doc(db, 'users', user.uid), { trainingPlan: { ...plan } });
+          await setDoc(doc(db, 'users', user.uid), { trainingPlan: { ...plan } }, { merge: true });
           savePlan({ ...plan }, fp);
         } catch (err) {
           console.error(`Week ${w} failed:`, err.message);
@@ -300,7 +300,7 @@ export default function Dashboard() {
   async function handleLocationChange(loc) {
     if (loc === currentLocation || generatingRef.current) return;
     setCurrentLocation(loc);
-    await updateDoc(doc(db, 'users', user.uid), { currentLocation: loc });
+    await setDoc(doc(db, 'users', user.uid), { currentLocation: loc }, { merge: true });
     clearPlan();
     clearProgress();
     setTrainingPlan(null);
@@ -311,7 +311,7 @@ export default function Dashboard() {
   async function handleEquipmentChange(eq) {
     if (eq === currentEquipment || generatingRef.current) return;
     setCurrentEquipment(eq);
-    await updateDoc(doc(db, 'users', user.uid), { equipment: eq });
+    await setDoc(doc(db, 'users', user.uid), { equipment: eq }, { merge: true });
     clearPlan();
     clearProgress();
     setTrainingPlan(null);

@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useAuth } from '../context/AuthContext';
 import { db } from '../services/firebase';
-import { doc, updateDoc, getDoc } from 'firebase/firestore';
+import { doc, setDoc, getDoc } from 'firebase/firestore';
 import { useNavigate } from 'react-router-dom';
 import { getAvailableSports } from '../utils/sportLogic';
 
@@ -38,7 +38,7 @@ export default function SportSelection() {
     if (prevSport && prevSport !== selected) {
       updates.trainingPlan = null;
     }
-    await updateDoc(doc(db, 'users', user.uid), updates);
+    await setDoc(doc(db, 'users', user.uid), updates, { merge: true });
     await refreshProfile();
     navigate('/goals');
   }
