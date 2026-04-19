@@ -95,8 +95,13 @@ export function useObjectDetection() {
   const captureFrame = useCallback((videoEl) => {
     if (!videoEl || videoEl.readyState < 2) return null;
     const canvas = document.createElement('canvas');
-    canvas.width = Math.min(videoEl.videoWidth, 320); // 320px — small enough for fast Haiku analysis
-    canvas.height = Math.min(videoEl.videoHeight, 240);
+    // Scale down to max 400px keeping aspect ratio
+    const MAX_DIM = 400;
+    const vw = videoEl.videoWidth;
+    const vh = videoEl.videoHeight;
+    const scale = Math.min(MAX_DIM / vw, MAX_DIM / vh, 1);
+    canvas.width = Math.round(vw * scale);
+    canvas.height = Math.round(vh * scale);
     const ctx = canvas.getContext('2d');
     ctx.drawImage(videoEl, 0, 0, canvas.width, canvas.height);
 
@@ -105,19 +110,19 @@ export function useObjectDetection() {
       const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
       const d = imageData.data;
       let nonBlack = 0;
-      const step = Math.floor(d.length / (20 * 4)); // Sample ~20 pixels evenly
+      const step = Math.floor(d.length / (20 * 4));
       for (let i = 0; i < d.length; i += step * 4) {
         if (d[i] > 10 || d[i + 1] > 10 || d[i + 2] > 10) nonBlack++;
       }
-      if (nonBlack < 3) return null; // Frame is mostly black — skip
+      if (nonBlack < 3) return null;
     } catch (e) {
       // getImageData may fail on tainted canvas — send frame anyway
     }
 
-    const dataUrl = canvas.toDataURL('image/jpeg', 0.3);
+    const dataUrl = canvas.toDataURL('image/jpeg', 0.4);
     // Strip ANY data URL prefix — Claude API expects raw base64 only
     const base64 = dataUrl.replace(/^data:image\/\w+;base64,/, '').trim();
-    if (!base64 || base64.length < 100) return null; // Too small = invalid
+    if (!base64 || base64.length < 100) return null;
     return base64;
   }, []);
 

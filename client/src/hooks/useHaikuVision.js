@@ -103,6 +103,9 @@ export function useHaikuVision({ onVisionFeedback } = {}) {
       console.log(`[HaikuVision] 📸 Peak frame preview (first 80 chars): ${frame2.substring(0, 80)}...`);
     }
 
+    const payloadKB = Math.round((frames.reduce((s, f) => s + (f?.length || 0), 0)) / 1024);
+    console.log(`[Speed-Check] Payload size: ${payloadKB} KB`);
+
     const sendTs = Date.now();
     const peakToSendMs = triggerTs ? sendTs - triggerTs : 0;
     console.log(`[HaikuVision] 🚀 Sending REAL camera frames to server... rep #${repNumber} | exercise=${ctx?.exerciseName} | sport=${ctx?.sport} | peakToSend=${peakToSendMs}ms`);
