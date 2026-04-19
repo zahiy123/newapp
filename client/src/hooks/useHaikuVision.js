@@ -60,6 +60,7 @@ export function useHaikuVision({ onVisionFeedback } = {}) {
   const sessionImageCountRef = useRef(0);
   const consecutiveFailuresRef = useRef(0);
   const inFlightRef = useRef(false);
+  const warmUpSentRef = useRef(false);
 
   // Capture a frame from the video element
   const captureFrame = useCallback(() => {
@@ -246,6 +247,36 @@ export function useHaikuVision({ onVisionFeedback } = {}) {
     lastPhaseRef.current = currentPhase;
   }, [captureFrame, sendToServer]);
 
+  // === SERVER WARM-UP: fire once during calibration to open SSL + wake AI ===
+  const performWarmUpCalibration = useCallback((captureFrameFn, videoEl) => {
+    if (warmUpSentRef.current) return;
+    if (!captureFrameFn || !videoEl) return;
+    const frame = captureFrameFn(videoEl);
+    if (!frame) return;
+    warmUpSentRef.current = true;
+    const frameKB = Math.round(frame.length / 1024);
+    console.log(`[WarmUp] Sending calibration frame to wake server (${frameKB} KB)...`);
+    const t0 = Date.now();
+    fetch(ANALYZE_REP_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        frames: [frame],
+        exercise: 'calibration',
+        sport: 'warmup',
+        playerName: 'calibration',
+        repNumber: 0
+      })
+    })
+      .then(r => r.json())
+      .then(data => {
+        console.log(`[WarmUp] Server ready in ${Date.now() - t0}ms | status=${data.status || 'ok'}`);
+      })
+      .catch(err => {
+        console.warn(`[WarmUp] Warm-up failed (${Date.now() - t0}ms):`, err.message);
+      });
+  }, []);
+
   const startVision = useCallback((context, captureFrameFn, videoEl) => {
     contextRef.current = context;
     captureFrameFnRef.current = captureFrameFn;
@@ -261,6 +292,7 @@ export function useHaikuVision({ onVisionFeedback } = {}) {
     prevAngleRef.current = null;
     enabledRef.current = true;
     disabledRef.current = false;
+    warmUpSentRef.current = false;
     console.log(`[HaikuVision] 🟢 Vision STARTED | exercise=${context?.exerciseName} | sport=${context?.sport} | captureFrameFn=${!!captureFrameFn} | videoEl=${!!videoEl}`);
   }, []);
 
@@ -285,5 +317,5 @@ export function useHaikuVision({ onVisionFeedback } = {}) {
     disabled: disabledRef.current
   }), []);
 
-  return { feedPhaseData, startVision, stopVision, resetSession, getSessionStats };
+  return { feedPhaseData, startVision, stopVision, resetSession, getSessionStats, performWarmUpCalibration };
 }

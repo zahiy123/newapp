@@ -148,6 +148,14 @@ const repAnalysisInFlight = new Set();
 router.post('/analyze-rep', async (req, res) => {
   const { playerName, exercise, frames, sport, playerProfile, repNumber, qaMode, jointAngles, telemetry } = req.body;
   const safeFallback = { is_correct: true, feedback: '', score: 0 };
+
+  // === CALIBRATION WARM-UP: fast reply to open SSL + wake server ===
+  if (exercise === 'calibration') {
+    const frameKB = frames?.[0] ? Math.round(frames[0].length / 1024) : 0;
+    console.log(`[Server] 🔥 WARM-UP calibration received (${frameKB}KB) — replying instantly`);
+    return res.json({ status: 'ready' });
+  }
+
   const key = `rep-${playerName}-${exercise}`;
 
   // === DETAILED LOGGING FOR EVERY REQUEST ===

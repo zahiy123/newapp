@@ -238,7 +238,7 @@ export default function Training() {
     });
   }, [speakCritical, stripName]);
 
-  const { feedPhaseData, startVision, stopVision, resetSession: resetVisionSession } = useHaikuVision({ onVisionFeedback });
+  const { feedPhaseData, startVision, stopVision, resetSession: resetVisionSession, performWarmUpCalibration } = useHaikuVision({ onVisionFeedback });
 
   // Environment scan state
   const [environmentScan, setEnvironmentScan] = useState(null);
@@ -559,6 +559,10 @@ export default function Training() {
     const stableLm = stabilizerRef.current.stabilize(landmarks);
     if (!stableLm) return;
     const cal = calibrationDataRef.current;
+    // Fire server warm-up on first skeleton detection during calibration
+    if (cal.frames === 0) {
+      performWarmUpCalibration(captureFrame, videoRef.current);
+    }
     cal.frames++;
     const cueKey = analyzerRef.current?.cueKey;
     const anglesToTrack = getCalibrationAngles(stableLm, cueKey);
