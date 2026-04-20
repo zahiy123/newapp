@@ -261,10 +261,6 @@ export function useHaikuVision({ onVisionFeedback } = {}) {
     }
 
     // === ANY down phase start (from up OR from null) — capture Frame 1, reset bestFrame ===
-    // Cancel any previous speech so new rep coaching starts clean
-    if (currentPhase === 'down' && prevPhase !== 'down' && typeof window !== 'undefined' && window.speechSynthesis) {
-      window.speechSynthesis.cancel();
-    }
     if (currentPhase === 'down' && prevPhase !== 'down') {
       const f1 = captureFrame();
       startFrameRef.current = f1;
@@ -303,9 +299,9 @@ export function useHaikuVision({ onVisionFeedback } = {}) {
         }
       }
 
-      // === TREND REVERSAL: angle rising by 3°+ → send the BUFFERED best frame ===
+      // === TREND REVERSAL: angle rising by 2°+ → send the BUFFERED best frame ===
       const prev = prevAngleRef.current;
-      if (!peakSentRef.current && prev !== null && primaryAngle > prev + 3 && bestFrameRef.current) {
+      if (!peakSentRef.current && prev !== null && primaryAngle > prev + 2 && bestFrameRef.current) {
         const shoulderDisp = (startShoulderYRef.current !== null && bestShoulderYRef.current !== null)
           ? bestShoulderYRef.current - startShoulderYRef.current : null;
         const qualified = isRepQualified(minAngleDuringDownRef.current, shoulderDisp);

@@ -348,12 +348,15 @@ export async function analyzeRepFrames({ frames, sport, exercise, playerProfile,
       }
     }
 
-    // Amputation context for vision analysis
+    // Prosthesis / amputation context for vision analysis
     const disability = playerProfile?.disability || 'none';
     const ampSide = playerProfile?.amputationSide || '';
     const ampLevel = playerProfile?.amputationLevel || '';
-    const ampBlock = disability !== 'none' && ampSide && ampSide !== 'none'
-      ? `\nAmputation: ${disability}, side=${ampSide}, level=${ampLevel}. IGNORE missing limb in analysis. Focus on compensation patterns: trunk lean, hip shift, crutch base width.`
+    const hasProsthesis = disability !== 'none' || (ampSide && ampSide !== 'none');
+    const ampBlock = hasProsthesis
+      ? `\nהספורטאי משתמש בפרוטזה ברגל (${ampSide || 'לא ידוע'}, ${ampLevel || ''}).
+אל תעיר על חוסר סימטריה בין צדדים. אל תעיר על מנח ירכיים או ברכיים.
+התמקד אך ורק בפלג גוף עליון: ידיים, כתפיים, גב, ליבה, טווח תנועה.`
       : '';
 
     // === UNIVERSAL PRO COACH — BIOMECHANICAL ANALYSIS ===
@@ -369,8 +372,10 @@ export async function analyzeRepFrames({ frames, sport, exercise, playerProfile,
     const system = `מאמן ${sport||'fitness'}. תרגיל: ${exercise}. נתח טכניקה בלבד.
 ${playerName} rep#${repNumber}. ${sportHint}${anglesBlock}${telemetryBlock}${bioBlock}${ampBlock}${scoreHint}
 SCORE|INSTRUCTION|PRO_TIP
-ציון 1-10. הוראה: עברית עד 6 מילים. טיפ: עד 6 מילים.
-דוגמה: 8|יישר גב|כופף מרפקים 90`;
+ציון 1-10. הוראה: עברית פשוטה עד 4 מילים. טיפ: עד 4 מילים.
+חובה: השתמש רק במילים פשוטות ותקניות. אסור להמציא מילים.
+דוגמה: 8|יישר גב|כופף מרפקים 90
+דוגמה: 7|רד עמוק יותר|שמור ליבה יציבה`;
 
     const t0 = Date.now();
     let message;

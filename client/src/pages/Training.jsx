@@ -209,11 +209,11 @@ export default function Training() {
     }
 
     if (cmdPhase === 'IDLE') {
-      // Hold exercises or no command coaching — use speakCritical (hard cancel)
+      // Hold exercises or no command coaching — short rep count + technical feedback only
       if (repConfirmed) {
-        speakCritical(`חזרה מספר ${repNumber}, כל הכבוד. ${aiFeedback}`, { rate: 1.2 });
+        speakCritical(`${repNumber}. ${aiFeedback}`, { rate: 1.3 });
       } else {
-        speakCritical(`החזרה לא נספרה. ${aiFeedback}. נסה שוב`, { rate: 1.25 });
+        speakCritical(`${aiFeedback}. נסה שוב`, { rate: 1.3 });
       }
       return;
     }
@@ -228,14 +228,14 @@ export default function Training() {
 
     let fullSpeech;
     if (repConfirmed) {
-      // Confirmed rep: "חזרה 3, כל הכבוד. רד נמוך יותר. עכשיו רד לחזרה 4"
+      // Confirmed rep: short count + feedback + next command
       const nextRep = repNumber + 1;
       const isLastRep = nextRep > targetReps;
-      const nextCmd = isLastRep ? '' : `. עכשיו ${getCommandText(nextRep, cueKey, cueType) || `רד לחזרה ${nextRep}`}`;
-      fullSpeech = `חזרה מספר ${repNumber}, כל הכבוד. ${aiFeedback}${nextCmd}`;
+      const nextCmd = isLastRep ? '' : `. ${getCommandText(nextRep, cueKey, cueType) || `חזרה ${nextRep}`}`;
+      fullSpeech = `${repNumber}. ${aiFeedback}${nextCmd}`;
     } else {
-      // Partial rep: "החזרה לא נספרה. [feedback]. נסה שוב את חזרה X"
-      fullSpeech = `החזרה לא נספרה. ${aiFeedback}. נסה שוב את חזרה ${curRep}`;
+      // Partial rep: feedback + retry
+      fullSpeech = `${aiFeedback}. נסה שוב`;
     }
 
     console.log(`[CMD] Speaking: "${fullSpeech}"`);
