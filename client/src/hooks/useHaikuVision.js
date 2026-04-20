@@ -2,6 +2,8 @@ import { useRef, useCallback } from 'react';
 const ANALYZE_REP_URL = 'https://newapp-nujg.onrender.com/api/coach/analyze-rep';
 const MAX_SESSION_IMAGES = 960;
 const MAX_CONSECUTIVE_FAILURES = 10;
+// Rehabilitation-friendly: count a rep if elbow reached 130° or below (not strict 90°)
+const REP_ANGLE_THRESHOLD = 130;
 
 // Key landmark indices: shoulders(11,12), elbows(13,14), wrists(15,16), hips(23,24), knees(25,26), ankles(27,28)
 const KEY_LANDMARK_INDICES = [11, 12, 13, 14, 15, 16, 23, 24, 25, 26, 27, 28];
@@ -45,11 +47,11 @@ export function useHaikuVision({ onVisionFeedback } = {}) {
   const startAnglesRef = useRef(null);
   const startLandmarksRef = useRef(null);
 
-  // Peak tracking
+  // Best-frame buffer: holds the frame at the deepest angle during "down" phase
   const minAngleDuringDownRef = useRef(Infinity);
-  const peakFrameRef = useRef(null);
-  const peakAnglesRef = useRef(null);
-  const peakLandmarksRef = useRef(null);
+  const bestFrameRef = useRef(null);
+  const bestAnglesRef = useRef(null);
+  const bestLandmarksRef = useRef(null);
   const peakSentRef = useRef(false);
   const prevAngleRef = useRef(null);
   const lastPhaseRef = useRef(null);
@@ -61,6 +63,8 @@ export function useHaikuVision({ onVisionFeedback } = {}) {
   const consecutiveFailuresRef = useRef(0);
   const inFlightRef = useRef(false);
   const warmUpSentRef = useRef(false);
+  // Duplicate prevention: set of rep numbers already confirmed by AI
+  const confirmedRepsRef = useRef(new Set());
 
   // Capture a frame from the video element
   const captureFrame = useCallback(() => {
@@ -143,8 +147,20 @@ export function useHaikuVision({ onVisionFeedback } = {}) {
       }
 
       if (onVisionFeedback) {
-        const repConfirmed = repCountRef.current > (repNumber - 1);
-        console.log(`[HaikuVision] ✅ Rep #${repNumber} | score=${result.score} | roundTrip=${roundTripMs}ms | peakToResponse=${totalLatencyMs}ms | confirmed=${repConfirmed} | feedback="${(result.feedback || '').slice(0, 80)}"`);
+        // AI-driven confirmation: score >= 3 means the rep counts
+        const aiScore = result.score ?? 0;
+        const isDuplicate = confirmedRepsRef.current.has(repNumber);
+        const repConfirmed = aiScore >= 3 && !isDuplicate;
+
+        if (repConfirmed) {
+          confirmedRepsRef.current.add(repNumber);
+          console.log(`[HaikuVision] ✅ Rep #${repNumber} CONFIRMED by AI | score=${aiScore} | roundTrip=${roundTripMs}ms | peakToResponse=${totalLatencyMs}ms`);
+        } else if (isDuplicate) {
+          console.warn(`[HaikuVision] ⚠️ Rep #${repNumber} DUPLICATE — already confirmed, skipping`);
+        } else {
+          console.log(`[HaikuVision] ❌ Rep #${repNumber} NOT confirmed | score=${aiScore} (<3) | roundTrip=${roundTripMs}ms`);
+        }
+
         onVisionFeedback({ ...result, repConfirmed, repNumber, _latency: { roundTripMs, totalLatencyMs } });
       }
     } catch (err) {
@@ -170,16 +186,17 @@ export function useHaikuVision({ onVisionFeedback } = {}) {
     const reps = newState.reps ?? 0;
     const primaryAngle = getPrimaryAngle(angles);
 
-    // === ANY down phase start (from up OR from null) — capture Frame 1 ===
+    // === ANY down phase start (from up OR from null) — capture Frame 1, reset bestFrame ===
     if (currentPhase === 'down' && prevPhase !== 'down') {
       const f1 = captureFrame();
       startFrameRef.current = f1;
       startAnglesRef.current = angles || null;
       startLandmarksRef.current = landmarks || null;
+      // Reset best-frame buffer for this new rep
       minAngleDuringDownRef.current = Infinity;
-      peakFrameRef.current = null;
-      peakAnglesRef.current = null;
-      peakLandmarksRef.current = null;
+      bestFrameRef.current = null;
+      bestAnglesRef.current = null;
+      bestLandmarksRef.current = null;
       peakSentRef.current = false;
       prevAngleRef.current = primaryAngle;
       console.log(`[HaikuVision] ⬇️ DOWN START | angle=${primaryAngle !== null ? Math.round(primaryAngle) : '?'}° | frame1=${f1 ? Math.round(f1.length/1024)+'KB' : 'FAILED'}`);
@@ -187,54 +204,57 @@ export function useHaikuVision({ onVisionFeedback } = {}) {
       return;
     }
 
-    // === DURING DOWN: track deepest angle + detect trend reversal ===
+    // === DURING DOWN: continuously update bestFrame at the deepest angle ===
     if (currentPhase === 'down' && primaryAngle !== null) {
-      // Track minimum
+      // Update best frame whenever we reach a new minimum angle
       if (primaryAngle < minAngleDuringDownRef.current) {
         minAngleDuringDownRef.current = primaryAngle;
-        const pf = captureFrame();
-        if (pf) {
-          peakFrameRef.current = pf;
-          peakAnglesRef.current = angles || null;
-          peakLandmarksRef.current = landmarks || null;
+        const bf = captureFrame();
+        if (bf) {
+          bestFrameRef.current = bf;
+          bestAnglesRef.current = angles || null;
+          bestLandmarksRef.current = landmarks || null;
         }
       }
 
-      // === TREND REVERSAL: angle rising by 3°+ → FORCE SEND ===
+      // === TREND REVERSAL: angle rising by 3°+ → send the BUFFERED best frame ===
       const prev = prevAngleRef.current;
-      if (!peakSentRef.current && prev !== null && primaryAngle > prev + 3 && peakFrameRef.current) {
-        peakSentRef.current = true;
-        const triggerTs = Date.now();
-        const anticipatedRep = repCountRef.current + 1;
-        earlySentRepRef.current = anticipatedRep;
-        console.log(`[HaikuVision] 🎯 PEAK REVERSAL at ${Math.round(minAngleDuringDownRef.current)}° (now ${Math.round(primaryAngle)}°, was ${Math.round(prev)}°) → FORCE SEND rep #${anticipatedRep}`);
+      if (!peakSentRef.current && prev !== null && primaryAngle > prev + 3 && bestFrameRef.current) {
+        // Only send if athlete reached deep enough (rehabilitation-friendly threshold)
+        if (minAngleDuringDownRef.current > REP_ANGLE_THRESHOLD) {
+          console.log(`[HaikuVision] ⚠️ PEAK REVERSAL at ${Math.round(minAngleDuringDownRef.current)}° but above ${REP_ANGLE_THRESHOLD}° threshold — skipping`);
+        } else {
+          peakSentRef.current = true;
+          const triggerTs = Date.now();
+          const anticipatedRep = repCountRef.current + 1;
+          earlySentRepRef.current = anticipatedRep;
+          console.log(`[HaikuVision] 🎯 PEAK REVERSAL at ${Math.round(minAngleDuringDownRef.current)}° (now ${Math.round(primaryAngle)}°, was ${Math.round(prev)}°) → sending BEST FRAME rep #${anticipatedRep}`);
 
-        // Use start frame if available, otherwise use peak frame for both
-        const f1 = startFrameRef.current || peakFrameRef.current;
-        const f2 = peakFrameRef.current;
-        sendToServer(f1, f2, anticipatedRep, startAnglesRef.current, peakAnglesRef.current, startLandmarksRef.current, peakLandmarksRef.current, triggerTs);
+          // Send buffered best frame (deepest angle), NOT a new capture
+          const f1 = startFrameRef.current || bestFrameRef.current;
+          const f2 = bestFrameRef.current;
+          sendToServer(f1, f2, anticipatedRep, startAnglesRef.current, bestAnglesRef.current, startLandmarksRef.current, bestLandmarksRef.current, triggerTs);
+        }
       }
 
       prevAngleRef.current = primaryAngle;
     }
 
-    // === PHASE: down → up — fallback if peak send didn't fire ===
+    // === PHASE: down → up — fallback using BUFFERED best frame only ===
     if (prevPhase === 'down' && currentPhase === 'up') {
       if (peakSentRef.current) {
-        console.log(`[HaikuVision] ⬆️ UP | already sent at peak`);
+        console.log(`[HaikuVision] ⬆️ UP | already sent best frame at peak`);
+      } else if (bestFrameRef.current && minAngleDuringDownRef.current <= REP_ANGLE_THRESHOLD) {
+        // Fallback: send buffered best frame — never capture a new frame here
+        const f1 = startFrameRef.current || bestFrameRef.current;
+        const f2 = bestFrameRef.current;
+        const anticipatedRep = repCountRef.current + 1;
+        const fallbackTs = Date.now();
+        earlySentRepRef.current = anticipatedRep;
+        console.log(`[HaikuVision] ⬆️ FALLBACK SEND best frame for rep #${anticipatedRep} (peak=${Math.round(minAngleDuringDownRef.current)}°)`);
+        sendToServer(f1, f2, anticipatedRep, startAnglesRef.current, bestAnglesRef.current, startLandmarksRef.current, bestLandmarksRef.current, fallbackTs);
       } else {
-        // Fallback: send whatever we have
-        const f1 = startFrameRef.current;
-        const f2 = peakFrameRef.current || captureFrame();
-        if (f1 && f2) {
-          const anticipatedRep = repCountRef.current + 1;
-          const fallbackTs = Date.now();
-          earlySentRepRef.current = anticipatedRep;
-          console.log(`[HaikuVision] ⬆️ FALLBACK SEND at down→up for rep #${anticipatedRep} (peak=${Math.round(minAngleDuringDownRef.current)}°)`);
-          sendToServer(f1, f2, anticipatedRep, startAnglesRef.current, peakAnglesRef.current, startLandmarksRef.current, peakLandmarksRef.current, fallbackTs);
-        } else {
-          console.warn(`[HaikuVision] ⬆️ NOT SENDING at down→up: f1=${!!f1}, f2=${!!f2}`);
-        }
+        console.warn(`[HaikuVision] ⬆️ NOT SENDING: bestFrame=${!!bestFrameRef.current}, minAngle=${Math.round(minAngleDuringDownRef.current)}° (threshold=${REP_ANGLE_THRESHOLD}°)`);
       }
     }
 
@@ -287,12 +307,15 @@ export function useHaikuVision({ onVisionFeedback } = {}) {
     earlySentRepRef.current = 0;
     consecutiveFailuresRef.current = 0;
     minAngleDuringDownRef.current = Infinity;
-    peakFrameRef.current = null;
+    bestFrameRef.current = null;
+    bestAnglesRef.current = null;
+    bestLandmarksRef.current = null;
     peakSentRef.current = false;
     prevAngleRef.current = null;
     enabledRef.current = true;
     disabledRef.current = false;
     warmUpSentRef.current = false;
+    confirmedRepsRef.current = new Set();
     console.log(`[HaikuVision] 🟢 Vision STARTED | exercise=${context?.exerciseName} | sport=${context?.sport} | captureFrameFn=${!!captureFrameFn} | videoEl=${!!videoEl}`);
   }, []);
 
@@ -309,6 +332,7 @@ export function useHaikuVision({ onVisionFeedback } = {}) {
     consecutiveFailuresRef.current = 0;
     repCountRef.current = 0;
     earlySentRepRef.current = 0;
+    confirmedRepsRef.current = new Set();
   }, []);
 
   const getSessionStats = useCallback(() => ({

@@ -188,13 +188,23 @@ export default function Training() {
     const cmdPhase = commandPhaseRef.current;
     const curRep = commandRepRef.current;
     const aiFeedback = result.feedback ? stripName(result.feedback) : 'המשך ככה';
-    const repConfirmed = result.repConfirmed !== false; // default true for backwards compat
-    console.log(`[CMD] onVisionFeedback: cmdPhase=${cmdPhase}, rep=${curRep}, confirmed=${repConfirmed}, score=${result.score}, fb="${aiFeedback}"`);
+    const repConfirmed = result.repConfirmed === true;
+    const repNumber = result.repNumber;
+    console.log(`[CMD] onVisionFeedback: cmdPhase=${cmdPhase}, rep=${curRep}, repNumber=${repNumber}, confirmed=${repConfirmed}, score=${result.score}, fb="${aiFeedback}"`);
+
+    // === AI-DRIVEN REP COUNTER: update displayReps immediately when AI confirms ===
+    if (repConfirmed) {
+      setDisplayReps(prev => {
+        const newCount = Math.max(prev, repNumber);
+        console.log(`[CMD] AI confirmed rep #${repNumber} → displayReps: ${prev} → ${newCount}`);
+        return newCount;
+      });
+    }
 
     if (cmdPhase === 'IDLE') {
       // Hold exercises or no command coaching — use speakCritical (hard cancel)
       if (repConfirmed) {
-        speakCritical(aiFeedback, { rate: 1.2 });
+        speakCritical(`חזרה מספר ${repNumber}, כל הכבוד. ${aiFeedback}`, { rate: 1.2 });
       } else {
         speakCritical(`החזרה לא נספרה. ${aiFeedback}. נסה שוב`, { rate: 1.25 });
       }
@@ -211,11 +221,11 @@ export default function Training() {
 
     let fullSpeech;
     if (repConfirmed) {
-      // Confirmed rep: "חזרה 2. רד נמוך יותר. עכשיו רד לחזרה 3"
-      const nextRep = curRep + 1;
+      // Confirmed rep: "חזרה 3, כל הכבוד. רד נמוך יותר. עכשיו רד לחזרה 4"
+      const nextRep = repNumber + 1;
       const isLastRep = nextRep > targetReps;
       const nextCmd = isLastRep ? '' : `. עכשיו ${getCommandText(nextRep, cueKey, cueType) || `רד לחזרה ${nextRep}`}`;
-      fullSpeech = `חזרה ${curRep}. ${aiFeedback}${nextCmd}`;
+      fullSpeech = `חזרה מספר ${repNumber}, כל הכבוד. ${aiFeedback}${nextCmd}`;
     } else {
       // Partial rep: "החזרה לא נספרה. [feedback]. נסה שוב את חזרה X"
       fullSpeech = `החזרה לא נספרה. ${aiFeedback}. נסה שוב את חזרה ${curRep}`;
@@ -226,7 +236,7 @@ export default function Training() {
 
     pollSpeechEnd(() => {
       if (repConfirmed) {
-        const nextRep = curRep + 1;
+        const nextRep = repNumber + 1;
         if (nextRep > targetReps) {
           commandPhaseRef.current = 'IDLE';
           return;
