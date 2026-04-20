@@ -369,13 +369,15 @@ export async function analyzeRepFrames({ frames, sport, exercise, playerProfile,
     };
     const sportHint = sportContext[sport] || sportContext.fitness;
 
-    const system = `מאמן ${sport||'fitness'}. תרגיל: ${exercise}. נתח טכניקה בלבד.
+    const system = `ענה אך ורק בפורמט: SCORE|INSTRUCTION|PRO_TIP
+בלי כותרות, בלי #, בלי **, בלי הסברים. רק שורה אחת בפורמט הזה.
+מאמן ${sport||'fitness'}. תרגיל: ${exercise}.
 ${playerName} rep#${repNumber}. ${sportHint}${anglesBlock}${telemetryBlock}${bioBlock}${ampBlock}${scoreHint}
-SCORE|INSTRUCTION|PRO_TIP
 ציון 1-10. הוראה: עברית פשוטה עד 4 מילים. טיפ: עד 4 מילים.
-חובה: השתמש רק במילים פשוטות ותקניות. אסור להמציא מילים.
-דוגמה: 8|יישר גב|כופף מרפקים 90
-דוגמה: 7|רד עמוק יותר|שמור ליבה יציבה`;
+מילים פשוטות בלבד. אסור להמציא מילים.
+אם הספורטאי עם פרוטזה: אל תעיר על סימטריה, ירכיים, נטייה. פלג עליון ישר+תנועה מלאה=ציון 8+.
+8|יישר גב|כופף מרפקים 90
+7|רד עמוק יותר|שמור ליבה יציבה`;
 
     const t0 = Date.now();
     let message;
@@ -411,6 +413,12 @@ SCORE|INSTRUCTION|PRO_TIP
     let rawText = message.content[0].text.trim();
     const elapsed = Date.now() - t0;
     console.log(`[VISION] Response in ${elapsed}ms (${rawText.length} chars): ${rawText}`);
+
+    // Strip Markdown artifacts (#, *, **, ```) before parsing
+    rawText = rawText.replace(/^[#*`\s]+/gm, '').replace(/\*\*/g, '').replace(/\*/g, '').trim();
+    // If multi-line, take only the first line that has a pipe
+    const pipeLine = rawText.split('\n').find(l => l.includes('|'));
+    if (pipeLine) rawText = pipeLine.trim();
 
     // Parse pipe-delimited: SCORE|INSTRUCTION|PRO_TIP
     const parts = rawText.split('|').map(s => s.trim());

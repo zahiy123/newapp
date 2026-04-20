@@ -857,9 +857,11 @@ export default function Training() {
           lastSpokenRef.current = fb.text;
 
           if (cmdPhase === 'IDLE' || isHoldExercise) {
-            // Non-command mode: speak count, coaching tip
-            speakCount(fb.count);
-            if (coachingText) {
+            // Non-command mode: speak count only if not currently speaking server feedback
+            if (!isSpeaking()) {
+              speakCount(fb.count);
+            }
+            if (coachingText && !isSpeaking()) {
               const now = Date.now();
               if (now - lastCoachingTimeRef.current > 10000) {
                 lastCoachingTimeRef.current = now;
@@ -906,8 +908,8 @@ export default function Training() {
             handleSetComplete();
             return;
           }
-        } else if (fb.type === 'warning' && coachingText && isNewRep) {
-          // For warnings, speak coaching text ONLY on new rep (not every frame)
+        } else if (fb.type === 'warning' && coachingText && isNewRep && !isSpeaking()) {
+          // For warnings, speak coaching text ONLY on new rep and not during server feedback
           speakPriority(coachingText, { rate: 1.2, pitch: 1.05 });
           lastSpokenRef.current = fb.text;
         }
