@@ -1257,6 +1257,11 @@ export default function Training() {
     warmUpInactivityStartRef.current = Date.now();
     lastActivityRef.current = Date.now();
 
+    // Server wake-up: send first frame on first warm-up exercise to eliminate cold-start
+    if (warmUpIdx === 0 && captureFrame && videoRef.current) {
+      performWarmUpCalibration(captureFrame, videoRef.current);
+    }
+
     // 1) Audible Instructions: full name + description + player name (speakPriority)
     const exName = isHe ? currentWarmUp.name.he : currentWarmUp.name.en;
     const exDesc = isHe ? currentWarmUp.description.he : currentWarmUp.description.en;

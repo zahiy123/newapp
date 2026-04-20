@@ -354,9 +354,9 @@ export async function analyzeRepFrames({ frames, sport, exercise, playerProfile,
     const ampLevel = playerProfile?.amputationLevel || '';
     const hasProsthesis = disability !== 'none' || (ampSide && ampSide !== 'none');
     const ampBlock = hasProsthesis
-      ? `\nהספורטאי משתמש בפרוטזה ברגל (${ampSide || 'לא ידוע'}, ${ampLevel || ''}).
-אל תעיר על חוסר סימטריה בין צדדים. אל תעיר על מנח ירכיים או ברכיים.
-התמקד אך ורק בפלג גוף עליון: ידיים, כתפיים, גב, ליבה, טווח תנועה.`
+      ? `\nהספורטאי עם פרוטזה ברגל. אסור להעיר על: סימטריה, ירכיים, נטייה, רגליים.
+התמקד רק ב: ליבה, גב, כתפיים, ידיים, טווח תנועה עליון.
+אם פלג עליון ישר ותנועה מלאה, ציון 8 ומעלה.`
       : '';
 
     // === UNIVERSAL PRO COACH — BIOMECHANICAL ANALYSIS ===
@@ -370,14 +370,18 @@ export async function analyzeRepFrames({ frames, sport, exercise, playerProfile,
     const sportHint = sportContext[sport] || sportContext.fitness;
 
     const system = `ענה אך ורק בפורמט: SCORE|INSTRUCTION|PRO_TIP
-בלי כותרות, בלי #, בלי **, בלי הסברים. רק שורה אחת בפורמט הזה.
+שורה אחת בלבד. בלי #, בלי **, בלי כותרות, בלי הסברים נוספים.
 מאמן ${sport||'fitness'}. תרגיל: ${exercise}.
 ${playerName} rep#${repNumber}. ${sportHint}${anglesBlock}${telemetryBlock}${bioBlock}${ampBlock}${scoreHint}
-ציון 1-10. הוראה: עברית פשוטה עד 4 מילים. טיפ: עד 4 מילים.
-מילים פשוטות בלבד. אסור להמציא מילים.
-אם הספורטאי עם פרוטזה: אל תעיר על סימטריה, ירכיים, נטייה. פלג עליון ישר+תנועה מלאה=ציון 8+.
-8|יישר גב|כופף מרפקים 90
-7|רד עמוק יותר|שמור ליבה יציבה`;
+כללי ציון:
+ציון 1-7: תיקון פעיל. תגיד איך לתקן, לא מה לא בסדר. משפט קצר וברור.
+ציון 8-10: אישור קצר. טכניקה טובה, תמשיך.
+סגנון: עברית פשוטה, מילים מקצועיות: חזה בחוץ, גב ישר, ליבה מתוחה, טווח מלא.
+משפטים קצרים עם נקודה. אסור להמציא מילים.
+5|תרד עמוק יותר, חזה קרוב לרצפה|תנעל שכמות
+3|תכניס בטן, תיישר גב מיד|ליבה מתוחה
+8|טכניקה מעולה, תמשיך|חזה בחוץ
+9|מצוין, טווח מלא|גב ישר וחזק`;
 
     const t0 = Date.now();
     let message;
@@ -392,7 +396,7 @@ ${playerName} rep#${repNumber}. ${sportHint}${anglesBlock}${telemetryBlock}${bio
       console.log(`[VISION-IMG] ${cleanFrames.length} frames for ${exercise} rep#${repNumber} serverScore=${serverScore} bio=${!!biomechanics} sizes=${cleanFrames.map(f => Math.round(f.length/1024) + 'KB').join(',')}`);
       message = await client.messages.create({
         model: HAIKU_VISION_MODEL,
-        max_tokens: 40,
+        max_tokens: 60,
         system,
         messages: [{ role: 'user', content: [
           ...imageBlocks,
@@ -404,7 +408,7 @@ ${playerName} rep#${repNumber}. ${sportHint}${anglesBlock}${telemetryBlock}${bio
       console.warn(`[VISION-TEXT] No images for ${exercise} rep#${repNumber} — text-only`);
       message = await client.messages.create({
         model: HAIKU_VISION_MODEL,
-        max_tokens: 40,
+        max_tokens: 60,
         system,
         messages: [{ role: 'user', content: 'נתח' }]
       });
