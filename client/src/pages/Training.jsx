@@ -185,6 +185,13 @@ export default function Training() {
   // Confirmed rep TTS: "חזרה X. [feedback]. עכשיו רד לחזרה Y"
   // Partial rep TTS:   "החזרה לא נספרה. [feedback]. נסה שוב את חזרה X"
   const onVisionFeedback = useCallback((result) => {
+    // Instant UI feedback: show "analyzing" spinner while server processes
+    if (result._analyzing) {
+      setAiAnalyzing(true);
+      return;
+    }
+    setAiAnalyzing(false);
+
     const cmdPhase = commandPhaseRef.current;
     const curRep = commandRepRef.current;
     const aiFeedback = result.feedback ? stripName(result.feedback) : 'המשך ככה';
@@ -286,6 +293,7 @@ export default function Training() {
   const exerciseStateRef = useRef({});
   const [displayReps, setDisplayReps] = useState(0);
   const [feedback, setFeedback] = useState(null);
+  const [aiAnalyzing, setAiAnalyzing] = useState(false);
   const [phase, setPhase] = useState(PHASE.IDLE);
   const [timer, setTimer] = useState(0);
   const [activeTimer, setActiveTimer] = useState(0);
@@ -2175,12 +2183,17 @@ export default function Training() {
           </button>
         )}
 
-        {/* Rep counter */}
+        {/* Rep counter + analyzing indicator */}
         {phase === PHASE.EXERCISING && displayReps != null && (
-          <div className="absolute bottom-4 right-4 bg-black/70 text-white px-4 py-2 rounded-xl">
-            <span className="text-sm">{t('training.reps')}: </span>
-            <span className="text-2xl font-bold">{displayReps}</span>
-            <span className="text-sm text-white/60">/{currentExercise?.reps || '?'}</span>
+          <div className="absolute bottom-4 right-4 bg-black/70 text-white px-4 py-2 rounded-xl flex items-center gap-2">
+            <div>
+              <span className="text-sm">{t('training.reps')}: </span>
+              <span className="text-2xl font-bold">{displayReps}</span>
+              <span className="text-sm text-white/60">/{currentExercise?.reps || '?'}</span>
+            </div>
+            {aiAnalyzing && (
+              <div className="animate-spin w-5 h-5 border-2 border-white/30 border-t-yellow-400 rounded-full" title={isHe ? 'מנתח...' : 'Analyzing...'} />
+            )}
           </div>
         )}
 

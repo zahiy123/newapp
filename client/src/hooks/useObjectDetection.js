@@ -95,11 +95,11 @@ export function useObjectDetection() {
   const captureFrame = useCallback((videoEl) => {
     if (!videoEl || videoEl.readyState < 2) return null;
     const canvas = document.createElement('canvas');
-    // Scale down to max 400px keeping aspect ratio
-    const MAX_DIM = 400;
+    // Scale down to max 480px width keeping aspect ratio
+    const MAX_W = 480;
     const vw = videoEl.videoWidth;
     const vh = videoEl.videoHeight;
-    const scale = Math.min(MAX_DIM / vw, MAX_DIM / vh, 1);
+    const scale = Math.min(MAX_W / vw, 1);
     canvas.width = Math.round(vw * scale);
     canvas.height = Math.round(vh * scale);
     const ctx = canvas.getContext('2d');
@@ -119,7 +119,7 @@ export function useObjectDetection() {
       // getImageData may fail on tainted canvas — send frame anyway
     }
 
-    const dataUrl = canvas.toDataURL('image/jpeg', 0.4);
+    const dataUrl = canvas.toDataURL('image/jpeg', 0.3);
     // Strip ANY data URL prefix — Claude API expects raw base64 only
     const base64 = dataUrl.replace(/^data:image\/\w+;base64,/, '').trim();
     if (!base64 || base64.length < 100) return null;

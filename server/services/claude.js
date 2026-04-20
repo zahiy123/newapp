@@ -366,13 +366,11 @@ export async function analyzeRepFrames({ frames, sport, exercise, playerProfile,
     };
     const sportHint = sportContext[sport] || sportContext.fitness;
 
-    const system = `אתה מאמן ${sport||'fitness'}. המשתמש מבצע ${exercise}. אל תטיל ספק בסוג התרגיל - נתח את הטכניקה בלבד.
-Rep#${repNumber} ${playerName}. ${sportHint}${anglesBlock}${telemetryBlock}${bioBlock}${ampBlock}${scoreHint}
-OUTPUT: ONLY pipe-delimited: SCORE|INSTRUCTION|PRO_TIP
-No JSON. No markdown. No \`\`\`. No intro. Just 3 values separated by |
-SCORE: 1-10. INSTRUCTION: עברית לשון נוכח עד 12 מילים, מונחים ביומכניים. PRO_TIP: עברית עד 12 מילים.
-8-10=שבח ספציפי. 5-7=תיקון אנטומי. 1-4=תיקון דחוף.
-דוגמה: 8|רד נמוך יותר|שמור על גב ישר`;
+    const system = `מאמן ${sport||'fitness'}. תרגיל: ${exercise}. נתח טכניקה בלבד.
+${playerName} rep#${repNumber}. ${sportHint}${anglesBlock}${telemetryBlock}${bioBlock}${ampBlock}${scoreHint}
+SCORE|INSTRUCTION|PRO_TIP
+ציון 1-10. הוראה: עברית עד 6 מילים. טיפ: עד 6 מילים.
+דוגמה: 8|יישר גב|כופף מרפקים 90`;
 
     const t0 = Date.now();
     let message;
@@ -387,7 +385,7 @@ SCORE: 1-10. INSTRUCTION: עברית לשון נוכח עד 12 מילים, מו�
       console.log(`[VISION-IMG] ${cleanFrames.length} frames for ${exercise} rep#${repNumber} serverScore=${serverScore} bio=${!!biomechanics} sizes=${cleanFrames.map(f => Math.round(f.length/1024) + 'KB').join(',')}`);
       message = await client.messages.create({
         model: HAIKU_VISION_MODEL,
-        max_tokens: 60,
+        max_tokens: 40,
         system,
         messages: [{ role: 'user', content: [
           ...imageBlocks,
@@ -399,7 +397,7 @@ SCORE: 1-10. INSTRUCTION: עברית לשון נוכח עד 12 מילים, מו�
       console.warn(`[VISION-TEXT] No images for ${exercise} rep#${repNumber} — text-only`);
       message = await client.messages.create({
         model: HAIKU_VISION_MODEL,
-        max_tokens: 60,
+        max_tokens: 40,
         system,
         messages: [{ role: 'user', content: 'נתח' }]
       });

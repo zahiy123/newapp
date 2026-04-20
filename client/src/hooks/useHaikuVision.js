@@ -104,17 +104,22 @@ export function useHaikuVision({ onVisionFeedback } = {}) {
     return frame;
   }, []);
 
-  // === FORCE SEND: no inFlight gate, no confidence gate ===
+  // === SEND WITH REQUEST LOCKING: block concurrent requests ===
   const sendToServer = useCallback(async (frame1, frame2, repNumber, angles1, angles2, landmarks1, landmarks2, triggerTs) => {
     if (disabledRef.current) {
       console.warn(`[HaikuVision] NOT SENDING: disabled after ${MAX_CONSECUTIVE_FAILURES} failures`);
       return;
     }
-    // Log inFlight but DON'T block — queue will naturally serialize via async
     if (inFlightRef.current) {
-      console.warn(`[HaikuVision] SEND CONCURRENT: previous request still in-flight, sending anyway`);
+      console.warn(`[HaikuVision] BLOCKED: previous request still in-flight, skipping rep #${repNumber}`);
+      return;
     }
     inFlightRef.current = true;
+
+    // Notify UI immediately that we're analyzing
+    if (onVisionFeedback) {
+      onVisionFeedback({ _analyzing: true, repNumber });
+    }
 
     const ctx = contextRef.current;
     const url = ANALYZE_REP_URL;
