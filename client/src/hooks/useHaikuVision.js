@@ -114,6 +114,11 @@ export function useHaikuVision({ onVisionFeedback } = {}) {
       console.warn(`[HaikuVision] BLOCKED: previous request still in-flight, skipping rep #${repNumber}`);
       return;
     }
+    // Pre-send duplicate check: if this rep was already confirmed, skip entirely
+    if (confirmedRepsRef.current.has(repNumber)) {
+      console.warn(`[HaikuVision] SKIPPED: rep #${repNumber} already confirmed, not sending again`);
+      return;
+    }
     inFlightRef.current = true;
 
     // Notify UI immediately that we're analyzing
@@ -174,18 +179,25 @@ export function useHaikuVision({ onVisionFeedback } = {}) {
       }
 
       if (onVisionFeedback) {
-        // AI-driven confirmation: score >= 3 means the rep counts
+        // AI-driven confirmation: score > 2 means the rep counts
         const aiScore = result.score ?? 0;
         const isDuplicate = confirmedRepsRef.current.has(repNumber);
-        const repConfirmed = aiScore >= 3 && !isDuplicate;
+
+        // Silently drop duplicate responses — don't call onVisionFeedback at all
+        if (isDuplicate) {
+          console.warn(`[HaikuVision] ⚠️ Rep #${repNumber} DUPLICATE — already confirmed, silently dropping`);
+          return;
+        }
+
+        const repConfirmed = aiScore > 2;
 
         if (repConfirmed) {
           confirmedRepsRef.current.add(repNumber);
-          console.log(`[HaikuVision] ✅ Rep #${repNumber} CONFIRMED by AI | score=${aiScore} | roundTrip=${roundTripMs}ms | peakToResponse=${totalLatencyMs}ms`);
-        } else if (isDuplicate) {
-          console.warn(`[HaikuVision] ⚠️ Rep #${repNumber} DUPLICATE — already confirmed, skipping`);
+          // Advance repCountRef so next anticipatedRep = repNumber + 1
+          repCountRef.current = Math.max(repCountRef.current, repNumber);
+          console.log(`[HaikuVision] ✅ Rep #${repNumber} CONFIRMED by AI | score=${aiScore} | repCountRef→${repCountRef.current} | roundTrip=${roundTripMs}ms | peakToResponse=${totalLatencyMs}ms`);
         } else {
-          console.log(`[HaikuVision] ❌ Rep #${repNumber} NOT confirmed | score=${aiScore} (<3) | roundTrip=${roundTripMs}ms`);
+          console.log(`[HaikuVision] ❌ Rep #${repNumber} NOT confirmed | score=${aiScore} (<=2) | roundTrip=${roundTripMs}ms`);
         }
 
         onVisionFeedback({ ...result, repConfirmed, repNumber, _latency: { roundTripMs, totalLatencyMs } });
@@ -249,6 +261,10 @@ export function useHaikuVision({ onVisionFeedback } = {}) {
     }
 
     // === ANY down phase start (from up OR from null) — capture Frame 1, reset bestFrame ===
+    // Cancel any previous speech so new rep coaching starts clean
+    if (currentPhase === 'down' && prevPhase !== 'down' && typeof window !== 'undefined' && window.speechSynthesis) {
+      window.speechSynthesis.cancel();
+    }
     if (currentPhase === 'down' && prevPhase !== 'down') {
       const f1 = captureFrame();
       startFrameRef.current = f1;
