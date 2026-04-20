@@ -1067,13 +1067,13 @@ export default function Training() {
         playerName,
         skillLevel: userProfile?.skillLevel || 'intermediate',
       });
-      // Start Haiku Vision per-rep analysis
+      // Start Haiku Vision per-rep analysis (pass calibration baseline for relative thresholding)
       startVision({
         sport: userProfile?.sport,
         exerciseName: currentExercise?.name,
         playerProfile: userProfile,
         playerName
-      }, captureFrame, videoRef.current);
+      }, captureFrame, videoRef.current, exerciseStateRef.current?._calibration || null);
     } else {
       stopBallLoop();
       stopAICoaching();
