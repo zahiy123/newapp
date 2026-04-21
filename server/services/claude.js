@@ -1582,10 +1582,16 @@ export async function generateWorkoutSummary({ profile, sessionData }) {
   const sportCtx = SPORT_CONTEXTS[sessionData.sport] || SPORT_CONTEXTS.football;
   const system = `${sportCtx}
 
-You are writing a short post-workout summary as an elite personal coach.
+You are writing a post-workout summary as an elite personal coach.
 Be specific about what the athlete did well and what needs improvement.
 Reference specific exercises by name. Be motivational but honest.
-Write in Hebrew. Keep it to 2-3 sentences max. Address the player by name.`;
+Write in Hebrew. Address the player by name.
+
+Format your response EXACTLY like this:
+SUMMARY: [2-3 sentences summarizing performance]
+TIP1: [short actionable tip for next session, max 12 words]
+TIP2: [short actionable tip for next session, max 12 words]
+TIP3: [short actionable tip for next session, max 12 words]`;
 
   const exerciseLines = (sessionData.exercises || []).map(e =>
     `${e.name}: ${e.repsActual || 0}/${e.repsTarget || 0} reps, ${e.setsCompleted || 0}/${e.setsTarget || 0} sets, quality: ${e.quality || 'unknown'}`
@@ -1599,10 +1605,18 @@ Write a short, personal coaching summary for this session.`;
 
   try {
     const text = await callClaude(system, content, 512);
-    return text;
+    // Parse structured response: SUMMARY: ... TIP1: ... TIP2: ... TIP3: ...
+    const summaryMatch = text.match(/SUMMARY:\s*(.+?)(?=\nTIP|$)/s);
+    const tips = [];
+    for (let i = 1; i <= 3; i++) {
+      const tipMatch = text.match(new RegExp(`TIP${i}:\\s*(.+?)(?=\\nTIP|$)`, 's'));
+      if (tipMatch) tips.push(tipMatch[1].trim());
+    }
+    return { summary: summaryMatch ? summaryMatch[1].trim() : text, tips };
   } catch (err) {
     console.error('Workout summary API error:', err.message);
-    return getLocalFallbackSummary({ profile, sessionData });
+    const fallback = getLocalFallbackSummary({ profile, sessionData });
+    return { summary: fallback, tips: [] };
   }
 }
 

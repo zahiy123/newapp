@@ -10,6 +10,7 @@ import {
   loadProgress, isDayCompleted, areAllWeeksComplete, getNextWorkoutDay, clearProgress,
   loadActiveWorkout, clearActiveWorkout
 } from '../utils/workoutStorage';
+import { loadWeeklyProgress, checkWeeklyReminder } from '../utils/weeklyGoals';
 
 
 const LOCATIONS = [
@@ -41,6 +42,8 @@ export default function Dashboard() {
   const [workoutCount, setWorkoutCount] = useState(0);
   const [progress, setProgress] = useState({ completedDays: [] });
   const [activeWorkout, setActiveWorkout] = useState(null);
+  const [weeklyProgress, setWeeklyProgress] = useState({ sessions: 0 });
+  const [weeklyReminder, setWeeklyReminder] = useState(null);
   const generatingRef = useRef(false);
 
   const name = userProfile?.name || '';
@@ -97,6 +100,13 @@ export default function Dashboard() {
   useEffect(() => {
     setActiveWorkout(loadActiveWorkout());
   }, []);
+
+  // Weekly goals tracking
+  useEffect(() => {
+    setWeeklyProgress(loadWeeklyProgress());
+    const target = userProfile?.trainingDays || 3;
+    setWeeklyReminder(checkWeeklyReminder(target));
+  }, [userProfile]);
 
   // Load existing plan: localStorage first, then Firestore
   useEffect(() => {
@@ -427,6 +437,48 @@ export default function Dashboard() {
               </button>
             ))}
           </div>
+        </div>
+      )}
+
+      {/* Weekly Goal Progress */}
+      {setupComplete && (
+        <div className="bg-gradient-to-r from-green-50 to-blue-50 rounded-xl shadow p-4">
+          <div className="flex items-center justify-between mb-2">
+            <h3 className="text-sm font-semibold text-gray-700">
+              {isHe ? 'מטרה שבועית' : 'Weekly Goal'}
+            </h3>
+            <span className="text-xs text-gray-400">
+              {new Date().toLocaleDateString(isHe ? 'he-IL' : 'en-US', { weekday: 'long' })}
+            </span>
+          </div>
+          <div className="flex items-center gap-4">
+            <div className="flex-1">
+              <div className="flex justify-between text-xs mb-1">
+                <span className="text-gray-600">
+                  {weeklyProgress.sessions} / {userProfile?.trainingDays || 3} {isHe ? 'אימונים' : 'sessions'}
+                </span>
+                <span className="text-gray-600">
+                  {Math.round((weeklyProgress.sessions / (userProfile?.trainingDays || 3)) * 100)}%
+                </span>
+              </div>
+              <div className="w-full bg-gray-200 rounded-full h-3">
+                <div
+                  className="bg-gradient-to-r from-green-500 to-blue-500 h-3 rounded-full transition-all duration-500"
+                  style={{ width: `${Math.min((weeklyProgress.sessions / (userProfile?.trainingDays || 3)) * 100, 100)}%` }}
+                />
+              </div>
+            </div>
+            <span className="text-2xl">
+              {weeklyProgress.sessions >= (userProfile?.trainingDays || 3) ? '🎉' : '💪'}
+            </span>
+          </div>
+        </div>
+      )}
+
+      {/* Thursday reminder */}
+      {weeklyReminder && (
+        <div className="bg-yellow-50 border border-yellow-300 rounded-xl p-4 text-center">
+          <p className="text-yellow-800 text-sm font-medium">{weeklyReminder}</p>
         </div>
       )}
 

@@ -79,17 +79,16 @@ router.post('/analyze-movement', async (req, res) => {
 router.post('/workout-summary', async (req, res) => {
   try {
     const { profile, sessionData } = req.body;
-    const summary = await generateWorkoutSummary({ profile, sessionData });
-    res.json({ summary });
+    const result = await generateWorkoutSummary({ profile, sessionData });
+    res.json({ summary: result.summary, tips: result.tips || [] });
   } catch (error) {
     console.error('Workout summary error:', error.message);
-    // Double-layer fallback: return a minimal template instead of 500
     const name = req.body?.profile?.name || 'שחקן';
     const exercises = req.body?.sessionData?.exercises || [];
     const completed = exercises.filter(e => (e.setsCompleted || 0) >= (e.setsTarget || 1)).length;
     const total = exercises.length;
     const fallback = `${name}, סיימת ${completed} מתוך ${total} תרגילים. ${completed === total ? 'כל הכבוד!' : 'בפעם הבאה ננסה לסיים הכל!'}`;
-    res.json({ summary: fallback });
+    res.json({ summary: fallback, tips: [] });
   }
 });
 

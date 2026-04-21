@@ -13,11 +13,14 @@ import { getAnalyzer, getLocationProps, getWarmUpExercises, getDisabilityContext
 import { LandmarkStabilizer, computeJointAngles, computeSymmetryScore, computeStabilityScore, detectMovementPhase, buildPerformanceReport, evaluateSetPerformance, getSportProfile, runSafetyCheck, generateCoachFeedback } from '../utils/motionEngine';
 
 import { estimateCalories } from '../utils/calorieEstimator';
+import ROMGauge from '../components/ROMGauge';
+import WorkoutSummary from '../components/WorkoutSummary';
 import { db } from '../services/firebase';
 import { doc, getDoc, addDoc, updateDoc, collection, Timestamp } from 'firebase/firestore';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { apiUrl } from '../utils/api';
 import { markDayCompleted, sanitizePlan, saveActiveWorkout, loadActiveWorkout, clearActiveWorkout } from '../utils/workoutStorage';
+import { incrementWeeklySession } from '../utils/weeklyGoals';
 
 const PHASE = {
   IDLE: 'idle',
@@ -358,6 +361,7 @@ export default function Training() {
   const prevLandmarksRef = useRef(null);       // Previous frame landmarks for movement gate
   const movementSufficientRef = useRef(false); // Movement >= 15% body height (gates server calls)
   const anglesHistoryRef = useRef([]);
+  const romGaugeRef = useRef(null);
   const prevAnglesRef = useRef(null);
   const performanceReportRef = useRef(null);
   const frameCountRef = useRef(0);
@@ -658,6 +662,16 @@ export default function Training() {
       anglesHistoryRef.current.push(angles);
       if (anglesHistoryRef.current.length > 30) anglesHistoryRef.current.shift();
 
+      // === ROM GAUGE: Update every 3rd frame ===
+      const primaryAngle = newState.kneeAngle ?? newState.elbowAngle ?? null;
+      const phaseStart = newState._phaseStartAngle;
+      if (primaryAngle != null && phaseStart != null && romGaugeRef.current) {
+        const delta = Math.abs(primaryAngle - phaseStart);
+        const range = newState._calibration?.range || 90;
+        const romPct = Math.min(delta / range, 1.0);
+        romGaugeRef.current.updateGauge(romPct);
+      }
+
       // Build performance report every ~1 second (every 20th computed frame)
       if (frameCountRef.current % 60 === 0) {
         const primaryJoint = analyzerRef.current?.cueKey === 'squat' || analyzerRef.current?.cueKey === 'lunge' ? 'leftKnee' : 'leftElbow';
@@ -861,11 +875,14 @@ export default function Training() {
             if (!isSpeaking()) {
               speakCount(fb.count);
             }
-            if (coachingText && !isSpeaking()) {
+            if (coachingText) {
               const now = Date.now();
               if (now - lastCoachingTimeRef.current > 10000) {
                 lastCoachingTimeRef.current = now;
-                speakIfIdle(coachingText, { rate: 1.2 });
+                // 150ms delay so user hears the count before technique instruction
+                setTimeout(() => {
+                  if (!isSpeaking()) speakIfIdle(coachingText, { rate: 1.2 });
+                }, 150);
               }
             }
           } else if (cmdPhase === 'WAITING_FOR_REP') {
@@ -1447,6 +1464,7 @@ export default function Training() {
     stabilizerRef.current.reset();
     anglesHistoryRef.current = [];
     prevAnglesRef.current = null;
+    romGaugeRef.current?.reset();
     performanceReportRef.current = null;
     frameCountRef.current = 0;
   }
@@ -1504,6 +1522,7 @@ export default function Training() {
         const weekIdx = parseInt(searchParams.get('week') || '0');
         const dayIdx = parseInt(searchParams.get('day') || '0');
         markDayCompleted(weekIdx, dayIdx);
+        incrementWeeklySession();
       }
       // Fire-and-forget AI summary
       fetchAISummary(ref.id, data);
@@ -1850,14 +1869,13 @@ export default function Training() {
 
   if (workoutDone) {
     return (
-      <div className="max-w-lg mx-auto text-center py-12 space-y-6">
-        <div className="text-6xl">&#127942;</div>
-        <h1 className="text-3xl font-bold text-gray-800">{t('training.workoutComplete')}</h1>
-        <p className="text-lg text-gray-500">{t('training.greatJob')}</p>
-        <button onClick={() => navigate('/')} className="px-8 py-3 bg-gradient-to-r from-blue-600 to-purple-600 text-white rounded-lg font-medium">
-          {t('training.backToPlan')}
-        </button>
-      </div>
+      <WorkoutSummary
+        sessionData={sessionDataRef.current}
+        profile={userProfile}
+        sport={userProfile?.sport}
+        isHe={isHe}
+        onBackToPlan={() => navigate('/')}
+      />
     );
   }
 
@@ -1904,6 +1922,13 @@ export default function Training() {
           >
             {isHe ? '\u2716 \u05E1\u05D9\u05D9\u05DD' : '\u2716 End'}
           </button>
+        )}
+
+        {/* ROM Gauge overlay */}
+        {phase === PHASE.EXERCISING && cameraActive && (
+          <div className="absolute bottom-3 right-3 z-20 pointer-events-none">
+            <ROMGauge ref={romGaugeRef} isHe={isHe} />
+          </div>
         )}
 
         {!poseReady && cameraActive && (
