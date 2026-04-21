@@ -50,6 +50,14 @@ export default function Dashboard() {
 
   const fingerprint = useMemo(() => userProfile ? buildFingerprint(userProfile) : '', [userProfile]);
 
+  // Auto-redirect to onboarding if profile incomplete
+  useEffect(() => {
+    if (!userProfile) return;
+    if (!userProfile.name) { navigate('/profile'); return; }
+    if (!userProfile.sport) { navigate('/sport-selection'); return; }
+    if (!userProfile.goals?.length) { navigate('/goals'); return; }
+  }, [userProfile, navigate]);
+
   useEffect(() => {
     if (userProfile?.trainingLocation) setCurrentLocation(userProfile.trainingLocation);
     if (userProfile?.equipment) setCurrentEquipment(userProfile.equipment);
@@ -282,7 +290,7 @@ export default function Dashboard() {
         plan.generalTips = tips.generalTips || [];
         plan.safetyNotes = tips.safetyNotes || [];
         setTrainingPlan({ ...plan });
-        await updateDoc(doc(db, 'users', user.uid), { trainingPlan: { ...plan } });
+        await setDoc(doc(db, 'users', user.uid), { trainingPlan: { ...plan } }, { merge: true });
         savePlan({ ...plan }, fp);
       } catch {}
 

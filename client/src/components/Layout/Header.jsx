@@ -24,9 +24,11 @@ export default function Header() {
         <div className="flex items-center gap-3">
           <button
             onClick={toggleLanguage}
-            className="px-3 py-1 bg-white/20 rounded-lg text-sm hover:bg-white/30 transition"
+            aria-label={lang === 'he' ? 'Switch to English' : 'שינוי שפה לעברית'}
+            className="px-3 py-1 bg-white/20 rounded-lg text-sm hover:bg-white/30 transition flex items-center gap-1"
           >
-            {lang === 'he' ? 'EN' : 'עב'}
+            <span>{lang === 'he' ? 'EN' : 'עב'}</span>
+            <span className="hidden sm:inline text-xs opacity-75">{lang === 'he' ? 'שפה' : 'Lang'}</span>
           </button>
 
           {user && (
@@ -54,6 +56,7 @@ export default function Header() {
         <nav className="md:hidden flex justify-around py-2 border-t border-white/20 text-sm">
           <Link to="/" className="hover:text-blue-200">{t('nav.home')}</Link>
           <Link to="/profile" className="hover:text-blue-200">{t('nav.profile')}</Link>
+          <Link to="/training" className="hover:text-blue-200">{t('nav.training')}</Link>
           <Link to="/stats" className="hover:text-blue-200">{t('nav.stats')}</Link>
           <Link to="/game" className="hover:text-blue-200">{t('nav.game')}</Link>
         </nav>

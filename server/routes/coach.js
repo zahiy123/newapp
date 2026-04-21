@@ -146,36 +146,25 @@ router.post('/realtime-feedback', async (req, res) => {
 const repAnalysisInFlight = new Set();
 
 router.post('/analyze-rep', async (req, res) => {
-  const { playerName, exercise, frames, sport, playerProfile, repNumber, qaMode, jointAngles, telemetry } = req.body;
+  const { playerName, exercise, frames, sport, playerProfile, repNumber, jointAngles, telemetry } = req.body;
   const safeFallback = { is_correct: true, feedback: '', score: 0 };
 
   // === CALIBRATION WARM-UP: fast reply to open SSL + wake server ===
   if (exercise === 'calibration') {
-    const frameKB = frames?.[0] ? Math.round(frames[0].length / 1024) : 0;
-    console.log(`[Server] 🔥 WARM-UP calibration received (${frameKB}KB) — replying instantly`);
     return res.json({ status: 'ready' });
   }
 
   const key = `rep-${playerName}-${exercise}`;
 
-  // === DETAILED LOGGING FOR EVERY REQUEST ===
   const frameCount = frames ? frames.length : 0;
-  const framesSizes = frames ? frames.map(f => typeof f === 'string' ? Math.round(f.length / 1024) : 0) : [];
-  const totalKB = framesSizes.reduce((a, b) => a + b, 0);
-  console.log(`[Server] ========================================`);
-  console.log(`[Server] 📥 Rep #${repNumber} received | exercise=${exercise} | player=${playerName} | sport=${sport}`);
-  console.log(`[Server] 📸 ${frameCount} images received | sizes=${framesSizes.join(',')}KB | total=${totalKB}KB | angles=${jointAngles?.length || 0}`);
+  console.log(`[Server] Rep #${repNumber} | exercise=${exercise} | player=${playerName} | frames=${frameCount}`);
 
-  // Throttle: reduced to 1s for rapid testing
-  if (!qaMode) {
-    if (shouldThrottle(key, 1000)) {
-      console.log(`[Server] ⚠️ THROTTLED rep #${repNumber} (${key}) — too fast, try again`);
-      return res.json(safeFallback);
-    }
-    if (repAnalysisInFlight.has(key)) {
-      console.log(`[Server] ⚠️ IN-FLIGHT rep #${repNumber} (${key}) — previous still processing`);
-      return res.json(safeFallback);
-    }
+  // Throttle: always enforced (no client bypass)
+  if (shouldThrottle(key, 1000)) {
+    return res.json(safeFallback);
+  }
+  if (repAnalysisInFlight.has(key)) {
+    return res.json(safeFallback);
   }
 
   if (!frames || !Array.isArray(frames) || frames.length < 1) {
@@ -185,8 +174,8 @@ router.post('/analyze-rep', async (req, res) => {
 
   repAnalysisInFlight.add(key);
 
-  // Debug mode: always save frames during testing phase
-  const shouldDebug = true;
+  // Debug mode: only save frames when DEBUG_VISION env var is set
+  const shouldDebug = process.env.DEBUG_VISION === 'true';
   if (shouldDebug) {
     try {
       const { saveDebugFrames } = await import('../services/debugFrames.js');
@@ -198,21 +187,12 @@ router.post('/analyze-rep', async (req, res) => {
 
   try {
     const t0 = Date.now();
-    console.log(`[Server] 🧠 Sending to AI for analysis...`);
     const result = await analyzeRepFrames({ frames, sport, exercise, playerProfile, repNumber, jointAngles, telemetry });
     const elapsed = Date.now() - t0;
-    console.log(`[Server] 🧠 AI Feedback for rep #${repNumber}: score=${result.score} | "${result.feedback || result.instruction || '(empty)'}"`);
-    console.log(`[Server] ⏱️ Response Time: ${elapsed}ms`);
-    console.log(`[Server] ========================================`);
-    if (shouldDebug) {
-      result._debug = { framesDir: 'server/debug_frames', savedAt: Date.now(), repNumber };
-    }
+    console.log(`[Server] Rep #${repNumber} score=${result.score} (${elapsed}ms)`);
     res.json(result);
   } catch (error) {
-    const elapsed = Date.now() - Date.now();
-    console.error(`[Server] ❌ ERROR on rep #${repNumber}: ${error.message}`);
-    console.error(`[Server] Stack: ${error.stack?.slice(0, 300)}`);
-    console.log(`[Server] ========================================`);
+    console.error(`[Server] Rep #${repNumber} error: ${error.message}`);
     res.json(safeFallback);
   } finally {
     repAnalysisInFlight.delete(key);
@@ -253,8 +233,11 @@ router.post('/adapt-workout', async (req, res) => {
 });
 
 // === QA DEBUG ENDPOINT ===
-// GET /api/coach/debug-frames — list saved debug frames (only works with DEBUG_VISION or in dev)
+// GET /api/coach/debug-frames — only available when DEBUG_VISION is enabled
 router.get('/debug-frames', async (req, res) => {
+  if (process.env.DEBUG_VISION !== 'true') {
+    return res.status(404).json({ error: 'Not found' });
+  }
   try {
     const { getDebugStats } = await import('../services/debugFrames.js');
     const stats = getDebugStats();

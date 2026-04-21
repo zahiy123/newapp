@@ -172,6 +172,7 @@ export default function GameMode() {
       isHe ? 'מחצית שנייה! יאללה!' : 'Second half! Let\'s go!',
       { rate: 1.3 }
     );
+    clearInterval(gameTimerRef.current);
     gameTimerRef.current = setInterval(() => {
       setGameTimer(prev => {
         if (prev + 1 >= halfLength * 60) {
@@ -187,6 +188,7 @@ export default function GameMode() {
     if (gamePaused) {
       setGamePaused(false);
       shortWhistle();
+      clearInterval(gameTimerRef.current);
       gameTimerRef.current = setInterval(() => {
         setGameTimer(prev => {
           if (prev + 1 >= halfLength * 60) clearInterval(gameTimerRef.current);

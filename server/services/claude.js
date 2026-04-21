@@ -7,6 +7,20 @@ const client = new Anthropic({
   apiKey: process.env.ANTHROPIC_API_KEY
 });
 
+// Sanitize user input to prevent prompt injection
+function sanitizeInput(value, maxLength = 50) {
+  if (typeof value !== 'string') return String(value || '');
+  // Strip control characters, pipe delimiters, and prompt-like patterns
+  return value
+    .replace(/[\x00-\x1f]/g, '')           // control chars
+    .replace(/[|]/g, '')                     // pipe (our delimiter)
+    .replace(/ignore.*instruction/gi, '')    // common injection patterns
+    .replace(/system.*prompt/gi, '')
+    .replace(/\n/g, ' ')                     // newlines
+    .trim()
+    .slice(0, maxLength);
+}
+
 export function extractJSON(text) {
   try { return JSON.parse(text); } catch {}
   const codeBlockMatch = text.match(/```(?:json)?\s*([\s\S]*?)```/);
@@ -307,7 +321,9 @@ function loadDebugFrames(playerName, exercise, repNumber) {
 export async function analyzeRepFrames({ frames, sport, exercise, playerProfile, repNumber, jointAngles, telemetry }) {
   const safeFallback = { is_correct: true, instruction: '', pro_tip: '', feedback: '', score: 0, angles: {} };
   try {
-    const playerName = playerProfile?.name || 'ספורטאי';
+    const playerName = sanitizeInput(playerProfile?.name, 30) || 'ספורטאי';
+    const safeExercise = sanitizeInput(exercise, 40) || 'exercise';
+    const safeSport = sanitizeInput(sport, 30) || 'fitness';
     const hasAngles = jointAngles && Array.isArray(jointAngles) && jointAngles.length > 0;
 
     // Compute score server-side from angles (deterministic, reliable)
@@ -371,7 +387,7 @@ export async function analyzeRepFrames({ frames, sport, exercise, playerProfile,
 
     const system = `ענה אך ורק בפורמט: SCORE|INSTRUCTION|PRO_TIP
 שורה אחת בלבד. בלי #, בלי **, בלי כותרות, בלי הסברים נוספים.
-מאמן ${sport||'fitness'}. תרגיל: ${exercise}.
+מאמן ${safeSport}. תרגיל: ${safeExercise}.
 ${playerName} rep#${repNumber}. ${sportHint}${anglesBlock}${telemetryBlock}${bioBlock}${ampBlock}${scoreHint}
 כללי ציון:
 ציון 1-7: תיקון פעיל. תגיד איך לתקן, לא מה לא בסדר. משפט קצר וברור.
@@ -845,7 +861,7 @@ AVOID: סקוואט, לאנג'ים, גשר ישבן, מטפס הרים, ישיב
 
   return `Create week ${weekNumber}/4. Theme: "${theme}"
 
-PLAYER: ${profile.name}, Age ${profile.age}, ${profile.gender}, ${profile.height}cm, ${profile.weight}kg
+PLAYER: ${sanitizeInput(profile.name, 30)}, Age ${Number(profile.age) || 25}, ${sanitizeInput(profile.gender, 10)}, ${Number(profile.height) || 170}cm, ${Number(profile.weight) || 70}kg
 Disability: ${profile.disability}.${profile.amputationSide && profile.amputationSide !== 'none' ? ` Side: ${profile.amputationSide}. Level: ${profile.amputationLevel}.` : ''} ${aidInfo}
 Level: ${skillLevel} — ${levelDirective}
 ${ageRule}
@@ -1575,7 +1591,7 @@ Write in Hebrew. Keep it to 2-3 sentences max. Address the player by name.`;
     `${e.name}: ${e.repsActual || 0}/${e.repsTarget || 0} reps, ${e.setsCompleted || 0}/${e.setsTarget || 0} sets, quality: ${e.quality || 'unknown'}`
   ).join('; ');
 
-  const content = `Player: ${profile.name}, Age: ${profile.age}, Sport: ${sessionData.sport}, Disability: ${profile.disability || 'none'}
+  const content = `Player: ${sanitizeInput(profile.name, 30)}, Age: ${Number(profile.age) || 25}, Sport: ${sanitizeInput(sessionData.sport, 30)}, Disability: ${sanitizeInput(profile.disability, 20) || 'none'}
 Session status: ${sessionData.status}, Duration: ${Math.floor((sessionData.totalDuration || 0) / 60)} min, Calories: ${sessionData.totalCalories || 0}
 Warm-up completed: ${sessionData.warmUpCompleted ? 'yes' : 'no'}
 Exercises: ${exerciseLines}
@@ -1691,7 +1707,7 @@ export async function adaptWorkout({ profile, completedExercises, performance, r
 
 You are adapting a workout MID-SESSION based on athlete performance.
 
-Athlete: ${profile.name || 'Athlete'}, age ${profile.age || 25}, ${profile.disability || 'no disability'}
+Athlete: ${sanitizeInput(profile.name, 30) || 'Athlete'}, age ${Number(profile.age) || 25}, ${sanitizeInput(profile.disability, 20) || 'no disability'}
 Skill level: ${profile.skillLevel || 'intermediate'}
 ${envInfo}
 
