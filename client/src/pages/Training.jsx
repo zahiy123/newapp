@@ -1547,9 +1547,9 @@ export default function Training() {
         }),
       });
       if (resp.ok) {
-        const { summary } = await resp.json();
-        if (summary) {
-          await updateDoc(doc(db, 'users', user.uid, 'workouts', docId), { aiSummary: summary });
+        const data = await resp.json();
+        if (data.summary) {
+          await updateDoc(doc(db, 'users', user.uid, 'workouts', docId), { aiSummary: data.summary });
         }
       }
     } catch (err) {
