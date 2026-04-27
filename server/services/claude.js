@@ -93,8 +93,7 @@ async function callClaudeHaiku(system, content, maxTokens = 2048, retries = 2) {
         model: HAIKU_VISION_MODEL,
         max_tokens: maxTokens,
         system,
-        messages: [{ role: 'user', content }],
-        timeout: 60000 // 60s timeout per attempt
+        messages: [{ role: 'user', content }]
       });
       return message.content[0].text;
     } catch (err) {
