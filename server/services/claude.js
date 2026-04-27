@@ -892,10 +892,12 @@ ${sport === 'fitness'
 CRITICAL: Return ONLY raw JSON. NO markdown, NO backticks, NO prose.
 DESCRIPTION STYLE: Write simple, clear action instructions in Hebrew. NOT "ביצוע פלנק סטטי" but "הישאר במצב שכיבת סמיכה על המרפקים עם גב ישר". Max 12 words.
 TIPS: One short safety/form tip per exercise. Max 10 words. Example: "שמור על גב ישר, אל תעגל את הכתפיים".
+INSTRUCTIONS: Array of 2-4 short Hebrew steps (max 8 words each). Example: ["עמוד ברוחב כתפיים","כופף ברכיים לאט","דחוף חזרה למעלה"].
+VOICE_PROMPT: One sentence in Hebrew (max 15 words) that a coach would say to explain the exercise aloud.
 warmup/cooldown: max 8 words.
 ${sport === 'fitness' ? (hasStrength ? '3-4' : '3') : '3-4'} exercises per day${sport !== 'fitness' ? ` (${hasStrength ? '3' : '2-3'} sport drills + max 1 strength)` : ' (all fitness exercises, NO sport drills)'}.
 
-{"weekNumber":${weekNumber},"theme":"${theme}","days":[{"day":"יום א","focus":"מיקוד","exercises":[{"name":"שם","description":"הסבר פשוט איך לבצע","sets":${prog.sets},"reps":"${prog.reps}","restSeconds":${prog.rest},"tips":"דגש בטיחות קצר"}],"warmup":"חימום פשוט","cooldown":"שחרור ומתיחות","durationMinutes":50}]}
+{"weekNumber":${weekNumber},"theme":"${theme}","days":[{"day":"יום א","focus":"מיקוד","exercises":[{"name":"שם","description":"הסבר פשוט איך לבצע","sets":${prog.sets},"reps":"${prog.reps}","restSeconds":${prog.rest},"tips":"דגש בטיחות קצר","instructions":["צעד 1","צעד 2","צעד 3"],"voicePrompt":"הסבר קולי קצר למאמן"}],"warmup":"חימום פשוט","cooldown":"שחרור ומתיחות","durationMinutes":50}]}
 
 Hebrew only. ${daysPerWeek} days.`;
 }

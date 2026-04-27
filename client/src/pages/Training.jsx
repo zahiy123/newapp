@@ -1120,7 +1120,7 @@ export default function Training() {
       if (!videoRef.current || !objReady) {
         // Skip scan if camera/detector not ready
         setPhase(PHASE.BRIEFING);
-        speakBriefing(currentExercise?.name, currentExercise?.description, currentExercise?.tips, locationProps, playerName);
+        speakBriefing(currentExercise?.name, currentExercise?.voicePrompt || currentExercise?.description, currentExercise?.tips, locationProps, playerName);
         return;
       }
 
@@ -1191,7 +1191,7 @@ export default function Training() {
           autoAdvanceTimer = setTimeout(() => {
             if (!cancelled) {
               setPhase(PHASE.BRIEFING);
-              speakBriefing(currentExercise?.name, currentExercise?.description, currentExercise?.tips, locationProps, playerName);
+              speakBriefing(currentExercise?.name, currentExercise?.voicePrompt || currentExercise?.description, currentExercise?.tips, locationProps, playerName);
             }
           }, 4000);
         }
@@ -1603,7 +1603,9 @@ export default function Training() {
     }
 
     setPhase(PHASE.BRIEFING);
-    speakBriefing(currentExercise.name, currentExercise.description, currentExercise.tips, locationProps, playerName);
+    // Use voicePrompt if available from AI, otherwise fall back to description
+    const voiceText = currentExercise.voicePrompt || currentExercise.description;
+    speakBriefing(currentExercise.name, voiceText, currentExercise.tips, locationProps, playerName);
   }
 
   function handleStartAfterBriefing() {
@@ -1959,29 +1961,68 @@ export default function Training() {
         )}
 
         {/* Briefing overlay — bottom sheet on mobile so camera stays visible */}
-        {phase === PHASE.BRIEFING && (
+        {phase === PHASE.BRIEFING && (() => {
+          // Build instructions: use AI-generated array or fall back to description
+          const steps = currentExercise?.instructions?.length > 0
+            ? currentExercise.instructions
+            : currentExercise?.description
+              ? currentExercise.description.split(/[.,،]/).map(s => s.trim()).filter(Boolean)
+              : [];
+          return (
           <div className="absolute inset-x-0 bottom-0 sm:inset-0 sm:flex sm:items-center sm:justify-center sm:bg-black/50 z-20">
-            <div className="bg-white/95 backdrop-blur-sm rounded-t-2xl sm:rounded-2xl p-4 sm:p-6 max-w-sm w-full text-center space-y-3 max-h-[60vh] sm:max-h-[85vh] overflow-y-auto shadow-2xl" dir={isHe ? 'rtl' : 'ltr'}>
+            <div className="bg-white/95 backdrop-blur-sm rounded-t-2xl sm:rounded-2xl p-4 sm:p-6 max-w-sm w-full space-y-3 max-h-[60vh] sm:max-h-[85vh] overflow-y-auto shadow-2xl" dir={isHe ? 'rtl' : 'ltr'}>
               {/* Drag handle for mobile */}
               <div className="sm:hidden w-10 h-1 bg-gray-300 rounded-full mx-auto mb-1"></div>
-              <h3 className="text-base font-bold text-gray-800">{currentExercise?.name}</h3>
-              <p className="text-sm text-gray-600">{currentExercise?.description}</p>
+
+              {/* Exercise name + meta */}
+              <div className="text-center">
+                <h3 className="text-lg font-bold text-gray-800">{currentExercise?.name}</h3>
+                <div className="text-xs text-gray-400 mt-1">
+                  {currentExercise?.sets} {t('training.set')} | {currentExercise?.reps} {t('training.reps')} | {currentExercise?.restSeconds}{t('dashboard.secRest')}
+                </div>
+              </div>
+
+              {/* Step-by-step instructions */}
+              {steps.length > 0 && (
+                <div className="bg-gray-50 rounded-xl p-3 space-y-2">
+                  <h4 className="text-xs font-bold text-gray-500 uppercase tracking-wide">
+                    {isHe ? 'איך לבצע' : 'How to do it'}
+                  </h4>
+                  <ol className={`space-y-1.5 text-sm text-gray-700 ${isHe ? 'pr-1' : 'pl-1'}`}>
+                    {steps.map((step, i) => (
+                      <li key={i} className="flex items-start gap-2">
+                        <span className="flex-shrink-0 w-5 h-5 rounded-full bg-blue-500 text-white text-xs flex items-center justify-center font-bold mt-0.5">
+                          {i + 1}
+                        </span>
+                        <span>{step}</span>
+                      </li>
+                    ))}
+                  </ol>
+                </div>
+              )}
+
+              {/* Setup hint */}
               <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-2.5 text-sm text-yellow-800">
                 <span className="font-bold">{LOCATION_ICONS[currentLocation]} {isHe ? 'הכנה' : 'Setup'}:</span>{' '}
                 {locationProps.setup}
               </div>
+
+              {/* Safety tip */}
               {currentExercise?.tips && (
-                <div className="bg-blue-50 rounded-lg p-2.5 text-xs text-blue-700">{currentExercise.tips}</div>
+                <div className="bg-blue-50 rounded-lg p-2.5 text-xs text-blue-700 flex items-start gap-1.5">
+                  <span className="flex-shrink-0">&#9888;&#65039;</span>
+                  <span>{currentExercise.tips}</span>
+                </div>
               )}
-              <div className="text-xs text-gray-400">
-                {currentExercise?.sets} {t('training.set')} | {currentExercise?.reps} {t('training.reps')} | {currentExercise?.restSeconds}{t('dashboard.secRest')}
-              </div>
-              <button onClick={handleStartAfterBriefing} className="w-full py-3 bg-gradient-to-r from-green-500 to-emerald-600 text-white rounded-lg font-bold text-lg hover:opacity-90 transition">
-                {t('training.briefingReady')}
+
+              {/* Start button */}
+              <button onClick={handleStartAfterBriefing} className="w-full py-3 bg-gradient-to-r from-green-500 to-emerald-600 text-white rounded-lg font-bold text-lg hover:opacity-90 transition shadow-lg">
+                {isHe ? 'הבנתי, בואו נתחיל!' : "Got it, let's start!"}
               </button>
             </div>
           </div>
-        )}
+          );
+        })()}
 
         {/* Environment scan overlay — bottom sheet on mobile */}
         {phase === PHASE.ENVIRONMENT_SCAN && (
@@ -1998,7 +2039,7 @@ export default function Training() {
                   </p>
                   <div className="inline-block w-8 h-8 border-4 border-blue-500 border-t-transparent rounded-full animate-spin"></div>
                   <button
-                    onClick={() => { environmentScannedRef.current = true; setPhase(PHASE.BRIEFING); speakBriefing(currentExercise?.name, currentExercise?.description, currentExercise?.tips, locationProps, playerName); }}
+                    onClick={() => { environmentScannedRef.current = true; setPhase(PHASE.BRIEFING); speakBriefing(currentExercise?.name, currentExercise?.voicePrompt || currentExercise?.description, currentExercise?.tips, locationProps, playerName); }}
                     className="text-xs text-gray-400 hover:text-gray-600 underline"
                   >
                     {isHe ? 'דלג' : 'Skip'}
