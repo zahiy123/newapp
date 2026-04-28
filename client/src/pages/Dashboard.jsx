@@ -627,7 +627,17 @@ export default function Dashboard() {
 
                 {day.warmup && (
                   <div className="bg-orange-50 rounded-lg p-3 text-sm">
-                    <span className="font-medium text-orange-700">{t('dashboard.warmup')}:</span> {day.warmup}
+                    <span className="font-medium text-orange-700">{t('dashboard.warmup')}:</span>{' '}
+                    {typeof day.warmup === 'string' ? day.warmup : day.warmup.text || ''}
+                    {typeof day.warmup === 'object' && day.warmup.instructions && (
+                      <ul className="mt-1 space-y-0.5 text-orange-600">
+                        {day.warmup.instructions.map((step, si) => (
+                          <li key={si} className="flex items-start gap-1">
+                            <span className="font-bold">{si + 1}.</span> {step}
+                          </li>
+                        ))}
+                      </ul>
+                    )}
                   </div>
                 )}
 

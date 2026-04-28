@@ -1496,6 +1496,8 @@ const WARM_UP_ARM_PUNCHES = {
   description: { he: 'הושט את הזרועות קדימה ואחורה בתנועת אגרוף', en: 'Extend your arms forward and back in a punching motion' },
   duration: 45,
   analyze: analyzeArmPunches,
+  instructions: { he: ['עמוד יציב עם רגליים ברוחב כתפיים', 'הושט אגרוף קדימה ביד אחת', 'החלף ידיים בקצב מהיר'], en: ['Stand stable with feet shoulder-width', 'Punch forward with one arm', 'Alternate arms at a fast pace'] },
+  voicePrompt: { he: 'נחמם את הידיים והכתפיים עם אגרופים מהירים קדימה', en: 'Warm up your arms and shoulders with fast forward punches' },
 };
 
 const WARM_UP_CORE_TWISTS = {
@@ -1504,6 +1506,8 @@ const WARM_UP_CORE_TWISTS = {
   description: { he: 'סובב את פלג הגוף העליון מצד לצד', en: 'Rotate your upper body side to side' },
   duration: 45,
   analyze: analyzeCoreTwists,
+  instructions: { he: ['עמוד יציב עם רגליים ברוחב כתפיים', 'הרם ידיים לגובה החזה', 'סובב את הגוף מצד לצד'], en: ['Stand stable with feet shoulder-width', 'Raise arms to chest height', 'Rotate your body side to side'] },
+  voicePrompt: { he: 'סיבובי גוף לחימום הליבה, תזוז בשליטה', en: 'Core twists to warm up, move with control' },
 };
 
 // Adapted warm-up exercises for disabilities
@@ -1512,6 +1516,8 @@ const WARM_UP_SINGLE_LEG_HIGH_KNEE = {
   name: { he: 'הרמת ברך', en: 'High Knee Raise' },
   description: { he: 'הרם את הברך לכיוון החזה תוך שמירה על יציבות', en: 'Raise your knee toward your chest while maintaining balance' },
   duration: 45, analyze: analyzeSingleLegHighKnee,
+  instructions: { he: ['היאחז בקביים ליציבות', 'הרם את הברך הבריאה לכיוון החזה', 'החזר לאט ושמור על איזון'], en: ['Hold crutches for stability', 'Raise your sound knee toward chest', 'Lower slowly and keep balance'] },
+  voicePrompt: { he: 'הרגל הבריאה שלך נושאת הכל, בוא נחמם אותה עם הרמות ברך', en: 'Your sound leg carries everything, let\'s warm it up with knee raises' },
 };
 
 const WARM_UP_FORWARD_KICKS = {
@@ -1519,6 +1525,8 @@ const WARM_UP_FORWARD_KICKS = {
   name: { he: 'בעיטות חימום', en: 'Warm-up Kicks' },
   description: { he: 'בעט קדימה ברגל לחימום שרירי הירך', en: 'Kick forward to warm up your thigh muscles' },
   duration: 45, analyze: analyzeForwardKicks,
+  instructions: { he: ['היאחז בקביים ליציבות', 'בעט קדימה ברגל הבריאה', 'חזור לאט ושמור על כף רגל יציבה'], en: ['Hold crutches for stability', 'Kick forward with sound leg', 'Return slowly, keep stable footing'] },
+  voicePrompt: { he: 'בעיטות חימום לרגל הבריאה, שרירי הירך צריכים להיות מוכנים', en: 'Warm-up kicks for your sound leg, thigh muscles need to be ready' },
 };
 
 const WARM_UP_BALANCE_HOPS = {
@@ -1526,6 +1534,8 @@ const WARM_UP_BALANCE_HOPS = {
   name: { he: 'קפיצות איזון', en: 'Balance Hops' },
   description: { he: 'קפיצות קטנות במקום תוך שמירה על יציבות עם הקביים', en: 'Small hops in place while maintaining balance with crutches' },
   duration: 45, analyze: analyzeBalanceHops,
+  instructions: { he: ['אחוז בקביים חזק', 'קפוץ קפיצות קטנות במקום', 'נחת רך על כף הרגל הבריאה'], en: ['Grip crutches firmly', 'Do small hops in place', 'Land softly on your sound foot'] },
+  voicePrompt: { he: 'קפיצות קטנות לאיזון, הקביים תומכות בך, אתה שולט', en: 'Small balance hops, crutches support you, you\'re in control' },
 };
 
 const WARM_UP_SINGLE_ARM_ROTATION = {
@@ -1533,6 +1543,8 @@ const WARM_UP_SINGLE_ARM_ROTATION = {
   name: { he: 'סיבוב יד אחת', en: 'Single Arm Rotation' },
   description: { he: 'סובב את היד הפעילה שלך בתנועה עגולה רחבה', en: 'Rotate your active arm in wide circular motions' },
   duration: 45, analyze: analyzeSingleArmRotation,
+  instructions: { he: ['עמוד יציב', 'סובב את היד הפעילה קדימה במעגלים רחבים', 'החלף כיוון אחרי 20 שניות'], en: ['Stand stable', 'Rotate your active arm forward in wide circles', 'Switch direction after 20 seconds'] },
+  voicePrompt: { he: 'היד החזקה שלך עושה עבודה כפולה, נחמם אותה עם סיבובים רחבים', en: 'Your strong arm does double duty, let\'s warm it with wide rotations' },
 };
 
 // Warm-up exercise definitions
@@ -1543,6 +1555,8 @@ export const WARM_UP_EXERCISES = [
     description: { he: 'סובב את הזרועות בתנועה עגולה', en: 'Rotate your arms in circular motions' },
     duration: 45,
     analyze: analyzeArmCircles,
+    instructions: { he: ['עמוד עם רגליים ברוחב כתפיים', 'פרוש ידיים לצדדים', 'סובב במעגלים קדימה ואחורה'], en: ['Stand with feet shoulder-width', 'Extend arms to sides', 'Rotate in circles forward and back'] },
+    voicePrompt: { he: 'בוא נחמם את הכתפיים עם סיבובי ידיים, קדימה ואחורה', en: 'Let\'s warm up your shoulders with arm circles, forward and back' },
   },
   {
     id: 'high_knees',
@@ -1550,6 +1564,8 @@ export const WARM_UP_EXERCISES = [
     description: { he: 'הרם את הברכיים לגובה המותניים בזו אחר זו', en: 'Lift your knees to waist height alternately' },
     duration: 45,
     analyze: analyzeHighKnees,
+    instructions: { he: ['עמוד זקוף', 'הרם ברך ימין לגובה המותניים', 'החלף לברך שמאל בקצב'], en: ['Stand upright', 'Raise right knee to waist height', 'Alternate to left knee rhythmically'] },
+    voicePrompt: { he: 'ברכיים למעלה בקצב, נעיר את הרגליים ואת הלב', en: 'High knees at pace, let\'s wake up your legs and heart' },
   },
   {
     id: 'side_steps',
@@ -1557,6 +1573,8 @@ export const WARM_UP_EXERCISES = [
     description: { he: 'צעד לצדדים בתנועה מהירה', en: 'Step side to side quickly' },
     duration: 45,
     analyze: analyzeSideSteps,
+    instructions: { he: ['עמוד ברגליים צמודות', 'צעד לצד ימין ואז שמאל', 'שמור על ברכיים כפופות קלות'], en: ['Stand with feet together', 'Step right then left', 'Keep knees slightly bent'] },
+    voicePrompt: { he: 'צעדים לצדדים, זריזים ומדויקים, שומרים על ברכיים כפופות', en: 'Side steps, quick and precise, keep knees slightly bent' },
   },
 ];
 

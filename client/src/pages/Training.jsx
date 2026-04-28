@@ -1279,17 +1279,22 @@ export default function Training() {
       performWarmUpCalibration(captureFrame, videoRef.current);
     }
 
-    // 1) Audible Instructions: full name + description + player name (speakPriority)
+    // 1) Audible Instructions: use voicePrompt if available, fallback to description
     const exName = isHe ? currentWarmUp.name.he : currentWarmUp.name.en;
-    const exDesc = isHe ? currentWarmUp.description.he : currentWarmUp.description.en;
+    const vp = currentWarmUp.voicePrompt
+      ? (isHe ? currentWarmUp.voicePrompt.he : currentWarmUp.voicePrompt.en)
+      : null;
+    const exDesc = vp || (isHe ? currentWarmUp.description.he : currentWarmUp.description.en);
     speakWarmUpExercise(exName, exDesc, playerName);
 
-    // Disability-specific safety tip after announcement
-    if (disabilityCtx.usesCrutches) {
-      setTimeout(() => speakDisabilityTip('crutchStable', playerName), 3500);
-    }
-    if (disabilityCtx.type === 'one_arm') {
-      setTimeout(() => speakDisabilityTip('useRemainingArm', playerName), 3500);
+    // Disability-specific safety tip after announcement (only if no voicePrompt already covers it)
+    if (!vp) {
+      if (disabilityCtx.usesCrutches) {
+        setTimeout(() => speakDisabilityTip('crutchStable', playerName), 3500);
+      }
+      if (disabilityCtx.type === 'one_arm') {
+        setTimeout(() => speakDisabilityTip('useRemainingArm', playerName), 3500);
+      }
     }
 
     warmUpPausedRef.current = false;
@@ -2446,6 +2451,19 @@ export default function Training() {
                     <span className="text-xs text-white/50">{currentWarmUp.duration}{isHe ? ' שניות' : 's'}</span>
                   </div>
                   <h2 className="text-lg font-bold text-white">{isHe ? currentWarmUp.name.he : currentWarmUp.name.en}</h2>
+
+                  {/* Warmup instructions */}
+                  {currentWarmUp.instructions && (
+                    <div className="space-y-1 py-1">
+                      {(isHe ? currentWarmUp.instructions.he : currentWarmUp.instructions.en).map((step, i) => (
+                        <div key={i} className="flex items-start gap-2 text-white/80 text-sm">
+                          <span className="text-orange-400 font-bold flex-shrink-0">{i + 1}.</span>
+                          <span>{step}</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
                   <div className="flex items-center justify-center py-2">
                     <span className={`text-5xl font-bold ${warmUpPaused ? 'text-yellow-500 animate-pulse' : 'text-white'}`}>{warmUpTimer}</span>
                   </div>
@@ -2578,7 +2596,18 @@ export default function Training() {
                     <span className="text-xs text-gray-400">{currentWarmUp.duration}{isHe ? ' שניות' : 's'}</span>
                   </div>
                   <h2 className="text-lg font-bold text-gray-800">{isHe ? currentWarmUp.name.he : currentWarmUp.name.en}</h2>
-                  <p className="text-sm text-gray-500">{isHe ? currentWarmUp.description.he : currentWarmUp.description.en}</p>
+                  {currentWarmUp.instructions ? (
+                    <div className="space-y-1 py-1">
+                      {(isHe ? currentWarmUp.instructions.he : currentWarmUp.instructions.en).map((step, i) => (
+                        <div key={i} className="flex items-start gap-2 text-gray-600 text-sm">
+                          <span className="text-orange-500 font-bold flex-shrink-0">{i + 1}.</span>
+                          <span>{step}</span>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="text-sm text-gray-500">{isHe ? currentWarmUp.description.he : currentWarmUp.description.en}</p>
+                  )}
                   <div className="flex items-center justify-center py-2">
                     <span className={`text-5xl font-bold ${warmUpPaused ? 'text-yellow-500 animate-pulse' : 'text-gray-800'}`}>{warmUpTimer}</span>
                   </div>
