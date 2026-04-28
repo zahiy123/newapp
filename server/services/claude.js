@@ -367,16 +367,35 @@ export async function analyzeRepFrames({ frames, sport, exercise, playerProfile,
     const disability = playerProfile?.disability || 'none';
     const ampSide = playerProfile?.amputationSide || '';
     const ampLevel = playerProfile?.amputationLevel || '';
+    const mobilityAid = playerProfile?.mobilityAid || 'none';
     const hasProsthesis = disability !== 'none' || (ampSide && ampSide !== 'none');
+
+    // Active device detection — visually scan frames for assistive devices
+    const deviceDetectionBlock = `
+זיהוי ציוד עזר בתמונה:
+- חפש: קביים, פרוטזה רגילה, פרוטזת ריצה (Blade), כיסא גלגלים, סד.
+- אם מזהה קביים: בדוק מרחק מהגוף, זווית נטייה, בסיס משולש תמיכה (2 קביים + רגל).
+- אם מזהה Blade: בדוק זווית עקמומיות, נקודת מגע עם הרצפה, יישור מול הברך.
+- נקודות ייחוס: קצה קב = נקודת מגע קרקע. קצה Blade = בסיס עמידה. השתמש בהן לחישוב יציבות.
+- אם הקביים רחוקות/צרות מדי, או Blade בזווית לא נכונה — ציין ב-INSTRUCTION.
+מילון ציוד: קביים רחוקות מדי, קרב קביים לגוף, בסיס משולש יציב, Blade בזווית טובה, נקודת מגע יציבה.`;
+
     const ampBlock = hasProsthesis
-      ? `\nהספורטאי עם פרוטזה ברגל. אסור להעיר על: סימטריה, ירכיים, נטייה, רגליים.
-התמקד רק ב: ליבה, גב, כתפיים, ידיים, טווח תנועה עליון.
-אם פלג עליון ישר ותנועה מלאה, ציון 8 ומעלה.`
+      ? `\nהספורטאי: מוגבלות=${disability}, צד=${ampSide || 'לא ידוע'}, רמה=${ampLevel || 'לא ידוע'}, עזר=${mobilityAid}.
+אסור להעיר על: סימטריה ירכיים, נטייה לצד, רגל חסרה.
+התמקד ב: ליבה, גב, כתפיים, ידיים, טווח תנועה עליון, מנח ציוד עזר.
+אם פלג עליון ישר ותנועה מלאה, ציון 8 ומעלה.
+${deviceDetectionBlock}`
+      : '';
+
+    // Lightweight device scan for users without disability in profile
+    const deviceScanBlock = !hasProsthesis
+      ? `\nאם אתה מזהה קביים, פרוטזה, או כיסא גלגלים בתמונה — התאם את הניתוח בהתאם. התעלם מהרגל/יד החסרה.`
       : '';
 
     // === UNIVERSAL PRO COACH — BIOMECHANICAL ANALYSIS ===
     const sportContext = {
-      footballAmputee: 'כדורגל קטועים: ניתוח בסיס קביים, זווית גזע, רוטציית ירך בבעיטה, מרכז כובד מעל משולש תמיכה',
+      footballAmputee: 'כדורגל קטועים: ניתוח בסיס קביים (קצוות=נקודות מגע), זווית גזע, רוטציית ירך בבעיטה, מרכז כובד מעל משולש תמיכה. בדוק רוחב בסיס קביים ויציבות.',
       football: 'כדורגל: נעילת קרסול, רגל עמידה ליד הכדור, רוטציית ירך, מעקב גוף',
       basketball: 'כדורסל: מרפק 90° מתחת לכדור, מעקב גוזנק, איזון רגליים, עין על הסל',
       tennis: 'טניס: סיבוב כתפיים מוקדם, נקודת מגע מול הגוף, מעקב מלא, העברת משקל',
@@ -387,7 +406,7 @@ export async function analyzeRepFrames({ frames, sport, exercise, playerProfile,
     const system = `ענה אך ורק בפורמט: SCORE|INSTRUCTION|PRO_TIP
 שורה אחת בלבד. בלי #, בלי **, בלי כותרות, בלי הסברים נוספים.
 מאמן ${safeSport}. תרגיל: ${safeExercise}.
-${playerName} rep#${repNumber}. ${sportHint}${anglesBlock}${telemetryBlock}${bioBlock}${ampBlock}${scoreHint}
+${playerName} rep#${repNumber}. ${sportHint}${anglesBlock}${telemetryBlock}${bioBlock}${ampBlock}${deviceScanBlock}${scoreHint}
 כללי ציון:
 ציון 1-7: תיקון פעיל. תגיד איך לתקן, לא מה לא בסדר. משפט קצר וברור.
 ציון 8-10: אישור קצר. טכניקה טובה, תמשיך.
@@ -411,7 +430,7 @@ ${playerName} rep#${repNumber}. ${sportHint}${anglesBlock}${telemetryBlock}${bio
       console.log(`[VISION-IMG] ${cleanFrames.length} frames for ${exercise} rep#${repNumber} serverScore=${serverScore} bio=${!!biomechanics} sizes=${cleanFrames.map(f => Math.round(f.length/1024) + 'KB').join(',')}`);
       message = await client.messages.create({
         model: HAIKU_VISION_MODEL,
-        max_tokens: 60,
+        max_tokens: 80,
         system,
         messages: [{ role: 'user', content: [
           ...imageBlocks,
@@ -423,7 +442,7 @@ ${playerName} rep#${repNumber}. ${sportHint}${anglesBlock}${telemetryBlock}${bio
       console.warn(`[VISION-TEXT] No images for ${exercise} rep#${repNumber} — text-only`);
       message = await client.messages.create({
         model: HAIKU_VISION_MODEL,
-        max_tokens: 60,
+        max_tokens: 80,
         system,
         messages: [{ role: 'user', content: 'נתח' }]
       });
