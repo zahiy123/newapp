@@ -21,6 +21,7 @@ import { useNavigate, useSearchParams } from 'react-router-dom';
 import { apiUrl } from '../utils/api';
 import { markDayCompleted, sanitizePlan, saveActiveWorkout, loadActiveWorkout, clearActiveWorkout } from '../utils/workoutStorage';
 import { incrementWeeklySession } from '../utils/weeklyGoals';
+import { saveSessionAvg, checkLevelUpEligibility } from '../utils/sessionScoring';
 
 const PHASE = {
   IDLE: 'idle',
@@ -202,6 +203,11 @@ export default function Training() {
     const repNumber = result.repNumber;
     console.log(`[CMD] onVisionFeedback: cmdPhase=${cmdPhase}, rep=${curRep}, repNumber=${repNumber}, confirmed=${repConfirmed}, score=${result.score}, fb="${aiFeedback}"`);
 
+    // Track AI score for adaptive coaching (per-exercise averaging)
+    if (result.score > 0) {
+      repScoresRef.current.push(result.score);
+    }
+
     // === AI-DRIVEN REP COUNTER: update displayReps immediately when AI confirms ===
     if (repConfirmed) {
       setDisplayReps(prev => {
@@ -327,6 +333,9 @@ export default function Training() {
   const [warmUpPaused, setWarmUpPaused] = useState(false);
   const warmUpReExplainedRef = useRef(false);
   const warmUpInactivityStartRef = useRef(0);
+
+  // Per-rep AI score tracking for adaptive coaching
+  const repScoresRef = useRef([]);
 
   // Feedback tracking
   const lastSpokenRef = useRef('');
@@ -1472,6 +1481,7 @@ export default function Training() {
     romGaugeRef.current?.reset();
     performanceReportRef.current = null;
     frameCountRef.current = 0;
+    repScoresRef.current = [];
   }
 
   // === SESSION TRACKING ===
@@ -1486,6 +1496,21 @@ export default function Training() {
         : setsPerformance.some(s => s.quality === 'needs_work') ? 'needs_work' : 'good')
       : 'needs_work';
 
+    // Compute exercise-level average score from all sets
+    const exerciseAvg = setsPerformance.length > 0
+      ? setsPerformance.reduce((s, sp) => s + (sp.avgScore || 0), 0) / setsPerformance.length
+      : 0;
+
+    // Adaptive coaching: suggest difficulty change based on average score
+    if (exerciseAvg > 0 && exerciseAvg < 5) {
+      setTimeout(() => {
+        speakIfIdle(isHe
+          ? `${playerName}, הציון הממוצע נמוך. אולי כדאי להוריד קושי או להתמקד בטכניקה`
+          : `${playerName}, average score is low. Consider lowering difficulty or focusing on technique`,
+          { rate: 1.2 });
+      }, 1500);
+    }
+
     sessionDataRef.current.exerciseResults.push({
       name: currentExercise.name,
       repsTarget: parseInt(currentExercise.reps) || 0,
@@ -1495,6 +1520,7 @@ export default function Training() {
       duration,
       quality: bestQuality,
       calories,
+      avgScore: Math.round(exerciseAvg * 10) / 10,
     });
   }
 
@@ -1528,6 +1554,24 @@ export default function Training() {
         const dayIdx = parseInt(searchParams.get('day') || '0');
         markDayCompleted(weekIdx, dayIdx);
         incrementWeeklySession();
+
+        // Save session average score and check for level-up eligibility
+        const exercises = sessionDataRef.current.exerciseResults || [];
+        const scoredExercises = exercises.filter(e => (e.avgScore || 0) > 0);
+        if (scoredExercises.length > 0) {
+          const sessionAvg = scoredExercises.reduce((s, e) => s + e.avgScore, 0) / scoredExercises.length;
+          saveSessionAvg(Math.round(sessionAvg * 10) / 10);
+
+          const levelUp = checkLevelUpEligibility();
+          if (levelUp) {
+            setTimeout(() => {
+              speakIfIdle(isHe
+                ? `${playerName}, שלושה אימונים ברמה גבוהה! הגיע הזמן לעלות רמה`
+                : `${playerName}, three high-level sessions! Time to level up`,
+                { rate: 1.2 });
+            }, 3000);
+          }
+        }
       }
       // Fire-and-forget AI summary
       fetchAISummary(ref.id, data);
@@ -1645,7 +1689,12 @@ export default function Training() {
     const wasGood = badFormCountRef.current < 3;
     const wasPerfect = badFormCountRef.current === 0 && goodFormCountRef.current > 3;
 
-    setSetsPerformance(prev => [...prev, { set: currentSet, quality: wasPerfect ? 'perfect' : wasGood ? 'good' : 'needs_work' }]);
+    // Compute set average from AI vision scores
+    const setAvgScore = repScoresRef.current.length > 0
+      ? repScoresRef.current.reduce((a, b) => a + b, 0) / repScoresRef.current.length
+      : 0;
+
+    setSetsPerformance(prev => [...prev, { set: currentSet, quality: wasPerfect ? 'perfect' : wasGood ? 'good' : 'needs_work', avgScore: Math.round(setAvgScore * 10) / 10 }]);
 
     if (wasPerfect) {
       const langKey = isHe ? 'he' : 'en';
