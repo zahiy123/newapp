@@ -4,7 +4,19 @@ import {
   analyzeAmputeeCrutchKick, analyzeAmputeeCrutchSprint,
   analyzeWheelchairBasketballShooting, analyzeWheelchairBasketballDribbling,
   analyzeWheelchairBasketballChestPass,
-  analyzeWheelchairTennisStroke, analyzeWheelchairTennisServe
+  analyzeWheelchairTennisStroke, analyzeWheelchairTennisServe,
+  analyzeLayup, analyzeCrossover, analyzeDefensiveSlide,
+  analyzeVolley, analyzeFootballPass, analyzeFirstTouch, analyzeJuggling,
+  analyzeAmputeeCrutchPass, analyzeAmputeeCrutchBalance, analyzeAmputeeCrutchPivot,
+  analyzeBouncePass, analyzeChestPass, analyzeOverheadPass,
+  analyzeSpinMove, analyzeHookShot, analyzePostMoves,
+  analyzeOverheadSmash, analyzeSplitStep,
+  analyzeHeaders, analyzeChestControl, analyzeConeDrill,
+  analyzeQuickTurns, analyzeShieldBall,
+  analyzeCrutchDribbling, analyzeCrutchAgility, analyzeCrutchShield,
+  analyzeCrutchHeader, analyzeCrutchChestControl,
+  analyzeGKDive, analyzeGKDistribution, analyzeGKPositioning, analyzeGKReaction,
+  analyzeWCBouncePass, analyzeWCPushSprint, analyzeWCSmash
 } from './sportAnalyzers';
 import { angleCosine } from './motionEngine';
 
@@ -1024,8 +1036,8 @@ export function analyzeArmCircles(landmarks, prevState = {}) {
   };
 }
 
-// --- High knees: detect knee height relative to hip ---
-export function analyzeHighKnees(landmarks, prevState = {}) {
+// --- High knees (warmup): detect knee height relative to hip ---
+export function analyzeHighKneesWarmup(landmarks, prevState = {}) {
   if (!landmarks) return { ...prevState, feedback: null };
 
   const vis = validateLandmarks(landmarks, ['legs', 'hips']);
@@ -1048,12 +1060,10 @@ export function analyzeHighKnees(landmarks, prevState = {}) {
   if (!lHip || !lKnee) return { ...prevState, feedback: null, posture, moving, _prevLandmarks: landmarks };
 
   const hipY = (lHip.y + (rHip?.visibility > 0.3 ? rHip.y : lHip.y)) / 2;
-  // Check if either knee is near or above hip level (Y decreases upward)
   const leftKneeHigh = lKnee?.visibility > 0.3 && (hipY - lKnee.y) > 0.02;
   const rightKneeHigh = rKnee?.visibility > 0.3 && (hipY - rKnee.y) > 0.02;
   const kneeIsHigh = leftKneeHigh || rightKneeHigh;
 
-  // Count knee lifts
   const wasHigh = prevState._kneeWasHigh || false;
   let reps = prevState.reps || 0;
   let feedback = null;
@@ -1063,13 +1073,11 @@ export function analyzeHighKnees(landmarks, prevState = {}) {
     feedback = { type: 'count', text: `${reps}!`, count: reps };
   }
 
-  // Check knee height quality - is it high enough?
   if (kneeIsHigh) {
     const bestKneeGap = Math.max(
       lKnee?.visibility > 0.3 ? hipY - lKnee.y : 0,
       rKnee?.visibility > 0.3 ? hipY - rKnee.y : 0
     );
-    // Knee barely reaches hip level
     if (bestKneeGap < 0.05 && bestKneeGap > 0.02) {
       feedback = { type: 'warning', text: 'kneesHigher' };
     }
@@ -3098,6 +3106,992 @@ export function analyzePullUps(landmarks, prevState = {}) {
   };
 }
 
+// =============================================
+// === NEW FITNESS ANALYZERS (15 functions) ===
+// =============================================
+
+// --- Calf Raise: standing, ankle Y tracking ---
+export function analyzeCalfRaise(landmarks, prevState = {}) {
+  if (!landmarks) return { ...prevState, feedback: null };
+
+  const vis = validateLandmarks(landmarks, ['legs']);
+  if (!vis.valid) {
+    return { ...prevState, feedback: { type: 'visibility', missingParts: vis.missingParts, direction: vis.direction }, posture: prevState.posture || 'unknown', _prevLandmarks: landmarks };
+  }
+
+  const posture = detectPosture(landmarks);
+  const moving = detectMovement(landmarks, prevState._prevLandmarks, prevState);
+  const headDown = detectHeadDown(landmarks);
+
+  if (posture === 'sitting' || posture === 'unknown') {
+    return { ...prevState, feedback: null, posture, moving: false, headDown: false, firstRepStarted: false, _prevLandmarks: landmarks };
+  }
+
+  const lAnkle = landmarks[LM.LEFT_ANKLE];
+  const rAnkle = landmarks[LM.RIGHT_ANKLE];
+  if (!lAnkle || lAnkle.visibility < 0.3) return { ...prevState, feedback: null, posture, moving, headDown, _prevLandmarks: landmarks };
+
+  const rawAnkleY = rAnkle?.visibility > 0.3 ? (lAnkle.y + rAnkle.y) / 2 : lAnkle.y;
+  const ankleY = smoothY(rawAnkleY, prevState, '_smoothAnkleY');
+
+  // Baseline = lowest (highest Y value) ankle position
+  const baselineAnkleY = prevState._baselineAnkleY != null ? Math.max(prevState._baselineAnkleY, ankleY) : ankleY;
+  const rise = baselineAnkleY - ankleY; // positive when rising on toes
+
+  const reps = prevState.reps || 0;
+  const phase = prevState.phase || 'down';
+  const firstRepStarted = prevState.firstRepStarted || false;
+
+  let newPhase = phase;
+  let newReps = reps;
+  let feedback = null;
+  let lastRepTime = prevState.lastRepTime || null;
+  let newFirstRep = firstRepStarted;
+
+  if (phase === 'down' && rise > 0.02) {
+    newPhase = 'up';
+    newFirstRep = true;
+    feedback = { type: 'info', text: 'למעלה! על קצות האצבעות' };
+  } else if (phase === 'up' && rise < 0.008) {
+    if (canCountRep(lastRepTime)) {
+      newReps = reps + 1;
+      lastRepTime = Date.now();
+      const coaching = newReps % 3 === 0
+        ? { he: 'מעולה! תעצור שנייה למעלה לסחיטה מקסימלית', en: 'Great! Pause at the top for maximum squeeze' }
+        : null;
+      feedback = { type: 'count', text: `${newReps}!`, count: newReps, coaching };
+    }
+    newPhase = 'down';
+  }
+
+  return {
+    reps: newReps, phase: newPhase, feedback, moving, headDown: newFirstRep ? headDown : false,
+    lastRepTime, firstRepStarted: newFirstRep, posture,
+    _baselineAnkleY: baselineAnkleY, _smoothAnkleY: ankleY, _prevLandmarks: landmarks
+  };
+}
+
+// --- Single Leg Deadlift: hip hinge tracking ---
+export function analyzeSingleLegDeadlift(landmarks, prevState = {}) {
+  if (!landmarks) return { ...prevState, feedback: null };
+
+  const vis = validateLandmarks(landmarks, ['legs', 'hips']);
+  if (!vis.valid) {
+    return { ...prevState, feedback: { type: 'visibility', missingParts: vis.missingParts, direction: vis.direction }, posture: prevState.posture || 'unknown', _prevLandmarks: landmarks };
+  }
+
+  const posture = detectPosture(landmarks);
+  const moving = detectMovement(landmarks, prevState._prevLandmarks, prevState);
+  const headDown = detectHeadDown(landmarks);
+
+  if (posture === 'sitting' || posture === 'unknown') {
+    return { ...prevState, feedback: null, posture, moving: false, headDown: false, firstRepStarted: false, _prevLandmarks: landmarks };
+  }
+
+  const leg = getStandingLeg(landmarks);
+  const hip = landmarks[leg === 'left' ? LM.LEFT_HIP : LM.RIGHT_HIP];
+  const knee = landmarks[leg === 'left' ? LM.LEFT_KNEE : LM.RIGHT_KNEE];
+  const shoulder = landmarks[leg === 'left' ? LM.LEFT_SHOULDER : LM.RIGHT_SHOULDER];
+
+  if (!hip || !knee || !shoulder) return { ...prevState, feedback: null, posture, moving, headDown, _prevLandmarks: landmarks };
+
+  // Hip hinge angle: shoulder-hip-knee
+  const rawHipAngle = angle(shoulder, hip, knee);
+  const hipAngle = smoothAngle(rawHipAngle, prevState, '_smoothHip');
+
+  const reps = prevState.reps || 0;
+  const phase = prevState.phase || 'up';
+  const firstRepStarted = prevState.firstRepStarted || false;
+  const phaseStartAngle = prevState._phaseStartAngle ?? hipAngle;
+
+  let newPhase = phase;
+  let newReps = reps;
+  let feedback = null;
+  let lastRepTime = prevState.lastRepTime || null;
+  let newFirstRep = firstRepStarted;
+  let newPhaseStartAngle = phaseStartAngle;
+  const repCounted = prevState._repCounted || false;
+  let newRepCounted = repCounted;
+
+  // Standing upright ~170°, hinged forward ~90-110°
+  if (phase === 'up' && hipAngle < 130) {
+    newPhase = 'down';
+    newFirstRep = true;
+    newPhaseStartAngle = hipAngle;
+    newRepCounted = false;
+    feedback = { type: 'info', text: 'ירידה יפה! שמור על גב ישר' };
+  } else if (phase === 'down') {
+    const earlyThreshold = phaseStartAngle + (170 - phaseStartAngle) * 0.75;
+    if (!repCounted && hipAngle > earlyThreshold && meetsMinROM(prevState, 'shoulder', hipAngle, phaseStartAngle) && canCountRep(lastRepTime)) {
+      newReps = reps + 1;
+      lastRepTime = Date.now();
+      newRepCounted = true;
+      feedback = { type: 'count', text: `${newReps}!`, count: newReps,
+        coaching: { he: 'מצוין! שמור על גב ישר ושליטה בירידה', en: 'Excellent! Keep back straight and control the descent' } };
+    }
+    if (hipAngle > 160) {
+      newPhase = 'up';
+      newRepCounted = false;
+      newPhaseStartAngle = hipAngle;
+    }
+  }
+
+  return {
+    reps: newReps, phase: newPhase, feedback, moving, headDown: newFirstRep ? headDown : false,
+    lastRepTime, firstRepStarted: newFirstRep, posture,
+    _phaseStartAngle: newPhaseStartAngle, _smoothHip: hipAngle, _repCounted: newRepCounted, _prevLandmarks: landmarks
+  };
+}
+
+// --- Front Raise: shoulder flexion angle ---
+export function analyzeFrontRaise(landmarks, prevState = {}) {
+  if (!landmarks) return { ...prevState, feedback: null };
+
+  const vis = validateLandmarks(landmarks, ['arms', 'shoulders']);
+  if (!vis.valid) {
+    return { ...prevState, feedback: { type: 'visibility', missingParts: vis.missingParts, direction: vis.direction }, posture: prevState.posture || 'unknown', _prevLandmarks: landmarks };
+  }
+
+  const posture = detectPosture(landmarks);
+  const moving = detectMovement(landmarks, prevState._prevLandmarks, prevState);
+  const headDown = detectHeadDown(landmarks);
+
+  if (posture === 'sitting' || posture === 'unknown') {
+    return { ...prevState, feedback: null, posture, moving: false, headDown: false, firstRepStarted: false, _prevLandmarks: landmarks };
+  }
+
+  const shoulder = landmarks[LM.LEFT_SHOULDER];
+  const elbow = landmarks[LM.LEFT_ELBOW];
+  const hip = landmarks[LM.LEFT_HIP];
+
+  if (!shoulder || !elbow || !hip || shoulder.visibility < 0.3) {
+    return { ...prevState, feedback: null, posture, moving, headDown, _prevLandmarks: landmarks };
+  }
+
+  // Shoulder flexion: elbow-shoulder-hip angle
+  const rawShoulderAngle = angle(elbow, shoulder, hip);
+  const shoulderAngle = smoothAngle(rawShoulderAngle, prevState, '_smoothShoulder');
+
+  const reps = prevState.reps || 0;
+  const phase = prevState.phase || 'down';
+  const firstRepStarted = prevState.firstRepStarted || false;
+  const phaseStartAngle = prevState._phaseStartAngle ?? shoulderAngle;
+
+  let newPhase = phase;
+  let newReps = reps;
+  let feedback = null;
+  let lastRepTime = prevState.lastRepTime || null;
+  let newFirstRep = firstRepStarted;
+  let newPhaseStartAngle = phaseStartAngle;
+  const repCounted = prevState._repCounted || false;
+  let newRepCounted = repCounted;
+
+  // Down: ~10-30°, Up: ~80-110°
+  if (phase === 'down' && shoulderAngle > 70) {
+    newPhase = 'up';
+    newFirstRep = true;
+    newPhaseStartAngle = shoulderAngle;
+    newRepCounted = false;
+    feedback = { type: 'info', text: 'הרמה יפה!' };
+  } else if (phase === 'up') {
+    if (!repCounted && shoulderAngle < 40 && meetsMinROM(prevState, 'shoulder', shoulderAngle, phaseStartAngle) && canCountRep(lastRepTime)) {
+      newReps = reps + 1;
+      lastRepTime = Date.now();
+      newRepCounted = true;
+      const romDelta = Math.abs(shoulderAngle - phaseStartAngle);
+      let coaching = null;
+      if (romDelta > 60) {
+        coaching = { he: 'טווח תנועה מלא! המשך ככה', en: 'Full range of motion! Keep it up' };
+      } else {
+        coaching = { he: 'נסה להרים גבוה יותר - עד גובה הכתפיים', en: 'Try to raise higher - up to shoulder level' };
+      }
+      feedback = { type: 'count', text: `${newReps}!`, count: newReps, coaching };
+    }
+    if (shoulderAngle < 30) {
+      newPhase = 'down';
+      newRepCounted = false;
+      newPhaseStartAngle = shoulderAngle;
+    }
+  }
+
+  return {
+    reps: newReps, phase: newPhase, feedback, moving, headDown: newFirstRep ? headDown : false,
+    lastRepTime, firstRepStarted: newFirstRep, posture,
+    _phaseStartAngle: newPhaseStartAngle, _smoothShoulder: shoulderAngle, _repCounted: newRepCounted, _prevLandmarks: landmarks
+  };
+}
+
+// --- Shrug: shoulder Y relative to head ---
+export function analyzeShrug(landmarks, prevState = {}) {
+  if (!landmarks) return { ...prevState, feedback: null };
+
+  const vis = validateLandmarks(landmarks, ['shoulders']);
+  if (!vis.valid) {
+    return { ...prevState, feedback: { type: 'visibility', missingParts: vis.missingParts, direction: vis.direction }, posture: prevState.posture || 'unknown', _prevLandmarks: landmarks };
+  }
+
+  const posture = detectPosture(landmarks);
+  const moving = detectMovement(landmarks, prevState._prevLandmarks, prevState);
+  const headDown = detectHeadDown(landmarks);
+
+  if (posture === 'sitting' || posture === 'unknown') {
+    return { ...prevState, feedback: null, posture, moving: false, headDown: false, firstRepStarted: false, _prevLandmarks: landmarks };
+  }
+
+  const lShoulder = landmarks[LM.LEFT_SHOULDER];
+  const rShoulder = landmarks[LM.RIGHT_SHOULDER];
+  const nose = landmarks[LM.NOSE];
+
+  if (!lShoulder || !nose || lShoulder.visibility < 0.3 || nose.visibility < 0.3) {
+    return { ...prevState, feedback: null, posture, moving, headDown, _prevLandmarks: landmarks };
+  }
+
+  const rawShoulderY = rShoulder?.visibility > 0.3 ? (lShoulder.y + rShoulder.y) / 2 : lShoulder.y;
+  const shoulderY = smoothY(rawShoulderY, prevState, '_smoothShoulderY');
+
+  // Baseline shoulder Y (relaxed position = highest Y value)
+  const baselineY = prevState._baselineShoulderY != null ? Math.max(prevState._baselineShoulderY, shoulderY) : shoulderY;
+  const rise = baselineY - shoulderY; // positive when shrugging up
+
+  const reps = prevState.reps || 0;
+  const phase = prevState.phase || 'down';
+  const firstRepStarted = prevState.firstRepStarted || false;
+
+  let newPhase = phase;
+  let newReps = reps;
+  let feedback = null;
+  let lastRepTime = prevState.lastRepTime || null;
+  let newFirstRep = firstRepStarted;
+
+  if (phase === 'down' && rise > 0.02) {
+    newPhase = 'up';
+    newFirstRep = true;
+    feedback = { type: 'info', text: 'הרם כתפיים!' };
+  } else if (phase === 'up' && rise < 0.008) {
+    if (canCountRep(lastRepTime)) {
+      newReps = reps + 1;
+      lastRepTime = Date.now();
+      const coaching = newReps % 3 === 0
+        ? { he: 'מצוין! תעצור שנייה למעלה וסחוט את הטרפזים', en: 'Excellent! Pause at top and squeeze traps' }
+        : null;
+      feedback = { type: 'count', text: `${newReps}!`, count: newReps, coaching };
+    }
+    newPhase = 'down';
+  }
+
+  return {
+    reps: newReps, phase: newPhase, feedback, moving, headDown: newFirstRep ? headDown : false,
+    lastRepTime, firstRepStarted: newFirstRep, posture,
+    _baselineShoulderY: baselineY, _smoothShoulderY: shoulderY, _prevLandmarks: landmarks
+  };
+}
+
+// --- Superman: lying hold, wrists + ankles elevated ---
+export function analyzeSuperman(landmarks, prevState = {}) {
+  if (!landmarks) return { ...prevState, feedback: null };
+
+  const vis = validateLandmarks(landmarks, ['shoulders', 'legs']);
+  if (!vis.valid) {
+    return { ...prevState, feedback: { type: 'visibility', missingParts: vis.missingParts, direction: vis.direction }, posture: 'unknown', _prevLandmarks: landmarks };
+  }
+
+  const moving = detectMovement(landmarks, prevState._prevLandmarks, prevState);
+
+  const lShoulder = landmarks[LM.LEFT_SHOULDER];
+  const rShoulder = landmarks[LM.RIGHT_SHOULDER];
+  const lWrist = landmarks[LM.LEFT_WRIST];
+  const lHip = landmarks[LM.LEFT_HIP];
+  const rHip = landmarks[LM.RIGHT_HIP];
+  const lAnkle = landmarks[LM.LEFT_ANKLE];
+  const rAnkle = landmarks[LM.RIGHT_ANKLE];
+
+  if (!lShoulder || !lHip || lShoulder.visibility < 0.3 || lHip.visibility < 0.3) {
+    return { ...prevState, feedback: null, posture: 'unknown', moving, _prevLandmarks: landmarks };
+  }
+
+  const shoulderY = rShoulder?.visibility > 0.3 ? (lShoulder.y + rShoulder.y) / 2 : lShoulder.y;
+  const hipY = rHip?.visibility > 0.3 ? (lHip.y + rHip.y) / 2 : lHip.y;
+  const ankleY = rAnkle?.visibility > 0.3 ? (lAnkle.y + rAnkle.y) / 2 : (lAnkle?.y || hipY);
+  const wristY = lWrist?.visibility > 0.3 ? lWrist.y : shoulderY;
+
+  // Active when wrists are above shoulders AND ankles are above hips (Y decreases = higher)
+  const armsUp = shoulderY - wristY > 0.01;
+  const legsUp = hipY - ankleY > 0.01;
+  const isActive = armsUp && legsUp;
+
+  let feedback = null;
+
+  if (isActive) {
+    if (armsUp && legsUp) {
+      feedback = { type: 'good', text: 'סופרמן מעולה! החזק חזק!',
+        coaching: { he: 'הרמה מצוינת! ידיים ורגליים למעלה - שמור על הגב מכווץ', en: 'Excellent hold! Arms and legs up - keep back engaged' } };
+    }
+  } else if (prevState.isActive) {
+    feedback = { type: 'warning', text: 'הרם ידיים ורגליים מהרצפה!',
+      coaching: { he: 'הרם ידיים ורגליים גבוה יותר - דמיין שאתה סופרמן עף', en: 'Lift arms and legs higher - imagine you are Superman flying' } };
+  }
+
+  return {
+    ...prevState, feedback, moving, isActive, firstRepStarted: isActive || prevState.firstRepStarted,
+    lastRepTime: isActive ? Date.now() : prevState.lastRepTime, posture: 'floor', _prevLandmarks: landmarks
+  };
+}
+
+// --- Dead Bug: lying reps, alternating limb extension ---
+export function analyzeDeadBug(landmarks, prevState = {}) {
+  if (!landmarks) return { ...prevState, feedback: null };
+
+  const vis = validateLandmarks(landmarks, ['arms', 'legs']);
+  if (!vis.valid) {
+    return { ...prevState, feedback: { type: 'visibility', missingParts: vis.missingParts, direction: vis.direction }, posture: prevState.posture || 'unknown', _prevLandmarks: landmarks };
+  }
+
+  const moving = detectMovement(landmarks, prevState._prevLandmarks, prevState);
+
+  const lWrist = landmarks[LM.LEFT_WRIST];
+  const rWrist = landmarks[LM.RIGHT_WRIST];
+  const lAnkle = landmarks[LM.LEFT_ANKLE];
+  const rAnkle = landmarks[LM.RIGHT_ANKLE];
+  const lHip = landmarks[LM.LEFT_HIP];
+
+  if (!lWrist || !rWrist || !lAnkle || !rAnkle || !lHip) {
+    return { ...prevState, feedback: null, posture: 'floor', moving, _prevLandmarks: landmarks };
+  }
+
+  // Track which limbs are extended (lower Y = higher in frame)
+  const leftArmUp = lWrist.y < lHip.y - 0.05;
+  const rightArmUp = rWrist.y < lHip.y - 0.05;
+  const leftLegExt = lAnkle.y < lHip.y + 0.05;
+  const rightLegExt = rAnkle.y < lHip.y + 0.05;
+
+  // Contralateral pattern: left arm + right leg OR right arm + left leg
+  const patternA = leftArmUp && rightLegExt;
+  const patternB = rightArmUp && leftLegExt;
+
+  const reps = prevState.reps || 0;
+  const lastPattern = prevState._lastPattern || 'none';
+  const firstRepStarted = prevState.firstRepStarted || false;
+
+  let newReps = reps;
+  let feedback = null;
+  let lastRepTime = prevState.lastRepTime || null;
+  let newFirstRep = firstRepStarted;
+  let newPattern = lastPattern;
+
+  if (patternA && lastPattern !== 'A') {
+    newPattern = 'A';
+    newFirstRep = true;
+    if (lastPattern === 'B' && canCountRep(lastRepTime)) {
+      newReps = reps + 1;
+      lastRepTime = Date.now();
+      feedback = { type: 'count', text: `${newReps}!`, count: newReps,
+        coaching: { he: 'שמור על הגב צמוד לרצפה!', en: 'Keep your back pressed to the floor!' } };
+    } else {
+      feedback = { type: 'info', text: 'החלפה יפה!' };
+    }
+  } else if (patternB && lastPattern !== 'B') {
+    newPattern = 'B';
+    newFirstRep = true;
+    if (lastPattern === 'A' && canCountRep(lastRepTime)) {
+      newReps = reps + 1;
+      lastRepTime = Date.now();
+      feedback = { type: 'count', text: `${newReps}!`, count: newReps,
+        coaching: { he: 'מעולה! שליטה מלאה', en: 'Excellent! Full control' } };
+    } else {
+      feedback = { type: 'info', text: 'החלפה יפה!' };
+    }
+  }
+
+  return {
+    reps: newReps, phase: newPattern, feedback, moving, headDown: false,
+    lastRepTime, firstRepStarted: newFirstRep, posture: 'floor',
+    _lastPattern: newPattern, _prevLandmarks: landmarks
+  };
+}
+
+// --- Bird Dog: quadruped contralateral extension ---
+export function analyzeBirdDog(landmarks, prevState = {}) {
+  if (!landmarks) return { ...prevState, feedback: null };
+
+  const vis = validateLandmarks(landmarks, ['arms', 'legs']);
+  if (!vis.valid) {
+    return { ...prevState, feedback: { type: 'visibility', missingParts: vis.missingParts, direction: vis.direction }, posture: prevState.posture || 'unknown', _prevLandmarks: landmarks };
+  }
+
+  const moving = detectMovement(landmarks, prevState._prevLandmarks, prevState);
+
+  const lWrist = landmarks[LM.LEFT_WRIST];
+  const rWrist = landmarks[LM.RIGHT_WRIST];
+  const lAnkle = landmarks[LM.LEFT_ANKLE];
+  const rAnkle = landmarks[LM.RIGHT_ANKLE];
+  const lShoulder = landmarks[LM.LEFT_SHOULDER];
+  const lHip = landmarks[LM.LEFT_HIP];
+
+  if (!lWrist || !rWrist || !lAnkle || !rAnkle || !lShoulder || !lHip) {
+    return { ...prevState, feedback: null, posture: 'floor', moving, _prevLandmarks: landmarks };
+  }
+
+  const shoulderY = lShoulder.y;
+  const hipY = lHip.y;
+
+  // Arm extended forward = wrist far from shoulder X-wise, ankle extended back
+  const lArmExt = Math.abs(lWrist.x - lShoulder.x) > 0.1 && lWrist.y < shoulderY + 0.03;
+  const rArmExt = Math.abs(rWrist.x - lShoulder.x) > 0.1 && rWrist.y < shoulderY + 0.03;
+  const lLegExt = Math.abs(lAnkle.x - lHip.x) > 0.1 && lAnkle.y < hipY + 0.03;
+  const rLegExt = Math.abs(rAnkle.x - lHip.x) > 0.1 && rAnkle.y < hipY + 0.03;
+
+  const patternA = lArmExt && rLegExt;
+  const patternB = rArmExt && lLegExt;
+
+  const reps = prevState.reps || 0;
+  const lastPattern = prevState._lastPattern || 'none';
+  const firstRepStarted = prevState.firstRepStarted || false;
+
+  let newReps = reps;
+  let feedback = null;
+  let lastRepTime = prevState.lastRepTime || null;
+  let newFirstRep = firstRepStarted;
+  let newPattern = lastPattern;
+
+  if (patternA && lastPattern !== 'A') {
+    newPattern = 'A';
+    newFirstRep = true;
+    if (lastPattern === 'B' && canCountRep(lastRepTime)) {
+      newReps = reps + 1;
+      lastRepTime = Date.now();
+      feedback = { type: 'count', text: `${newReps}!`, count: newReps,
+        coaching: { he: 'יציבות מעולה! שמור על הגב ישר', en: 'Great stability! Keep back straight' } };
+    } else {
+      feedback = { type: 'info', text: 'הארכה יפה!' };
+    }
+  } else if (patternB && lastPattern !== 'B') {
+    newPattern = 'B';
+    newFirstRep = true;
+    if (lastPattern === 'A' && canCountRep(lastRepTime)) {
+      newReps = reps + 1;
+      lastRepTime = Date.now();
+      feedback = { type: 'count', text: `${newReps}!`, count: newReps,
+        coaching: { he: 'מצוין! שליטה וניהול גוף מעולים', en: 'Excellent! Great body control' } };
+    } else {
+      feedback = { type: 'info', text: 'הארכה יפה!' };
+    }
+  }
+
+  return {
+    reps: newReps, phase: newPattern, feedback, moving, headDown: false,
+    lastRepTime, firstRepStarted: newFirstRep, posture: 'floor',
+    _lastPattern: newPattern, _prevLandmarks: landmarks
+  };
+}
+
+// --- Russian Twist: trunk rotation ---
+export function analyzeRussianTwist(landmarks, prevState = {}) {
+  if (!landmarks) return { ...prevState, feedback: null };
+
+  const vis = validateLandmarks(landmarks, ['shoulders', 'hips']);
+  if (!vis.valid) {
+    return { ...prevState, feedback: { type: 'visibility', missingParts: vis.missingParts, direction: vis.direction }, posture: prevState.posture || 'unknown', _prevLandmarks: landmarks };
+  }
+
+  const moving = detectMovement(landmarks, prevState._prevLandmarks, prevState);
+
+  const lShoulder = landmarks[LM.LEFT_SHOULDER];
+  const rShoulder = landmarks[LM.RIGHT_SHOULDER];
+  const lHip = landmarks[LM.LEFT_HIP];
+  const rHip = landmarks[LM.RIGHT_HIP];
+
+  if (!lShoulder || !rShoulder || !lHip || !rHip) {
+    return { ...prevState, feedback: null, posture: 'floor', moving, _prevLandmarks: landmarks };
+  }
+
+  const shoulderMidX = (lShoulder.x + rShoulder.x) / 2;
+  const hipMidX = (lHip.x + rHip.x) / 2;
+  const twist = shoulderMidX - hipMidX; // positive = rotated right, negative = left
+
+  const reps = prevState.reps || 0;
+  const phase = prevState.phase || 'center';
+  const firstRepStarted = prevState.firstRepStarted || false;
+
+  let newPhase = phase;
+  let newReps = reps;
+  let feedback = null;
+  let lastRepTime = prevState.lastRepTime || null;
+  let newFirstRep = firstRepStarted;
+  const twistThreshold = 0.03;
+
+  if (twist > twistThreshold && phase !== 'right') {
+    if (phase === 'left' && canCountRep(lastRepTime)) {
+      newReps = reps + 1;
+      lastRepTime = Date.now();
+      feedback = { type: 'count', text: `${newReps}!`, count: newReps,
+        coaching: { he: 'סיבוב מלא! שמור על בטן מכווצת', en: 'Full rotation! Keep abs tight' } };
+    } else {
+      feedback = { type: 'info', text: 'ימינה!' };
+      newFirstRep = true;
+    }
+    newPhase = 'right';
+  } else if (twist < -twistThreshold && phase !== 'left') {
+    if (phase === 'right' && canCountRep(lastRepTime)) {
+      newReps = reps + 1;
+      lastRepTime = Date.now();
+      feedback = { type: 'count', text: `${newReps}!`, count: newReps,
+        coaching: { he: 'יפה! סיבוב שלם - שליטה מלאה', en: 'Nice! Full twist - complete control' } };
+    } else {
+      feedback = { type: 'info', text: 'שמאלה!' };
+      newFirstRep = true;
+    }
+    newPhase = 'left';
+  }
+
+  return {
+    reps: newReps, phase: newPhase, feedback, moving, headDown: false,
+    lastRepTime, firstRepStarted: newFirstRep, posture: 'floor', _prevLandmarks: landmarks
+  };
+}
+
+// --- Leg Raise: lying, ankle Y rising from floor ---
+export function analyzeLegRaise(landmarks, prevState = {}) {
+  if (!landmarks) return { ...prevState, feedback: null };
+
+  const vis = validateLandmarks(landmarks, ['hips', 'legs']);
+  if (!vis.valid) {
+    return { ...prevState, feedback: { type: 'visibility', missingParts: vis.missingParts, direction: vis.direction }, posture: prevState.posture || 'unknown', _prevLandmarks: landmarks };
+  }
+
+  const moving = detectMovement(landmarks, prevState._prevLandmarks, prevState);
+
+  const lHip = landmarks[LM.LEFT_HIP];
+  const rHip = landmarks[LM.RIGHT_HIP];
+  const lAnkle = landmarks[LM.LEFT_ANKLE];
+  const rAnkle = landmarks[LM.RIGHT_ANKLE];
+
+  if (!lHip || !lAnkle || lHip.visibility < 0.3) {
+    return { ...prevState, feedback: null, posture: 'floor', moving, _prevLandmarks: landmarks };
+  }
+
+  const hipY = rHip?.visibility > 0.3 ? (lHip.y + rHip.y) / 2 : lHip.y;
+  const rawAnkleY = rAnkle?.visibility > 0.3 ? (lAnkle.y + rAnkle.y) / 2 : lAnkle.y;
+  const ankleY = smoothY(rawAnkleY, prevState, '_smoothAnkleY');
+
+  // Baseline = ankles at floor level (highest Y)
+  const baselineAnkleY = prevState._baselineAnkleY != null ? Math.max(prevState._baselineAnkleY, ankleY) : ankleY;
+  const rise = baselineAnkleY - ankleY; // positive = legs raised
+
+  const reps = prevState.reps || 0;
+  const phase = prevState.phase || 'down';
+  const firstRepStarted = prevState.firstRepStarted || false;
+
+  let newPhase = phase;
+  let newReps = reps;
+  let feedback = null;
+  let lastRepTime = prevState.lastRepTime || null;
+  let newFirstRep = firstRepStarted;
+
+  if (phase === 'down' && rise > 0.06) {
+    newPhase = 'up';
+    newFirstRep = true;
+    feedback = { type: 'info', text: 'הרמה יפה! רגליים ישרות' };
+  } else if (phase === 'up' && rise < 0.02) {
+    if (canCountRep(lastRepTime)) {
+      newReps = reps + 1;
+      lastRepTime = Date.now();
+      feedback = { type: 'count', text: `${newReps}!`, count: newReps,
+        coaching: { he: 'מעולה! שמור על הגב צמוד לרצפה', en: 'Great! Keep lower back pressed to the floor' } };
+    }
+    newPhase = 'down';
+  }
+
+  // Form: legs bending
+  if (newFirstRep && newPhase === 'up') {
+    const lKnee = landmarks[LM.LEFT_KNEE];
+    if (lKnee?.visibility > 0.3 && lHip?.visibility > 0.3 && lAnkle?.visibility > 0.3) {
+      const kneeAngle = angle(lHip, lKnee, lAnkle);
+      if (kneeAngle < 150) {
+        feedback = { type: 'warning', text: 'ישר את הרגליים! שמור על ברכיים ישרות',
+          coaching: { he: 'הברכיים כפופות - ישר את הרגליים לטווח תנועה מלא', en: 'Knees bending - straighten legs for full ROM' } };
+      }
+    }
+  }
+
+  return {
+    reps: newReps, phase: newPhase, feedback, moving, headDown: false,
+    lastRepTime, firstRepStarted: newFirstRep, posture: 'floor',
+    _baselineAnkleY: baselineAnkleY, _smoothAnkleY: ankleY, _prevLandmarks: landmarks
+  };
+}
+
+// --- Flutter Kicks: lying, alternating ankle Y oscillation ---
+export function analyzeFlutterKicks(landmarks, prevState = {}) {
+  if (!landmarks) return { ...prevState, feedback: null };
+
+  const vis = validateLandmarks(landmarks, ['legs']);
+  if (!vis.valid) {
+    return { ...prevState, feedback: { type: 'visibility', missingParts: vis.missingParts, direction: vis.direction }, posture: prevState.posture || 'unknown', _prevLandmarks: landmarks };
+  }
+
+  const moving = detectMovement(landmarks, prevState._prevLandmarks, prevState);
+
+  const lAnkle = landmarks[LM.LEFT_ANKLE];
+  const rAnkle = landmarks[LM.RIGHT_ANKLE];
+
+  if (!lAnkle || !rAnkle || lAnkle.visibility < 0.3 || rAnkle.visibility < 0.3) {
+    return { ...prevState, feedback: null, posture: 'floor', moving, _prevLandmarks: landmarks };
+  }
+
+  // Track which ankle is higher (lower Y)
+  const leftHigher = lAnkle.y < rAnkle.y;
+  const prevLeftHigher = prevState._leftHigher;
+  const oscillations = prevState._oscillations || 0;
+
+  let newOscillations = oscillations;
+  let crossDetected = false;
+
+  if (prevLeftHigher !== undefined && leftHigher !== prevLeftHigher) {
+    newOscillations = oscillations + 1;
+    crossDetected = true;
+  }
+
+  const reps = prevState.reps || 0;
+  const firstRepStarted = prevState.firstRepStarted || false;
+
+  let newReps = reps;
+  let feedback = null;
+  let lastRepTime = prevState.lastRepTime || null;
+  let newFirstRep = firstRepStarted;
+
+  // Every 4 oscillations = 1 rep
+  if (crossDetected && newOscillations >= 4) {
+    newOscillations = 0;
+    newFirstRep = true;
+    if (canCountRep(lastRepTime)) {
+      newReps = reps + 1;
+      lastRepTime = Date.now();
+      feedback = { type: 'count', text: `${newReps}!`, count: newReps,
+        coaching: { he: 'קצב מעולה! שמור על רגליים ישרות ובטן מכווצת', en: 'Great pace! Keep legs straight and abs tight' } };
+    }
+  } else if (crossDetected) {
+    newFirstRep = true;
+    feedback = { type: 'info', text: 'המשך לבעוט!' };
+  }
+
+  return {
+    reps: newReps, phase: leftHigher ? 'leftUp' : 'rightUp', feedback, moving, headDown: false,
+    lastRepTime, firstRepStarted: newFirstRep, posture: 'floor',
+    _leftHigher: leftHigher, _oscillations: newOscillations, _prevLandmarks: landmarks
+  };
+}
+
+// --- V-Ups: lying, simultaneous shoulder + ankle rise ---
+export function analyzeVUps(landmarks, prevState = {}) {
+  if (!landmarks) return { ...prevState, feedback: null };
+
+  const vis = validateLandmarks(landmarks, ['shoulders', 'legs']);
+  if (!vis.valid) {
+    return { ...prevState, feedback: { type: 'visibility', missingParts: vis.missingParts, direction: vis.direction }, posture: prevState.posture || 'unknown', _prevLandmarks: landmarks };
+  }
+
+  const moving = detectMovement(landmarks, prevState._prevLandmarks, prevState);
+
+  const lShoulder = landmarks[LM.LEFT_SHOULDER];
+  const rShoulder = landmarks[LM.RIGHT_SHOULDER];
+  const lAnkle = landmarks[LM.LEFT_ANKLE];
+  const rAnkle = landmarks[LM.RIGHT_ANKLE];
+  const lHip = landmarks[LM.LEFT_HIP];
+
+  if (!lShoulder || !lAnkle || !lHip || lShoulder.visibility < 0.3) {
+    return { ...prevState, feedback: null, posture: 'floor', moving, _prevLandmarks: landmarks };
+  }
+
+  const shoulderY = rShoulder?.visibility > 0.3 ? (lShoulder.y + rShoulder.y) / 2 : lShoulder.y;
+  const ankleY = rAnkle?.visibility > 0.3 ? (lAnkle.y + rAnkle.y) / 2 : lAnkle.y;
+  const hipY = lHip.y;
+
+  // Baseline: shoulders and ankles at rest (high Y values)
+  const baseShoulder = prevState._baseShoulderY != null ? Math.max(prevState._baseShoulderY, shoulderY) : shoulderY;
+  const baseAnkle = prevState._baseAnkleY != null ? Math.max(prevState._baseAnkleY, ankleY) : ankleY;
+
+  const shoulderRise = baseShoulder - shoulderY;
+  const ankleRise = baseAnkle - ankleY;
+  const bothUp = shoulderRise > 0.04 && ankleRise > 0.04;
+
+  const reps = prevState.reps || 0;
+  const phase = prevState.phase || 'down';
+  const firstRepStarted = prevState.firstRepStarted || false;
+
+  let newPhase = phase;
+  let newReps = reps;
+  let feedback = null;
+  let lastRepTime = prevState.lastRepTime || null;
+  let newFirstRep = firstRepStarted;
+
+  if (phase === 'down' && bothUp) {
+    newPhase = 'up';
+    newFirstRep = true;
+    feedback = { type: 'info', text: 'V יפה! ידיים לרגליים!' };
+  } else if (phase === 'up' && shoulderRise < 0.02 && ankleRise < 0.02) {
+    if (canCountRep(lastRepTime)) {
+      newReps = reps + 1;
+      lastRepTime = Date.now();
+      feedback = { type: 'count', text: `${newReps}!`, count: newReps,
+        coaching: { he: 'V-Up מושלם! נסה לגעת באצבעות הרגליים', en: 'Perfect V-Up! Try to touch your toes' } };
+    }
+    newPhase = 'down';
+  }
+
+  return {
+    reps: newReps, phase: newPhase, feedback, moving, headDown: false,
+    lastRepTime, firstRepStarted: newFirstRep, posture: 'floor',
+    _baseShoulderY: baseShoulder, _baseAnkleY: baseAnkle, _prevLandmarks: landmarks
+  };
+}
+
+// --- Donkey Kicks: quadruped, single leg hip extension ---
+export function analyzeDonkeyKicks(landmarks, prevState = {}) {
+  if (!landmarks) return { ...prevState, feedback: null };
+
+  const vis = validateLandmarks(landmarks, ['hips', 'legs']);
+  if (!vis.valid) {
+    return { ...prevState, feedback: { type: 'visibility', missingParts: vis.missingParts, direction: vis.direction }, posture: prevState.posture || 'unknown', _prevLandmarks: landmarks };
+  }
+
+  const moving = detectMovement(landmarks, prevState._prevLandmarks, prevState);
+
+  const lHip = landmarks[LM.LEFT_HIP];
+  const rHip = landmarks[LM.RIGHT_HIP];
+  const lAnkle = landmarks[LM.LEFT_ANKLE];
+  const rAnkle = landmarks[LM.RIGHT_ANKLE];
+  const lKnee = landmarks[LM.LEFT_KNEE];
+
+  if (!lHip || !lAnkle || lHip.visibility < 0.3) {
+    return { ...prevState, feedback: null, posture: 'floor', moving, _prevLandmarks: landmarks };
+  }
+
+  const hipY = rHip?.visibility > 0.3 ? (lHip.y + rHip.y) / 2 : lHip.y;
+  // Use whichever ankle has the bigger rise
+  const lAnkleRise = hipY - lAnkle.y;
+  const rAnkleRise = rAnkle?.visibility > 0.3 ? hipY - rAnkle.y : -1;
+  const ankleRise = Math.max(lAnkleRise, rAnkleRise); // positive when ankle above hip
+
+  const reps = prevState.reps || 0;
+  const phase = prevState.phase || 'down';
+  const firstRepStarted = prevState.firstRepStarted || false;
+
+  let newPhase = phase;
+  let newReps = reps;
+  let feedback = null;
+  let lastRepTime = prevState.lastRepTime || null;
+  let newFirstRep = firstRepStarted;
+
+  if (phase === 'down' && ankleRise > 0.03) {
+    newPhase = 'up';
+    newFirstRep = true;
+    feedback = { type: 'info', text: 'בעיטה למעלה!' };
+  } else if (phase === 'up' && ankleRise < 0.01) {
+    if (canCountRep(lastRepTime)) {
+      newReps = reps + 1;
+      lastRepTime = Date.now();
+      feedback = { type: 'count', text: `${newReps}!`, count: newReps,
+        coaching: { he: 'מצוין! סחוט את הישבן למעלה', en: 'Excellent! Squeeze glutes at the top' } };
+    }
+    newPhase = 'down';
+  }
+
+  return {
+    reps: newReps, phase: newPhase, feedback, moving, headDown: false,
+    lastRepTime, firstRepStarted: newFirstRep, posture: 'floor', _prevLandmarks: landmarks
+  };
+}
+
+// --- High Knees: standing, fast knee raises ---
+export function analyzeHighKnees(landmarks, prevState = {}) {
+  if (!landmarks) return { ...prevState, feedback: null };
+
+  const vis = validateLandmarks(landmarks, ['legs', 'hips']);
+  if (!vis.valid) {
+    return { ...prevState, feedback: { type: 'visibility', missingParts: vis.missingParts, direction: vis.direction }, posture: prevState.posture || 'unknown', _prevLandmarks: landmarks };
+  }
+
+  const posture = detectPosture(landmarks);
+  const moving = detectMovement(landmarks, prevState._prevLandmarks, prevState);
+  const headDown = detectHeadDown(landmarks);
+
+  if (posture === 'sitting' || posture === 'unknown') {
+    return { ...prevState, feedback: null, posture, moving: false, headDown: false, firstRepStarted: false, _prevLandmarks: landmarks };
+  }
+
+  const lKnee = landmarks[LM.LEFT_KNEE];
+  const rKnee = landmarks[LM.RIGHT_KNEE];
+  const lHip = landmarks[LM.LEFT_HIP];
+  const rHip = landmarks[LM.RIGHT_HIP];
+
+  if (!lKnee || !rKnee || !lHip || !rHip) {
+    return { ...prevState, feedback: null, posture, moving, headDown, _prevLandmarks: landmarks };
+  }
+
+  const lHipY = lHip.y;
+  const rHipY = rHip.y;
+
+  // Knee above hip = knee Y < hip Y (normalized coords)
+  const leftKneeHigh = lKnee.y < lHipY - 0.01;
+  const rightKneeHigh = rKnee.y < rHipY - 0.01;
+  const eitherHigh = leftKneeHigh || rightKneeHigh;
+  const prevHigh = prevState._kneeHigh || false;
+
+  const reps = prevState.reps || 0;
+  const firstRepStarted = prevState.firstRepStarted || false;
+
+  let newReps = reps;
+  let feedback = null;
+  let lastRepTime = prevState.lastRepTime || null;
+  let newFirstRep = firstRepStarted;
+
+  // Fast exercise: 400ms interval
+  const FAST_INTERVAL = 400;
+  const canCount = !lastRepTime || (Date.now() - lastRepTime >= FAST_INTERVAL);
+
+  if (eitherHigh && !prevHigh && canCount) {
+    newReps = reps + 1;
+    lastRepTime = Date.now();
+    newFirstRep = true;
+    const coaching = newReps % 5 === 0
+      ? { he: 'יופי! ברכיים גבוהות - תשמור על הקצב!', en: 'Great! Knees high - keep the pace!' }
+      : null;
+    feedback = { type: 'count', text: `${newReps}!`, count: newReps, coaching };
+  }
+
+  return {
+    reps: newReps, phase: eitherHigh ? 'up' : 'down', feedback, moving,
+    headDown: newFirstRep ? headDown : false,
+    lastRepTime, firstRepStarted: newFirstRep, posture,
+    _kneeHigh: eitherHigh, _prevLandmarks: landmarks
+  };
+}
+
+// --- Butt Kicks: standing, ankle approaching hip height ---
+export function analyzeButtKicks(landmarks, prevState = {}) {
+  if (!landmarks) return { ...prevState, feedback: null };
+
+  const vis = validateLandmarks(landmarks, ['legs', 'hips']);
+  if (!vis.valid) {
+    return { ...prevState, feedback: { type: 'visibility', missingParts: vis.missingParts, direction: vis.direction }, posture: prevState.posture || 'unknown', _prevLandmarks: landmarks };
+  }
+
+  const posture = detectPosture(landmarks);
+  const moving = detectMovement(landmarks, prevState._prevLandmarks, prevState);
+  const headDown = detectHeadDown(landmarks);
+
+  if (posture === 'sitting' || posture === 'unknown') {
+    return { ...prevState, feedback: null, posture, moving: false, headDown: false, firstRepStarted: false, _prevLandmarks: landmarks };
+  }
+
+  const lAnkle = landmarks[LM.LEFT_ANKLE];
+  const rAnkle = landmarks[LM.RIGHT_ANKLE];
+  const lHip = landmarks[LM.LEFT_HIP];
+  const rHip = landmarks[LM.RIGHT_HIP];
+
+  if (!lAnkle || !rAnkle || !lHip || !rHip) {
+    return { ...prevState, feedback: null, posture, moving, headDown, _prevLandmarks: landmarks };
+  }
+
+  // Ankle close to hip Y = butt kick (ankle Y approaches hip Y from below)
+  const lDist = Math.abs(lAnkle.y - lHip.y);
+  const rDist = Math.abs(rAnkle.y - rHip.y);
+  const eitherClose = lDist < 0.08 || rDist < 0.08;
+  const prevClose = prevState._ankleClose || false;
+
+  const reps = prevState.reps || 0;
+  const firstRepStarted = prevState.firstRepStarted || false;
+
+  let newReps = reps;
+  let feedback = null;
+  let lastRepTime = prevState.lastRepTime || null;
+  let newFirstRep = firstRepStarted;
+
+  // Fast exercise: 400ms interval
+  const FAST_INTERVAL = 400;
+  const canCount = !lastRepTime || (Date.now() - lastRepTime >= FAST_INTERVAL);
+
+  if (eitherClose && !prevClose && canCount) {
+    newReps = reps + 1;
+    lastRepTime = Date.now();
+    newFirstRep = true;
+    const coaching = newReps % 5 === 0
+      ? { he: 'יופי! העקבים מגיעים לישבן - המשך!', en: 'Nice! Heels reaching glutes - keep going!' }
+      : null;
+    feedback = { type: 'count', text: `${newReps}!`, count: newReps, coaching };
+  }
+
+  return {
+    reps: newReps, phase: eitherClose ? 'up' : 'down', feedback, moving,
+    headDown: newFirstRep ? headDown : false,
+    lastRepTime, firstRepStarted: newFirstRep, posture,
+    _ankleClose: eitherClose, _prevLandmarks: landmarks
+  };
+}
+
+// --- Plank Shoulder Tap: plank position, wrist lifts ---
+export function analyzePlankShoulderTap(landmarks, prevState = {}) {
+  if (!landmarks) return { ...prevState, feedback: null };
+
+  const vis = validateLandmarks(landmarks, ['arms', 'shoulders', 'hips']);
+  if (!vis.valid) {
+    return { ...prevState, feedback: { type: 'visibility', missingParts: vis.missingParts, direction: vis.direction }, posture: 'unknown', _prevLandmarks: landmarks };
+  }
+
+  const moving = detectMovement(landmarks, prevState._prevLandmarks, prevState);
+
+  const lShoulder = landmarks[LM.LEFT_SHOULDER];
+  const rShoulder = landmarks[LM.RIGHT_SHOULDER];
+  const lWrist = landmarks[LM.LEFT_WRIST];
+  const rWrist = landmarks[LM.RIGHT_WRIST];
+  const lHip = landmarks[LM.LEFT_HIP];
+  const rHip = landmarks[LM.RIGHT_HIP];
+  const lAnkle = landmarks[LM.LEFT_ANKLE];
+
+  if (!lShoulder || !lWrist || !rWrist || !lHip) {
+    return { ...prevState, feedback: null, posture: 'unknown', moving, _prevLandmarks: landmarks };
+  }
+
+  // Check plank position
+  const shoulder = rShoulder?.visibility > 0.3 ? { y: (lShoulder.y + rShoulder.y) / 2 } : lShoulder;
+  const hip = rHip?.visibility > 0.3 ? { y: (lHip.y + rHip.y) / 2 } : lHip;
+  const isHorizontal = Math.abs(shoulder.y - hip.y) < 0.15;
+
+  if (!isHorizontal) {
+    return { ...prevState, feedback: null, posture: 'unknown', moving, _prevLandmarks: landmarks };
+  }
+
+  // Detect wrist lift: wrist Y significantly above shoulder Y (lower in normalized coords)
+  const lWristLift = lShoulder.y - lWrist.y > 0.04;
+  const rWristLift = rShoulder?.visibility > 0.3 ? rShoulder.y - rWrist.y > 0.04 : false;
+  const eitherLift = lWristLift || rWristLift;
+  const prevLift = prevState._wristLift || false;
+
+  const reps = prevState.reps || 0;
+  const firstRepStarted = prevState.firstRepStarted || false;
+
+  let newReps = reps;
+  let feedback = null;
+  let lastRepTime = prevState.lastRepTime || null;
+  let newFirstRep = firstRepStarted;
+
+  if (eitherLift && !prevLift && canCountRep(lastRepTime)) {
+    newReps = reps + 1;
+    lastRepTime = Date.now();
+    newFirstRep = true;
+    const coaching = newReps % 4 === 0
+      ? { he: 'מצוין! שמור על ירכיים יציבות - אל תתנדנד', en: 'Great! Keep hips stable - no rocking' }
+      : null;
+    feedback = { type: 'count', text: `${newReps}!`, count: newReps, coaching };
+  }
+
+  return {
+    reps: newReps, phase: eitherLift ? 'tap' : 'plank', feedback, moving, headDown: false,
+    lastRepTime, firstRepStarted: newFirstRep, posture: 'plank',
+    _wristLift: eitherLift, _prevLandmarks: landmarks
+  };
+}
+
 // Table-based analyzer mapping with keyword matching + required orientation
 const O = ORIENTATION; // shorthand
 const ANALYZER_MAP = [
@@ -3118,6 +4112,19 @@ const ANALYZER_MAP = [
   // === STANDING dynamic exercises ===
   { keywords: ['jumping jack', "ג'אמפינג", 'בורפי', 'burpee', 'קפיצות פיצוח', 'קפיצות'], analyze: analyzeJumpingExercise, type: 'reps', cueKey: 'jump', orientation: O.STANDING },
   { keywords: ['ריצה', 'ספרינט', 'sprint', 'running', 'אינטרוולים', 'ריצת'], analyze: analyzeRunningForm, type: 'form', cueKey: 'running', orientation: O.STANDING },
+  // === NEW FITNESS — Standing Strength ===
+  { keywords: ['הרמות עקב', 'calf raise', 'עקבים'], analyze: analyzeCalfRaise, type: 'reps', cueKey: 'calfRaise', orientation: O.STANDING },
+  { keywords: ['סקוואט סומו', 'sumo squat', 'סומו'], analyze: analyzeSquat, type: 'reps', cueKey: 'squat', orientation: O.STANDING },
+  { keywords: ["לאנג' הפוך", 'reverse lunge', 'לאנג הפוך'], analyze: analyzeLunges, type: 'reps', cueKey: 'lunge', orientation: O.STANDING },
+  { keywords: ['ספליט סקוואט בולגרי', 'bulgarian split', 'בולגרי'], analyze: analyzeLunges, type: 'reps', cueKey: 'lunge', orientation: O.STANDING },
+  { keywords: ['דדליפט חד', 'single leg deadlift', 'דדליפט'], analyze: analyzeSingleLegDeadlift, type: 'reps', cueKey: 'deadlift', orientation: O.STANDING },
+  { keywords: ['סטפ-אפ', 'step up', 'סטפ אפ', 'עלייה על מדרגה'], analyze: analyzeLunges, type: 'reps', cueKey: 'lunge', orientation: O.STANDING },
+  { keywords: ['הרמה קדמית', 'front raise', 'הרמות קדמיות'], analyze: analyzeFrontRaise, type: 'reps', cueKey: 'frontRaise', orientation: O.STANDING },
+  { keywords: ['משיכה זקופה', 'upright row', 'משיכה עומדת'], analyze: analyzeBentOverRow, type: 'reps', cueKey: 'row', orientation: O.STANDING },
+  { keywords: ['כיווץ כתפיים', 'shrug', 'שראג'], analyze: analyzeShrug, type: 'reps', cueKey: 'shrug', orientation: O.STANDING },
+  { keywords: ['לחיצת ארנולד', 'arnold press', 'ארנולד'], analyze: analyzeShoulderPress, type: 'reps', cueKey: 'shoulder', orientation: O.STANDING },
+  { keywords: ['כפיפות פטיש', 'hammer curl', 'פטיש'], analyze: analyzeBicepCurl, type: 'reps', cueKey: 'bicep', orientation: O.STANDING },
+  { keywords: ['הרחבת טריצפס מעל', 'overhead tricep', 'טריצפס מעל'], analyze: analyzeTricepExtension, type: 'reps', cueKey: 'tricep', orientation: O.STANDING },
   // === LYING fitness exercises ===
   { keywords: ['גשר ישבן', 'glute bridge', 'גשר'], analyze: analyzeGluteBridge, type: 'reps', cueKey: 'bridge', orientation: O.LYING },
   { keywords: ['מטפס הרים', 'mountain climber', 'מטפסי הרים'], analyze: analyzeMountainClimbers, type: 'reps', cueKey: 'mountain', orientation: O.LYING },
@@ -3125,17 +4132,53 @@ const ANALYZER_MAP = [
   { keywords: ['פלאנק צידי', 'side plank'], analyze: analyzeSidePlank, type: 'hold', cueKey: 'sideplank', orientation: O.LYING },
   { keywords: ['push', 'שכיבות סמיכה', 'שכיבות שמיכה', 'פוש', 'שכיבות'], analyze: analyzePushUps, type: 'reps', cueKey: 'push', orientation: O.LYING },
   { keywords: ['פלאנק', 'plank'], analyze: analyzePlank, type: 'hold', cueKey: 'plank', orientation: O.LYING },
+  // === NEW FITNESS — Floor/Lying ===
+  { keywords: ['סופרמן', 'superman'], analyze: analyzeSuperman, type: 'hold', cueKey: 'superman', orientation: O.LYING },
+  { keywords: ['דד באג', 'dead bug'], analyze: analyzeDeadBug, type: 'reps', cueKey: 'deadbug', orientation: O.LYING },
+  { keywords: ['ציפור-כלב', 'ציפור כלב', 'bird dog', 'בירד דוג'], analyze: analyzeBirdDog, type: 'reps', cueKey: 'birddog', orientation: O.LYING },
+  { keywords: ['סיבוב רוסי', 'russian twist', 'רוסי'], analyze: analyzeRussianTwist, type: 'reps', cueKey: 'russianTwist', orientation: O.LYING },
+  { keywords: ['הרמות רגליים', 'leg raise', 'הרמת רגליים'], analyze: analyzeLegRaise, type: 'reps', cueKey: 'legRaise', orientation: O.LYING },
+  { keywords: ['בעיטות פרפר', 'flutter kick', 'פלאטר'], analyze: analyzeFlutterKicks, type: 'reps', cueKey: 'flutter', orientation: O.LYING },
+  { keywords: ['כפיפות אופניים', 'bicycle crunch', 'אופניים'], analyze: analyzeCrunches, type: 'reps', cueKey: 'crunch', orientation: O.LYING },
+  { keywords: ['כפיפות בטן הפוכות', 'reverse crunch', 'הפוכות'], analyze: analyzeCrunches, type: 'reps', cueKey: 'crunch', orientation: O.LYING },
+  { keywords: ['הרמת ירכיים', 'hip thrust'], analyze: analyzeGluteBridge, type: 'reps', cueKey: 'bridge', orientation: O.LYING },
+  { keywords: ['כפיפות V', 'v-up', 'v up'], analyze: analyzeVUps, type: 'reps', cueKey: 'vups', orientation: O.LYING },
+  { keywords: ['בעיטות חמור', 'donkey kick', 'חמור'], analyze: analyzeDonkeyKicks, type: 'reps', cueKey: 'donkeyKick', orientation: O.LYING },
+  // === NEW FITNESS — Cardio/Dynamic ===
+  { keywords: ['ברכיים גבוהות', 'high knee', 'ברכיים'], analyze: analyzeHighKnees, type: 'reps', cueKey: 'highKnees', orientation: O.STANDING },
+  { keywords: ['בעיטות ישבן', 'butt kick', 'בעיטת ישבן'], analyze: analyzeButtKicks, type: 'reps', cueKey: 'buttKicks', orientation: O.STANDING },
+  { keywords: ['קפיצות מחליק', 'skater jump', 'מחליק'], analyze: analyzeJumpingExercise, type: 'reps', cueKey: 'jump', orientation: O.STANDING },
+  { keywords: ['קפיצות טאק', 'tuck jump', 'טאק'], analyze: analyzeJumpingExercise, type: 'reps', cueKey: 'jump', orientation: O.STANDING },
+  { keywords: ['זחילת דוב', 'bear crawl', 'דוב'], analyze: analyzeRunningForm, type: 'form', cueKey: 'running', orientation: O.LYING },
+  { keywords: ['תולעת', 'inch worm', 'אינצ׳'], analyze: analyzeRunningForm, type: 'form', cueKey: 'running', orientation: O.LYING },
+  // === NEW FITNESS — Additional ===
+  { keywords: ['גוד מורנינג', 'good morning'], analyze: analyzeSingleLegDeadlift, type: 'reps', cueKey: 'deadlift', orientation: O.STANDING },
+  { keywords: ['החזקת גוף חלול', 'hollow body', 'גוף חלול'], analyze: analyzeSuperman, type: 'hold', cueKey: 'hollowBody', orientation: O.LYING },
+  { keywords: ['פלאנק לשכיבות', 'plank to push', 'פלאנק שכיבות'], analyze: analyzePlankShoulderTap, type: 'reps', cueKey: 'plankTap', orientation: O.LYING },
+  { keywords: ['קפיצות כוכב', 'star jump', 'כוכב'], analyze: analyzeJumpingExercise, type: 'reps', cueKey: 'jump', orientation: O.STANDING },
+  { keywords: ['פלאנק עם נגיעת כתף', 'plank shoulder tap', 'נגיעת כתף'], analyze: analyzePlankShoulderTap, type: 'reps', cueKey: 'plankTap', orientation: O.LYING },
+  { keywords: ['סופרמן-בננה', 'superman banana', 'בננה'], analyze: analyzeSuperman, type: 'hold', cueKey: 'superman', orientation: O.LYING },
   // === STANDING sport drills ===
   { keywords: ['דריבל', 'dribbl', 'שליטה', 'כדור'], analyze: analyzeDribbling, type: 'form', cueKey: 'dribbling', orientation: O.STANDING },
   { keywords: ['זריקה', 'קליעה', 'shooting', 'free throw', 'זריקות חופשיות'], analyze: analyzeShootingForm, type: 'form', cueKey: 'shooting', orientation: O.STANDING },
   { keywords: ['כדרור ביד', 'hand dribbl', 'כדרור כדורסל'], analyze: analyzeHandDribbling, type: 'form', cueKey: 'handDribble', orientation: O.STANDING },
+  { keywords: ['עליה לסל', 'עלייה לסל', 'layup', 'ליי אפ'], analyze: analyzeLayup, type: 'form', cueKey: 'layup', orientation: O.STANDING },
+  { keywords: ['קרוסאובר', 'crossover', 'העברה'], analyze: analyzeCrossover, type: 'form', cueKey: 'crossover', orientation: O.STANDING },
+  { keywords: ['החלקת הגנה', 'defensive slide', 'הגנה', 'סלייד'], analyze: analyzeDefensiveSlide, type: 'form', cueKey: 'defensiveSlide', orientation: O.STANDING },
   { keywords: ['פורהנד', 'בקהנד', 'מכות', 'forehand', 'backhand', 'מכות לקיר', 'wall hit'], analyze: analyzeStroke, type: 'form', cueKey: 'stroke', orientation: O.STANDING },
+  { keywords: ['ווליי', 'volley', 'וולי'], analyze: analyzeVolley, type: 'form', cueKey: 'volley', orientation: O.STANDING },
   { keywords: ['הגשה', 'serve', 'סרב'], analyze: analyzeServe, type: 'form', cueKey: 'serve', orientation: O.STANDING },
   { keywords: ['עבודת רגליים', 'footwork', 'תנועת מגרש', 'רגליים מהירות'], analyze: analyzeFootwork, type: 'form', cueKey: 'footwork', orientation: O.STANDING },
+  { keywords: ['מסירה', 'pass', 'מסירות'], analyze: analyzeFootballPass, type: 'form', cueKey: 'pass', orientation: O.STANDING },
+  { keywords: ['שליטה ראשונית', 'first touch', 'קבלת כדור'], analyze: analyzeFirstTouch, type: 'form', cueKey: 'firstTouch', orientation: O.STANDING },
+  { keywords: ['ג\'אגלינג', 'juggl', 'ליפטינג', 'לקפיצות כדור'], analyze: analyzeJuggling, type: 'form', cueKey: 'juggle', orientation: O.STANDING },
   { keywords: ['בעיטה', 'kick', 'בעיטות', 'shooting drill'], analyze: analyzeKickTechnique, type: 'form', cueKey: 'kick', orientation: O.STANDING },
   // === STANDING Paralympic — Amputee Football ===
   { keywords: ['בעיטה בקביים', 'בעיטת קביים', 'amputee kick', 'crutch kick'], analyze: analyzeAmputeeCrutchKick, type: 'form', cueKey: 'amputeeKick', orientation: O.STANDING },
   { keywords: ['ריצה בקביים', 'ספרינט קביים', 'crutch sprint', 'amputee sprint'], analyze: analyzeAmputeeCrutchSprint, type: 'form', cueKey: 'amputeeSprint', orientation: O.STANDING },
+  { keywords: ['מסירה בקביים', 'מסירת קביים', 'crutch pass', 'amputee pass'], analyze: analyzeAmputeeCrutchPass, type: 'form', cueKey: 'crutchPass', orientation: O.STANDING },
+  { keywords: ['איזון קביים', 'crutch balance', 'עמידת קביים'], analyze: analyzeAmputeeCrutchBalance, type: 'hold', cueKey: 'crutchBalance', orientation: O.STANDING },
+  { keywords: ['פיבוט קביים', 'ציר קביים', 'crutch pivot', 'סיבוב קביים'], analyze: analyzeAmputeeCrutchPivot, type: 'form', cueKey: 'crutchPivot', orientation: O.STANDING },
   // === SITTING Paralympic — Wheelchair Basketball ===
   { keywords: ['זריקה כיסא גלגלים', 'קליעה כיסא', 'wheelchair shooting', 'wheelchair basketball shoot'], analyze: analyzeWheelchairBasketballShooting, type: 'form', cueKey: 'wheelchairShooting', orientation: O.SITTING },
   { keywords: ['כדרור כיסא גלגלים', 'כדרור כיסא', 'wheelchair dribble'], analyze: analyzeWheelchairBasketballDribbling, type: 'form', cueKey: 'wheelchairDribble', orientation: O.SITTING },
@@ -3143,6 +4186,66 @@ const ANALYZER_MAP = [
   // === SITTING Paralympic — Wheelchair Tennis ===
   { keywords: ['מכות כיסא גלגלים', 'פורהנד כיסא', 'wheelchair stroke', 'wheelchair forehand'], analyze: analyzeWheelchairTennisStroke, type: 'form', cueKey: 'wheelchairStroke', orientation: O.SITTING },
   { keywords: ['הגשה כיסא גלגלים', 'סרב כיסא', 'wheelchair serve'], analyze: analyzeWheelchairTennisServe, type: 'form', cueKey: 'wheelchairServe', orientation: O.SITTING },
+  // === NEW BASKETBALL ===
+  { keywords: ['מסירת הקפצה', 'bounce pass'], analyze: analyzeBouncePass, type: 'form', cueKey: 'bouncePass', orientation: O.STANDING },
+  { keywords: ['מסירת חזה', 'chest pass'], analyze: analyzeChestPass, type: 'form', cueKey: 'chestPass', orientation: O.STANDING },
+  { keywords: ['מסירה מעל הראש', 'overhead pass'], analyze: analyzeOverheadPass, type: 'form', cueKey: 'overheadPass', orientation: O.STANDING },
+  { keywords: ['דריבל מאחורי הגב', 'behind-back dribble', 'מאחורי הגב'], analyze: analyzeHandDribbling, type: 'form', cueKey: 'handDribble', orientation: O.STANDING },
+  { keywords: ['ספין מוב', 'spin move', 'ספין'], analyze: analyzeSpinMove, type: 'form', cueKey: 'spinMove', orientation: O.STANDING },
+  { keywords: ['זריקת קפיצה', 'jump shot', 'ג\'אמפ שוט'], analyze: analyzeShootingForm, type: 'form', cueKey: 'shooting', orientation: O.STANDING },
+  { keywords: ['הוק שוט', 'hook shot'], analyze: analyzeHookShot, type: 'form', cueKey: 'hookShot', orientation: O.STANDING },
+  { keywords: ['תנועות פוסט', 'post moves', 'פוסט'], analyze: analyzePostMoves, type: 'form', cueKey: 'postMoves', orientation: O.STANDING },
+  // === NEW TENNIS ===
+  { keywords: ['סמאש', 'smash', 'overhead smash'], analyze: analyzeOverheadSmash, type: 'form', cueKey: 'smash', orientation: O.STANDING },
+  { keywords: ['דרופ שוט', 'drop shot'], analyze: analyzeStroke, type: 'form', cueKey: 'stroke', orientation: O.STANDING },
+  { keywords: ['ספליט סטפ', 'split step'], analyze: analyzeSplitStep, type: 'form', cueKey: 'splitStep', orientation: O.STANDING },
+  { keywords: ['עמדת קבלה', 'return stance'], analyze: analyzeFootwork, type: 'form', cueKey: 'footwork', orientation: O.STANDING },
+  { keywords: ['סלייס', 'slice'], analyze: analyzeStroke, type: 'form', cueKey: 'stroke', orientation: O.STANDING },
+  { keywords: ['גישה לרשת', 'approach shot', 'approach'], analyze: analyzeFootwork, type: 'form', cueKey: 'footwork', orientation: O.STANDING },
+  // === NEW FOOTBALL ===
+  { keywords: ['נגיחות ראש', 'header', 'נגיחה'], analyze: analyzeHeaders, type: 'form', cueKey: 'headers', orientation: O.STANDING },
+  { keywords: ['בעיטת גב כף רגל', 'instep shot', 'אינסטפ'], analyze: analyzeKickTechnique, type: 'form', cueKey: 'kick', orientation: O.STANDING },
+  { keywords: ['מסירה חיצונית', 'outside foot', 'outside pass'], analyze: analyzeFootballPass, type: 'form', cueKey: 'pass', orientation: O.STANDING },
+  { keywords: ['שליטה בחזה', 'chest control'], analyze: analyzeChestControl, type: 'form', cueKey: 'chestControl', orientation: O.STANDING },
+  { keywords: ['תרגיל זריזות', 'cone drill', 'קונוסים'], analyze: analyzeConeDrill, type: 'form', cueKey: 'coneDrill', orientation: O.STANDING },
+  { keywords: ['פניות מהירות', 'quick turn'], analyze: analyzeQuickTurns, type: 'form', cueKey: 'quickTurns', orientation: O.STANDING },
+  { keywords: ['חזרה מספרינט', 'sprint recovery'], analyze: analyzeRunningForm, type: 'form', cueKey: 'running', orientation: O.STANDING },
+  { keywords: ['הגנה על הכדור', 'shield ball', 'הגנת כדור'], analyze: analyzeShieldBall, type: 'form', cueKey: 'shieldBall', orientation: O.STANDING },
+  // === NEW AMPUTEE FOOTBALL ===
+  { keywords: ['דריבלינג בקביים', 'crutch dribbling', 'דריבל בקביים'], analyze: analyzeCrutchDribbling, type: 'form', cueKey: 'crutchDribble', orientation: O.STANDING },
+  { keywords: ['בעיטת דריבל בקביים', 'crutch shot', 'בעיטה חזקה בקביים'], analyze: analyzeAmputeeCrutchKick, type: 'form', cueKey: 'amputeeKick', orientation: O.STANDING },
+  { keywords: ['זריזות בקביים', 'crutch agility'], analyze: analyzeCrutchAgility, type: 'form', cueKey: 'crutchAgility', orientation: O.STANDING },
+  { keywords: ['פנייה מהירה בקביים', 'crutch quick turn'], analyze: analyzeAmputeeCrutchPivot, type: 'form', cueKey: 'crutchPivot', orientation: O.STANDING },
+  { keywords: ['הגנה על כדור בקביים', 'crutch shield'], analyze: analyzeCrutchShield, type: 'form', cueKey: 'crutchShield', orientation: O.STANDING },
+  { keywords: ['נגיחה בקביים', 'crutch header'], analyze: analyzeCrutchHeader, type: 'form', cueKey: 'crutchHeader', orientation: O.STANDING },
+  { keywords: ['שליטה בחזה בקביים', 'crutch chest control'], analyze: analyzeCrutchChestControl, type: 'form', cueKey: 'crutchChestControl', orientation: O.STANDING },
+  // === NEW AMPUTEE FOOTBALL GK ===
+  { keywords: ['צלילה לשער', 'gk dive', 'dive save'], analyze: analyzeGKDive, type: 'form', cueKey: 'gkDive', orientation: O.STANDING },
+  { keywords: ['הפצה מהשער', 'gk distribution', 'הפצה'], analyze: analyzeGKDistribution, type: 'form', cueKey: 'gkDistribution', orientation: O.STANDING },
+  { keywords: ['מיקום שוער', 'gk positioning'], analyze: analyzeGKPositioning, type: 'hold', cueKey: 'gkPositioning', orientation: O.STANDING },
+  { keywords: ['עצירה ביד אחת', 'gk one-hand', 'יד אחת'], analyze: analyzeGKDive, type: 'form', cueKey: 'gkDive', orientation: O.STANDING },
+  { keywords: ['חסימה בקביים', 'gk crutch block'], analyze: analyzeGKPositioning, type: 'hold', cueKey: 'gkPositioning', orientation: O.STANDING },
+  { keywords: ['תפיסה גבוהה', 'gk high catch'], analyze: analyzeGKDistribution, type: 'form', cueKey: 'gkDistribution', orientation: O.STANDING },
+  { keywords: ['עצירה נמוכה', 'gk low save'], analyze: analyzeGKDive, type: 'form', cueKey: 'gkDive', orientation: O.STANDING },
+  { keywords: ['שחרור מהיר', 'gk quick release'], analyze: analyzeGKDistribution, type: 'form', cueKey: 'gkDistribution', orientation: O.STANDING },
+  { keywords: ['עבודת רגליים שוער', 'gk footwork'], analyze: analyzeFootwork, type: 'form', cueKey: 'footwork', orientation: O.STANDING },
+  { keywords: ['תגובה מהירה', 'gk reaction'], analyze: analyzeGKReaction, type: 'form', cueKey: 'gkReaction', orientation: O.STANDING },
+  // === NEW WHEELCHAIR BASKETBALL ===
+  { keywords: ['מסירת הקפצה כיסא', 'wc bounce pass'], analyze: analyzeWCBouncePass, type: 'form', cueKey: 'wcBouncePass', orientation: O.SITTING },
+  { keywords: ['הוק שוט כיסא', 'wc hook shot'], analyze: analyzeHookShot, type: 'form', cueKey: 'hookShot', orientation: O.SITTING },
+  { keywords: ['לייאפ כיסא', 'wc layup'], analyze: analyzeWheelchairBasketballShooting, type: 'form', cueKey: 'wheelchairShooting', orientation: O.SITTING },
+  { keywords: ['ספרינט כיסא', 'wc push sprint'], analyze: analyzeWCPushSprint, type: 'form', cueKey: 'wcPushSprint', orientation: O.SITTING },
+  { keywords: ['הגנה כיסא', 'wc defense'], analyze: analyzeWheelchairBasketballDribbling, type: 'form', cueKey: 'wheelchairDribble', orientation: O.SITTING },
+  { keywords: ['פיק אנד רול כיסא', 'wc pick and roll'], analyze: analyzeWCPushSprint, type: 'form', cueKey: 'wcPushSprint', orientation: O.SITTING },
+  { keywords: ['חסימת ריבאונד כיסא', 'wc block out'], analyze: analyzeWheelchairBasketballShooting, type: 'form', cueKey: 'wheelchairShooting', orientation: O.SITTING },
+  { keywords: ['מהיר כיסא', 'wc fast break'], analyze: analyzeWCPushSprint, type: 'form', cueKey: 'wcPushSprint', orientation: O.SITTING },
+  // === NEW WHEELCHAIR TENNIS ===
+  { keywords: ['סמאש כיסא', 'wc smash'], analyze: analyzeWCSmash, type: 'form', cueKey: 'wcSmash', orientation: O.SITTING },
+  { keywords: ['ווליי כיסא', 'wc volley'], analyze: analyzeWheelchairTennisStroke, type: 'form', cueKey: 'wheelchairStroke', orientation: O.SITTING },
+  { keywords: ['קבלה כיסא', 'wc return'], analyze: analyzeWheelchairTennisStroke, type: 'form', cueKey: 'wheelchairStroke', orientation: O.SITTING },
+  { keywords: ['ספליט סטפ כיסא', 'wc split step'], analyze: analyzeWCPushSprint, type: 'form', cueKey: 'wcPushSprint', orientation: O.SITTING },
+  { keywords: ['דרופ שוט כיסא', 'wc drop shot'], analyze: analyzeWheelchairTennisStroke, type: 'form', cueKey: 'wheelchairStroke', orientation: O.SITTING },
+  { keywords: ['התאוששות דחיפה כיסא', 'wc push recovery'], analyze: analyzeWCPushSprint, type: 'form', cueKey: 'wcPushSprint', orientation: O.SITTING },
 ];
 
 // Get the right analyzer based on exercise type
@@ -3172,24 +4275,32 @@ export function getCalibrationAngles(landmarks, cueKey) {
     angles.rightElbow = angle(lm(LM.RIGHT_SHOULDER), lm(LM.RIGHT_ELBOW), lm(LM.RIGHT_WRIST));
   }
 
-  // Knee angles (squats, lunges, kicks)
-  if (['squat', 'lunge', 'amputeeKick', 'kick'].includes(cueKey)) {
+  // Knee angles (squats, lunges, kicks, sport drills, fitness legs)
+  if (['squat', 'lunge', 'amputeeKick', 'kick', 'layup', 'crossover', 'defensiveSlide', 'pass', 'firstTouch', 'juggle', 'footwork', 'calfRaise', 'deadlift', 'highKnees', 'buttKicks', 'bouncePass', 'chestPass', 'postMoves', 'splitStep', 'headers', 'chestControl', 'coneDrill', 'quickTurns', 'shieldBall', 'gkPositioning', 'gkReaction', 'legRaise', 'vups', 'donkeyKick'].includes(cueKey)) {
     if (v(LM.LEFT_HIP) && v(LM.LEFT_KNEE) && v(LM.LEFT_ANKLE))
       angles.leftKnee = angle(lm(LM.LEFT_HIP), lm(LM.LEFT_KNEE), lm(LM.LEFT_ANKLE));
     if (v(LM.RIGHT_HIP) && v(LM.RIGHT_KNEE) && v(LM.RIGHT_ANKLE))
       angles.rightKnee = angle(lm(LM.RIGHT_HIP), lm(LM.RIGHT_KNEE), lm(LM.RIGHT_ANKLE));
   }
 
-  // Shoulder angles (overhead press, shooting, serves)
-  if (['shoulder', 'wheelchairShooting', 'wheelchairServe', 'wheelchairStroke', 'shooting', 'serve'].includes(cueKey)) {
+  // Shoulder angles (overhead press, shooting, serves, volley, layup, new exercises)
+  if (['shoulder', 'wheelchairShooting', 'wheelchairServe', 'wheelchairStroke', 'shooting', 'serve', 'volley', 'layup', 'frontRaise', 'shrug', 'hookShot', 'overheadPass', 'smash', 'wcSmash', 'wcPushSprint', 'gkDistribution', 'wcBouncePass'].includes(cueKey)) {
     if (v(LM.LEFT_ELBOW) && v(LM.LEFT_SHOULDER) && v(LM.LEFT_HIP))
       angles.leftShoulder = angle(lm(LM.LEFT_ELBOW), lm(LM.LEFT_SHOULDER), lm(LM.LEFT_HIP));
     if (v(LM.RIGHT_ELBOW) && v(LM.RIGHT_SHOULDER) && v(LM.RIGHT_HIP))
       angles.rightShoulder = angle(lm(LM.RIGHT_ELBOW), lm(LM.RIGHT_SHOULDER), lm(LM.RIGHT_HIP));
   }
 
-  // Trunk rotation (wheelchair sports, passes, strokes, kicks)
-  if (['wheelchairStroke', 'wheelchairServe', 'wheelchairPass', 'amputeeKick', 'stroke', 'kick'].includes(cueKey)) {
+  // Hip angles (deadlift, leg raise, floor exercises)
+  if (['deadlift', 'legRaise', 'vups', 'donkeyKick', 'russianTwist', 'deadbug', 'birddog', 'superman', 'hollowBody'].includes(cueKey)) {
+    if (v(LM.LEFT_SHOULDER) && v(LM.LEFT_HIP) && v(LM.LEFT_KNEE))
+      angles.leftHip = angle(lm(LM.LEFT_SHOULDER), lm(LM.LEFT_HIP), lm(LM.LEFT_KNEE));
+    if (v(LM.RIGHT_SHOULDER) && v(LM.RIGHT_HIP) && v(LM.RIGHT_KNEE))
+      angles.rightHip = angle(lm(LM.RIGHT_SHOULDER), lm(LM.RIGHT_HIP), lm(LM.RIGHT_KNEE));
+  }
+
+  // Trunk rotation (wheelchair sports, passes, strokes, kicks, crutch drills, new sport exercises)
+  if (['wheelchairStroke', 'wheelchairServe', 'wheelchairPass', 'amputeeKick', 'stroke', 'kick', 'crutchPass', 'crutchPivot', 'crutchBalance', 'pass', 'spinMove', 'quickTurns', 'russianTwist', 'crutchDribble', 'crutchAgility', 'crutchShield', 'crutchHeader', 'crutchChestControl', 'gkDive'].includes(cueKey)) {
     if (v(LM.LEFT_SHOULDER) && v(LM.RIGHT_SHOULDER) && v(LM.LEFT_HIP) && v(LM.RIGHT_HIP)) {
       const shoulderMidX = (lm(LM.LEFT_SHOULDER).x + lm(LM.RIGHT_SHOULDER).x) / 2;
       const hipMidX = (lm(LM.LEFT_HIP).x + lm(LM.RIGHT_HIP).x) / 2;

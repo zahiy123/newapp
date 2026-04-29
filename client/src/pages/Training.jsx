@@ -16,12 +16,11 @@ import { estimateCalories } from '../utils/calorieEstimator';
 import ROMGauge from '../components/ROMGauge';
 import WorkoutSummary from '../components/WorkoutSummary';
 import { db } from '../services/firebase';
-import { doc, getDoc, addDoc, updateDoc, collection, Timestamp } from 'firebase/firestore';
+import { doc, getDoc, addDoc, updateDoc, collection, Timestamp, getDocs, query, orderBy, limit } from 'firebase/firestore';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { apiUrl } from '../utils/api';
 import { markDayCompleted, sanitizePlan, saveActiveWorkout, loadActiveWorkout, clearActiveWorkout } from '../utils/workoutStorage';
 import { incrementWeeklySession } from '../utils/weeklyGoals';
-import { saveSessionAvg, checkLevelUpEligibility } from '../utils/sessionScoring';
 
 const PHASE = {
   IDLE: 'idle',
@@ -336,6 +335,8 @@ export default function Training() {
 
   // Per-rep AI score tracking for adaptive coaching
   const repScoresRef = useRef([]);
+  // Per-exercise history from Firestore (loaded once at training init)
+  const exerciseHistoryRef = useRef({});
 
   // Feedback tracking
   const lastSpokenRef = useRef('');
@@ -415,6 +416,29 @@ export default function Training() {
       const loadedExercises = sanitized.weeks[0].days[0].exercises || [];
       setExercises(loadedExercises);
       resetVisionSession();
+
+      // Load per-exercise score history from Firestore (last 5 workouts)
+      try {
+        const histQ = query(
+          collection(db, 'users', user.uid, 'workouts'),
+          orderBy('date', 'desc'),
+          limit(5)
+        );
+        const histSnap = await getDocs(histQ);
+        const history = {};
+        histSnap.docs.forEach(d => {
+          const wData = d.data();
+          (wData.exercises || []).forEach(ex => {
+            if (ex.avgScore > 0) {
+              if (!history[ex.name]) history[ex.name] = [];
+              history[ex.name].push({ score: ex.avgScore, date: wData.date?.toDate?.() || new Date() });
+            }
+          });
+        });
+        exerciseHistoryRef.current = history;
+      } catch (err) {
+        console.error('Failed to load exercise history:', err);
+      }
 
       // Resume detection
       if (searchParams.get('resume') === 'true') {
@@ -1104,11 +1128,14 @@ export default function Training() {
         skillLevel: userProfile?.skillLevel || 'intermediate',
       });
       // Start Haiku Vision per-rep analysis (pass calibration baseline for relative thresholding)
+      const prevScores = exerciseHistoryRef.current[currentExercise?.name] || [];
+      const previousScore = prevScores.length > 0 ? prevScores[0].score : null;
       startVision({
         sport: userProfile?.sport,
         exerciseName: currentExercise?.name,
         playerProfile: userProfile,
-        playerName
+        playerName,
+        previousScore
       }, captureFrame, videoRef.current, exerciseStateRef.current?._calibration || null);
     } else {
       stopBallLoop();
@@ -1530,6 +1557,12 @@ export default function Training() {
     sessionSavedRef.current = true;
     clearActiveWorkout();
 
+    // Compute session-level technical quality from exercise avgScores
+    const scoredExercises = sessionDataRef.current.exerciseResults.filter(e => (e.avgScore || 0) > 0);
+    const technicalQuality = scoredExercises.length > 0
+      ? Math.round((scoredExercises.reduce((s, e) => s + e.avgScore, 0) / scoredExercises.length) * 10) / 10
+      : null;
+
     const data = {
       date: Timestamp.now(),
       weekNumber: parseInt(searchParams.get('week') || '0'),
@@ -1542,6 +1575,7 @@ export default function Training() {
       totalCalories: sessionDataRef.current.exerciseResults.reduce((s, e) => s + (e.calories || 0), 0),
       warmUpCompleted: sessionDataRef.current.warmUpCompleted,
       exercises: sessionDataRef.current.exerciseResults,
+      technicalQuality,
       personalBests: [],
       aiSummary: null,
     };
@@ -1555,22 +1589,31 @@ export default function Training() {
         markDayCompleted(weekIdx, dayIdx);
         incrementWeeklySession();
 
-        // Save session average score and check for level-up eligibility
-        const exercises = sessionDataRef.current.exerciseResults || [];
-        const scoredExercises = exercises.filter(e => (e.avgScore || 0) > 0);
-        if (scoredExercises.length > 0) {
-          const sessionAvg = scoredExercises.reduce((s, e) => s + e.avgScore, 0) / scoredExercises.length;
-          saveSessionAvg(Math.round(sessionAvg * 10) / 10);
+        // Check level-up from Firestore (last 3 completed workouts)
+        try {
+          const recentQ = query(
+            collection(db, 'users', user.uid, 'workouts'),
+            orderBy('date', 'desc'),
+            limit(3)
+          );
+          const recentSnap = await getDocs(recentQ);
+          const recentScores = recentSnap.docs
+            .map(d => d.data().technicalQuality)
+            .filter(s => s != null && s > 0);
 
-          const levelUp = checkLevelUpEligibility();
-          if (levelUp) {
-            setTimeout(() => {
-              speakIfIdle(isHe
-                ? `${playerName}, שלושה אימונים ברמה גבוהה! הגיע הזמן לעלות רמה`
-                : `${playerName}, three high-level sessions! Time to level up`,
-                { rate: 1.2 });
-            }, 3000);
+          if (recentScores.length >= 3) {
+            const avg3 = recentScores.reduce((a, b) => a + b, 0) / recentScores.length;
+            if (avg3 > 8.5) {
+              setTimeout(() => {
+                speakIfIdle(isHe
+                  ? `${playerName}, שלושה אימונים ברמה גבוהה! הגיע הזמן לעלות לרמת Pro`
+                  : `${playerName}, three high-level sessions! Time to upgrade to Pro level`,
+                  { rate: 1.2 });
+              }, 3000);
+            }
           }
+        } catch (err) {
+          console.error('Level-up check failed:', err);
         }
       }
       // Fire-and-forget AI summary

@@ -149,6 +149,38 @@ export default function Stats() {
     }]
   };
 
+  // AI Quality (technicalQuality) chart — only workouts that have a score
+  const qualityWorkouts = chartWorkouts.filter(w => w.technicalQuality != null && w.technicalQuality > 0);
+  const qualityLabels = qualityWorkouts.map(w => {
+    const d = w.date?.toDate ? w.date.toDate() : new Date(w.date);
+    return `${d.getDate()}/${d.getMonth() + 1}`;
+  });
+  const qualityChartData = {
+    labels: qualityLabels,
+    datasets: [{
+      label: t('stats.aiQualityOverTime'),
+      data: qualityWorkouts.map(w => w.technicalQuality),
+      borderColor: '#10B981',
+      backgroundColor: 'rgba(16, 185, 129, 0.1)',
+      fill: true,
+      tension: 0.3,
+      pointBackgroundColor: qualityWorkouts.map(w => w.technicalQuality >= 8 ? '#10B981' : w.technicalQuality >= 5 ? '#F59E0B' : '#EF4444'),
+      pointRadius: 5,
+    }]
+  };
+  const qualityChartOptions = {
+    responsive: true,
+    maintainAspectRatio: false,
+    plugins: { legend: { display: false } },
+    scales: {
+      x: { grid: { display: false } },
+      y: { beginAtZero: true, max: 10, grid: { color: 'rgba(0,0,0,0.05)' } }
+    }
+  };
+  const avgQuality = qualityWorkouts.length > 0
+    ? Math.round((qualityWorkouts.reduce((s, w) => s + w.technicalQuality, 0) / qualityWorkouts.length) * 10) / 10
+    : null;
+
   const chartOptions = {
     responsive: true,
     maintainAspectRatio: false,
@@ -349,6 +381,25 @@ export default function Stats() {
           </div>
         </div>
       </div>
+
+      {/* AI Quality Over Time */}
+      {qualityWorkouts.length > 1 && (
+        <div className="bg-white rounded-xl shadow p-4">
+          <div className="flex items-center justify-between mb-2">
+            <h3 className="text-sm font-medium text-gray-600">{t('stats.aiQualityOverTime')}</h3>
+            {avgQuality !== null && (
+              <span className={`text-sm font-bold px-2 py-0.5 rounded-full ${
+                avgQuality >= 8 ? 'bg-green-100 text-green-700' : avgQuality >= 5 ? 'bg-yellow-100 text-yellow-700' : 'bg-red-100 text-red-700'
+              }`}>
+                {t('stats.avgQuality')}: {avgQuality}/10
+              </span>
+            )}
+          </div>
+          <div style={{ height: 220 }}>
+            <Line data={qualityChartData} options={qualityChartOptions} />
+          </div>
+        </div>
+      )}
 
       {/* Personal Bests */}
       {personalBests.length > 0 && (

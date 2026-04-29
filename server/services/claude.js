@@ -151,6 +151,131 @@ const BIOMECHANICS_DB = {
   'backhand': 'CHECKPOINTS: early shoulder turn, firm two-hand grip, contact in front of body, follow-through across body, balanced wide stance',
   'serve': 'CHECKPOINTS: ball toss at 1 o\'clock position, trophy pose (racket behind head), full extension at contact, pronation on follow-through, land on front foot',
   'volley': 'CHECKPOINTS: split step before contact, short backswing, firm wrist, punch through ball, recover to ready position',
+  // Wheelchair Basketball
+  'wheelchair shooting': 'CHECKPOINTS: torso upright and braced against backrest, elbow 90° under ball, shooting hand behind ball center, follow-through gooseneck, non-shooting hand stabilizes, chair locked/braced before release',
+  'wheelchair dribble': 'CHECKPOINTS: ball below shoulder height, push-push-dribble rhythm (2 pushes max), fingertip control, eyes up, trunk stable, chair momentum maintained',
+  'wheelchair pass': 'CHECKPOINTS: chest pass from sternum, elbows drive outward, wrists snap on release, torso leans into pass for power, chair angled toward target, follow-through arms extended',
+  // Wheelchair Tennis
+  'wheelchair stroke': 'CHECKPOINTS: early trunk rotation (not just arm), racket back with shoulder turn, contact point in front of wheel axle, trunk lean into shot, push-hit timing (push chair then swing), follow-through across body',
+  'wheelchair serve': 'CHECKPOINTS: ball toss at 1 o\'clock, trophy pose with trunk lean forward, full arm extension at contact, pronation on snap, chair positioned sideways to baseline, balance maintained post-serve',
+  // Warm-up / Dynamic exercises
+  'arm circles': 'CHECKPOINTS: arms fully extended, smooth circular motion, shoulders relaxed (no shrugging), consistent tempo, both directions equal time',
+  'high knees': 'CHECKPOINTS: knee drives above hip line, land on balls of feet, arms pump opposite to legs, torso upright, quick ground contact',
+  'side steps': 'CHECKPOINTS: low athletic stance, feet never cross, hips stay low, arms ready, quick lateral push-off, weight on balls of feet',
+  'balance hops': 'CHECKPOINTS: soft landing on ball of foot, knee slightly bent on landing, core engaged, minimal upper body sway, controlled rhythm',
+  'forward kicks': 'CHECKPOINTS: standing leg slightly bent, kick leg swings from hip, controlled arc (not flinging), core braced, arms counterbalance',
+  'single leg high knee': 'CHECKPOINTS: standing leg stable, driving knee reaches hip height, core engaged, hands on crutches for balance if needed, controlled tempo',
+  'arm punches': 'CHECKPOINTS: full extension on punch, retract to guard position, core rotates with punch, shoulders stay down, alternate arms evenly',
+  'core twists': 'CHECKPOINTS: hips face forward (rotate only torso), arms move with shoulders, controlled tempo, full range of rotation, core engaged throughout',
+  // Fitness — remaining
+  'pull-up': 'CHECKPOINTS: dead hang start, chin clears bar, elbows full extension at bottom, no kipping, controlled descent, shoulder blades retract at top',
+  'pullup': 'CHECKPOINTS: dead hang start, chin clears bar, elbows full extension at bottom, no kipping, controlled descent, shoulder blades retract at top',
+  'tricep extension': 'CHECKPOINTS: elbows pinned by ears, full extension at top, controlled descent behind head, no elbow flare, core braced',
+  'side plank': 'CHECKPOINTS: straight line head-to-feet, bottom shoulder stacked over elbow/wrist, hips off ground and not sagging, top arm extended or on hip, core and glutes engaged',
+  'band pull apart': 'CHECKPOINTS: arms extended at shoulder height, squeeze shoulder blades together, controlled return, chest open, no shoulder shrugging',
+  'goblet squat': 'CHECKPOINTS: weight held at chest, elbows inside knees at bottom, heels planted, depth below parallel, torso upright, core braced',
+  'jumping jack': 'CHECKPOINTS: soft landing on balls of feet, full arm extension overhead, legs wider than shoulders at top, arms touch at top, rhythmic tempo',
+  'running form': 'CHECKPOINTS: midfoot/forefoot strike, slight forward lean 5-10°, arms at 90° pumping forward (not across), cadence 170-180 spm, relaxed shoulders',
+  'glute bridge': 'CHECKPOINTS: feet hip-width, drive through heels, squeeze glutes at top, neutral spine, no rib flare',
+  // === NEW FITNESS — Standing Strength ===
+  'calf raise': 'CHECKPOINTS: full ankle plantarflexion at top, controlled descent (no bouncing), weight on balls of feet, knees straight not locked, pause at top',
+  'sumo squat': 'CHECKPOINTS: wide stance toes out 45°, knees track over toes, depth below parallel, torso upright, weight in heels, squeeze adductors',
+  'reverse lunge': 'CHECKPOINTS: step back controlled, front knee over ankle, back knee toward floor, torso upright, push off front heel to return',
+  'bulgarian split squat': 'CHECKPOINTS: rear foot elevated, front knee over ankle, depth until rear knee near floor, torso upright, front heel drives up',
+  'single leg deadlift': 'CHECKPOINTS: flat back throughout, hip hinge not squat, rear leg extends straight behind, standing knee slight bend, arms hang vertically',
+  'step up': 'CHECKPOINTS: full foot on platform, drive through heel, stand tall at top, controlled descent, no push-off from ground foot',
+  'front raise': 'CHECKPOINTS: arms raise to shoulder height (not above), slight elbow bend, controlled descent, no momentum/swinging, core braced',
+  'upright row': 'CHECKPOINTS: hands close grip, pull elbows up and out, bar/weights close to body, stop at chin height, controlled descent',
+  'shrug': 'CHECKPOINTS: elevate shoulders to ears, squeeze traps at top 1-2s, controlled descent, no head forward movement, arms straight',
+  'arnold press': 'CHECKPOINTS: start palms facing you at chin, rotate palms outward while pressing, full lockout overhead, reverse on descent, core tight',
+  'hammer curl': 'CHECKPOINTS: neutral grip (palms facing each other), elbows pinned at sides, full range of motion, no swinging, controlled negative',
+  'overhead tricep extension': 'CHECKPOINTS: elbows by ears pointing up, lower weight behind head, full extension at top, no elbow flare, core braced',
+  // === NEW FITNESS — Floor/Lying ===
+  'superman': 'CHECKPOINTS: simultaneous arm and leg lift, arms straight overhead, legs straight behind, hold 2-3s at top, neck neutral',
+  'dead bug': 'CHECKPOINTS: lower back pressed into floor, extend opposite arm and leg, controlled movement, exhale on extension, return to start before switching',
+  'bird dog': 'CHECKPOINTS: hands under shoulders knees under hips, extend opposite arm and leg straight, hold 1-2s, core braced no rotation, return controlled',
+  'russian twist': 'CHECKPOINTS: lean back 45° from floor, feet elevated or planted, rotate from thoracic spine, arms extended or holding weight, control both directions',
+  'leg raise': 'CHECKPOINTS: lower back pressed into floor, legs straight, raise to 90°, controlled descent (don\'t drop), no arch in lower back',
+  'flutter kicks': 'CHECKPOINTS: lower back pressed into floor, legs straight 6 inches off ground, small rapid kicks, hands under glutes for support, continuous movement',
+  'bicycle crunch': 'CHECKPOINTS: opposite elbow to knee, full twist from thoracic, extend opposite leg, controlled pace, don\'t pull neck',
+  'reverse crunch': 'CHECKPOINTS: curl hips off floor toward chest, lower back lifts, controlled descent, don\'t use momentum, exhale on curl',
+  'hip thrust': 'CHECKPOINTS: upper back on bench/elevated surface, feet hip-width flat, drive through heels, full hip extension at top, squeeze glutes',
+  'v-ups': 'CHECKPOINTS: start fully extended on floor, simultaneously lift legs and torso, reach hands to toes, controlled descent back to flat, core engaged throughout',
+  'donkey kicks': 'CHECKPOINTS: hands and knees position, kick one leg up and back, squeeze glute at top, knee bent 90°, no lower back arch, alternate legs',
+  // === NEW FITNESS — Cardio/Dynamic ===
+  'high knees main': 'CHECKPOINTS: knee drives above hip line, land on balls of feet, arms pump opposite to legs, torso upright, quick ground contact, maintain rhythm',
+  'butt kicks': 'CHECKPOINTS: heel kicks toward glutes, land on balls of feet, upright torso, arms pump naturally, quick cadence, knees point down',
+  'skater jumps': 'CHECKPOINTS: lateral bound on single leg, soft landing with knee bend, opposite leg sweeps behind, arm drives across body, controlled deceleration',
+  'tuck jumps': 'CHECKPOINTS: explosive vertical jump, tuck knees to chest at peak, soft landing on balls of feet, immediate reset, arms drive up',
+  'bear crawl': 'CHECKPOINTS: hands under shoulders knees under hips, knees hover 1 inch off ground, opposite hand and foot move together, back flat, controlled pace',
+  'inch worm': 'CHECKPOINTS: walk hands out to plank, maintain straight legs during walk-out, plank position briefly, walk hands back to feet, slow controlled movement',
+  // === NEW FITNESS — Additional ===
+  'good morning': 'CHECKPOINTS: barbell or hands behind head, hip hinge with flat back, slight knee bend, hamstring stretch at bottom, drive hips forward to stand',
+  'hollow body hold': 'CHECKPOINTS: lower back pressed into floor, shoulders and feet 6 inches off ground, arms overhead, core maximally engaged, hold steady',
+  'plank to push-up': 'CHECKPOINTS: start in forearm plank, place one hand then other to push-up, lower one elbow then other back to plank, alternate leading arm, no hip rotation',
+  'star jumps': 'CHECKPOINTS: explosive jump, spread arms and legs wide in air (star shape), soft landing together, immediate reset, arms and legs symmetrical',
+  'plank shoulder tap': 'CHECKPOINTS: maintain plank position, lift one hand to tap opposite shoulder, minimize hip rotation, alternate hands, core braced throughout',
+  'superman banana': 'CHECKPOINTS: alternate between superman (face down, limbs up) and hollow body (face up, limbs up), controlled roll, no momentum, core engaged both positions',
+  // === NEW BASKETBALL ===
+  'bounce pass': 'CHECKPOINTS: step toward target, push ball down at 2/3 distance, aim for partner waist height, follow-through fingers point down, backspin on ball',
+  'chest pass': 'CHECKPOINTS: ball at chest, step forward, extend both arms fully, snap wrists on release, follow-through with palms out, aim partner chest height',
+  'overhead pass': 'CHECKPOINTS: ball above and behind head, step forward, snap pass over head, follow-through arms extended, use for long distance or over defenders',
+  'behind-back dribble': 'CHECKPOINTS: low stance, push ball behind back with wrist, receive with opposite hand, keep ball low, head up, maintain speed',
+  'spin move': 'CHECKPOINTS: plant pivot foot, reverse spin 180°, protect ball during rotation, accelerate out of spin, maintain low center of gravity',
+  'jump shot': 'CHECKPOINTS: squared to basket, jump straight up, release at peak of jump, elbow under ball 90°, follow-through gooseneck, consistent arc',
+  'hook shot': 'CHECKPOINTS: shoulder toward defender, single arm arc motion, release at highest point, follow-through over head, soft touch off backboard',
+  'post moves': 'CHECKPOINTS: back to basket wide stance, feel defender with hip, drop step or face-up, protect ball high, power finish at rim',
+  // === NEW TENNIS ===
+  'overhead smash': 'CHECKPOINTS: position under ball, racket back and up early, full extension at contact, snap wrist down, follow-through across body, balanced landing',
+  'split step': 'CHECKPOINTS: time jump as opponent contacts ball, land on balls of both feet, wide base, knees bent ready, immediate push-off in correct direction',
+  'drop shot': 'CHECKPOINTS: disguise with full stroke prep, open racket face, slice under ball, soft hands absorb impact, short follow-through, use against deep opponents',
+  'slice': 'CHECKPOINTS: continental grip, high-to-low racket path, open face cuts under ball, firm wrist, follow-through forward and down, backspin',
+  'approach shot': 'CHECKPOINTS: move forward through the shot, contact in front, deep placement, split step after hit, close to net ready for volley',
+  'return stance': 'CHECKPOINTS: wide base, weight on balls of feet, racket in front ready, split step as server tosses, explosive first step to ball',
+  // === NEW FOOTBALL ===
+  'headers': 'CHECKPOINTS: eyes on ball, meet ball with forehead (not top of head), neck muscles braced, attack the ball (don\'t let it hit you), jump timing, arms for balance',
+  'instep shot': 'CHECKPOINTS: approach 30-45° angle, plant foot beside ball pointing target, strike with laces top of foot, ankle locked, lean over ball, follow-through high',
+  'outside foot pass': 'CHECKPOINTS: contact with outside of foot, plant foot beside ball, short backswing, aim across body, disguise direction, follow-through toward target',
+  'chest control': 'CHECKPOINTS: chest out to meet ball, withdraw chest on contact (cushion), arms wide for balance, knees slightly bent, ball drops to feet',
+  'cone drill': 'CHECKPOINTS: low center of gravity, quick direction changes, push off outside foot, maintain balance, eyes up, decelerate before turn',
+  'quick turns': 'CHECKPOINTS: decelerate with short steps, low center of gravity, pivot on ball of foot, accelerate immediately after turn, body rotation leads',
+  'sprint recovery': 'CHECKPOINTS: decelerate gradually, lower center of gravity, shorten stride, transition to defensive stance, ready for next action',
+  'shield ball': 'CHECKPOINTS: body between opponent and ball, wide stable stance, arm creates space legally, ball on far foot, low center of gravity, back to pressure',
+  // === NEW AMPUTEE FOOTBALL ===
+  'crutch dribbling': 'CHECKPOINTS: ball within crutch reach, use sole of foot for control, crutches planted for stability, small touches, head up scanning, maintain triangular base',
+  'crutch shot': 'CHECKPOINTS: crutch base planted wide, weight shifts to crutches, kicking leg swings fully, hip rotation drives power, follow-through balanced, core braced',
+  'crutch agility': 'CHECKPOINTS: quick lateral crutch repositioning, maintain base throughout, short explosive movements, core stabilizes, weight shifts smoothly between crutches',
+  'crutch quick turn': 'CHECKPOINTS: plant crutches firmly, rotate trunk on standing foot, maintain balance through turn, re-establish base immediately, quick acceleration out',
+  'crutch shield': 'CHECKPOINTS: wide crutch base, body between opponent and ball, ball on standing-leg side, crutches create barrier, low center of gravity, core engaged',
+  'crutch header': 'CHECKPOINTS: stable crutch base before jump, explosive push through standing leg, meet ball with forehead, brace neck, land with crutch support, absorb impact',
+  'crutch chest control': 'CHECKPOINTS: crutches planted firmly, chest meets ball, withdraw chest on impact (cushion), maintain crutch stability throughout, ball drops to standing foot',
+  // === NEW AMPUTEE FOOTBALL GK ===
+  'gk dive save': 'CHECKPOINTS: explosive lateral push, lead with hands, body follows hands, land on side (not stomach), extend fully, quick recovery to feet',
+  'gk distribution': 'CHECKPOINTS: overhand throw or punt kick, step toward target, follow-through, accuracy over power, quick release, scan field before distributing',
+  'gk positioning': 'CHECKPOINTS: centered on goal line, knees slightly bent ready stance, weight on balls of feet, hands ready at waist, narrow angle for shooter',
+  'gk one-hand save': 'CHECKPOINTS: lead with dominant hand, full arm extension, fingertip save if needed, push ball away from goal, wrist firm, maintain body behind ball',
+  'gk crutch block': 'CHECKPOINTS: crutch base wide, lower body behind ball, use body as barrier, arms protect upper area, anticipate shot direction, quick repositioning',
+  'gk high catch': 'CHECKPOINTS: jump timing crucial, catch at highest point, two hands secure ball, bring ball to chest on landing, land balanced, elbows in',
+  'gk low save': 'CHECKPOINTS: get body behind ball, lower to ground quickly, scoop ball with both hands, bring to chest, protect with body, quick recovery',
+  'gk quick release': 'CHECKPOINTS: scan field immediately after save, choose target quickly, overhand throw for accuracy, roll for close player, get ball out fast',
+  'gk footwork': 'CHECKPOINTS: shuffle across goal, stay on balls of feet, don\'t cross feet, face the ball always, quick side steps, set before shot',
+  'gk reaction': 'CHECKPOINTS: explosive first step, read shooter body language, stay big as long as possible, commit at last moment, spring from ready position',
+  // === NEW WHEELCHAIR BASKETBALL ===
+  'wc bounce pass': 'CHECKPOINTS: push ball downward from chest, aim at 2/3 distance to partner, follow-through fingers down, trunk leans into pass, chair angled toward target',
+  'wc hook shot': 'CHECKPOINTS: single arm arc from shoulder, release at highest point, trunk lean for power, non-shooting hand stabilizes, follow-through over head',
+  'wc layup': 'CHECKPOINTS: push chair to basket, ball protected on approach, extend arm fully at basket, soft touch off glass, maintain chair speed throughout',
+  'wc push sprint': 'CHECKPOINTS: lean forward in chair, powerful push-recovery rhythm, hands hit push rims at 12 o\'clock, full push through to 6 o\'clock, recover hands quickly',
+  'wc defense': 'CHECKPOINTS: chair angled 45° to offensive player, hands active and up, maintain distance, quick lateral pushes, anticipate offensive moves, block passing lanes',
+  'wc pick and roll': 'CHECKPOINTS: set solid screen (chair stopped), roll after contact, open to ball, receive pass in motion, finish at basket, communication essential',
+  'wc block out': 'CHECKPOINTS: chair positioned between opponent and basket, widen chair stance, hold position, reach up for rebound, secure ball to chest',
+  'wc fast break': 'CHECKPOINTS: explosive first push, maintain top speed, ball control while pushing (dribble rules), look up for outlet, finish at basket under control',
+  // === NEW WHEELCHAIR TENNIS ===
+  'wc smash': 'CHECKPOINTS: position chair under ball, racket back and up, full arm extension overhead at contact, snap wrist down, trunk lean into shot, recover chair position',
+  'wc volley': 'CHECKPOINTS: short compact backswing, firm wrist, punch through ball, recover to ready position, chair positioned near net, split step timing with push',
+  'wc return': 'CHECKPOINTS: ready position in chair, anticipate serve direction, quick chair push toward ball, early racket preparation, contact in front, depth on return',
+  'wc split step': 'CHECKPOINTS: quick forward-back chair push (simulating split step), time with opponent contact, immediate directional push, anticipate ball placement',
+  'wc drop shot': 'CHECKPOINTS: disguise with full prep, open racket face, soft hands, short follow-through, place near net, use when opponent deep on court',
+  'wc push recovery': 'CHECKPOINTS: immediate chair push after shot, return to center court, push-coast-push rhythm, maintain ready position, anticipate next shot location',
 };
 
 // Fuzzy match: find best biomechanics checklist for an exercise name (Hebrew or English)
@@ -170,8 +295,67 @@ function getBiomechanicsChecklist(exercise, sport) {
     'כפיפות בטן': 'crunch', 'מטפס הרים': 'mountain climber', 'ישיבה על הקיר': 'wall sit',
     'כתפיים': 'shoulder press', 'משיכת משקולת': 'row', 'כפיפות מרפק': 'bicep curl',
     'הרמה צידית': 'lateral raise', 'בעיטה': 'kick', 'כדרור': 'dribble', 'מסירה': 'pass',
-    'זריקה': 'basketball shoot', 'עליה לסל': 'layup', 'הגנה': 'defensive slide',
-    'פורהנד': 'forehand', 'בקהנד': 'backhand', 'הגשה': 'serve',
+    'שליטה ראשונית': 'first touch', 'ג\'אגלינג': 'juggle', 'בעיטת שוט': 'shoot',
+    'זריקה': 'basketball shoot', 'עליה לסל': 'layup', 'הגנה': 'defensive slide', 'קרוסאובר': 'crossover',
+    'פורהנד': 'forehand', 'בקהנד': 'backhand', 'הגשה': 'serve', 'ווליי': 'volley',
+    'זריקה כיסא': 'wheelchair shooting', 'כדרור כיסא': 'wheelchair dribble', 'מסירה כיסא': 'wheelchair pass',
+    'מכות כיסא': 'wheelchair stroke', 'הגשה כיסא': 'wheelchair serve',
+    'מסירה בקביים': 'crutch-pass', 'ציר קביים': 'crutch-pivot', 'איזון קביים': 'crutch-balance',
+    'עיגולי ידיים': 'arm circles', 'הרמת ברך': 'high knees', 'צעדים צידיים': 'side steps',
+    'קפיצות איזון': 'balance hops', 'בעיטות קדימה': 'forward kicks', 'אגרופים': 'arm punches',
+    'סיבובי גוף': 'core twists', 'טריצפס': 'tricep extension', 'מתח': 'pull-up',
+    'פלאנק צידי': 'side plank', 'גומייה': 'band pull apart', 'גובלט': 'goblet squat',
+    // === NEW FITNESS — Standing ===
+    'הרמות עקב': 'calf raise', 'סקוואט סומו': 'sumo squat', "לאנג' הפוך": 'reverse lunge',
+    'ספליט סקוואט בולגרי': 'bulgarian split squat', 'דדליפט חד-רגלי': 'single leg deadlift',
+    'סטפ-אפ': 'step up', 'הרמה קדמית': 'front raise', 'משיכה זקופה': 'upright row',
+    'כיווץ כתפיים': 'shrug', 'לחיצת ארנולד': 'arnold press', 'כפיפות פטיש': 'hammer curl',
+    'הרחבת טריצפס מעל הראש': 'overhead tricep extension',
+    // === NEW FITNESS — Floor/Lying ===
+    'סופרמן': 'superman', 'דד באג': 'dead bug', 'ציפור-כלב': 'bird dog', 'ציפור כלב': 'bird dog',
+    'סיבוב רוסי': 'russian twist', 'הרמות רגליים': 'leg raise', 'בעיטות פרפר': 'flutter kicks',
+    'כפיפות אופניים': 'bicycle crunch', 'כפיפות בטן הפוכות': 'reverse crunch',
+    'הרמת ירכיים': 'hip thrust', 'כפיפות V': 'v-ups', 'בעיטות חמור': 'donkey kicks',
+    // === NEW FITNESS — Cardio/Dynamic ===
+    'ברכיים גבוהות': 'high knees main', 'בעיטות ישבן': 'butt kicks',
+    'קפיצות מחליק': 'skater jumps', 'קפיצות טאק': 'tuck jumps',
+    'זחילת דוב': 'bear crawl', 'תולעת': 'inch worm',
+    // === NEW FITNESS — Additional ===
+    'גוד מורנינג': 'good morning', 'החזקת גוף חלול': 'hollow body hold',
+    'פלאנק לשכיבות סמיכה': 'plank to push-up', 'קפיצות כוכב': 'star jumps',
+    'פלאנק עם נגיעת כתף': 'plank shoulder tap', 'סופרמן-בננה': 'superman banana',
+    // === NEW BASKETBALL ===
+    'מסירת הקפצה': 'bounce pass', 'מסירת חזה': 'chest pass', 'מסירה מעל הראש': 'overhead pass',
+    'דריבל מאחורי הגב': 'behind-back dribble', 'ספין מוב': 'spin move',
+    'זריקת קפיצה': 'jump shot', 'הוק שוט': 'hook shot', 'תנועות פוסט': 'post moves',
+    // === NEW TENNIS ===
+    'סמאש': 'overhead smash', 'דרופ שוט': 'drop shot', 'ספליט סטפ': 'split step',
+    'עמדת קבלה': 'return stance', 'סלייס': 'slice', 'גישה לרשת': 'approach shot',
+    // === NEW FOOTBALL ===
+    'נגיחות ראש': 'headers', 'בעיטת גב כף רגל': 'instep shot',
+    'מסירה חיצונית': 'outside foot pass', 'שליטה בחזה': 'chest control',
+    'תרגיל זריזות קונוסים': 'cone drill', 'פניות מהירות': 'quick turns',
+    'חזרה מספרינט': 'sprint recovery', 'הגנה על הכדור': 'shield ball',
+    // === NEW AMPUTEE FOOTBALL ===
+    'דריבלינג בקביים': 'crutch dribbling', 'בעיטת דריבל בקביים': 'crutch shot',
+    'זריזות בקביים': 'crutch agility', 'פנייה מהירה בקביים': 'crutch quick turn',
+    'הגנה על כדור בקביים': 'crutch shield', 'נגיחה בקביים': 'crutch header',
+    'שליטה בחזה בקביים': 'crutch chest control',
+    // === NEW AMPUTEE GK ===
+    'צלילה לשער': 'gk dive save', 'הפצה מהשער': 'gk distribution',
+    'מיקום שוער': 'gk positioning', 'עצירה ביד אחת': 'gk one-hand save',
+    'חסימה בקביים': 'gk crutch block', 'תפיסה גבוהה': 'gk high catch',
+    'עצירה נמוכה': 'gk low save', 'שחרור מהיר': 'gk quick release',
+    'עבודת רגליים שוער': 'gk footwork', 'תגובה מהירה': 'gk reaction',
+    // === NEW WHEELCHAIR BASKETBALL ===
+    'מסירת הקפצה כיסא': 'wc bounce pass', 'הוק שוט כיסא': 'wc hook shot',
+    'לייאפ כיסא': 'wc layup', 'ספרינט כיסא': 'wc push sprint',
+    'הגנה כיסא': 'wc defense', 'פיק אנד רול כיסא': 'wc pick and roll',
+    'חסימת ריבאונד כיסא': 'wc block out', 'מהיר כיסא': 'wc fast break',
+    // === NEW WHEELCHAIR TENNIS ===
+    'סמאש כיסא': 'wc smash', 'ווליי כיסא': 'wc volley', 'קבלה כיסא': 'wc return',
+    'ספליט סטפ כיסא': 'wc split step', 'דרופ שוט כיסא': 'wc drop shot',
+    'התאוששות דחיפה כיסא': 'wc push recovery',
   };
   for (const [heb, eng] of Object.entries(hebrewMap)) {
     if (name.includes(heb) && BIOMECHANICS_DB[eng]) return BIOMECHANICS_DB[eng];
@@ -194,27 +378,431 @@ function formatAngles(a) {
 // Server-side scoring: compute score from joint angles deterministically
 // Haiku provides Hebrew feedback (instruction + pro_tip) — score is computed here
 const SCORING_RULES = [
+  // === FITNESS: Standing ===
   // Squat: knee at peak (index 1) — lower = deeper = better
-  { keywords: ['סקוואט', 'squat'], joint: 'knee', phase: 1, dir: 'lower',
-    thresholds: [90, 120] }, // <90=8-10, 90-120=5-7, >120=2-4
+  { keywords: ['סקוואט', 'squat', 'גובלט', 'goblet'], joint: 'knee', phase: 1, dir: 'lower',
+    thresholds: [90, 120] },
   // Push-up: elbow at peak (bottom position)
   { keywords: ['פוש', 'push', 'שכיבות'], joint: 'elbow', phase: 1, dir: 'lower',
     thresholds: [90, 120] },
   // Pull-up: elbow at peak (top position)
-  { keywords: ['מתח', 'pull', 'chin', 'סנטר'], joint: 'elbow', phase: 1, dir: 'lower',
+  { keywords: ['מתח', 'pull up', 'pullup', 'chin', 'סנטר'], joint: 'elbow', phase: 1, dir: 'lower',
     thresholds: [90, 120] },
   // Dips: elbow at bottom
-  { keywords: ['מקבילים', 'dip'], joint: 'elbow', phase: 1, dir: 'lower',
+  { keywords: ['מקבילים', 'dip', 'שקיע'], joint: 'elbow', phase: 1, dir: 'lower',
     thresholds: [90, 120] },
+  // Lunge: front knee at bottom — lower = deeper
+  { keywords: ['לאנג', 'lunge', 'מכרע'], joint: 'knee', phase: 1, dir: 'lower',
+    thresholds: [90, 120] },
+  // Shoulder press: elbow at top — higher = more extension = better
+  { keywords: ['כתפיים', 'shoulder press', 'לחיצת כתפ'], joint: 'elbow', phase: 1, dir: 'higher',
+    thresholds: [150, 170] },
+  // Bicep curl: elbow at peak — lower = more curl = better
+  { keywords: ['ביספ', 'bicep', 'כפיפות מרפק', 'כפיפות ידיים'], joint: 'elbow', phase: 1, dir: 'lower',
+    thresholds: [40, 70] },
+  // Tricep extension: elbow at top — higher = full extension = better
+  { keywords: ['טריצפס', 'tricep', 'הרחבת מרפק'], joint: 'elbow', phase: 1, dir: 'higher',
+    thresholds: [150, 170] },
+  // Bent over row: elbow at pull — lower = deeper pull = better
+  { keywords: ['משיכת משקולת', 'משיכה', 'row'], joint: 'elbow', phase: 1, dir: 'lower',
+    thresholds: [80, 110] },
+  // Lateral raise: shoulder at peak — higher = more raise = better
+  { keywords: ['הרמה צידית', 'lateral raise'], joint: 'shoulder', phase: 1, dir: 'higher',
+    thresholds: [70, 90] },
+  // Band pull apart: shoulder angle (arms back) — wider spread = better
+  { keywords: ['גומייה', 'band pull', 'מתיחת גומייה'], joint: 'shoulder', phase: 1, dir: 'higher',
+    thresholds: [140, 170] },
+  // === FITNESS: Lying / Hold ===
+  // Plank: trunk alignment (shoulder-hip-ankle) — higher = straighter = better
+  { keywords: ['פלאנק', 'plank'], joint: 'trunk', phase: 0, dir: 'higher',
+    thresholds: [160, 175] },
+  // Side plank: trunk alignment
+  { keywords: ['פלאנק צידי', 'side plank'], joint: 'trunk', phase: 0, dir: 'higher',
+    thresholds: [155, 170] },
+  // Glute bridge: knee at peak — lower = more bend = better
+  { keywords: ['גשר', 'bridge', 'glute'], joint: 'knee', phase: 1, dir: 'lower',
+    thresholds: [85, 110] },
+  // Crunch: trunk at peak — lower = more curl = better
+  { keywords: ['כפיפות בטן', 'crunch', 'בטן'], joint: 'trunk', phase: 1, dir: 'lower',
+    thresholds: [120, 150] },
+  // Mountain climbers: knee at peak — lower = more drive = better
+  { keywords: ['מטפס הרים', 'mountain climber'], joint: 'knee', phase: 1, dir: 'lower',
+    thresholds: [60, 90] },
+  // Wall sit: knee angle — closer to 90 = better (lower is better)
+  { keywords: ['ישיבה על הקיר', 'wall sit', 'ישיבת קיר'], joint: 'knee', phase: 0, dir: 'lower',
+    thresholds: [90, 110] },
+  // === FOOTBALL (soccer) ===
   // Kicks: knee at peak — lower = more backswing = better
   { keywords: ['בעיטה', 'kick'], joint: 'knee', phase: 1, dir: 'lower',
     thresholds: [50, 90] },
-  // Crutch running: trunk at peak — lower = more stable = better
-  { keywords: ['קביים', 'crutch', 'ריצה עם'], joint: 'trunk', phase: 1, dir: 'lower',
+  // Pass: knee at contact — controlled swing (moderate angle)
+  { keywords: ['מסירה', 'pass'], joint: 'knee', phase: 1, dir: 'lower',
+    thresholds: [100, 140] },
+  // Shoot: knee at backswing — lower = more power
+  { keywords: ['שוט', 'shoot', 'בעיטת שוט'], joint: 'knee', phase: 1, dir: 'lower',
+    thresholds: [50, 90] },
+  // Dribbling: knee flexion — lower center of gravity = better
+  { keywords: ['כדרור', 'dribbl'], joint: 'knee', phase: 0, dir: 'lower',
+    thresholds: [130, 155] },
+  // First touch: knee at cushion — slight flex = better
+  { keywords: ['שליטה ראשונית', 'first touch'], joint: 'knee', phase: 1, dir: 'lower',
+    thresholds: [120, 150] },
+  // Juggle: knee consistency — moderate flex
+  { keywords: ['ג\'אגלינג', 'juggle', 'ליפטינג'], joint: 'knee', phase: 1, dir: 'lower',
+    thresholds: [100, 140] },
+  // === BASKETBALL ===
+  // Shooting: elbow at release — higher = more extension = better
+  { keywords: ['זריקה', 'basketball shoot', 'free throw'], joint: 'elbow', phase: 2, dir: 'higher',
+    thresholds: [120, 160] },
+  // Layup: knee drive up — lower = more drive = better
+  { keywords: ['עליה לסל', 'layup', 'עלייה לסל'], joint: 'knee', phase: 1, dir: 'lower',
+    thresholds: [60, 100] },
+  // Crossover: knee flexion (low stance) — lower = better
+  { keywords: ['קרוסאובר', 'crossover'], joint: 'knee', phase: 0, dir: 'lower',
+    thresholds: [110, 140] },
+  // Defensive slide: knee flexion (low stance)
+  { keywords: ['הגנה', 'defensive slide', 'החלקת הגנה'], joint: 'knee', phase: 0, dir: 'lower',
+    thresholds: [100, 130] },
+  // Hand dribbling: knee flexion
+  { keywords: ['כדרור ביד', 'hand dribbl', 'כדרור כדורסל'], joint: 'knee', phase: 0, dir: 'lower',
+    thresholds: [130, 155] },
+  // === TENNIS ===
+  // Forehand/backhand stroke: shoulder rotation at contact — higher = better
+  { keywords: ['פורהנד', 'בקהנד', 'forehand', 'backhand', 'stroke'], joint: 'shoulder', phase: 1, dir: 'higher',
+    thresholds: [80, 120] },
+  // Serve: elbow at release — higher = full extension = better
+  { keywords: ['הגשה', 'serve', 'סרב'], joint: 'elbow', phase: 1, dir: 'higher',
+    thresholds: [140, 165] },
+  // Volley: elbow at contact — firm compact angle, lower = better (tight punch)
+  { keywords: ['ווליי', 'volley'], joint: 'elbow', phase: 1, dir: 'lower',
+    thresholds: [80, 120] },
+  // Footwork: knee flexion — athletic stance
+  { keywords: ['עבודת רגליים', 'footwork', 'רגליים מהירות'], joint: 'knee', phase: 0, dir: 'lower',
+    thresholds: [120, 150] },
+  // === AMPUTEE FOOTBALL ===
+  // Crutch sprint: trunk lean — lower = more stable = better
+  { keywords: ['ספרינט קביים', 'crutch sprint', 'ריצה בקביים'], joint: 'trunk', phase: 1, dir: 'lower',
     thresholds: [10, 25] },
-  // Basketball shooting: elbow at end (release) — higher = more extension = better
-  { keywords: ['זריקה', 'shoot', 'כדורסל'], joint: 'elbow', phase: 2, dir: 'higher',
-    thresholds: [120, 160] }, // >160=8-10, 120-160=5-7, <120=2-4
+  // Crutch kick: shoulder stability during kick — higher = more upright = better
+  { keywords: ['בעיטה בקביים', 'בעיטת קביים', 'crutch kick', 'amputee kick'], joint: 'shoulder', phase: 1, dir: 'higher',
+    thresholds: [60, 90] },
+  // Crutch pass: trunk stability — higher = more upright = better
+  { keywords: ['מסירה בקביים', 'crutch pass', 'מסירת קביים'], joint: 'trunk', phase: 1, dir: 'higher',
+    thresholds: [155, 170] },
+  // Crutch pivot: trunk rotation
+  { keywords: ['ציר קביים', 'crutch pivot', 'פיבוט קביים'], joint: 'trunk', phase: 1, dir: 'lower',
+    thresholds: [15, 30] },
+  // Crutch balance: trunk alignment — higher = straighter = better
+  { keywords: ['איזון קביים', 'crutch balance'], joint: 'trunk', phase: 0, dir: 'higher',
+    thresholds: [165, 175] },
+  // === WHEELCHAIR BASKETBALL ===
+  // Wheelchair shooting: elbow at release — higher = better
+  { keywords: ['זריקה כיסא', 'wheelchair shoot'], joint: 'elbow', phase: 2, dir: 'higher',
+    thresholds: [120, 160] },
+  // Wheelchair dribbling: elbow flexion — controlled push
+  { keywords: ['כדרור כיסא', 'wheelchair dribbl'], joint: 'elbow', phase: 1, dir: 'lower',
+    thresholds: [80, 120] },
+  // Wheelchair pass: elbow at release — higher = stronger pass
+  { keywords: ['מסירה כיסא', 'wheelchair pass', 'מסירת חזה כיסא'], joint: 'elbow', phase: 1, dir: 'higher',
+    thresholds: [140, 165] },
+  // === WHEELCHAIR TENNIS ===
+  // Wheelchair stroke: shoulder rotation — higher = more rotation = better
+  { keywords: ['מכות כיסא', 'wheelchair stroke', 'wheelchair forehand'], joint: 'shoulder', phase: 1, dir: 'higher',
+    thresholds: [70, 110] },
+  // Wheelchair serve: elbow at contact — higher = full extension
+  { keywords: ['הגשה כיסא', 'wheelchair serve'], joint: 'elbow', phase: 1, dir: 'higher',
+    thresholds: [140, 165] },
+  // === WARM-UP / DYNAMIC ===
+  // High knees: knee at peak — lower = higher drive = better
+  { keywords: ['הרמת ברך', 'high knee'], joint: 'knee', phase: 1, dir: 'lower',
+    thresholds: [60, 90] },
+  // Arm circles: shoulder range — higher = wider circle
+  { keywords: ['עיגולי ידיים', 'arm circle'], joint: 'shoulder', phase: 1, dir: 'higher',
+    thresholds: [120, 160] },
+  // Forward kicks: knee at peak — lower = higher kick
+  { keywords: ['בעיטות קדימה', 'forward kick'], joint: 'knee', phase: 1, dir: 'lower',
+    thresholds: [80, 120] },
+  // Jumping exercises (burpees, jumping jacks)
+  { keywords: ["ג'אמפינג", 'jumping jack', 'בורפי', 'burpee', 'קפיצות'], joint: 'knee', phase: 1, dir: 'lower',
+    thresholds: [100, 140] },
+  // Running form: trunk lean — small forward lean is ideal
+  { keywords: ['ריצה', 'ספרינט', 'sprint', 'running'], joint: 'trunk', phase: 0, dir: 'lower',
+    thresholds: [5, 15] },
+  // === NEW FITNESS — Standing Strength ===
+  // Calf raise: ankle plantarflexion — knee should stay straight (higher = better)
+  { keywords: ['הרמות עקב', 'calf raise', 'עקבים'], joint: 'knee', phase: 0, dir: 'higher',
+    thresholds: [160, 175] },
+  // Sumo squat: wider stance, same knee tracking
+  { keywords: ['סקוואט סומו', 'sumo squat', 'סומו'], joint: 'knee', phase: 1, dir: 'lower',
+    thresholds: [85, 115] },
+  // Reverse lunge: front knee angle at bottom
+  { keywords: ["לאנג' הפוך", 'reverse lunge', 'לאנג הפוך'], joint: 'knee', phase: 1, dir: 'lower',
+    thresholds: [90, 120] },
+  // Bulgarian split squat: deep front knee bend
+  { keywords: ['ספליט סקוואט בולגרי', 'bulgarian', 'בולגרי'], joint: 'knee', phase: 1, dir: 'lower',
+    thresholds: [85, 110] },
+  // Single-leg deadlift: hip hinge depth (trunk angle)
+  { keywords: ['דדליפט', 'deadlift', 'דד ליפט'], joint: 'trunk', phase: 1, dir: 'lower',
+    thresholds: [30, 60] },
+  // Step-up: knee at drive
+  { keywords: ['סטפ-אפ', 'step up', 'סטפ אפ', 'מדרגה'], joint: 'knee', phase: 1, dir: 'lower',
+    thresholds: [90, 120] },
+  // Front raise: shoulder flexion at top — higher = better
+  { keywords: ['הרמה קדמית', 'front raise', 'הרמות קדמיות'], joint: 'shoulder', phase: 1, dir: 'higher',
+    thresholds: [70, 90] },
+  // Upright row: elbow at pull — higher = better (elbows up)
+  { keywords: ['משיכה זקופה', 'upright row'], joint: 'elbow', phase: 1, dir: 'lower',
+    thresholds: [60, 90] },
+  // Shrug: shoulder elevation (measured as shoulder angle change)
+  { keywords: ['כיווץ כתפיים', 'shrug', 'שראג'], joint: 'shoulder', phase: 1, dir: 'lower',
+    thresholds: [15, 30] },
+  // Arnold press: elbow at top — higher = full extension
+  { keywords: ['לחיצת ארנולד', 'arnold press', 'ארנולד'], joint: 'elbow', phase: 1, dir: 'higher',
+    thresholds: [150, 170] },
+  // Hammer curl: elbow at peak — lower = more curl
+  { keywords: ['כפיפות פטיש', 'hammer curl', 'פטיש'], joint: 'elbow', phase: 1, dir: 'lower',
+    thresholds: [40, 70] },
+  // Overhead tricep ext: elbow at top — higher = full extension
+  { keywords: ['הרחבת טריצפס מעל', 'overhead tricep', 'טריצפס מעל'], joint: 'elbow', phase: 1, dir: 'higher',
+    thresholds: [150, 170] },
+  // === NEW FITNESS — Floor/Lying ===
+  // Superman: trunk extension — higher = more arch = better
+  { keywords: ['סופרמן', 'superman'], joint: 'trunk', phase: 0, dir: 'higher',
+    thresholds: [160, 175] },
+  // Dead bug: trunk stability — higher = flatter back = better
+  { keywords: ['דד באג', 'dead bug'], joint: 'trunk', phase: 0, dir: 'higher',
+    thresholds: [165, 178] },
+  // Bird dog: trunk alignment — higher = flatter = better
+  { keywords: ['ציפור', 'bird dog', 'בירד דוג'], joint: 'trunk', phase: 0, dir: 'higher',
+    thresholds: [160, 175] },
+  // Russian twist: trunk rotation — lower = more rotation = better
+  { keywords: ['סיבוב רוסי', 'russian twist', 'רוסי'], joint: 'trunk', phase: 1, dir: 'lower',
+    thresholds: [20, 40] },
+  // Leg raise: hip angle at top — lower = higher lift = better
+  { keywords: ['הרמות רגליים', 'leg raise', 'הרמת רגליים'], joint: 'knee', phase: 1, dir: 'lower',
+    thresholds: [80, 120] },
+  // Flutter kicks: trunk stability while kicking
+  { keywords: ['בעיטות פרפר', 'flutter kick', 'פלאטר'], joint: 'trunk', phase: 0, dir: 'higher',
+    thresholds: [160, 175] },
+  // Bicycle crunch: trunk curl — lower = more curl
+  { keywords: ['כפיפות אופניים', 'bicycle crunch', 'אופניים'], joint: 'trunk', phase: 1, dir: 'lower',
+    thresholds: [120, 150] },
+  // Reverse crunch: hip curl
+  { keywords: ['כפיפות בטן הפוכות', 'reverse crunch', 'הפוכות'], joint: 'trunk', phase: 1, dir: 'lower',
+    thresholds: [120, 150] },
+  // Hip thrust: hip extension at top — higher = more extension
+  { keywords: ['הרמת ירכיים', 'hip thrust'], joint: 'knee', phase: 1, dir: 'lower',
+    thresholds: [85, 110] },
+  // V-ups: trunk angle at peak — lower = more fold
+  { keywords: ['כפיפות V', 'v-up', 'v up'], joint: 'trunk', phase: 1, dir: 'lower',
+    thresholds: [60, 100] },
+  // Donkey kicks: knee angle at top — lower = more kick back
+  { keywords: ['בעיטות חמור', 'donkey kick', 'חמור'], joint: 'knee', phase: 1, dir: 'lower',
+    thresholds: [80, 110] },
+  // === NEW FITNESS — Cardio/Dynamic ===
+  // High knees (main): knee at peak — lower = higher
+  { keywords: ['ברכיים גבוהות', 'high knee main'], joint: 'knee', phase: 1, dir: 'lower',
+    thresholds: [60, 90] },
+  // Butt kicks: knee at peak — lower = closer to glute
+  { keywords: ['בעיטות ישבן', 'butt kick'], joint: 'knee', phase: 1, dir: 'lower',
+    thresholds: [30, 60] },
+  // Skater jumps: knee at landing — lower = more controlled
+  { keywords: ['קפיצות מחליק', 'skater jump', 'מחליק'], joint: 'knee', phase: 1, dir: 'lower',
+    thresholds: [100, 130] },
+  // Tuck jumps: knee at peak — lower = more tuck
+  { keywords: ['קפיצות טאק', 'tuck jump', 'טאק'], joint: 'knee', phase: 1, dir: 'lower',
+    thresholds: [50, 80] },
+  // Bear crawl: trunk alignment
+  { keywords: ['זחילת דוב', 'bear crawl', 'דוב'], joint: 'trunk', phase: 0, dir: 'higher',
+    thresholds: [155, 170] },
+  // Inch worm: trunk at bottom — lower = deeper stretch
+  { keywords: ['תולעת', 'inch worm'], joint: 'trunk', phase: 1, dir: 'lower',
+    thresholds: [140, 165] },
+  // === NEW FITNESS — Additional ===
+  // Good morning: trunk lean — lower = more hinge
+  { keywords: ['גוד מורנינג', 'good morning'], joint: 'trunk', phase: 1, dir: 'lower',
+    thresholds: [30, 60] },
+  // Hollow body: trunk alignment — higher = flatter
+  { keywords: ['החזקת גוף חלול', 'hollow body', 'גוף חלול'], joint: 'trunk', phase: 0, dir: 'higher',
+    thresholds: [165, 178] },
+  // Plank to push-up: elbow at top — higher = full push-up
+  { keywords: ['פלאנק לשכיבות', 'plank to push', 'פלאנק שכיבות'], joint: 'elbow', phase: 1, dir: 'higher',
+    thresholds: [150, 170] },
+  // Star jumps: knee at landing
+  { keywords: ['קפיצות כוכב', 'star jump', 'כוכב'], joint: 'knee', phase: 1, dir: 'lower',
+    thresholds: [100, 140] },
+  // Plank shoulder tap: trunk stability
+  { keywords: ['פלאנק עם נגיעת כתף', 'shoulder tap', 'נגיעת כתף'], joint: 'trunk', phase: 0, dir: 'higher',
+    thresholds: [160, 175] },
+  // Superman banana: trunk alignment
+  { keywords: ['סופרמן-בננה', 'superman banana', 'בננה'], joint: 'trunk', phase: 0, dir: 'higher',
+    thresholds: [155, 170] },
+  // === NEW BASKETBALL ===
+  // Bounce pass: elbow extension — higher = more push
+  { keywords: ['מסירת הקפצה', 'bounce pass'], joint: 'elbow', phase: 1, dir: 'higher',
+    thresholds: [140, 165] },
+  // Chest pass: elbow at release — higher = full push
+  { keywords: ['מסירת חזה', 'chest pass'], joint: 'elbow', phase: 1, dir: 'higher',
+    thresholds: [140, 165] },
+  // Overhead pass: elbow extension overhead
+  { keywords: ['מסירה מעל הראש', 'overhead pass'], joint: 'elbow', phase: 1, dir: 'higher',
+    thresholds: [140, 165] },
+  // Behind-back dribble: knee flexion (low stance)
+  { keywords: ['דריבל מאחורי הגב', 'behind-back dribble'], joint: 'knee', phase: 0, dir: 'lower',
+    thresholds: [110, 140] },
+  // Spin move: trunk rotation
+  { keywords: ['ספין מוב', 'spin move', 'ספין'], joint: 'trunk', phase: 1, dir: 'lower',
+    thresholds: [15, 35] },
+  // Jump shot: elbow at release
+  { keywords: ['זריקת קפיצה', 'jump shot'], joint: 'elbow', phase: 2, dir: 'higher',
+    thresholds: [120, 160] },
+  // Hook shot: shoulder at release — higher = more arc
+  { keywords: ['הוק שוט', 'hook shot'], joint: 'shoulder', phase: 1, dir: 'higher',
+    thresholds: [100, 140] },
+  // Post moves: knee flexion (power stance)
+  { keywords: ['תנועות פוסט', 'post moves', 'פוסט'], joint: 'knee', phase: 0, dir: 'lower',
+    thresholds: [100, 130] },
+  // === NEW TENNIS ===
+  // Overhead smash: elbow at contact — higher = full extension
+  { keywords: ['סמאש', 'smash', 'overhead smash'], joint: 'elbow', phase: 1, dir: 'higher',
+    thresholds: [140, 170] },
+  // Split step: knee at landing — lower = more loaded
+  { keywords: ['ספליט סטפ', 'split step'], joint: 'knee', phase: 1, dir: 'lower',
+    thresholds: [110, 140] },
+  // Drop shot: shoulder angle (soft touch)
+  { keywords: ['דרופ שוט', 'drop shot'], joint: 'shoulder', phase: 1, dir: 'higher',
+    thresholds: [60, 100] },
+  // Slice: elbow angle at contact — higher = cleaner cut
+  { keywords: ['סלייס', 'slice'], joint: 'elbow', phase: 1, dir: 'higher',
+    thresholds: [120, 155] },
+  // Approach shot: trunk lean forward
+  { keywords: ['גישה לרשת', 'approach shot'], joint: 'trunk', phase: 1, dir: 'lower',
+    thresholds: [5, 15] },
+  // Return stance: knee flexion
+  { keywords: ['עמדת קבלה', 'return stance'], joint: 'knee', phase: 0, dir: 'lower',
+    thresholds: [120, 150] },
+  // === NEW FOOTBALL ===
+  // Headers: trunk alignment at jump — higher = straighter
+  { keywords: ['נגיחות ראש', 'header'], joint: 'trunk', phase: 1, dir: 'higher',
+    thresholds: [155, 170] },
+  // Instep shot: knee at backswing — lower = more power
+  { keywords: ['בעיטת גב כף', 'instep shot'], joint: 'knee', phase: 1, dir: 'lower',
+    thresholds: [50, 90] },
+  // Outside-foot pass: knee at contact
+  { keywords: ['מסירה חיצונית', 'outside foot', 'outside pass'], joint: 'knee', phase: 1, dir: 'lower',
+    thresholds: [100, 140] },
+  // Chest control: knee flex on cushion
+  { keywords: ['שליטה בחזה', 'chest control'], joint: 'knee', phase: 1, dir: 'lower',
+    thresholds: [120, 150] },
+  // Cone drill: knee flexion — low = agile
+  { keywords: ['תרגיל זריזות', 'cone drill', 'קונוסים'], joint: 'knee', phase: 0, dir: 'lower',
+    thresholds: [110, 140] },
+  // Quick turns: trunk rotation
+  { keywords: ['פניות מהירות', 'quick turn'], joint: 'trunk', phase: 1, dir: 'lower',
+    thresholds: [20, 40] },
+  // Sprint recovery: trunk alignment
+  { keywords: ['חזרה מספרינט', 'sprint recovery'], joint: 'trunk', phase: 0, dir: 'higher',
+    thresholds: [155, 170] },
+  // Shield ball: knee flexion (low stance)
+  { keywords: ['הגנה על הכדור', 'shield ball'], joint: 'knee', phase: 0, dir: 'lower',
+    thresholds: [110, 140] },
+  // === NEW AMPUTEE FOOTBALL ===
+  // Crutch dribbling: trunk stability
+  { keywords: ['דריבלינג בקביים', 'crutch dribbling'], joint: 'trunk', phase: 0, dir: 'higher',
+    thresholds: [155, 170] },
+  // Crutch shot: shoulder stability
+  { keywords: ['בעיטת דריבל בקביים', 'crutch shot'], joint: 'shoulder', phase: 1, dir: 'higher',
+    thresholds: [60, 90] },
+  // Crutch agility: trunk stability during movement
+  { keywords: ['זריזות בקביים', 'crutch agility'], joint: 'trunk', phase: 0, dir: 'higher',
+    thresholds: [150, 168] },
+  // Crutch quick turn: trunk rotation
+  { keywords: ['פנייה מהירה בקביים', 'crutch quick turn'], joint: 'trunk', phase: 1, dir: 'lower',
+    thresholds: [15, 30] },
+  // Crutch shield: trunk upright
+  { keywords: ['הגנה על כדור בקביים', 'crutch shield'], joint: 'trunk', phase: 0, dir: 'higher',
+    thresholds: [155, 170] },
+  // Crutch header: trunk alignment
+  { keywords: ['נגיחה בקביים', 'crutch header'], joint: 'trunk', phase: 1, dir: 'higher',
+    thresholds: [155, 170] },
+  // Crutch chest control: trunk stability
+  { keywords: ['שליטה בחזה בקביים', 'crutch chest control'], joint: 'trunk', phase: 0, dir: 'higher',
+    thresholds: [155, 170] },
+  // === NEW AMPUTEE GK ===
+  // GK dive: lateral reach measured as trunk lean
+  { keywords: ['צלילה לשער', 'gk dive', 'dive save'], joint: 'trunk', phase: 1, dir: 'lower',
+    thresholds: [30, 60] },
+  // GK distribution: elbow extension on throw
+  { keywords: ['הפצה מהשער', 'gk distribution'], joint: 'elbow', phase: 1, dir: 'higher',
+    thresholds: [140, 165] },
+  // GK positioning: knee flexion in ready stance
+  { keywords: ['מיקום שוער', 'gk positioning'], joint: 'knee', phase: 0, dir: 'lower',
+    thresholds: [130, 155] },
+  // GK one-hand save: elbow extension
+  { keywords: ['עצירה ביד אחת', 'gk one-hand'], joint: 'elbow', phase: 1, dir: 'higher',
+    thresholds: [140, 170] },
+  // GK crutch block: trunk stability
+  { keywords: ['חסימה בקביים', 'gk crutch block'], joint: 'trunk', phase: 0, dir: 'higher',
+    thresholds: [150, 168] },
+  // GK high catch: shoulder at catch — higher = more reach
+  { keywords: ['תפיסה גבוהה', 'gk high catch'], joint: 'shoulder', phase: 1, dir: 'higher',
+    thresholds: [120, 160] },
+  // GK low save: knee flexion — lower = more committed
+  { keywords: ['עצירה נמוכה', 'gk low save'], joint: 'knee', phase: 1, dir: 'lower',
+    thresholds: [60, 100] },
+  // GK quick release: elbow on throw
+  { keywords: ['שחרור מהיר', 'gk quick release'], joint: 'elbow', phase: 1, dir: 'higher',
+    thresholds: [140, 165] },
+  // GK footwork: knee flexion
+  { keywords: ['עבודת רגליים שוער', 'gk footwork'], joint: 'knee', phase: 0, dir: 'lower',
+    thresholds: [120, 150] },
+  // GK reaction: knee at burst — lower = more explosive
+  { keywords: ['תגובה מהירה', 'gk reaction'], joint: 'knee', phase: 1, dir: 'lower',
+    thresholds: [100, 135] },
+  // === NEW WHEELCHAIR BASKETBALL ===
+  // WC bounce pass: elbow extension
+  { keywords: ['מסירת הקפצה כיסא', 'wc bounce pass'], joint: 'elbow', phase: 1, dir: 'higher',
+    thresholds: [140, 165] },
+  // WC hook shot: shoulder arc
+  { keywords: ['הוק שוט כיסא', 'wc hook shot'], joint: 'shoulder', phase: 1, dir: 'higher',
+    thresholds: [100, 140] },
+  // WC layup: elbow at finish
+  { keywords: ['לייאפ כיסא', 'wc layup'], joint: 'elbow', phase: 1, dir: 'higher',
+    thresholds: [140, 170] },
+  // WC push sprint: shoulder rotation (push cycle)
+  { keywords: ['ספרינט כיסא', 'wc push sprint'], joint: 'shoulder', phase: 1, dir: 'higher',
+    thresholds: [80, 120] },
+  // WC defense: trunk stability
+  { keywords: ['הגנה כיסא', 'wc defense'], joint: 'trunk', phase: 0, dir: 'higher',
+    thresholds: [155, 172] },
+  // WC pick and roll: trunk rotation
+  { keywords: ['פיק אנד רול כיסא', 'wc pick and roll'], joint: 'trunk', phase: 1, dir: 'lower',
+    thresholds: [15, 35] },
+  // WC block out: trunk stability
+  { keywords: ['חסימת ריבאונד כיסא', 'wc block out'], joint: 'trunk', phase: 0, dir: 'higher',
+    thresholds: [155, 172] },
+  // WC fast break: shoulder push cycle
+  { keywords: ['מהיר כיסא', 'wc fast break'], joint: 'shoulder', phase: 1, dir: 'higher',
+    thresholds: [80, 120] },
+  // === NEW WHEELCHAIR TENNIS ===
+  // WC smash: elbow at contact
+  { keywords: ['סמאש כיסא', 'wc smash'], joint: 'elbow', phase: 1, dir: 'higher',
+    thresholds: [140, 170] },
+  // WC volley: elbow compact
+  { keywords: ['ווליי כיסא', 'wc volley'], joint: 'elbow', phase: 1, dir: 'lower',
+    thresholds: [80, 120] },
+  // WC return: shoulder rotation
+  { keywords: ['קבלה כיסא', 'wc return'], joint: 'shoulder', phase: 1, dir: 'higher',
+    thresholds: [70, 110] },
+  // WC split step: trunk stability during chair push
+  { keywords: ['ספליט סטפ כיסא', 'wc split step'], joint: 'trunk', phase: 0, dir: 'higher',
+    thresholds: [155, 172] },
+  // WC drop shot: shoulder angle (soft touch)
+  { keywords: ['דרופ שוט כיסא', 'wc drop shot'], joint: 'shoulder', phase: 1, dir: 'higher',
+    thresholds: [60, 100] },
+  // WC push recovery: shoulder push range
+  { keywords: ['התאוששות דחיפה כיסא', 'wc push recovery'], joint: 'shoulder', phase: 1, dir: 'higher',
+    thresholds: [80, 120] },
 ];
 
 // Extract a joint value from angle data — handles both 'elbow' and 'leftElbow'/'rightElbow' keys
@@ -317,7 +905,7 @@ function loadDebugFrames(playerName, exercise, repNumber) {
   }
 }
 
-export async function analyzeRepFrames({ frames, sport, exercise, playerProfile, repNumber, jointAngles, telemetry }) {
+export async function analyzeRepFrames({ frames, sport, exercise, playerProfile, repNumber, jointAngles, telemetry, previousScore }) {
   const safeFallback = { is_correct: true, instruction: '', pro_tip: '', feedback: '', score: 0, angles: {} };
   try {
     const playerName = sanitizeInput(playerProfile?.name, 30) || 'ספורטאי';
@@ -362,6 +950,13 @@ export async function analyzeRepFrames({ frames, sport, exercise, playerProfile,
         console.log(`[VISION] Loaded ${cleanFrames.length} frames from disk (${cleanFrames.map(f => Math.round(f.length/1024) + 'KB').join(', ')})`);
       }
     }
+
+    // Body metrics for biomechanical context
+    const height = playerProfile?.height;
+    const weight = playerProfile?.weight;
+    const bodyBlock = (height || weight)
+      ? `\nנתוני גוף: ${height ? `גובה ${height} ס"מ` : ''}${height && weight ? ', ' : ''}${weight ? `משקל ${weight} ק"ג` : ''}. התאם ציפיות טווח תנועה ועומס בהתאם.`
+      : '';
 
     // Prosthesis / amputation context for vision analysis
     const disability = playerProfile?.disability || 'none';
@@ -423,10 +1018,19 @@ ${deviceDetectionBlock}`
     };
     const sportHint = sportContext[sport] || sportContext.fitness;
 
+    const historyBlock = previousScore != null
+      ? `\nביצוע קודם: ${previousScore}/10. ${previousScore > 0 ? 'השווה לביצוע הנוכחי. אם שיפור — ציין. אם ירידה — ציין.' : ''}`
+      : '';
+
     const system = `ענה אך ורק בפורמט: SCORE|INSTRUCTION|PRO_TIP
 שורה אחת בלבד. בלי #, בלי **, בלי כותרות, בלי הסברים נוספים.
+אתה מאמן מוסמך בעל ניסיון של 20 שנה. הערות שלך חייבות להיות:
+- ברמה ביומכנית: ציין שמות שרירים, מפרקים, וזוויות ספציפיות
+- פדנטי: שים לב לפרטים הקטנים — זווית כף רגל, סיבוב אגן, קו כתפיים
+- אגרסיבי-חיובי: דרוש יותר אבל תשבח כשמגיע
+- השתמש בשמות אנטומיים בעברית: ארבע ראשי, שריר התאומים, דלתואיד, ליבה, טרפז, חזה גדול
 מאמן ${safeSport}. תרגיל: ${safeExercise}.
-${playerName} rep#${repNumber}. ${sportHint}${anglesBlock}${telemetryBlock}${bioBlock}${ampBlock}${deviceScanBlock}${scoreHint}
+${playerName} rep#${repNumber}. ${sportHint}${bodyBlock}${anglesBlock}${telemetryBlock}${bioBlock}${ampBlock}${deviceScanBlock}${historyBlock}${scoreHint}
 כללי ציון:
 ציון 1-7: תיקון פעיל. תגיד איך לתקן, לא מה לא בסדר. משפט קצר וברור.
 ציון 8-10: אישור קצר. טכניקה טובה, תמשיך.
@@ -464,7 +1068,7 @@ ${playerName} rep#${repNumber}. ${sportHint}${anglesBlock}${telemetryBlock}${bio
         model: HAIKU_VISION_MODEL,
         max_tokens: 80,
         system,
-        messages: [{ role: 'user', content: 'נתח' }]
+        messages: [{ role: 'user', content: 'נתח לפי הזוויות שקיבלת. ענה בפורמט SCORE|INSTRUCTION|PRO_TIP בלבד.' }]
       });
     }
 
@@ -819,31 +1423,38 @@ function buildWeekPrompt({ profile, sport, goals, daysPerWeek, location, weekNum
     none: `BODYWEIGHT ONLY — NO WEIGHTS, NO DUMBBELLS, NO BARBELLS, NO MACHINES, NO RESISTANCE BANDS.
 The athlete has ZERO equipment. Every exercise must use bodyweight only.
 Strength exercises MUST use these EXACT Hebrew names (pick from this list):
-שכיבות סמיכה, סקוואט, פלאנק, לאנג'ים, דיפס, כפיפות מרפק, גשר ישבן, כפיפות בטן, מטפס הרים, ישיבה על הקיר, פלאנק צידי.
+שכיבות סמיכה, סקוואט, פלאנק, לאנג'ים, דיפס, כפיפות מרפק, גשר ישבן, כפיפות בטן, מטפס הרים, ישיבה על הקיר, פלאנק צידי,
+הרמות עקב, סקוואט סומו, לאנג' הפוך, ספליט סקוואט בולגרי, דדליפט חד-רגלי, סטפ-אפ, הרמה קדמית, כיווץ כתפיים,
+סופרמן, דד באג, ציפור-כלב, סיבוב רוסי, הרמות רגליים, בעיטות פרפר, כפיפות אופניים, כפיפות בטן הפוכות, הרמת ירכיים, כפיפות V, בעיטות חמור,
+ברכיים גבוהות, בעיטות ישבן, קפיצות מחליק, קפיצות טאק, זחילת דוב, תולעת, גוד מורנינג, החזקת גוף חלול, פלאנק לשכיבות סמיכה, קפיצות כוכב, פלאנק עם נגיעת כתף, סופרמן-בננה.
 NEVER suggest exercises that require any equipment when equipment is "none".`,
     dumbbells: `Strength exercises MUST use these EXACT Hebrew names (pick from this list):
 שכיבות סמיכה, סקוואט, פלאנק, לאנג'ים, דיפס, כפיפות מרפק, גשר ישבן, כפיפות בטן, מטפס הרים, ישיבה על הקיר, פלאנק צידי,
-כתפיים עם משקולות, גובלט סקוואט, הרמה צידית, משיכת משקולת, הרחבת מרפק.
+כתפיים עם משקולות, גובלט סקוואט, הרמה צידית, משיכת משקולת, הרחבת מרפק,
+הרמות עקב, סקוואט סומו, לאנג' הפוך, ספליט סקוואט בולגרי, דדליפט חד-רגלי, סטפ-אפ, הרמה קדמית, משיכה זקופה, כיווץ כתפיים, לחיצת ארנולד, כפיפות פטיש, הרחבת טריצפס מעל הראש,
+סופרמן, דד באג, ציפור-כלב, סיבוב רוסי, הרמות רגליים, כפיפות V, בעיטות חמור, גוד מורנינג.
 Prefer dumbbell exercises when possible.`,
     resistance_bands: `Strength exercises MUST use these EXACT Hebrew names (pick from this list):
 שכיבות סמיכה, סקוואט, פלאנק, לאנג'ים, דיפס, כפיפות מרפק, גשר ישבן, כפיפות בטן, מטפס הרים, ישיבה על הקיר, פלאנק צידי,
-לחיצת כתפיים עם גומייה, סקוואט עם גומייה, כפיפות מרפק עם גומייה, משיכת גומייה, מתיחת גומייה.
+לחיצת כתפיים עם גומייה, סקוואט עם גומייה, כפיפות מרפק עם גומייה, משיכת גומייה, מתיחת גומייה,
+הרמות עקב, סקוואט סומו, לאנג' הפוך, דדליפט חד-רגלי, סטפ-אפ, הרמה קדמית, כיווץ כתפיים,
+סופרמן, דד באג, ציפור-כלב, סיבוב רוסי, הרמות רגליים, כפיפות V, גוד מורנינג.
 Prefer resistance band exercises when possible.`,
   };
 
   const disabilityStrength = {
     one_arm: `For ONE-ARM athletes: ONLY use exercises they can do with one arm.
-PREFERRED: סקוואט, לאנג'ים, גשר ישבן, כפיפות בטן, פלאנק, מטפס הרים, ישיבה על הקיר, פלאנק צידי, כפיפות מרפק (one arm).
-AVOID: שכיבות סמיכה (unless modified), מתיחת גומייה. Focus on core and legs.`,
+PREFERRED: סקוואט, לאנג'ים, גשר ישבן, כפיפות בטן, פלאנק, מטפס הרים, ישיבה על הקיר, פלאנק צידי, כפיפות מרפק (one arm), הרמות עקב, סקוואט סומו, דדליפט חד-רגלי, סיבוב רוסי, הרמות רגליים, ברכיים גבוהות, בעיטות ישבן.
+AVOID: שכיבות סמיכה (unless modified), מתיחת גומייה, דד באג, ציפור-כלב (require two arms). Focus on core and legs.`,
     one_leg: `For ONE-LEG amputee athletes (crutches): ONLY upper body + core + adapted exercises.
 AMPUTATION SIDE: ${profile.amputationSide || 'unknown'}. LEVEL: ${profile.amputationLevel || 'unknown'}.
 COMPENSATION ANALYSIS: Watch for hip shift to the amputated side during standing exercises. Core engagement compensates for missing leg stability.
 IGNORE all analysis of the amputated leg — focus on standing leg alignment, crutch positioning, and trunk stability.
-PREFERRED: שכיבות סמיכה, דיפס, פלאנק, כפיפות מרפק, כפיפות בטן, גשר ישבן, פלאנק צידי, כתפיים עם משקולות, הרמה צידית, הרחבת מרפק, משיכת משקולת.
-AVOID: סקוואט, לאנג'ים, מטפס הרים (require two legs). Squat only if described as single-leg with crutch support.`,
+PREFERRED: שכיבות סמיכה, דיפס, פלאנק, כפיפות מרפק, כפיפות בטן, גשר ישבן, פלאנק צידי, כתפיים עם משקולות, הרמה צידית, הרחבת מרפק, משיכת משקולת, סופרמן, דד באג, ציפור-כלב, סיבוב רוסי, הרמות רגליים, כפיפות V, הרמה קדמית, כיווץ כתפיים, גוד מורנינג.
+AVOID: סקוואט, לאנג'ים, מטפס הרים, ברכיים גבוהות, קפיצות מחליק, קפיצות טאק, הרמות עקב (require two legs). Squat only if described as single-leg with crutch support.`,
     two_legs: `For WHEELCHAIR athletes: ONLY upper body exercises done seated.
-PREFERRED: שכיבות סמיכה, דיפס, כפיפות מרפק, כפיפות בטן, פלאנק, כתפיים עם משקולות, הרמה צידית, הרחבת מרפק, משיכת משקולת, מתיחת גומייה.
-AVOID: סקוואט, לאנג'ים, גשר ישבן, מטפס הרים, ישיבה על הקיר (require standing/legs).`,
+PREFERRED: שכיבות סמיכה, דיפס, כפיפות מרפק, כפיפות בטן, פלאנק, כתפיים עם משקולות, הרמה צידית, הרחבת מרפק, משיכת משקולת, מתיחת גומייה, הרמה קדמית, כיווץ כתפיים, לחיצת ארנולד, כפיפות פטיש, סיבוב רוסי, הרמות רגליים, כפיפות V.
+AVOID: סקוואט, לאנג'ים, גשר ישבן, מטפס הרים, ישיבה על הקיר, הרמות עקב, ברכיים גבוהות, קפיצות, דדליפט (require standing/legs).`,
   };
 
   const eqRule = equipmentRules[eq] || equipmentRules.none;
@@ -957,6 +1568,22 @@ ${sport === 'fitness'
 - Maximum 1 strength/conditioning exercise per day as a supplement — NOT the main focus.
 - Sport drills: dribbling, passing, shooting, agility, tactical movement for this specific sport.
 - SOLO TRAINING: Include household items as simulated defenders/targets in tips.`}
+
+WORKOUT SEQUENCE (MANDATORY ORDER of exercises in the day):
+${sport === 'fitness'
+    ? `1. Compound movement first (squat/deadlift/push-up pattern) — heaviest exercise when fresh
+2. Secondary compound or isolation (shoulder press/curl/row)
+3. Core/stability exercise (plank/crunch/russian twist)
+4. Cardio finisher LAST (jumping jacks/high knees/mountain climbers)`
+    : `1. TECHNIQUE drill first (low intensity skill: passing/dribbling/footwork) — practice form when fresh
+2. MAIN sport drill (shooting/kicking/advanced moves) — high intensity
+3. STRENGTH supplement (1 exercise: push-ups/squats/planks)
+4. CONDITIONING finisher LAST (sprints/agility/high knees)`}
+LOCATION-SPECIFIC EXERCISE SELECTION:
+- home: ONLY floor + bodyweight + limited space. NO running drills, NO cone work, NO sprints. Prefer: ${sport === 'fitness' ? 'פלאנק, שכיבות סמיכה, סקוואט, דד באג, סופרמן, סיבוב רוסי, הרמות רגליים, ברכיים גבוהות' : 'עבודת רגליים, מסירות לקיר, דריבל במקום, שכיבות סמיכה'}.
+- yard: Running OK, agility OK, moderate space. Prefer: ${sport === 'fitness' ? 'ספרינטים, קפיצות מחליק, זחילת דוב, בורפיז, ריצת אינטרוולים' : 'ספרינטים, דריבלינג, מסירות, בעיטות, תרגיל זריזות קונוסים'}.
+- field: Full drills, sprints, large area. All exercises allowed.
+- gym: Equipment exercises priority. Prefer: ${sport === 'fitness' ? 'גובלט סקוואט, כתפיים עם משקולות, משיכת משקולת, הרמה צידית, כפיפות מרפק, הרחבת מרפק' : 'תרגילי כוח עם ציוד + תרגילי ספורט'}.
 
 CRITICAL: Return ONLY raw JSON. NO markdown, NO backticks, NO prose.
 DESCRIPTION STYLE: Write simple, clear action instructions in Hebrew. NOT "ביצוע פלנק סטטי" but "הישאר במצב שכיבת סמיכה על המרפקים עם גב ישר". Max 12 words.

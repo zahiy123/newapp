@@ -145,7 +145,7 @@ router.post('/realtime-feedback', async (req, res) => {
 const repAnalysisInFlight = new Set();
 
 router.post('/analyze-rep', async (req, res) => {
-  const { playerName, exercise, frames, sport, playerProfile, repNumber, jointAngles, telemetry } = req.body;
+  const { playerName, exercise, frames, sport, playerProfile, repNumber, jointAngles, telemetry, previousScore } = req.body;
   const safeFallback = { is_correct: true, feedback: '', score: 0 };
 
   // === CALIBRATION WARM-UP: fast reply to open SSL + wake server ===
@@ -186,7 +186,7 @@ router.post('/analyze-rep', async (req, res) => {
 
   try {
     const t0 = Date.now();
-    const result = await analyzeRepFrames({ frames, sport, exercise, playerProfile, repNumber, jointAngles, telemetry });
+    const result = await analyzeRepFrames({ frames, sport, exercise, playerProfile, repNumber, jointAngles, telemetry, previousScore });
     const elapsed = Date.now() - t0;
     console.log(`[Server] Rep #${repNumber} score=${result.score} (${elapsed}ms)`);
     res.json(result);

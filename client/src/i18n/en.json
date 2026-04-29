@@ -197,7 +197,9 @@
     "goalsPerGame": "Goals Per Game",
     "gameHistory": "Game History",
     "goalsLabel": "goals",
-    "foulsLabel": "fouls"
+    "foulsLabel": "fouls",
+    "aiQualityOverTime": "AI Quality Over Time",
+    "avgQuality": "Avg Quality"
   },
   "game": {
     "title": "Game Mode",

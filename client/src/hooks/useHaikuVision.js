@@ -159,7 +159,8 @@ export function useHaikuVision({ onVisionFeedback } = {}) {
           exercise: ctx?.exerciseName || '',
           playerProfile: ctx?.playerProfile,
           playerName: ctx?.playerName || '',
-          repNumber
+          repNumber,
+          previousScore: ctx?.previousScore || null
         })
       });
 

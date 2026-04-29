@@ -197,7 +197,9 @@
     "goalsPerGame": "גולים למשחק",
     "gameHistory": "היסטוריית משחקים",
     "goalsLabel": "גולים",
-    "foulsLabel": "עבירות"
+    "foulsLabel": "עבירות",
+    "aiQualityOverTime": "ציון AI לאורך זמן",
+    "avgQuality": "ציון ממוצע"
   },
   "game": {
     "title": "מצב משחק",
