@@ -1102,6 +1102,19 @@ ${playerName} rep#${repNumber}. ${sportHint}${bodyBlock}${anglesBlock}${telemetr
         proTip = jsonParsed.pro_tip || '';
         feedback = instruction + (proTip && proTip !== instruction ? '. ' + proTip : '');
       } else {
+        // Both parsers failed — but if we have a serverScore from angles, use it
+        if (serverScore !== null) {
+          console.warn(`[VISION] Parse failed but serverScore=${serverScore}, returning angle-based result`);
+          return {
+            is_correct: true,
+            instruction: serverScore >= 8 ? 'טכניקה טובה, המשך ככה' : 'שפר את הטכניקה, שמור על טווח תנועה מלא',
+            pro_tip: '',
+            feedback: serverScore >= 8 ? 'טכניקה טובה, המשך ככה' : 'שפר את הטכניקה, שמור על טווח תנועה מלא',
+            score: serverScore,
+            issue_key: '',
+            angles: keyAngles,
+          };
+        }
         return safeFallback;
       }
     }
@@ -1117,6 +1130,19 @@ ${playerName} rep#${repNumber}. ${sportHint}${bodyBlock}${anglesBlock}${telemetr
     };
   } catch (err) {
     if (err.status === 429) return safeFallback;
+    // Vision API error (400 invalid image, etc.) — fall back to serverScore if available
+    if (serverScore !== null) {
+      console.warn(`[VISION] API error but serverScore=${serverScore}, returning angle-based result`);
+      return {
+        is_correct: true,
+        instruction: serverScore >= 8 ? 'טכניקה טובה, המשך ככה' : 'שפר את הטכניקה, שמור על טווח תנועה מלא',
+        pro_tip: '',
+        feedback: serverScore >= 8 ? 'טכניקה טובה, המשך ככה' : 'שפר את הטכניקה, שמור על טווח תנועה מלא',
+        score: serverScore,
+        issue_key: '',
+        angles: keyAngles,
+      };
+    }
     console.error('analyzeRepFrames error:', err.message);
     return safeFallback;
   }
