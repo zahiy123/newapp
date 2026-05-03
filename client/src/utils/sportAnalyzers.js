@@ -2124,6 +2124,15 @@ export function analyzeBouncePass(landmarks, prevState = {}, ballData = null) {
   const lShoulder = landmarks[LM.LEFT_SHOULDER], rShoulder = landmarks[LM.RIGHT_SHOULDER];
   const lHip = landmarks[LM.LEFT_HIP], rHip = landmarks[LM.RIGHT_HIP];
 
+  // Safe access: individual landmarks may still be null after group validation passes (70%)
+  if (!vis(lHip) && !vis(rHip)) return { ...prevState, feedback: null, _prevLandmarks: landmarks };
+  const hipMidY = vis(lHip) && vis(rHip) ? (lHip.y + rHip.y) / 2 : (lHip || rHip).y;
+  const wristMidY = vis(lWrist) && vis(rWrist) ? (lWrist.y + rWrist.y) / 2 : vis(lWrist) ? lWrist.y : vis(rWrist) ? rWrist.y : hipMidY;
+  const lElbowAngle = vis(lShoulder) && vis(lElbow) && vis(lWrist) ? angle(lShoulder, lElbow, lWrist) : null;
+  const rElbowAngle = vis(rShoulder) && vis(rElbow) && vis(rWrist) ? angle(rShoulder, rElbow, rWrist) : null;
+  if (lElbowAngle === null && rElbowAngle === null) return { ...prevState, feedback: null, _prevLandmarks: landmarks };
+  const avgElbow = lElbowAngle !== null && rElbowAngle !== null ? (lElbowAngle + rElbowAngle) / 2 : (lElbowAngle ?? rElbowAngle);
+
   let firstRepStarted = prevState.firstRepStarted || false;
   let reps = prevState.reps || 0;
   let phase = prevState.phase || 'ready';
@@ -2132,12 +2141,6 @@ export function analyzeBouncePass(landmarks, prevState = {}, ballData = null) {
   let feedback = null;
   let lastRepTime = prevState.lastRepTime || null;
   const formIssues = { ...(prevState.formIssues || {}) };
-
-  const hipMidY = (lHip.y + rHip.y) / 2;
-  const wristMidY = (lWrist.y + rWrist.y) / 2;
-  const lElbowAngle = angle(lShoulder, lElbow, lWrist);
-  const rElbowAngle = angle(rShoulder, rElbow, rWrist);
-  const avgElbow = (lElbowAngle + rElbowAngle) / 2;
 
   if (moving) firstRepStarted = true;
 
@@ -2185,6 +2188,12 @@ export function analyzeChestPass(landmarks, prevState = {}, ballData = null) {
   const lElbow = landmarks[LM.LEFT_ELBOW], rElbow = landmarks[LM.RIGHT_ELBOW];
   const lWrist = landmarks[LM.LEFT_WRIST], rWrist = landmarks[LM.RIGHT_WRIST];
 
+  // Safe angle computation — individual landmarks may be null after group validation
+  const lElbowAngle = vis(lShoulder) && vis(lElbow) && vis(lWrist) ? angle(lShoulder, lElbow, lWrist) : null;
+  const rElbowAngle = vis(rShoulder) && vis(rElbow) && vis(rWrist) ? angle(rShoulder, rElbow, rWrist) : null;
+  if (lElbowAngle === null && rElbowAngle === null) return { ...prevState, feedback: null, _prevLandmarks: landmarks };
+  const avgElbow = lElbowAngle !== null && rElbowAngle !== null ? (lElbowAngle + rElbowAngle) / 2 : (lElbowAngle ?? rElbowAngle);
+
   let firstRepStarted = prevState.firstRepStarted || false;
   let reps = prevState.reps || 0;
   let phase = prevState.phase || 'loaded';
@@ -2193,10 +2202,6 @@ export function analyzeChestPass(landmarks, prevState = {}, ballData = null) {
   let feedback = null;
   let lastRepTime = prevState.lastRepTime || null;
   const formIssues = { ...(prevState.formIssues || {}) };
-
-  const lElbowAngle = angle(lShoulder, lElbow, lWrist);
-  const rElbowAngle = angle(rShoulder, rElbow, rWrist);
-  const avgElbow = (lElbowAngle + rElbowAngle) / 2;
 
   if (moving) firstRepStarted = true;
 
@@ -2245,6 +2250,14 @@ export function analyzeOverheadPass(landmarks, prevState = {}, ballData = null) 
   const lElbow = landmarks[LM.LEFT_ELBOW], rElbow = landmarks[LM.RIGHT_ELBOW];
   const lWrist = landmarks[LM.LEFT_WRIST], rWrist = landmarks[LM.RIGHT_WRIST];
 
+  // Safe angle computation — individual landmarks may be null after group validation
+  const lElbowAngle = vis(lShoulder) && vis(lElbow) && vis(lWrist) ? angle(lShoulder, lElbow, lWrist) : null;
+  const rElbowAngle = vis(rShoulder) && vis(rElbow) && vis(rWrist) ? angle(rShoulder, rElbow, rWrist) : null;
+  if (lElbowAngle === null && rElbowAngle === null) return { ...prevState, feedback: null, _prevLandmarks: landmarks };
+  const avgElbow = lElbowAngle !== null && rElbowAngle !== null ? (lElbowAngle + rElbowAngle) / 2 : (lElbowAngle ?? rElbowAngle);
+  const wristMidY = vis(lWrist) && vis(rWrist) ? (lWrist.y + rWrist.y) / 2 : vis(lWrist) ? lWrist.y : vis(rWrist) ? rWrist.y : 0;
+  const wristsAboveNose = vis(nose) ? wristMidY < nose.y : false;
+
   let firstRepStarted = prevState.firstRepStarted || false;
   let reps = prevState.reps || 0;
   let phase = prevState.phase || 'up';
@@ -2253,12 +2266,6 @@ export function analyzeOverheadPass(landmarks, prevState = {}, ballData = null) 
   let feedback = null;
   let lastRepTime = prevState.lastRepTime || null;
   const formIssues = { ...(prevState.formIssues || {}) };
-
-  const wristMidY = (lWrist.y + rWrist.y) / 2;
-  const lElbowAngle = angle(lShoulder, lElbow, lWrist);
-  const rElbowAngle = angle(rShoulder, rElbow, rWrist);
-  const avgElbow = (lElbowAngle + rElbowAngle) / 2;
-  const wristsAboveNose = wristMidY < nose.y;
 
   if (moving) firstRepStarted = true;
 
@@ -3559,6 +3566,14 @@ export function analyzeWCBouncePass(landmarks, prevState = {}, ballData = null) 
   const lElbow = landmarks[LM.LEFT_ELBOW], rElbow = landmarks[LM.RIGHT_ELBOW];
   const lWrist = landmarks[LM.LEFT_WRIST], rWrist = landmarks[LM.RIGHT_WRIST];
 
+  // Safe angle computation — individual landmarks may be null after group validation
+  const lElbowAngle = vis(lShoulder) && vis(lElbow) && vis(lWrist) ? angle(lShoulder, lElbow, lWrist) : null;
+  const rElbowAngle = vis(rShoulder) && vis(rElbow) && vis(rWrist) ? angle(rShoulder, rElbow, rWrist) : null;
+  if (lElbowAngle === null && rElbowAngle === null) return { ...prevState, feedback: null, _prevLandmarks: landmarks };
+  const avgElbow = lElbowAngle !== null && rElbowAngle !== null ? (lElbowAngle + rElbowAngle) / 2 : (lElbowAngle ?? rElbowAngle);
+  const wristMidY = vis(lWrist) && vis(rWrist) ? (lWrist.y + rWrist.y) / 2 : vis(lWrist) ? lWrist.y : vis(rWrist) ? rWrist.y : 0;
+  const shoulderMidY = vis(lShoulder) && vis(rShoulder) ? (lShoulder.y + rShoulder.y) / 2 : vis(lShoulder) ? lShoulder.y : vis(rShoulder) ? rShoulder.y : 0;
+
   let firstRepStarted = prevState.firstRepStarted || false;
   let reps = prevState.reps || 0;
   let phase = prevState.phase || 'loaded';
@@ -3567,12 +3582,6 @@ export function analyzeWCBouncePass(landmarks, prevState = {}, ballData = null) 
   let feedback = null;
   let lastRepTime = prevState.lastRepTime || null;
   const formIssues = { ...(prevState.formIssues || {}) };
-
-  const wristMidY = (lWrist.y + rWrist.y) / 2;
-  const shoulderMidY = (lShoulder.y + rShoulder.y) / 2;
-  const lElbowAngle = angle(lShoulder, lElbow, lWrist);
-  const rElbowAngle = angle(rShoulder, rElbow, rWrist);
-  const avgElbow = (lElbowAngle + rElbowAngle) / 2;
 
   // Wrists pushing down past shoulder level
   const wristsBelowShoulders = wristMidY > shoulderMidY + 0.1;
@@ -3632,11 +3641,12 @@ export function analyzeWCPushSprint(landmarks, prevState = {}, ballData = null) 
   const formIssues = { ...(prevState.formIssues || {}) };
 
   // Track shoulder angle oscillation (forward push = shoulders rotate forward)
-  const shoulderMidY = (lShoulder.y + rShoulder.y) / 2;
-  const wristMidY = (lWrist.y + rWrist.y) / 2;
-  const lShoulderAngle = vis(lShoulder) && vis(lElbow) && vis(lWrist) ? angle(lShoulder, lElbow, lWrist) : null;
-  const rShoulderAngle = vis(rShoulder) && vis(rElbow) && vis(rWrist) ? angle(rShoulder, rElbow, rWrist) : null;
-  const avgArmAngle = (lShoulderAngle || rShoulderAngle || 0);
+  const shoulderMidY = vis(lShoulder) && vis(rShoulder) ? (lShoulder.y + rShoulder.y) / 2 : vis(lShoulder) ? lShoulder.y : vis(rShoulder) ? rShoulder.y : 0;
+  const wristMidY = vis(lWrist) && vis(rWrist) ? (lWrist.y + rWrist.y) / 2 : vis(lWrist) ? lWrist.y : vis(rWrist) ? rWrist.y : 0;
+  const lArmAngle = vis(lShoulder) && vis(lElbow) && vis(lWrist) ? angle(lShoulder, lElbow, lWrist) : null;
+  const rArmAngle = vis(rShoulder) && vis(rElbow) && vis(rWrist) ? angle(rShoulder, rElbow, rWrist) : null;
+  if (lArmAngle === null && rArmAngle === null) return { ...prevState, feedback: null, _prevLandmarks: landmarks };
+  const avgArmAngle = lArmAngle !== null && rArmAngle !== null ? (lArmAngle + rArmAngle) / 2 : (lArmAngle ?? rArmAngle);
 
   // Push: wrists go forward/down, Recovery: wrists come back up
   const wristsBelowShoulders = wristMidY > shoulderMidY;

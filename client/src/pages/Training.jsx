@@ -151,16 +151,26 @@ export default function Training() {
     return `רד לחזרה ${repNum}`;
   }
 
+  // Track active poll intervals for cleanup on unmount
+  const pollIntervalsRef = useRef(new Set());
+
   // Poll until speech finishes, then call callback (safety: 10s max)
   function pollSpeechEnd(callback) {
     const poll = setInterval(() => {
       if (!isSpeaking()) {
         clearInterval(poll);
+        pollIntervalsRef.current.delete(poll);
         callback();
       }
     }, 200);
-    setTimeout(() => clearInterval(poll), 10000);
+    pollIntervalsRef.current.add(poll);
+    setTimeout(() => { clearInterval(poll); pollIntervalsRef.current.delete(poll); }, 10000);
   }
+
+  // Cleanup all poll intervals on unmount
+  useEffect(() => {
+    return () => { pollIntervalsRef.current.forEach(id => clearInterval(id)); };
+  }, []);
 
   // Speak the initial command for a rep, then transition to WAITING_FOR_REP
   function speakCommandAndWait(repNum) {
@@ -1107,6 +1117,13 @@ export default function Training() {
     return () => clearInterval(timerRef.current);
   }, [phase]);
 
+  // Safety timeout: reset aiAnalyzing spinner if server never responds (8s)
+  useEffect(() => {
+    if (!aiAnalyzing) return;
+    const timeout = setTimeout(() => setAiAnalyzing(false), 8000);
+    return () => clearTimeout(timeout);
+  }, [aiAnalyzing]);
+
   // Ball detection + AI coaching lifecycle
   useEffect(() => {
     if (phase === PHASE.EXERCISING) {
@@ -1778,7 +1795,12 @@ export default function Training() {
   }
 
   function startNextSet() {
-    setCurrentSet(prev => prev + 1);
+    setCurrentSet(prev => {
+      const nextSet = prev + 1;
+      // Speak inside updater to avoid stale closure on currentSet
+      setTimeout(() => speakSetStart(nextSet, totalSets), 100);
+      return nextSet;
+    });
     const prevCal = exerciseStateRef.current._calibration;
     exerciseStateRef.current = { _userProfile: userProfile, _calibration: prevCal }; setDisplayReps(0);
     setFeedback(null);
@@ -1787,7 +1809,6 @@ export default function Training() {
     setPhase(PHASE.EXERCISING);
     setTimer(0);
     setActiveTimer(0);
-    speakSetStart(currentSet + 1, totalSets);
 
     // Start command coaching for rep-based exercises
     if (analyzerRef.current?.type !== 'hold') {

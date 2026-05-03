@@ -4317,5 +4317,19 @@ export function getCalibrationAngles(landmarks, cueKey) {
     angles._headY = lm(LM.NOSE).y;
   }
 
+  // Body proportions: capture torso-to-leg ratio for proportional knee thresholds
+  // These are normalized (0-1) so they adapt to any user height and camera distance
+  if (v(LM.LEFT_SHOULDER) && v(LM.LEFT_HIP) && v(LM.LEFT_KNEE) && v(LM.LEFT_ANKLE)) {
+    const torsoLen = Math.abs(lm(LM.LEFT_HIP).y - lm(LM.LEFT_SHOULDER).y);
+    const thighLen = Math.abs(lm(LM.LEFT_KNEE).y - lm(LM.LEFT_HIP).y);
+    const shinLen = Math.abs(lm(LM.LEFT_ANKLE).y - lm(LM.LEFT_KNEE).y);
+    if (torsoLen > 0.01 && thighLen > 0.01) {
+      angles._torsoLen = torsoLen;
+      angles._thighLen = thighLen;
+      angles._shinLen = shinLen;
+      angles._legRatio = thighLen / (thighLen + shinLen); // ~0.5 for average, varies by build
+    }
+  }
+
   return angles;
 }

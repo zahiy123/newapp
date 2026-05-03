@@ -873,18 +873,19 @@ const cleanBase64 = (b) => {
 };
 
 // Load saved debug frames from disk as base64 (fallback when client sends placeholders)
-function loadDebugFrames(playerName, exercise, repNumber) {
+const MAX_DEBUG_FRAME_BYTES = 1024 * 1024; // 1MB per frame max
+
+async function loadDebugFrames(playerName, exercise, repNumber) {
   try {
     const debugDir = path.join(__analyzerDirname, '..', 'debug_frames');
     if (!fs.existsSync(debugDir)) return [];
 
-    const files = fs.readdirSync(debugDir)
+    const files = (await fs.promises.readdir(debugDir))
       .filter(f => f.endsWith('.jpg'))
       .sort()
       .reverse(); // Most recent first
 
     // Find the 3 most recent frames matching this exercise+rep (or just the latest 3)
-    const safeName = (playerName || '').replace(/[^a-zA-Z0-9\u0590-\u05FF_-]/g, '_');
     const safeExercise = (exercise || '').replace(/[^a-zA-Z0-9\u0590-\u05FF_-]/g, '_');
     const pattern = `rep${repNumber}_`;
 
@@ -895,10 +896,18 @@ function loadDebugFrames(playerName, exercise, repNumber) {
 
     // Take the 3 frames (f1, f2, f3) — sort by name to get correct order
     const sorted = matched.slice(0, 3).sort();
-    return sorted.map(f => {
-      const data = fs.readFileSync(path.join(debugDir, f));
-      return data.toString('base64');
-    });
+    const results = [];
+    for (const f of sorted) {
+      const filePath = path.join(debugDir, f);
+      const stat = await fs.promises.stat(filePath);
+      if (stat.size > MAX_DEBUG_FRAME_BYTES) {
+        console.warn(`[VISION] Skipping oversized debug frame: ${f} (${Math.round(stat.size/1024)}KB)`);
+        continue;
+      }
+      const data = await fs.promises.readFile(filePath);
+      results.push(data.toString('base64'));
+    }
+    return results;
   } catch (err) {
     console.warn('[VISION] Failed to load debug frames:', err.message);
     return [];
@@ -944,7 +953,7 @@ export async function analyzeRepFrames({ frames, sport, exercise, playerProfile,
     // If frames are placeholders/empty, try loading from debug_frames on disk
     if (cleanFrames.length === 0) {
       console.log(`[VISION] No valid frames from client, loading from debug_frames...`);
-      const diskFrames = loadDebugFrames(playerName, exercise, repNumber);
+      const diskFrames = await loadDebugFrames(playerName, exercise, repNumber);
       if (diskFrames.length > 0) {
         cleanFrames = diskFrames.filter(f => f.length > 500);
         console.log(`[VISION] Loaded ${cleanFrames.length} frames from disk (${cleanFrames.map(f => Math.round(f.length/1024) + 'KB').join(', ')})`);
@@ -1092,7 +1101,7 @@ ${playerName} rep#${repNumber}. ${sportHint}${bodyBlock}${anglesBlock}${telemetr
       console.log(`[VISION-IMG] ${cleanFrames.length} frames for ${exercise} rep#${repNumber} serverScore=${serverScore} bio=${!!biomechanics} sizes=${cleanFrames.map(f => Math.round(f.length/1024) + 'KB').join(',')}`);
       message = await client.messages.create({
         model: HAIKU_VISION_MODEL,
-        max_tokens: 80,
+        max_tokens: 120,
         system,
         messages: [{ role: 'user', content: [
           ...imageBlocks,
@@ -1104,7 +1113,7 @@ ${playerName} rep#${repNumber}. ${sportHint}${bodyBlock}${anglesBlock}${telemetr
       console.warn(`[VISION-TEXT] No images for ${exercise} rep#${repNumber} — text-only`);
       message = await client.messages.create({
         model: HAIKU_VISION_MODEL,
-        max_tokens: 80,
+        max_tokens: 120,
         system,
         messages: [{ role: 'user', content: 'נתח לפי הזוויות שקיבלת. ענה בפורמט SCORE|INSTRUCTION|PRO_TIP בלבד.' }]
       });
