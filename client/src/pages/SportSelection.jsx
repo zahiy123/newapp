@@ -40,7 +40,12 @@ export default function SportSelection() {
     }
     await setDoc(doc(db, 'users', user.uid), updates, { merge: true });
     await refreshProfile();
-    navigate('/goals');
+    // Rehab needs a diagnostic step before goals
+    if (selected === 'rehab') {
+      navigate('/rehab-selection');
+    } else {
+      navigate('/goals');
+    }
   }
 
   return (
@@ -48,7 +53,7 @@ export default function SportSelection() {
       <h1 className="text-2xl font-bold text-gray-800 mb-2">{t('sport.title')}</h1>
       <p className="text-gray-500 mb-6">{t('sport.subtitle')}</p>
 
-      <div className="grid grid-cols-2 gap-4">
+      <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
         {availableSports.map((sport) => (
           <button
             key={sport.key}

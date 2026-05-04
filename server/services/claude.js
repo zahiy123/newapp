@@ -276,6 +276,22 @@ const BIOMECHANICS_DB = {
   'wc split step': 'CHECKPOINTS: quick forward-back chair push (simulating split step), time with opponent contact, immediate directional push, anticipate ball placement',
   'wc drop shot': 'CHECKPOINTS: disguise with full prep, open racket face, soft hands, short follow-through, place near net, use when opponent deep on court',
   'wc push recovery': 'CHECKPOINTS: immediate chair push after shot, return to center court, push-coast-push rhythm, maintain ready position, anticipate next shot location',
+  // === REHAB EXERCISES ===
+  'pendulum swing': 'CHECKPOINTS: arm relaxed and hanging, circular motion from shoulder not elbow, trunk stable no leaning, controlled speed 2-3 seconds per circle, no shoulder hiking',
+  'controlled front raise': 'CHECKPOINTS: arm lifts forward to 90° max, elbow slightly bent, no back arching, shoulder stays down (no hiking), controlled 3-second ascent, pain-free ROM only',
+  'external rotation': 'CHECKPOINTS: elbow pinned to side at 90°, forearm rotates outward, no trunk rotation, no elbow drift from ribcage, controlled speed',
+  'active elbow flexion': 'CHECKPOINTS: full bend from straight to max flexion, wrist neutral (no deviation), no shoulder compensation, controlled speed, pain-free range',
+  'elbow extension rom': 'CHECKPOINTS: full extension from bent to straight, no shoulder forward drift, controlled descent, wrist neutral, elbow stays at side',
+  'pronation supination': 'CHECKPOINTS: wrist rotates palm-up to palm-down, elbow stays still at side, no shoulder movement, controlled alternating rotation',
+  'cat cow': 'CHECKPOINTS: on all fours, alternate between spine flexion (cat: round up) and extension (cow: arch down), head follows spine, controlled breathing, no rushing',
+  'pelvic tilt': 'CHECKPOINTS: lying supine, flatten lower back to floor by tilting pelvis, legs stay still, no leg lifting, very small controlled movement, engage deep core',
+  'wall angel': 'CHECKPOINTS: back flat against wall, arms slide up overhead then down, elbows and wrists touch wall throughout, no back arching off wall, controlled speed',
+  'straight leg raise': 'CHECKPOINTS: lying supine, lift one leg straight to 45-60°, opposite leg stays flat, no pelvic tilt, no back arching, controlled lower, core engaged',
+  'seated knee flexion': 'CHECKPOINTS: sitting upright, bend knee under chair, no trunk lean forward, controlled speed, knee tracks straight, return to full extension',
+  'mini squat rehab': 'CHECKPOINTS: shallow squat 20-40° knee bend only, knees track over toes (no valgus), weight mid-foot, trunk upright, controlled slow descent and ascent',
+  'reach exercise': 'CHECKPOINTS: extend arm forward or sideways to reach, no trunk lean or side bend to compensate, pelvis stays level, shoulder blade stable, controlled return',
+  'lateral weight shift': 'CHECKPOINTS: shift hips left and right, trunk stays upright (no side lean), feet planted, controlled oscillation, pelvis leads movement not shoulders',
+  'sit to stand': 'CHECKPOINTS: nose over toes before rising, even push from both legs, trunk controlled lean (not excessive), stand fully upright, controlled sit-down',
 };
 
 // Fuzzy match: find best biomechanics checklist for an exercise name (Hebrew or English)
@@ -356,6 +372,22 @@ function getBiomechanicsChecklist(exercise, sport) {
     'סמאש כיסא': 'wc smash', 'ווליי כיסא': 'wc volley', 'קבלה כיסא': 'wc return',
     'ספליט סטפ כיסא': 'wc split step', 'דרופ שוט כיסא': 'wc drop shot',
     'התאוששות דחיפה כיסא': 'wc push recovery',
+    // === REHAB EXERCISES ===
+    'סיבוב כתף פסיבי': 'pendulum swing',
+    'הרמת יד קדמית מבוקרת': 'controlled front raise',
+    'סיבוב חיצוני': 'external rotation',
+    'כיפוף מרפק אקטיבי': 'active elbow flexion',
+    'יישור מרפק מבוקר': 'elbow extension rom',
+    'פרונציה-סופינציה': 'pronation supination',
+    'חתול-פרה': 'cat cow',
+    'הטיית אגן': 'pelvic tilt',
+    'יישור גב כנגד קיר': 'wall angel',
+    'הרמת רגל ישרה': 'straight leg raise',
+    'כיפוף ברך בישיבה': 'seated knee flexion',
+    'מיני סקוואט': 'mini squat rehab',
+    'הושטת יד': 'reach exercise',
+    'העברת משקל': 'lateral weight shift',
+    'עמידה-ישיבה': 'sit to stand',
   };
   for (const [heb, eng] of Object.entries(hebrewMap)) {
     if (name.includes(heb) && BIOMECHANICS_DB[eng]) return BIOMECHANICS_DB[eng];
@@ -803,6 +835,23 @@ const SCORING_RULES = [
   // WC push recovery: shoulder push range
   { keywords: ['התאוששות דחיפה כיסא', 'wc push recovery'], joint: 'shoulder', phase: 1, dir: 'higher',
     thresholds: [80, 120] },
+  // === REHAB EXERCISES ===
+  // Rehab exercises — wider "good" thresholds (rehab prioritizes controlled ROM over max depth)
+  { keywords: ['pendulum', 'מטוטלת', 'סיבוב כתף פסיבי'], joint: 'shoulder', phase: 1, dir: 'lower', thresholds: [60, 100] },
+  { keywords: ['controlled front raise', 'הרמת יד קדמית'], joint: 'shoulder', phase: 1, dir: 'lower', thresholds: [70, 110] },
+  { keywords: ['external rotation', 'סיבוב חיצוני', 'רוטציה חיצונית'], joint: 'elbow', phase: 1, dir: 'lower', thresholds: [80, 100] },
+  { keywords: ['active elbow flexion', 'כיפוף מרפק אקטיבי'], joint: 'elbow', phase: 1, dir: 'lower', thresholds: [50, 90] },
+  { keywords: ['elbow extension', 'יישור מרפק מבוקר'], joint: 'elbow', phase: 1, dir: 'higher', thresholds: [150, 130] },
+  { keywords: ['pronation', 'supination', 'פרונציה', 'סופינציה'], joint: 'elbow', phase: 1, dir: 'lower', thresholds: [85, 95] },
+  { keywords: ['cat cow', 'חתול-פרה', 'חתול פרה'], joint: 'hip', phase: 1, dir: 'lower', thresholds: [140, 165] },
+  { keywords: ['pelvic tilt', 'הטיית אגן'], joint: 'hip', phase: 1, dir: 'lower', thresholds: [160, 175] },
+  { keywords: ['wall angel', 'יישור גב', 'מלאך קיר'], joint: 'shoulder', phase: 1, dir: 'lower', thresholds: [50, 90] },
+  { keywords: ['straight leg raise', 'הרמת רגל ישרה', 'slr'], joint: 'hip', phase: 1, dir: 'lower', thresholds: [120, 155] },
+  { keywords: ['seated knee flexion', 'כיפוף ברך בישיבה'], joint: 'knee', phase: 1, dir: 'lower', thresholds: [90, 130] },
+  { keywords: ['mini squat', 'מיני סקוואט', 'סקוואט שיקום'], joint: 'knee', phase: 1, dir: 'lower', thresholds: [140, 160] },
+  { keywords: ['reach exercise', 'הושטת יד', 'הושטה'], joint: 'shoulder', phase: 1, dir: 'lower', thresholds: [60, 100] },
+  { keywords: ['weight shift', 'העברת משקל'], joint: 'hip', phase: 1, dir: 'lower', thresholds: [160, 175] },
+  { keywords: ['sit to stand', 'עמידה-ישיבה', 'עמידה ישיבה'], joint: 'knee', phase: 1, dir: 'lower', thresholds: [100, 140] },
 ];
 
 // Extract a joint value from angle data — handles both 'elbow' and 'leftElbow'/'rightElbow' keys
@@ -1438,7 +1487,45 @@ EXERCISE BIOMECHANICS:
 - Dips: shoulders stay above elbow level at bottom, elbows bend to 90 degrees, no shoulder shrug or forward lean, controlled descent 2-3 seconds
 - Bridge: drive through heels, squeeze glutes at top, neutral spine (no rib flare), hold peak contraction 1-2 seconds
 - Mountain climber: hands under shoulders, hips stay level (no bouncing up/down), drive knees to chest alternating, maintain plank spine throughout
-- Crunch: lower back stays pressed to floor, curl shoulders toward hips, exhale forcefully on contraction, no neck pulling with hands`
+- Crunch: lower back stays pressed to floor, curl shoulders toward hips, exhale forcefully on contraction, no neck pulling with hands`,
+  rehab: `אתה פיזיותרפיסט מוסמך עם 20 שנות ניסיון בשיקום אורתופדי ונוירולוגי.
+
+REHABILITATION PRINCIPLES:
+- Pain = STOP. Any exercise causing pain must be stopped immediately
+- Controlled movement ONLY: 2-3 seconds per direction, no jerky movements
+- ROM is progressive: start at comfortable range, increase gradually
+- Compensation detection is CRITICAL: patient must not cheat with other body parts
+- Center of Mass (CoM) stability over bilateral symmetry for amputees
+
+COMPENSATION PATTERNS TO DETECT:
+- Trunk lean (tilting torso to compensate for weak limb)
+- Shoulder hiking (elevating shoulder during arm exercises)
+- Pelvic obliquity (one hip higher than other)
+- Back arch (hyperextending spine to gain ROM)
+- Substitution patterns (using wrong muscle groups)
+
+AMPUTEE PROTOCOLS:
+- No prosthesis: Focus on residual limb ROM (prevent contractures), core stability (prevent scoliosis), sound limb strength
+- With prosthesis: Focus on weight-bearing symmetry, gait training, dynamic balance
+- CoM shifts toward sound side — train midline awareness
+
+WHEELCHAIR PROTOCOLS:
+- Pressure relief movements every 15-20 min
+- Upper body ROM and strength (prevent overuse injuries)
+- Seated posture correction (prevent kyphosis)
+- Core engagement for trunk stability
+
+INJURY RECOVERY:
+- Follow progressive loading: isometric → concentric → eccentric → functional
+- Never exceed pain-free ROM
+- Bilateral comparison for asymmetry detection
+
+Use calibration data (_legRatio, _torsoLen) to personalize ROM targets.
+Score 1-3: "עצור! סכנת פציעה" + immediate correction
+Score 4-7: correction with specific muscle/joint guidance
+Score 8-10: "ביצוע מצוין" + one refinement point
+
+EXERCISE LIST: סיבוב כתף פסיבי, הרמת יד קדמית מבוקרת, סיבוב חיצוני, כיפוף מרפק אקטיבי, יישור מרפק מבוקר, פרונציה-סופינציה, חתול-פרה, הטיית אגן, יישור גב כנגד קיר, הרמת רגל ישרה, כיפוף ברך בישיבה, מיני סקוואט, הושטת יד, העברת משקל, עמידה-ישיבה`,
 };
 
 const LOCATION_RULES = {
@@ -1499,7 +1586,8 @@ Strength exercises MUST use these EXACT Hebrew names (pick from this list):
 שכיבות סמיכה, סקוואט, פלאנק, לאנג'ים, דיפס, כפיפות מרפק, גשר ישבן, כפיפות בטן, מטפס הרים, ישיבה על הקיר, פלאנק צידי,
 הרמות עקב, סקוואט סומו, לאנג' הפוך, ספליט סקוואט בולגרי, דדליפט חד-רגלי, סטפ-אפ, הרמה קדמית, כיווץ כתפיים,
 סופרמן, דד באג, ציפור-כלב, סיבוב רוסי, הרמות רגליים, בעיטות פרפר, כפיפות אופניים, כפיפות בטן הפוכות, הרמת ירכיים, כפיפות V, בעיטות חמור,
-ברכיים גבוהות, בעיטות ישבן, קפיצות מחליק, קפיצות טאק, זחילת דוב, תולעת, גוד מורנינג, החזקת גוף חלול, פלאנק לשכיבות סמיכה, קפיצות כוכב, פלאנק עם נגיעת כתף, סופרמן-בננה.
+ברכיים גבוהות, בעיטות ישבן, קפיצות מחליק, קפיצות טאק, זחילת דוב, תולעת, גוד מורנינג, החזקת גוף חלול, פלאנק לשכיבות סמיכה, קפיצות כוכב, פלאנק עם נגיעת כתף, סופרמן-בננה,
+סיבוב כתף פסיבי, הרמת יד קדמית מבוקרת, סיבוב חיצוני, כיפוף מרפק אקטיבי, יישור מרפק מבוקר, פרונציה-סופינציה, חתול-פרה, הטיית אגן, יישור גב כנגד קיר, הרמת רגל ישרה, כיפוף ברך בישיבה, מיני סקוואט, הושטת יד, העברת משקל, עמידה-ישיבה.
 NEVER suggest exercises that require any equipment when equipment is "none".`,
     dumbbells: `Strength exercises MUST use these EXACT Hebrew names (pick from this list):
 שכיבות סמיכה, סקוואט, פלאנק, לאנג'ים, דיפס, כפיפות מרפק, גשר ישבן, כפיפות בטן, מטפס הרים, ישיבה על הקיר, פלאנק צידי,
@@ -1528,6 +1616,15 @@ AVOID: סקוואט, לאנג'ים, מטפס הרים, ברכיים גבוהות
     two_legs: `For WHEELCHAIR athletes: ONLY upper body exercises done seated.
 PREFERRED: שכיבות סמיכה, דיפס, כפיפות מרפק, כפיפות בטן, פלאנק, כתפיים עם משקולות, הרמה צידית, הרחבת מרפק, משיכת משקולת, מתיחת גומייה, הרמה קדמית, כיווץ כתפיים, לחיצת ארנולד, כפיפות פטיש, סיבוב רוסי, הרמות רגליים, כפיפות V.
 AVOID: סקוואט, לאנג'ים, גשר ישבן, מטפס הרים, ישיבה על הקיר, הרמות עקב, ברכיים גבוהות, קפיצות, דדליפט (require standing/legs).`,
+    rehab_one_arm: `For ONE-ARM rehab: Focus on sound arm ROM/strength + core stability + adapted bilateral exercises.
+PREFERRED: סיבוב כתף פסיבי, הרמת יד קדמית מבוקרת, סיבוב חיצוני, כיפוף מרפק אקטיבי, יישור מרפק מבוקר, חתול-פרה, הטיית אגן, מיני סקוואט, העברת משקל, עמידה-ישיבה
+AVOID: פרונציה-סופינציה (if affected arm)`,
+    rehab_one_leg: `For ONE-LEG rehab (amputee): Focus on residual limb ROM + core/spine stability + sound leg strength.
+PREFERRED: סיבוב כתף פסיבי, הרמת יד קדמית מבוקרת, כיפוף מרפק אקטיבי, חתול-פרה, הטיית אגן, יישור גב כנגד קיר, הושטת יד, העברת משקל
+AVOID: מיני סקוואט, עמידה-ישיבה (if no prosthesis), הרמת רגל ישרה (affected side)`,
+    rehab_wheelchair: `For WHEELCHAIR rehab: Upper body + seated core exercises only.
+PREFERRED: סיבוב כתף פסיבי, הרמת יד קדמית מבוקרת, סיבוב חיצוני, כיפוף מרפק אקטיבי, יישור מרפק מבוקר, פרונציה-סופינציה, הושטת יד
+AVOID: מיני סקוואט, עמידה-ישיבה, הרמת רגל ישרה, העברת משקל (standing exercises)`,
   };
 
   const eqRule = equipmentRules[eq] || equipmentRules.none;
@@ -2221,6 +2318,7 @@ const BANNED_KEYWORDS_BY_SPORT = {
     'קביים', 'crutch',
     'kick', 'goal', 'corner', 'penalty', 'basket', 'dunk', 'layup',
   ],
+  rehab: ['כדור', 'דריבל', 'בעיטה', 'קליעה', 'שער', 'סל', 'רשת', 'מגרש', 'שער', 'גול', 'מסירה'],
 };
 
 // Aliases — sport variants map to parent sport's banned list

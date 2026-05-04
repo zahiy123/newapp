@@ -12,6 +12,7 @@ import Dashboard from './pages/Dashboard';
 import Training from './pages/Training';
 import Stats from './pages/Stats';
 import GameMode from './pages/GameMode';
+import RehabSelection from './pages/RehabSelection';
 
 function PrivateRoute({ children }) {
   const { user, loading, authError, refreshProfile } = useAuth();
@@ -46,6 +47,7 @@ function App() {
               <Route path="/" element={<Dashboard />} />
               <Route path="/profile" element={<Profile />} />
               <Route path="/sport-selection" element={<SportSelection />} />
+              <Route path="/rehab-selection" element={<RehabSelection />} />
               <Route path="/goals" element={<Goals />} />
               <Route path="/training" element={<Training />} />
               <Route path="/stats" element={<Stats />} />

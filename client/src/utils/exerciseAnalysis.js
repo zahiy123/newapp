@@ -18,6 +18,13 @@ import {
   analyzeGKDive, analyzeGKDistribution, analyzeGKPositioning, analyzeGKReaction,
   analyzeWCBouncePass, analyzeWCPushSprint, analyzeWCSmash
 } from './sportAnalyzers';
+import {
+  analyzeRehabPendulum, analyzeRehabFrontRaise, analyzeRehabExternalRotation,
+  analyzeRehabElbowFlexion, analyzeRehabElbowExtension, analyzeRehabPronSup,
+  analyzeRehabCatCow, analyzeRehabPelvicTilt, analyzeRehabWallAngel,
+  analyzeRehabSLR, analyzeRehabSeatedKneeFlex, analyzeRehabMiniSquat,
+  analyzeRehabReach, analyzeRehabWeightShift, analyzeRehabSitToStand
+} from './rehabAnalyzers';
 import { angleCosine } from './motionEngine';
 
 // Key landmark indices
@@ -4246,6 +4253,27 @@ const ANALYZER_MAP = [
   { keywords: ['ספליט סטפ כיסא', 'wc split step'], analyze: analyzeWCPushSprint, type: 'form', cueKey: 'wcPushSprint', orientation: O.SITTING },
   { keywords: ['דרופ שוט כיסא', 'wc drop shot'], analyze: analyzeWheelchairTennisStroke, type: 'form', cueKey: 'wheelchairStroke', orientation: O.SITTING },
   { keywords: ['התאוששות דחיפה כיסא', 'wc push recovery'], analyze: analyzeWCPushSprint, type: 'form', cueKey: 'wcPushSprint', orientation: O.SITTING },
+  // === REHABILITATION EXERCISES ===
+  // Shoulders
+  { keywords: ['סיבוב כתף פסיבי', 'pendulum', 'מטוטלת'], analyze: analyzeRehabPendulum, type: 'reps', cueKey: 'rehabPendulum', orientation: O.STANDING },
+  { keywords: ['הרמת יד קדמית מבוקרת', 'controlled front raise', 'הרמה קדמית שיקום'], analyze: analyzeRehabFrontRaise, type: 'reps', cueKey: 'rehabFrontRaise', orientation: O.STANDING },
+  { keywords: ['סיבוב חיצוני', 'external rotation', 'רוטציה חיצונית'], analyze: analyzeRehabExternalRotation, type: 'reps', cueKey: 'rehabExtRot', orientation: O.STANDING },
+  // Arms
+  { keywords: ['כיפוף מרפק אקטיבי', 'active elbow flexion', 'כיפוף מרפק שיקום'], analyze: analyzeRehabElbowFlexion, type: 'reps', cueKey: 'rehabElbowFlex', orientation: O.STANDING },
+  { keywords: ['יישור מרפק מבוקר', 'elbow extension rom', 'יישור מרפק שיקום'], analyze: analyzeRehabElbowExtension, type: 'reps', cueKey: 'rehabElbowExt', orientation: O.STANDING },
+  { keywords: ['פרונציה', 'סופינציה', 'pronation', 'supination'], analyze: analyzeRehabPronSup, type: 'reps', cueKey: 'rehabPronSup', orientation: O.STANDING },
+  // Back
+  { keywords: ['חתול-פרה', 'חתול פרה', 'cat cow', 'cat-cow'], analyze: analyzeRehabCatCow, type: 'reps', cueKey: 'rehabCatCow', orientation: O.LYING },
+  { keywords: ['הטיית אגן', 'pelvic tilt', 'טילט אגן'], analyze: analyzeRehabPelvicTilt, type: 'reps', cueKey: 'rehabPelvicTilt', orientation: O.LYING },
+  { keywords: ['יישור גב כנגד קיר', 'wall angel', 'מלאך קיר'], analyze: analyzeRehabWallAngel, type: 'reps', cueKey: 'rehabWallAngel', orientation: O.STANDING },
+  // Legs
+  { keywords: ['הרמת רגל ישרה', 'straight leg raise', 'slr'], analyze: analyzeRehabSLR, type: 'reps', cueKey: 'rehabSLR', orientation: O.LYING },
+  { keywords: ['כיפוף ברך בישיבה', 'seated knee flexion', 'כיפוף ברך שיקום'], analyze: analyzeRehabSeatedKneeFlex, type: 'reps', cueKey: 'rehabKneeFlex', orientation: O.ANY },
+  { keywords: ['מיני סקוואט', 'mini squat', 'סקוואט שיקום', 'סקוואט מבוקר'], analyze: analyzeRehabMiniSquat, type: 'reps', cueKey: 'rehabMiniSquat', orientation: O.STANDING },
+  // Functional
+  { keywords: ['הושטת יד', 'reach exercise', 'הושטה'], analyze: analyzeRehabReach, type: 'reps', cueKey: 'rehabReach', orientation: O.STANDING },
+  { keywords: ['העברת משקל', 'weight shift', 'הזזת משקל'], analyze: analyzeRehabWeightShift, type: 'reps', cueKey: 'rehabWeightShift', orientation: O.STANDING },
+  { keywords: ['עמידה-ישיבה', 'עמידה ישיבה', 'sit to stand', 'sit-to-stand'], analyze: analyzeRehabSitToStand, type: 'reps', cueKey: 'rehabSitToStand', orientation: O.ANY },
 ];
 
 // Get the right analyzer based on exercise type
@@ -4276,7 +4304,7 @@ export function getCalibrationAngles(landmarks, cueKey) {
   }
 
   // Knee angles (squats, lunges, kicks, sport drills, fitness legs)
-  if (['squat', 'lunge', 'amputeeKick', 'kick', 'layup', 'crossover', 'defensiveSlide', 'pass', 'firstTouch', 'juggle', 'footwork', 'calfRaise', 'deadlift', 'highKnees', 'buttKicks', 'bouncePass', 'chestPass', 'postMoves', 'splitStep', 'headers', 'chestControl', 'coneDrill', 'quickTurns', 'shieldBall', 'gkPositioning', 'gkReaction', 'legRaise', 'vups', 'donkeyKick'].includes(cueKey)) {
+  if (['squat', 'lunge', 'amputeeKick', 'kick', 'layup', 'crossover', 'defensiveSlide', 'pass', 'firstTouch', 'juggle', 'footwork', 'calfRaise', 'deadlift', 'highKnees', 'buttKicks', 'bouncePass', 'chestPass', 'postMoves', 'splitStep', 'headers', 'chestControl', 'coneDrill', 'quickTurns', 'shieldBall', 'gkPositioning', 'gkReaction', 'legRaise', 'vups', 'donkeyKick', 'rehabSLR', 'rehabKneeFlex', 'rehabMiniSquat', 'rehabSitToStand', 'rehabWeightShift'].includes(cueKey)) {
     if (v(LM.LEFT_HIP) && v(LM.LEFT_KNEE) && v(LM.LEFT_ANKLE))
       angles.leftKnee = angle(lm(LM.LEFT_HIP), lm(LM.LEFT_KNEE), lm(LM.LEFT_ANKLE));
     if (v(LM.RIGHT_HIP) && v(LM.RIGHT_KNEE) && v(LM.RIGHT_ANKLE))
@@ -4284,7 +4312,7 @@ export function getCalibrationAngles(landmarks, cueKey) {
   }
 
   // Shoulder angles (overhead press, shooting, serves, volley, layup, new exercises)
-  if (['shoulder', 'wheelchairShooting', 'wheelchairServe', 'wheelchairStroke', 'shooting', 'serve', 'volley', 'layup', 'frontRaise', 'shrug', 'hookShot', 'overheadPass', 'smash', 'wcSmash', 'wcPushSprint', 'gkDistribution', 'wcBouncePass'].includes(cueKey)) {
+  if (['shoulder', 'wheelchairShooting', 'wheelchairServe', 'wheelchairStroke', 'shooting', 'serve', 'volley', 'layup', 'frontRaise', 'shrug', 'hookShot', 'overheadPass', 'smash', 'wcSmash', 'wcPushSprint', 'gkDistribution', 'wcBouncePass', 'rehabPendulum', 'rehabFrontRaise', 'rehabExtRot', 'rehabWallAngel', 'rehabReach'].includes(cueKey)) {
     if (v(LM.LEFT_ELBOW) && v(LM.LEFT_SHOULDER) && v(LM.LEFT_HIP))
       angles.leftShoulder = angle(lm(LM.LEFT_ELBOW), lm(LM.LEFT_SHOULDER), lm(LM.LEFT_HIP));
     if (v(LM.RIGHT_ELBOW) && v(LM.RIGHT_SHOULDER) && v(LM.RIGHT_HIP))
@@ -4292,7 +4320,7 @@ export function getCalibrationAngles(landmarks, cueKey) {
   }
 
   // Hip angles (deadlift, leg raise, floor exercises)
-  if (['deadlift', 'legRaise', 'vups', 'donkeyKick', 'russianTwist', 'deadbug', 'birddog', 'superman', 'hollowBody'].includes(cueKey)) {
+  if (['deadlift', 'legRaise', 'vups', 'donkeyKick', 'russianTwist', 'deadbug', 'birddog', 'superman', 'hollowBody', 'rehabCatCow', 'rehabPelvicTilt', 'rehabSLR'].includes(cueKey)) {
     if (v(LM.LEFT_SHOULDER) && v(LM.LEFT_HIP) && v(LM.LEFT_KNEE))
       angles.leftHip = angle(lm(LM.LEFT_SHOULDER), lm(LM.LEFT_HIP), lm(LM.LEFT_KNEE));
     if (v(LM.RIGHT_SHOULDER) && v(LM.RIGHT_HIP) && v(LM.RIGHT_KNEE))

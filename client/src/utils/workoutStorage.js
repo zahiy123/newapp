@@ -248,8 +248,8 @@ export function loadActiveWorkout() {
     const raw = localStorage.getItem(ACTIVE_WORKOUT_KEY);
     if (!raw) return null;
     const data = JSON.parse(raw);
-    // Expire if older than 4 hours
-    if (Date.now() - data.savedAt > 4 * 60 * 60 * 1000) {
+    // Expire if older than 30 minutes
+    if (Date.now() - data.savedAt > 30 * 60 * 1000) {
       localStorage.removeItem(ACTIVE_WORKOUT_KEY);
       return null;
     }
