@@ -96,9 +96,14 @@ export default function Dashboard() {
     refreshProgress();
   }, [trainingPlan]);
 
-  // Check for active (resumable) workout
+  // Check for active (resumable) workout — re-check every 30s to auto-expire
   useEffect(() => {
     setActiveWorkout(loadActiveWorkout());
+    const iv = setInterval(() => {
+      const w = loadActiveWorkout();
+      setActiveWorkout(w);
+    }, 30000);
+    return () => clearInterval(iv);
   }, []);
 
   // Weekly goals tracking
@@ -327,23 +332,15 @@ export default function Dashboard() {
   async function handleLocationChange(loc) {
     if (loc === currentLocation || generatingRef.current) return;
     setCurrentLocation(loc);
-    await setDoc(doc(db, 'users', user.uid), { currentLocation: loc }, { merge: true });
-    clearPlan();
-    clearProgress();
-    setTrainingPlan(null);
-    planLoadedRef.current = false;
-    generatePlan(loc);
+    await setDoc(doc(db, 'users', user.uid), { currentLocation: loc, trainingLocation: loc }, { merge: true });
+    // Don't regenerate plan — just save preference for next plan generation
   }
 
   async function handleEquipmentChange(eq) {
     if (eq === currentEquipment || generatingRef.current) return;
     setCurrentEquipment(eq);
     await setDoc(doc(db, 'users', user.uid), { equipment: eq }, { merge: true });
-    clearPlan();
-    clearProgress();
-    setTrainingPlan(null);
-    planLoadedRef.current = false;
-    generatePlan();
+    // Don't regenerate plan — just save preference for next plan generation
   }
 
   const weeks = trainingPlan?.weeks || [];
@@ -524,14 +521,20 @@ export default function Dashboard() {
         </div>
       )}
 
-      {/* Resume interrupted workout */}
-      {activeWorkout && (
+      {/* Resume interrupted workout — only if user actually started exercising */}
+      {activeWorkout && (activeWorkout.exerciseResults?.length > 0 || activeWorkout.warmUpCompleted || activeWorkout.exerciseIndex > 0) && (() => {
+        const elapsed = Date.now() - (activeWorkout.savedAt || 0);
+        const remaining = Math.max(0, 30 * 60 * 1000 - elapsed);
+        const mins = Math.floor(remaining / 60000);
+        const secs = Math.floor((remaining % 60000) / 1000);
+        const timeStr = `${mins}:${String(secs).padStart(2, '0')}`;
+        return (
         <div className="space-y-1">
           <button
             onClick={() => navigate(`/training?week=${activeWorkout.week}&day=${activeWorkout.day}&resume=true`)}
             className="w-full py-4 min-h-[56px] bg-gradient-to-r from-amber-500 to-orange-500 text-white rounded-xl font-bold text-lg hover:opacity-90 transition shadow-lg animate-pulse"
           >
-            {isHe ? 'חזור לאימון' : 'Resume Workout'} &#9654;
+            {isHe ? `חזור לאימון (${timeStr})` : `Resume Workout (${timeStr})`} &#9654;
           </button>
           <button
             onClick={() => { clearActiveWorkout(); setActiveWorkout(null); }}
@@ -540,7 +543,8 @@ export default function Dashboard() {
             {isHe ? 'בטל' : 'Dismiss'}
           </button>
         </div>
-      )}
+        );
+      })()}
 
       {/* Continue training shortcut */}
       {nextWorkout && trainingPlan && !generating && !allComplete && (

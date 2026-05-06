@@ -21,6 +21,7 @@ import { useNavigate, useSearchParams } from 'react-router-dom';
 import { apiUrl } from '../utils/api';
 import { markDayCompleted, sanitizePlan, saveActiveWorkout, loadActiveWorkout, clearActiveWorkout } from '../utils/workoutStorage';
 import { incrementWeeklySession } from '../utils/weeklyGoals';
+import { getExerciseInstruction, getWarmUpInstruction } from '../utils/exerciseInstructions';
 
 const PHASE = {
   IDLE: 'idle',
@@ -1171,9 +1172,15 @@ export default function Training() {
 
     async function runScan() {
       if (!videoRef.current || !objReady) {
-        // Skip scan if camera/detector not ready
-        setPhase(PHASE.BRIEFING);
-        speakBriefing(currentExercise?.name, currentExercise?.voicePrompt || currentExercise?.description, currentExercise?.tips, locationProps, playerName);
+        // Skip scan if camera/detector not ready — go to warmup or briefing
+        if (!warmUpDone && currentIdx === 0 && warmUpExercises.length > 0) {
+          setWarmUpIdx(0);
+          speakWarmUpIntro(playerName);
+          setPhase(PHASE.WARM_UP);
+        } else {
+          setPhase(PHASE.BRIEFING);
+          doBriefingSpeech(currentExercise);
+        }
         return;
       }
 
@@ -1239,12 +1246,18 @@ export default function Training() {
 
         environmentScannedRef.current = true;
 
-        // Auto-advance to briefing after 4s
+        // Auto-advance after 4s — warmup first if needed
         if (!cancelled) {
           autoAdvanceTimer = setTimeout(() => {
             if (!cancelled) {
-              setPhase(PHASE.BRIEFING);
-              speakBriefing(currentExercise?.name, currentExercise?.voicePrompt || currentExercise?.description, currentExercise?.tips, locationProps, playerName);
+              if (!warmUpDone && currentIdx === 0 && warmUpExercises.length > 0) {
+                setWarmUpIdx(0);
+                speakWarmUpIntro(playerName);
+                setPhase(PHASE.WARM_UP);
+              } else {
+                setPhase(PHASE.BRIEFING);
+                doBriefingSpeech(currentExercise);
+              }
             }
           }, 4000);
         }
@@ -1267,15 +1280,8 @@ export default function Training() {
     // Auto-proceed after 5 seconds regardless
     equipCheckTimerRef.current = setTimeout(() => {
       if (!equipmentFound) {
-        if (!warmUpDone && currentIdx === 0) {
-          // First exercise: do warm-up first
-          setWarmUpIdx(0);
-          speakWarmUpIntro(playerName);
-          setPhase(PHASE.WARM_UP);
-        } else {
-          calibrationDataRef.current = null;
-          setPhase(PHASE.CALIBRATING);
-        }
+        calibrationDataRef.current = null;
+        setPhase(PHASE.CALIBRATING);
       }
     }, 5000);
 
@@ -1300,14 +1306,8 @@ export default function Training() {
 
       // Auto-proceed after 2s to let user see the result
       setTimeout(() => {
-        if (!warmUpDone && currentIdx === 0) {
-          setWarmUpIdx(0);
-          speakWarmUpIntro(playerName);
-          setPhase(PHASE.WARM_UP);
-        } else {
-          calibrationDataRef.current = null;
-          setPhase(PHASE.CALIBRATING);
-        }
+        calibrationDataRef.current = null;
+        setPhase(PHASE.CALIBRATING);
       }, 2000);
     }
   }, [detectedObjects, phase, equipmentFound]);
@@ -1332,12 +1332,12 @@ export default function Training() {
       performWarmUpCalibration(captureFrame, videoRef.current);
     }
 
-    // 1) Audible Instructions: use voicePrompt if available, fallback to description
-    const exName = isHe ? currentWarmUp.name.he : currentWarmUp.name.en;
-    const vp = currentWarmUp.voicePrompt
-      ? (isHe ? currentWarmUp.voicePrompt.he : currentWarmUp.voicePrompt.en)
-      : null;
-    const exDesc = vp || (isHe ? currentWarmUp.description.he : currentWarmUp.description.en);
+    // 1) Audible Instructions: use deterministic Hebrew instructions from map, fallback to voicePrompt/description
+    const wuInstr = getWarmUpInstruction(currentWarmUp.id);
+    const exName = wuInstr?.name || (isHe ? currentWarmUp.name.he : currentWarmUp.name.en);
+    const exDesc = wuInstr
+      ? wuInstr.steps.join('. ')
+      : (currentWarmUp.voicePrompt ? (isHe ? currentWarmUp.voicePrompt.he : currentWarmUp.voicePrompt.en) : (isHe ? currentWarmUp.description.he : currentWarmUp.description.en));
     speakWarmUpExercise(exName, exDesc, playerName);
 
     // Disability-specific safety tip after announcement (only if no voicePrompt already covers it)
@@ -1408,14 +1408,7 @@ export default function Training() {
           if (warmUpIdx < warmUpExercises.length - 1) {
             setWarmUpIdx(warmUpIdx + 1);
           } else {
-            // All warm-up done → transition to first exercise briefing
-            setWarmUpDone(true);
-            sessionDataRef.current.warmUpCompleted = true;
-            speakWarmUpComplete(playerName);
-            setTimeout(() => {
-              setPhase(PHASE.IDLE);
-              setFeedback(null);
-            }, 2500);
+            finishWarmUp();
           }
           return 0;
         }
@@ -1698,6 +1691,33 @@ export default function Training() {
     return true;
   }
 
+  // Complete warmup and auto-transition to first exercise briefing
+  function finishWarmUp() {
+    clearInterval(warmUpTimerRef.current);
+    setWarmUpDone(true);
+    sessionDataRef.current.warmUpCompleted = true;
+    speakWarmUpComplete(playerName);
+    setFeedback(null);
+    setTimeout(() => {
+      const ex = exercises[currentIdx];
+      if (ex) {
+        setPhase(PHASE.BRIEFING);
+        doBriefingSpeech(ex);
+      } else {
+        setPhase(PHASE.IDLE);
+      }
+    }, 2500);
+  }
+
+  // Build briefing voice params from deterministic instruction map
+  function doBriefingSpeech(exercise) {
+    if (!exercise) return;
+    const instr = getExerciseInstruction(exercise.name, getAnalyzer(exercise.name)?.cueKey);
+    const voiceText = instr ? instr.steps.join('. ') : (exercise.voicePrompt || exercise.description);
+    const safetyText = instr?.safety || exercise.tips;
+    speakBriefing(instr?.name || exercise.name, voiceText, safetyText, locationProps, playerName);
+  }
+
   function handleStartBriefing() {
     unlockAudio(); // Ensure mobile audio is unlocked on every exercise start
     exerciseStateRef.current = { _userProfile: userProfile }; setDisplayReps(0);
@@ -1705,16 +1725,22 @@ export default function Training() {
     setFeedback(null);
     resetAllTracking();
 
-    // On first exercise, do environment scan before briefing
+    // On first exercise, do environment scan before anything
     if (currentIdx === 0 && !environmentScannedRef.current && objReady) {
       setPhase(PHASE.ENVIRONMENT_SCAN);
       return;
     }
 
+    // Warmup FIRST before the first exercise
+    if (!warmUpDone && currentIdx === 0 && warmUpExercises.length > 0) {
+      setWarmUpIdx(0);
+      speakWarmUpIntro(playerName);
+      setPhase(PHASE.WARM_UP);
+      return;
+    }
+
     setPhase(PHASE.BRIEFING);
-    // Use voicePrompt if available from AI, otherwise fall back to description
-    const voiceText = currentExercise.voicePrompt || currentExercise.description;
-    speakBriefing(currentExercise.name, voiceText, currentExercise.tips, locationProps, playerName);
+    doBriefingSpeech(currentExercise);
   }
 
   function handleStartAfterBriefing() {
@@ -1723,15 +1749,8 @@ export default function Training() {
     sittingWarnedRef.current = false;
 
     if (!needsEquipmentCheck(currentExercise)) {
-      // Skip equipment detection — go directly to warm-up or calibrating
-      if (!warmUpDone && currentIdx === 0) {
-        setWarmUpIdx(0);
-        speakWarmUpIntro(playerName);
-        setPhase(PHASE.WARM_UP);
-      } else {
-        calibrationDataRef.current = null;
-        setPhase(PHASE.CALIBRATING);
-      }
+      calibrationDataRef.current = null;
+      setPhase(PHASE.CALIBRATING);
     } else {
       setEquipmentFound(false);
       setEquipmentLabel('');
@@ -2080,12 +2099,17 @@ export default function Training() {
 
         {/* Briefing overlay — bottom sheet on mobile so camera stays visible */}
         {phase === PHASE.BRIEFING && (() => {
-          // Build instructions: use AI-generated array or fall back to description
-          const steps = currentExercise?.instructions?.length > 0
-            ? currentExercise.instructions
-            : currentExercise?.description
-              ? currentExercise.description.split(/[.,،]/).map(s => s.trim()).filter(Boolean)
-              : [];
+          // Deterministic Hebrew instructions from map (override AI-generated)
+          const analyzer = currentExercise ? getAnalyzer(currentExercise.name) : null;
+          const instruction = getExerciseInstruction(currentExercise?.name, analyzer?.cueKey);
+          const steps = instruction?.steps
+            || (currentExercise?.instructions?.length > 0
+              ? currentExercise.instructions
+              : currentExercise?.description
+                ? currentExercise.description.split(/[.,،]/).map(s => s.trim()).filter(Boolean)
+                : []);
+          const safetyTip = instruction?.safety || currentExercise?.tips || '';
+          const displayName = instruction?.name || currentExercise?.name;
           return (
           <div className="absolute inset-x-0 bottom-0 sm:inset-0 sm:flex sm:items-center sm:justify-center sm:bg-black/50 z-20">
             <div className="bg-white/95 backdrop-blur-sm rounded-t-2xl sm:rounded-2xl p-4 sm:p-6 max-w-sm w-full space-y-3 max-h-[60vh] sm:max-h-[85vh] overflow-y-auto shadow-2xl" dir={isHe ? 'rtl' : 'ltr'}>
@@ -2094,7 +2118,7 @@ export default function Training() {
 
               {/* Exercise name + meta */}
               <div className="text-center">
-                <h3 className="text-lg font-bold text-gray-800">{currentExercise?.name}</h3>
+                <h3 className="text-lg font-bold text-gray-800">{displayName}</h3>
                 <div className="text-xs text-gray-400 mt-1">
                   {currentExercise?.sets} {t('training.set')} | {currentExercise?.reps} {t('training.reps')} | {currentExercise?.restSeconds}{t('dashboard.secRest')}
                 </div>
@@ -2126,10 +2150,10 @@ export default function Training() {
               </div>
 
               {/* Safety tip */}
-              {currentExercise?.tips && (
-                <div className="bg-blue-50 rounded-lg p-2.5 text-xs text-blue-700 flex items-start gap-1.5">
+              {safetyTip && (
+                <div className="bg-red-50 border border-red-200 rounded-lg p-2.5 text-xs text-red-700 flex items-start gap-1.5">
                   <span className="flex-shrink-0">&#9888;&#65039;</span>
-                  <span>{currentExercise.tips}</span>
+                  <span>{safetyTip}</span>
                 </div>
               )}
 
@@ -2157,7 +2181,7 @@ export default function Training() {
                   </p>
                   <div className="inline-block w-8 h-8 border-4 border-blue-500 border-t-transparent rounded-full animate-spin"></div>
                   <button
-                    onClick={() => { environmentScannedRef.current = true; setPhase(PHASE.BRIEFING); speakBriefing(currentExercise?.name, currentExercise?.voicePrompt || currentExercise?.description, currentExercise?.tips, locationProps, playerName); }}
+                    onClick={() => { environmentScannedRef.current = true; setPhase(PHASE.BRIEFING); doBriefingSpeech(currentExercise); }}
                     className="text-xs text-gray-400 hover:text-gray-600 underline"
                   >
                     {isHe ? 'דלג' : 'Skip'}
@@ -2225,14 +2249,8 @@ export default function Training() {
                   onClick={() => {
                     stopObjLoop();
                     clearTimeout(equipCheckTimerRef.current);
-                    if (!warmUpDone && currentIdx === 0) {
-                      setWarmUpIdx(0);
-                      speakWarmUpIntro(playerName);
-                      setPhase(PHASE.WARM_UP);
-                    } else {
-                      calibrationDataRef.current = null;
-                      setPhase(PHASE.CALIBRATING);
-                    }
+                    calibrationDataRef.current = null;
+                    setPhase(PHASE.CALIBRATING);
                   }}
                   className="w-full py-3 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-lg font-medium transition"
                 >
@@ -2459,11 +2477,7 @@ export default function Training() {
                     if (warmUpIdx < warmUpExercises.length - 1) {
                       setWarmUpIdx(warmUpIdx + 1);
                     } else {
-                      setWarmUpDone(true);
-                      sessionDataRef.current.warmUpCompleted = true;
-                      speakWarmUpComplete(playerName);
-                      setFeedback(null);
-                      setTimeout(() => setPhase(PHASE.IDLE), 2500);
+                      finishWarmUp();
                     }
                   }}
                   className="flex-1 py-2 min-h-[48px] bg-blue-600 text-white rounded-lg font-bold text-base"
@@ -2471,14 +2485,7 @@ export default function Training() {
                   {warmUpIdx < warmUpExercises.length - 1 ? (isHe ? 'הבא' : 'Next') : (isHe ? 'סיים חימום' : 'Finish warm-up')}
                 </button>
                 <button
-                  onClick={() => {
-                    clearInterval(warmUpTimerRef.current);
-                    setWarmUpDone(true);
-                    sessionDataRef.current.warmUpCompleted = true;
-                    speakWarmUpComplete(playerName);
-                    setFeedback(null);
-                    setTimeout(() => setPhase(PHASE.IDLE), 2500);
-                  }}
+                  onClick={() => { finishWarmUp(); }}
                   className="px-3 py-2 min-h-[48px] border border-white/30 text-white rounded-lg text-sm"
                 >
                   {isHe ? 'דלג' : 'Skip'}
@@ -2519,26 +2526,54 @@ export default function Training() {
             </button>
           </div>
 
-          {/* ZONE 3: Exercise list — scrollable bottom, z-10 */}
+          {/* ZONE 3: Unified exercise list (warmup + main) — scrollable bottom, z-10 */}
           <div className="flex-1 bg-gray-950 overflow-y-auto px-3 py-2 pb-[env(safe-area-inset-bottom)]" style={{ maxHeight: '40vh' }}>
             <div className="flex gap-2 overflow-x-auto pb-2">
+              {/* Warmup exercises */}
+              {warmUpExercises.map((wu, i) => {
+                const isActive = phase === PHASE.WARM_UP && i === warmUpIdx;
+                const isDone = warmUpDone || (phase === PHASE.WARM_UP && i < warmUpIdx);
+                return (
+                  <button
+                    key={`wu-${i}`}
+                    className={`flex-shrink-0 px-3 py-2 rounded-lg text-xs font-medium transition truncate max-w-[150px] ${
+                      isActive ? 'bg-orange-500 text-white ring-2 ring-orange-300' :
+                      isDone ? 'bg-green-500/30 text-green-300 line-through' :
+                      'bg-orange-500/20 text-orange-300'
+                    }`}
+                  >
+                    {i + 1}. {isHe ? wu.name.he : wu.name.en}
+                  </button>
+                );
+              })}
+              {/* Main exercises */}
               {exercises.map((ex, i) => (
                 <button
                   key={i}
                   onClick={() => {
+                    if (phase === PHASE.WARM_UP) return; // Don't allow skipping during warmup
                     stopSpeech(); setCurrentIdx(i); setPhase(PHASE.IDLE); setTimer(0);
                     exerciseStateRef.current = { _userProfile: userProfile }; setDisplayReps(0); setSetsPerformance([]); setCurrentSet(1); resetAllTracking();
                   }}
                   className={`flex-shrink-0 px-3 py-2 rounded-lg text-xs font-medium transition truncate max-w-[150px] ${
-                    i === currentIdx ? 'bg-blue-500 text-white' : 'bg-white/10 text-white/70 hover:bg-white/20'
+                    i === currentIdx && phase !== PHASE.WARM_UP ? 'bg-blue-500 text-white' : 'bg-white/10 text-white/70 hover:bg-white/20'
                   }`}
                 >
-                  {i + 1}. {ex.name}
+                  {warmUpExercises.length + i + 1}. {ex.name}
                 </button>
               ))}
             </div>
             {/* Current exercise details */}
-            {currentExercise && (
+            {phase === PHASE.WARM_UP && currentWarmUp && (
+              <div className="bg-orange-500/10 rounded-lg p-3 space-y-2 mt-1">
+                <p className="text-white/80 text-sm">{isHe ? currentWarmUp.description.he : currentWarmUp.description.en}</p>
+                <div className="flex items-center gap-2">
+                  <span className="text-orange-300 text-xs font-medium">{currentWarmUp.duration}{isHe ? ' שניות' : 's'}</span>
+                  <span className="text-4xl font-bold text-white">{warmUpTimer}</span>
+                </div>
+              </div>
+            )}
+            {currentExercise && phase !== PHASE.WARM_UP && (
               <div className="bg-white/5 rounded-lg p-3 space-y-2 mt-1">
                 <p className="text-white/80 text-sm">{currentExercise.description}</p>
                 {currentExercise.tips && (
@@ -2563,19 +2598,27 @@ export default function Training() {
                     </span>
                     <span className="text-xs text-white/50">{currentWarmUp.duration}{isHe ? ' שניות' : 's'}</span>
                   </div>
-                  <h2 className="text-lg font-bold text-white">{isHe ? currentWarmUp.name.he : currentWarmUp.name.en}</h2>
+                  <h2 className="text-lg font-bold text-white">{(() => { const wi = getWarmUpInstruction(currentWarmUp.id); return wi?.name || (isHe ? currentWarmUp.name.he : currentWarmUp.name.en); })()}</h2>
 
-                  {/* Warmup instructions */}
-                  {currentWarmUp.instructions && (
-                    <div className="space-y-1 py-1">
-                      {(isHe ? currentWarmUp.instructions.he : currentWarmUp.instructions.en).map((step, i) => (
-                        <div key={i} className="flex items-start gap-2 text-white/80 text-sm">
-                          <span className="text-orange-400 font-bold flex-shrink-0">{i + 1}.</span>
-                          <span>{step}</span>
-                        </div>
-                      ))}
-                    </div>
-                  )}
+                  {/* Warmup instructions — deterministic from map */}
+                  {(() => {
+                    const wi = getWarmUpInstruction(currentWarmUp.id);
+                    const steps = wi?.steps || (currentWarmUp.instructions ? (isHe ? currentWarmUp.instructions.he : currentWarmUp.instructions.en) : null);
+                    if (!steps) return null;
+                    return (
+                      <div className="space-y-1 py-1">
+                        {steps.map((step, i) => (
+                          <div key={i} className="flex items-start gap-2 text-white/80 text-sm">
+                            <span className="text-orange-400 font-bold flex-shrink-0">{i + 1}.</span>
+                            <span>{step}</span>
+                          </div>
+                        ))}
+                        {wi?.safety && (
+                          <p className="text-red-300 text-xs mt-1">{wi.safety}</p>
+                        )}
+                      </div>
+                    );
+                  })()}
 
                   <div className="flex items-center justify-center py-2">
                     <span className={`text-5xl font-bold ${warmUpPaused ? 'text-yellow-500 animate-pulse' : 'text-white'}`}>{warmUpTimer}</span>
@@ -2595,11 +2638,7 @@ export default function Training() {
                         if (warmUpIdx < warmUpExercises.length - 1) {
                           setWarmUpIdx(warmUpIdx + 1);
                         } else {
-                          setWarmUpDone(true);
-                          sessionDataRef.current.warmUpCompleted = true;
-                          speakWarmUpComplete(playerName);
-                          setFeedback(null);
-                          setTimeout(() => setPhase(PHASE.IDLE), 2500);
+                          finishWarmUp();
                         }
                       }}
                       className="flex-1 py-2 min-h-[44px] bg-blue-600 text-white rounded-lg font-medium"
@@ -2607,14 +2646,7 @@ export default function Training() {
                       {warmUpIdx < warmUpExercises.length - 1 ? (isHe ? 'הבא ▶' : 'Next ▶') : (isHe ? 'סיים חימום ▶' : 'Finish warm-up ▶')}
                     </button>
                     <button
-                      onClick={() => {
-                        clearInterval(warmUpTimerRef.current);
-                        setWarmUpDone(true);
-                        sessionDataRef.current.warmUpCompleted = true;
-                        speakWarmUpComplete(playerName);
-                        setFeedback(null);
-                        setTimeout(() => setPhase(PHASE.IDLE), 2500);
-                      }}
+                      onClick={() => { finishWarmUp(); }}
                       className="px-4 py-2 min-h-[44px] rounded-lg text-sm border border-white/30 text-white"
                     >
                       {isHe ? 'דלג' : 'Skip'}
@@ -2708,19 +2740,25 @@ export default function Training() {
                     </span>
                     <span className="text-xs text-gray-400">{currentWarmUp.duration}{isHe ? ' שניות' : 's'}</span>
                   </div>
-                  <h2 className="text-lg font-bold text-gray-800">{isHe ? currentWarmUp.name.he : currentWarmUp.name.en}</h2>
-                  {currentWarmUp.instructions ? (
-                    <div className="space-y-1 py-1">
-                      {(isHe ? currentWarmUp.instructions.he : currentWarmUp.instructions.en).map((step, i) => (
-                        <div key={i} className="flex items-start gap-2 text-gray-600 text-sm">
-                          <span className="text-orange-500 font-bold flex-shrink-0">{i + 1}.</span>
-                          <span>{step}</span>
-                        </div>
-                      ))}
-                    </div>
-                  ) : (
-                    <p className="text-sm text-gray-500">{isHe ? currentWarmUp.description.he : currentWarmUp.description.en}</p>
-                  )}
+                  <h2 className="text-lg font-bold text-gray-800">{(() => { const wi = getWarmUpInstruction(currentWarmUp.id); return wi?.name || (isHe ? currentWarmUp.name.he : currentWarmUp.name.en); })()}</h2>
+                  {(() => {
+                    const wi = getWarmUpInstruction(currentWarmUp.id);
+                    const steps = wi?.steps || (currentWarmUp.instructions ? (isHe ? currentWarmUp.instructions.he : currentWarmUp.instructions.en) : null);
+                    if (!steps) return <p className="text-sm text-gray-500">{isHe ? currentWarmUp.description.he : currentWarmUp.description.en}</p>;
+                    return (
+                      <div className="space-y-1 py-1">
+                        {steps.map((step, i) => (
+                          <div key={i} className="flex items-start gap-2 text-gray-600 text-sm">
+                            <span className="text-orange-500 font-bold flex-shrink-0">{i + 1}.</span>
+                            <span>{step}</span>
+                          </div>
+                        ))}
+                        {wi?.safety && (
+                          <p className="text-red-500 text-xs mt-1">{wi.safety}</p>
+                        )}
+                      </div>
+                    );
+                  })()}
                   <div className="flex items-center justify-center py-2">
                     <span className={`text-5xl font-bold ${warmUpPaused ? 'text-yellow-500 animate-pulse' : 'text-gray-800'}`}>{warmUpTimer}</span>
                   </div>
@@ -2739,11 +2777,7 @@ export default function Training() {
                         if (warmUpIdx < warmUpExercises.length - 1) {
                           setWarmUpIdx(warmUpIdx + 1);
                         } else {
-                          setWarmUpDone(true);
-                          sessionDataRef.current.warmUpCompleted = true;
-                          speakWarmUpComplete(playerName);
-                          setFeedback(null);
-                          setTimeout(() => setPhase(PHASE.IDLE), 2500);
+                          finishWarmUp();
                         }
                       }}
                       className="flex-1 py-2 min-h-[44px] bg-blue-600 text-white rounded-lg font-medium"
@@ -2751,14 +2785,7 @@ export default function Training() {
                       {warmUpIdx < warmUpExercises.length - 1 ? (isHe ? 'הבא ▶' : 'Next ▶') : (isHe ? 'סיים חימום ▶' : 'Finish warm-up ▶')}
                     </button>
                     <button
-                      onClick={() => {
-                        clearInterval(warmUpTimerRef.current);
-                        setWarmUpDone(true);
-                        sessionDataRef.current.warmUpCompleted = true;
-                        speakWarmUpComplete(playerName);
-                        setFeedback(null);
-                        setTimeout(() => setPhase(PHASE.IDLE), 2500);
-                      }}
+                      onClick={() => { finishWarmUp(); }}
                       className="px-4 py-2 min-h-[44px] rounded-lg text-sm border border-gray-300 text-gray-500"
                     >
                       {isHe ? 'דלג' : 'Skip'}

@@ -118,6 +118,7 @@ export function sanitizePlan(plan, sport, age) {
 }
 
 // Build a fingerprint from profile settings that affect plan generation
+// Note: location/equipment NOT included — changing them should not regenerate the plan
 export function buildFingerprint(userProfile) {
   if (!userProfile) return '';
   return JSON.stringify({
@@ -125,8 +126,6 @@ export function buildFingerprint(userProfile) {
     goals: [...(userProfile.goals || [])].sort(),
     disability: userProfile.disability || 'none',
     skillLevel: userProfile.skillLevel || 'beginner',
-    location: userProfile.trainingLocation || 'field',
-    equipment: userProfile.equipment || 'none',
     daysPerWeek: userProfile.trainingDays || 3,
   });
 }
