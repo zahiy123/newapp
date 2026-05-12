@@ -2278,6 +2278,26 @@ export default function Training() {
           </div>
         )}
 
+        {/* START TRAINING — big overlay button when IDLE and camera ready */}
+        {phase === PHASE.IDLE && cameraActive && exercises.length > 0 && (
+          <div className="absolute inset-0 flex items-center justify-center z-[6]">
+            <div className="text-center space-y-4">
+              <button
+                onClick={() => { unlockAudio(); handleStartBriefing(); }}
+                disabled={!poseReady}
+                className="px-12 py-6 bg-gradient-to-r from-green-500 to-emerald-600 text-white rounded-2xl font-bold text-2xl shadow-2xl hover:scale-105 transition-transform disabled:opacity-50 disabled:hover:scale-100 animate-pulse"
+              >
+                {isHe ? '▶ התחל אימון' : '▶ Start Training'}
+              </button>
+              {!poseReady && (
+                <p className="text-white/80 text-sm bg-black/50 rounded-lg px-4 py-2">
+                  {isHe ? 'ממתין לזיהוי תנוחה...' : 'Waiting for pose detection...'}
+                </p>
+              )}
+            </div>
+          </div>
+        )}
+
         {/* Warm-up — minimal camera overlay (timer + feedback only) */}
         {phase === PHASE.WARM_UP && feedback && (
           <div className={`absolute top-4 left-4 right-4 ${feedbackColor[feedback.type] || 'bg-blue-500'} text-white px-4 py-3 rounded-xl text-center font-bold text-lg shadow-lg z-[5] pointer-events-none`}>
