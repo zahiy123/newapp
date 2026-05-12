@@ -42,14 +42,13 @@ export default function Dashboard() {
   const [workoutCount, setWorkoutCount] = useState(0);
   const [progress, setProgress] = useState({ completedDays: [] });
   const [activeWorkout, setActiveWorkout] = useState(() => {
-    // Validate on init — never show stale/empty workouts
+    // Validate on init — only show resume if exercises were actually completed
     const w = loadActiveWorkout();
     if (!w) return null;
-    const valid = (
-      (Array.isArray(w.exerciseResults) && w.exerciseResults.length > 0) ||
-      w.warmUpCompleted === true
-    );
-    if (!valid) { clearActiveWorkout(); return null; }
+    if (!Array.isArray(w.exerciseResults) || w.exerciseResults.length === 0) {
+      clearActiveWorkout();
+      return null;
+    }
     return w;
   });
   const [weeklyProgress, setWeeklyProgress] = useState({ sessions: 0 });
@@ -108,22 +107,15 @@ export default function Dashboard() {
 
   // Re-check active workout every 30s (auto-expire after 30min)
   useEffect(() => {
-    function checkActiveWorkout() {
+    const iv = setInterval(() => {
       const w = loadActiveWorkout();
-      if (!w) { setActiveWorkout(null); return; }
-      const valid = (
-        (Array.isArray(w.exerciseResults) && w.exerciseResults.length > 0) ||
-        w.warmUpCompleted === true
-      );
-      if (!valid) {
-        console.log('[Dashboard] Clearing invalid workout — no completed exercises');
-        clearActiveWorkout();
+      if (!w || !Array.isArray(w.exerciseResults) || w.exerciseResults.length === 0) {
+        if (w) clearActiveWorkout();
         setActiveWorkout(null);
         return;
       }
       setActiveWorkout(w);
-    }
-    const iv = setInterval(checkActiveWorkout, 30000);
+    }, 30000);
     return () => clearInterval(iv);
   }, []);
 
@@ -542,11 +534,11 @@ export default function Dashboard() {
         </div>
       )}
 
-      {/* Resume interrupted workout — triple-guarded */}
-      {activeWorkout && (activeWorkout.exerciseResults?.length > 0 || activeWorkout.warmUpCompleted === true) && (() => {
+      {/* Resume interrupted workout — only if real progress exists */}
+      {activeWorkout && activeWorkout.exerciseResults?.length > 0 && (() => {
         const elapsed = Date.now() - (activeWorkout.savedAt || 0);
         const remaining = Math.max(0, 30 * 60 * 1000 - elapsed);
-        if (remaining <= 0) return null; // expired
+        if (remaining <= 0) return null;
         const mins = Math.floor(remaining / 60000);
         const secs = Math.floor((remaining % 60000) / 1000);
         const timeStr = `${mins}:${String(secs).padStart(2, '0')}`;
@@ -568,13 +560,13 @@ export default function Dashboard() {
         );
       })()}
 
-      {/* Continue training shortcut */}
+      {/* Start / Continue training — ALWAYS visible when there's an incomplete plan */}
       {nextWorkout && trainingPlan && !generating && !allComplete && (
         <button
           onClick={() => navigate(`/training?week=${nextWorkout.week}&day=${nextWorkout.day}`)}
           className="w-full py-4 min-h-[56px] bg-gradient-to-r from-blue-600 to-indigo-600 text-white rounded-xl font-bold text-lg hover:opacity-90 transition shadow-lg"
         >
-          {isHe ? 'המשך אימון' : 'Continue Training'} &#8594;
+          {isHe ? 'התחל אימון' : 'Start Training'} &#9654;
         </button>
       )}
 

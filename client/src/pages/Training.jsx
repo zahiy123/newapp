@@ -2550,39 +2550,33 @@ export default function Training() {
           {/* ZONE 3: Unified exercise list (warmup + main) — scrollable bottom, z-10 */}
           <div className="flex-1 bg-gray-950 overflow-y-auto px-3 py-2 pb-[env(safe-area-inset-bottom)]" style={{ maxHeight: '40vh' }}>
             <div className="flex gap-2 overflow-x-auto pb-2">
-              {/* Warmup exercises */}
-              {warmUpExercises.map((wu, i) => {
-                const isActive = phase === PHASE.WARM_UP && i === warmUpIdx;
-                const isDone = warmUpDone || (phase === PHASE.WARM_UP && i < warmUpIdx);
+              {/* Warmup first, then main — same card style */}
+              {[
+                ...warmUpExercises.map((wu, i) => ({ key: `wu-${i}`, idx: i, name: isHe ? wu.name.he : wu.name.en, isWarmup: true })),
+                ...exercises.map((ex, i) => ({ key: `ex-${i}`, idx: i, name: ex.name, isWarmup: false })),
+              ].map((item, globalIdx) => {
+                const isActiveWarmup = item.isWarmup && phase === PHASE.WARM_UP && item.idx === warmUpIdx;
+                const isActiveExercise = !item.isWarmup && item.idx === currentIdx && phase !== PHASE.WARM_UP;
+                const isWarmupDone = item.isWarmup && (warmUpDone || (phase === PHASE.WARM_UP && item.idx < warmUpIdx));
+                const isActive = isActiveWarmup || isActiveExercise;
                 return (
                   <button
-                    key={`wu-${i}`}
+                    key={item.key}
+                    onClick={() => {
+                      if (item.isWarmup || phase === PHASE.WARM_UP) return;
+                      stopSpeech(); setCurrentIdx(item.idx); setPhase(PHASE.IDLE); setTimer(0);
+                      exerciseStateRef.current = { _userProfile: userProfile }; setDisplayReps(0); setSetsPerformance([]); setCurrentSet(1); resetAllTracking();
+                    }}
                     className={`flex-shrink-0 px-3 py-2 rounded-lg text-xs font-medium transition truncate max-w-[150px] ${
-                      isActive ? 'bg-orange-500 text-white ring-2 ring-orange-300' :
-                      isDone ? 'bg-green-500/30 text-green-300 line-through' :
-                      'bg-orange-500/20 text-orange-300'
+                      isActive ? 'bg-blue-500 text-white' :
+                      isWarmupDone ? 'bg-green-500/30 text-green-300' :
+                      'bg-white/10 text-white/70 hover:bg-white/20'
                     }`}
                   >
-                    {i + 1}. {isHe ? wu.name.he : wu.name.en}
+                    {globalIdx + 1}. {item.name}
                   </button>
                 );
               })}
-              {/* Main exercises */}
-              {exercises.map((ex, i) => (
-                <button
-                  key={i}
-                  onClick={() => {
-                    if (phase === PHASE.WARM_UP) return; // Don't allow skipping during warmup
-                    stopSpeech(); setCurrentIdx(i); setPhase(PHASE.IDLE); setTimer(0);
-                    exerciseStateRef.current = { _userProfile: userProfile }; setDisplayReps(0); setSetsPerformance([]); setCurrentSet(1); resetAllTracking();
-                  }}
-                  className={`flex-shrink-0 px-3 py-2 rounded-lg text-xs font-medium transition truncate max-w-[150px] ${
-                    i === currentIdx && phase !== PHASE.WARM_UP ? 'bg-blue-500 text-white' : 'bg-white/10 text-white/70 hover:bg-white/20'
-                  }`}
-                >
-                  {warmUpExercises.length + i + 1}. {ex.name}
-                </button>
-              ))}
             </div>
             {/* Current exercise details */}
             {phase === PHASE.WARM_UP && currentWarmUp && (
@@ -2873,49 +2867,39 @@ export default function Training() {
                 </div>
               )}
 
-              {/* Unified exercise list: warmup + main */}
+              {/* Unified exercise list: warmup + main — same card style */}
               <div className="grid gap-2">
-                {/* Warmup items */}
-                {warmUpExercises.map((wu, i) => {
-                  const isActive = phase === PHASE.WARM_UP && i === warmUpIdx;
-                  const isDone = warmUpDone || (phase === PHASE.WARM_UP && i < warmUpIdx);
+                {[
+                  ...warmUpExercises.map((wu, i) => ({ key: `wu-${i}`, idx: i, name: isHe ? wu.name.he : wu.name.en, info: `${wu.duration}${isHe ? 'שנ' : 's'}`, isWarmup: true })),
+                  ...exercises.map((ex, i) => ({ key: `ex-${i}`, idx: i, name: ex.name, info: `${ex.sets}x${ex.reps}`, isWarmup: false })),
+                ].map((item, globalIdx) => {
+                  const isActiveWarmup = item.isWarmup && phase === PHASE.WARM_UP && item.idx === warmUpIdx;
+                  const isActiveExercise = !item.isWarmup && item.idx === currentIdx && phase !== PHASE.WARM_UP;
+                  const isWarmupDone = item.isWarmup && (warmUpDone || (phase === PHASE.WARM_UP && item.idx < warmUpIdx));
+                  const isActive = isActiveWarmup || isActiveExercise;
                   return (
-                    <div
-                      key={`wu-${i}`}
-                      className={`p-3 rounded-lg border transition ${
-                        isActive ? 'border-orange-500 bg-orange-50 ring-2 ring-orange-300' :
-                        isDone ? 'border-green-300 bg-green-50' :
-                        'border-orange-200 bg-orange-50/50'
+                    <button
+                      key={item.key}
+                      onClick={() => {
+                        if (item.isWarmup || phase === PHASE.WARM_UP) return;
+                        stopSpeech(); setCurrentIdx(item.idx); setPhase(PHASE.IDLE); setTimer(0);
+                        exerciseStateRef.current = { _userProfile: userProfile }; setDisplayReps(0); setSetsPerformance([]); setCurrentSet(1); resetAllTracking();
+                      }}
+                      className={`text-start p-3 rounded-lg border transition ${
+                        isActive ? 'border-blue-500 bg-blue-50' :
+                        isWarmupDone ? 'border-green-300 bg-green-50' :
+                        'border-gray-200 bg-white hover:border-gray-300'
                       }`}
                     >
                       <div className="flex items-center justify-between">
-                        <span className={`font-medium text-sm truncate max-w-[70%] ${isDone ? 'text-green-600 line-through' : 'text-orange-700'}`}>
-                          {i + 1}. {isHe ? wu.name.he : wu.name.en}
+                        <span className={`font-medium text-sm truncate max-w-[70%] ${isWarmupDone ? 'text-green-600' : 'text-gray-800'}`}>
+                          {globalIdx + 1}. {item.name}
                         </span>
-                        <span className="text-xs text-orange-400">{wu.duration}{isHe ? 'שנ' : 's'} {isDone ? '✓' : ''}</span>
+                        <span className="text-xs text-gray-400">{item.info}</span>
                       </div>
-                    </div>
+                    </button>
                   );
                 })}
-                {/* Main exercise items */}
-                {exercises.map((ex, i) => (
-                  <button
-                    key={i}
-                    onClick={() => {
-                      if (phase === PHASE.WARM_UP) return;
-                      stopSpeech(); setCurrentIdx(i); setPhase(PHASE.IDLE); setTimer(0);
-                      exerciseStateRef.current = { _userProfile: userProfile }; setDisplayReps(0); setSetsPerformance([]); setCurrentSet(1); resetAllTracking();
-                    }}
-                    className={`text-start p-3 rounded-lg border transition ${
-                      i === currentIdx && phase !== PHASE.WARM_UP ? 'border-blue-500 bg-blue-50' : 'border-gray-200 bg-white hover:border-gray-300'
-                    }`}
-                  >
-                    <div className="flex items-center justify-between">
-                      <span className="font-medium text-sm text-gray-800 truncate max-w-[70%]">{warmUpExercises.length + i + 1}. {ex.name}</span>
-                      <span className="text-xs text-gray-400">{ex.sets}x{ex.reps}</span>
-                    </div>
-                  </button>
-                ))}
               </div>
             </div>
           )}
