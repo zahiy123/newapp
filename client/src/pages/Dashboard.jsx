@@ -560,16 +560,6 @@ export default function Dashboard() {
         );
       })()}
 
-      {/* Start / Continue training — ALWAYS visible when there's an incomplete plan */}
-      {nextWorkout && trainingPlan && !generating && !allComplete && (
-        <button
-          onClick={() => navigate(`/training?week=${nextWorkout.week}&day=${nextWorkout.day}`)}
-          className="w-full py-4 min-h-[56px] bg-gradient-to-r from-blue-600 to-indigo-600 text-white rounded-xl font-bold text-lg hover:opacity-90 transition shadow-lg"
-        >
-          {isHe ? 'התחל אימון' : 'Start Training'} &#9654;
-        </button>
-      )}
-
       {trainingPlan && !generating && (
         <div className="space-y-4">
           <div className="flex items-center justify-between">
