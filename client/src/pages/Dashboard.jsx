@@ -41,7 +41,17 @@ export default function Dashboard() {
   const [currentEquipment, setCurrentEquipment] = useState('none');
   const [workoutCount, setWorkoutCount] = useState(0);
   const [progress, setProgress] = useState({ completedDays: [] });
-  const [activeWorkout, setActiveWorkout] = useState(null);
+  const [activeWorkout, setActiveWorkout] = useState(() => {
+    // Validate on init — never show stale/empty workouts
+    const w = loadActiveWorkout();
+    if (!w) return null;
+    const valid = (
+      (Array.isArray(w.exerciseResults) && w.exerciseResults.length > 0) ||
+      w.warmUpCompleted === true
+    );
+    if (!valid) { clearActiveWorkout(); return null; }
+    return w;
+  });
   const [weeklyProgress, setWeeklyProgress] = useState({ sessions: 0 });
   const [weeklyReminder, setWeeklyReminder] = useState(null);
   const generatingRef = useRef(false);
@@ -96,27 +106,23 @@ export default function Dashboard() {
     refreshProgress();
   }, [trainingPlan]);
 
-  // Check for active (resumable) workout — validate & clean invalid ones
+  // Re-check active workout every 30s (auto-expire after 30min)
   useEffect(() => {
     function checkActiveWorkout() {
       const w = loadActiveWorkout();
-      console.log('[Dashboard] loadActiveWorkout:', w);
       if (!w) { setActiveWorkout(null); return; }
-      // FORCE: only show resume if user actually did something
-      const didWork = (
+      const valid = (
         (Array.isArray(w.exerciseResults) && w.exerciseResults.length > 0) ||
-        w.warmUpCompleted === true ||
-        (typeof w.exerciseIndex === 'number' && w.exerciseIndex > 0)
+        w.warmUpCompleted === true
       );
-      if (!didWork) {
-        console.log('[Dashboard] Invalid workout (no exercises done) — clearing');
+      if (!valid) {
+        console.log('[Dashboard] Clearing invalid workout — no completed exercises');
         clearActiveWorkout();
         setActiveWorkout(null);
         return;
       }
       setActiveWorkout(w);
     }
-    checkActiveWorkout();
     const iv = setInterval(checkActiveWorkout, 30000);
     return () => clearInterval(iv);
   }, []);
@@ -536,14 +542,14 @@ export default function Dashboard() {
         </div>
       )}
 
-      {/* Resume interrupted workout — only rendered if validated by useEffect */}
-      {activeWorkout && (() => {
+      {/* Resume interrupted workout — triple-guarded */}
+      {activeWorkout && (activeWorkout.exerciseResults?.length > 0 || activeWorkout.warmUpCompleted === true) && (() => {
         const elapsed = Date.now() - (activeWorkout.savedAt || 0);
         const remaining = Math.max(0, 30 * 60 * 1000 - elapsed);
+        if (remaining <= 0) return null; // expired
         const mins = Math.floor(remaining / 60000);
         const secs = Math.floor((remaining % 60000) / 1000);
         const timeStr = `${mins}:${String(secs).padStart(2, '0')}`;
-        console.log('[Dashboard] Rendering resume button. exerciseResults:', activeWorkout.exerciseResults?.length, 'warmUpCompleted:', activeWorkout.warmUpCompleted, 'exerciseIndex:', activeWorkout.exerciseIndex);
         return (
         <div className="space-y-1">
           <button

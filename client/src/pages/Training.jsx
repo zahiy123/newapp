@@ -2449,24 +2449,28 @@ export default function Training() {
               </div>
             )}
 
-            {/* Current exercise name + set info */}
-            {currentExercise && phase !== PHASE.WARM_UP && (
+            {/* Current exercise/warmup name + info */}
+            {phase === PHASE.WARM_UP && currentWarmUp ? (
+              <div className="flex items-center justify-between mb-2">
+                <h2 className="text-orange-300 font-bold text-base truncate max-w-[60%]">
+                  {isHe ? `חימום: ${currentWarmUp.name.he}` : `Warm-up: ${currentWarmUp.name.en}`}
+                </h2>
+                <span className="text-4xl font-bold text-white">{warmUpTimer}</span>
+              </div>
+            ) : currentExercise && (warmUpDone || warmUpExercises.length === 0) ? (
               <div className="flex items-center justify-between mb-2">
                 <h2 className="text-white font-bold text-base truncate max-w-[60%]">{currentExercise.name}</h2>
                 <span className="text-white/60 text-xs flex-shrink-0">
                   {t('training.set')} {currentSet}/{totalSets} | {displayReps}/{currentExercise.reps}
                 </span>
               </div>
-            )}
-
-            {phase === PHASE.WARM_UP && currentWarmUp && (
+            ) : !warmUpDone && warmUpExercises.length > 0 ? (
               <div className="flex items-center justify-between mb-2">
-                <h2 className="text-white font-bold text-base truncate max-w-[60%]">
-                  {isHe ? currentWarmUp.name.he : currentWarmUp.name.en}
+                <h2 className="text-orange-300 font-bold text-base">
+                  {isHe ? `לחץ "התחל" כדי להתחיל חימום (${warmUpExercises.length} תרגילים)` : `Press "Start" to begin warm-up (${warmUpExercises.length} exercises)`}
                 </h2>
-                <span className="text-4xl font-bold text-white">{warmUpTimer}</span>
               </div>
-            )}
+            ) : null}
 
             {/* Sets performance dots */}
             {setsPerformance.length > 0 && phase !== PHASE.WARM_UP && (
@@ -2590,7 +2594,7 @@ export default function Training() {
                 </div>
               </div>
             )}
-            {currentExercise && phase !== PHASE.WARM_UP && (
+            {currentExercise && phase !== PHASE.WARM_UP && (warmUpDone || warmUpExercises.length === 0) && (
               <div className="bg-white/5 rounded-lg p-3 space-y-2 mt-1">
                 <p className="text-white/80 text-sm">{currentExercise.description}</p>
                 {currentExercise.tips && (
@@ -2672,7 +2676,7 @@ export default function Training() {
                 </div>
               )}
 
-              {currentExercise && phase !== PHASE.WARM_UP && (
+              {currentExercise && phase !== PHASE.WARM_UP && (warmUpDone || warmUpExercises.length === 0) && (
                 <div className="bg-white/10 rounded-xl p-3 space-y-2">
                   <div className="flex items-center justify-between">
                     <span className="text-xs font-medium text-blue-300">{t('training.currentExercise')} ({currentIdx + 1}/{exercises.length})</span>
@@ -2811,7 +2815,15 @@ export default function Training() {
                 </div>
               )}
 
-              {currentExercise && phase !== PHASE.WARM_UP && (
+              {/* Show "press start for warmup" when warmup pending */}
+              {!warmUpDone && warmUpExercises.length > 0 && phase !== PHASE.WARM_UP && (
+                <div className="bg-orange-50 rounded-xl shadow-lg p-5 border-2 border-orange-400 space-y-2 text-center">
+                  <span className="text-orange-600 font-bold text-lg">{isHe ? 'חימום' : 'Warm-up'}</span>
+                  <p className="text-sm text-orange-700">{isHe ? `${warmUpExercises.length} תרגילי חימום לפני האימון. לחץ "התחל" כדי להתחיל.` : `${warmUpExercises.length} warm-up exercises before the workout. Press "Start" to begin.`}</p>
+                </div>
+              )}
+
+              {currentExercise && phase !== PHASE.WARM_UP && (warmUpDone || warmUpExercises.length === 0) && (
                 <div className="bg-white rounded-xl shadow-lg p-5 border-2 border-blue-500 space-y-3">
                   <div className="flex items-center justify-between">
                     <span className="text-xs font-medium text-blue-600">{t('training.currentExercise')} ({currentIdx + 1}/{exercises.length})</span>
