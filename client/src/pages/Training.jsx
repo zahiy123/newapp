@@ -313,7 +313,13 @@ export default function Training() {
   const [displayReps, setDisplayReps] = useState(0);
   const [feedback, setFeedback] = useState(null);
   const [aiAnalyzing, setAiAnalyzing] = useState(false);
-  const [phase, setPhase] = useState(PHASE.IDLE);
+  const [phase, _setPhaseRaw] = useState(PHASE.IDLE);
+  const phaseRef = useRef(PHASE.IDLE);
+  const setPhase = useCallback((newPhase) => {
+    console.log('[Phase Change]', phaseRef.current, '→', newPhase);
+    phaseRef.current = newPhase;
+    _setPhaseRaw(newPhase);
+  }, []);
   const [timer, setTimer] = useState(0);
   const [activeTimer, setActiveTimer] = useState(0);
   const [workoutDone, setWorkoutDone] = useState(false);
@@ -1318,6 +1324,7 @@ export default function Training() {
   // Warm-up countdown timer — movement-locked, with aggressive vocal coaching
   useEffect(() => {
     if (phase !== PHASE.WARM_UP) return;
+    console.log('[WARM_UP Effect] Started! warmUpIdx:', warmUpIdx, 'exercise:', currentWarmUp?.id, 'duration:', currentWarmUp?.duration);
 
     setWarmUpTimer(currentWarmUp.duration);
     warmUpStateRef.current = {};
@@ -1693,13 +1700,18 @@ export default function Training() {
 
   // Complete warmup and auto-transition to first exercise briefing
   function finishWarmUp() {
+    console.log('[finishWarmUp] Completing warmup. currentIdx:', currentIdx, 'exercises.length:', exercises.length);
     clearInterval(warmUpTimerRef.current);
     setWarmUpDone(true);
     sessionDataRef.current.warmUpCompleted = true;
     speakWarmUpComplete(playerName);
     setFeedback(null);
+    // Auto-transition to briefing for first exercise after 2.5s
+    const targetIdx = currentIdx;
+    const targetExercises = exercises;
     setTimeout(() => {
-      const ex = exercises[currentIdx];
+      const ex = targetExercises[targetIdx];
+      console.log('[finishWarmUp] setTimeout fired. ex:', ex?.name, 'targetIdx:', targetIdx);
       if (ex) {
         setPhase(PHASE.BRIEFING);
         doBriefingSpeech(ex);
@@ -1725,20 +1737,25 @@ export default function Training() {
     setFeedback(null);
     resetAllTracking();
 
-    // On first exercise, do environment scan before anything
-    if (currentIdx === 0 && !environmentScannedRef.current && objReady) {
-      setPhase(PHASE.ENVIRONMENT_SCAN);
-      return;
-    }
+    console.log('[handleStartBriefing] currentIdx:', currentIdx, 'warmUpDone:', warmUpDone, 'warmUpExercises.length:', warmUpExercises.length, 'objReady:', objReady, 'envScanned:', environmentScannedRef.current);
 
-    // Warmup FIRST before the first exercise
+    // WARMUP CHECK FIRST — before env scan or briefing
     if (!warmUpDone && currentIdx === 0 && warmUpExercises.length > 0) {
+      console.log('[handleStartBriefing] → WARM_UP phase');
       setWarmUpIdx(0);
       speakWarmUpIntro(playerName);
       setPhase(PHASE.WARM_UP);
       return;
     }
 
+    // Environment scan (only after warmup is done or skipped)
+    if (currentIdx === 0 && !environmentScannedRef.current && objReady) {
+      console.log('[handleStartBriefing] → ENVIRONMENT_SCAN phase');
+      setPhase(PHASE.ENVIRONMENT_SCAN);
+      return;
+    }
+
+    console.log('[handleStartBriefing] → BRIEFING phase');
     setPhase(PHASE.BRIEFING);
     doBriefingSpeech(currentExercise);
   }
@@ -2844,20 +2861,45 @@ export default function Training() {
                 </div>
               )}
 
+              {/* Unified exercise list: warmup + main */}
               <div className="grid gap-2">
+                {/* Warmup items */}
+                {warmUpExercises.map((wu, i) => {
+                  const isActive = phase === PHASE.WARM_UP && i === warmUpIdx;
+                  const isDone = warmUpDone || (phase === PHASE.WARM_UP && i < warmUpIdx);
+                  return (
+                    <div
+                      key={`wu-${i}`}
+                      className={`p-3 rounded-lg border transition ${
+                        isActive ? 'border-orange-500 bg-orange-50 ring-2 ring-orange-300' :
+                        isDone ? 'border-green-300 bg-green-50' :
+                        'border-orange-200 bg-orange-50/50'
+                      }`}
+                    >
+                      <div className="flex items-center justify-between">
+                        <span className={`font-medium text-sm truncate max-w-[70%] ${isDone ? 'text-green-600 line-through' : 'text-orange-700'}`}>
+                          {i + 1}. {isHe ? wu.name.he : wu.name.en}
+                        </span>
+                        <span className="text-xs text-orange-400">{wu.duration}{isHe ? 'שנ' : 's'} {isDone ? '✓' : ''}</span>
+                      </div>
+                    </div>
+                  );
+                })}
+                {/* Main exercise items */}
                 {exercises.map((ex, i) => (
                   <button
                     key={i}
                     onClick={() => {
+                      if (phase === PHASE.WARM_UP) return;
                       stopSpeech(); setCurrentIdx(i); setPhase(PHASE.IDLE); setTimer(0);
                       exerciseStateRef.current = { _userProfile: userProfile }; setDisplayReps(0); setSetsPerformance([]); setCurrentSet(1); resetAllTracking();
                     }}
                     className={`text-start p-3 rounded-lg border transition ${
-                      i === currentIdx ? 'border-blue-500 bg-blue-50' : 'border-gray-200 bg-white hover:border-gray-300'
+                      i === currentIdx && phase !== PHASE.WARM_UP ? 'border-blue-500 bg-blue-50' : 'border-gray-200 bg-white hover:border-gray-300'
                     }`}
                   >
                     <div className="flex items-center justify-between">
-                      <span className="font-medium text-sm text-gray-800 truncate max-w-[70%]">{i + 1}. {ex.name}</span>
+                      <span className="font-medium text-sm text-gray-800 truncate max-w-[70%]">{warmUpExercises.length + i + 1}. {ex.name}</span>
                       <span className="text-xs text-gray-400">{ex.sets}x{ex.reps}</span>
                     </div>
                   </button>

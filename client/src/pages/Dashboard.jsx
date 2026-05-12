@@ -96,13 +96,28 @@ export default function Dashboard() {
     refreshProgress();
   }, [trainingPlan]);
 
-  // Check for active (resumable) workout — re-check every 30s to auto-expire
+  // Check for active (resumable) workout — validate & clean invalid ones
   useEffect(() => {
-    setActiveWorkout(loadActiveWorkout());
-    const iv = setInterval(() => {
+    function checkActiveWorkout() {
       const w = loadActiveWorkout();
+      console.log('[Dashboard] loadActiveWorkout:', w);
+      if (!w) { setActiveWorkout(null); return; }
+      // FORCE: only show resume if user actually did something
+      const didWork = (
+        (Array.isArray(w.exerciseResults) && w.exerciseResults.length > 0) ||
+        w.warmUpCompleted === true ||
+        (typeof w.exerciseIndex === 'number' && w.exerciseIndex > 0)
+      );
+      if (!didWork) {
+        console.log('[Dashboard] Invalid workout (no exercises done) — clearing');
+        clearActiveWorkout();
+        setActiveWorkout(null);
+        return;
+      }
       setActiveWorkout(w);
-    }, 30000);
+    }
+    checkActiveWorkout();
+    const iv = setInterval(checkActiveWorkout, 30000);
     return () => clearInterval(iv);
   }, []);
 
@@ -521,13 +536,14 @@ export default function Dashboard() {
         </div>
       )}
 
-      {/* Resume interrupted workout — only if user actually started exercising */}
-      {activeWorkout && (activeWorkout.exerciseResults?.length > 0 || activeWorkout.warmUpCompleted || activeWorkout.exerciseIndex > 0) && (() => {
+      {/* Resume interrupted workout — only rendered if validated by useEffect */}
+      {activeWorkout && (() => {
         const elapsed = Date.now() - (activeWorkout.savedAt || 0);
         const remaining = Math.max(0, 30 * 60 * 1000 - elapsed);
         const mins = Math.floor(remaining / 60000);
         const secs = Math.floor((remaining % 60000) / 1000);
         const timeStr = `${mins}:${String(secs).padStart(2, '0')}`;
+        console.log('[Dashboard] Rendering resume button. exerciseResults:', activeWorkout.exerciseResults?.length, 'warmUpCompleted:', activeWorkout.warmUpCompleted, 'exerciseIndex:', activeWorkout.exerciseIndex);
         return (
         <div className="space-y-1">
           <button
