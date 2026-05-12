@@ -279,6 +279,7 @@ export default function Training() {
   // Environment scan state
   const [environmentScan, setEnvironmentScan] = useState(null);
   const environmentScannedRef = useRef(false);
+  const poseLoopStartedRef = useRef(false);
 
   // Workout adaptation
   const lastAdaptationRef = useRef(0);
@@ -1348,7 +1349,7 @@ export default function Training() {
     speakWarmUpExercise(exName, exDesc, playerName);
 
     // Disability-specific safety tip after announcement (only if no voicePrompt already covers it)
-    if (!vp) {
+    if (!currentWarmUp.voicePrompt) {
       if (disabilityCtx.usesCrutches) {
         setTimeout(() => speakDisabilityTip('crutchStable', playerName), 3500);
       }
@@ -1491,17 +1492,19 @@ export default function Training() {
     await startCamera();
     // Re-unlock after camera resolves (Android sometimes re-suspends during permission dialog)
     unlockAudio();
-    setTimeout(() => { if (videoRef.current) startLoop(videoRef.current); }, 500);
+    // DON'T start pose loop here — wait until user clicks Start Training
+    // This keeps the camera feed clean (no skeleton) during IDLE and avoids GPU load
     // Start session timer
     if (!sessionDataRef.current.startTime) {
       sessionDataRef.current.startTime = Date.now();
       sessionSavedRef.current = false;
     }
-  }, [startCamera, startLoop, videoRef, unlockAudio]);
+  }, [startCamera, videoRef, unlockAudio]);
 
   const handleStopCamera = useCallback(() => {
     stopLoop(); stopObjLoop(); stopBallLoop(); stopCamera(); stopSpeech(); stopAICoaching(); stopVision();
     clearInterval(warmUpTimerRef.current);
+    poseLoopStartedRef.current = false;
     setPhase(PHASE.IDLE);
   }, [stopLoop, stopObjLoop, stopBallLoop, stopCamera, stopSpeech, stopAICoaching]);
 
@@ -1736,6 +1739,13 @@ export default function Training() {
     setTimer(0);
     setFeedback(null);
     resetAllTracking();
+
+    // Start pose detection loop on first activation (deferred from camera start)
+    if (videoRef.current && !poseLoopStartedRef.current) {
+      console.log('[handleStartBriefing] Starting pose detection loop');
+      startLoop(videoRef.current);
+      poseLoopStartedRef.current = true;
+    }
 
     console.log('[handleStartBriefing] currentIdx:', currentIdx, 'warmUpDone:', warmUpDone, 'warmUpExercises.length:', warmUpExercises.length, 'objReady:', objReady, 'envScanned:', environmentScannedRef.current);
 
@@ -2087,7 +2097,8 @@ export default function Training() {
           </div>
         )}
 
-        {!poseReady && cameraActive && (
+        {/* Loading pose overlay — only show AFTER user started training, not during IDLE */}
+        {!poseReady && cameraActive && phase !== PHASE.IDLE && (
           <div className="absolute inset-0 bg-black/60 flex items-center justify-center">
             <div className="text-white text-center space-y-2">
               <div className="animate-spin inline-block w-8 h-8 border-4 border-white border-t-transparent rounded-full"></div>
@@ -2284,16 +2295,10 @@ export default function Training() {
             <div className="text-center space-y-4">
               <button
                 onClick={() => { unlockAudio(); handleStartBriefing(); }}
-                disabled={!poseReady}
-                className="px-12 py-6 bg-gradient-to-r from-green-500 to-emerald-600 text-white rounded-2xl font-bold text-2xl shadow-2xl hover:scale-105 transition-transform disabled:opacity-50 disabled:hover:scale-100 animate-pulse"
+                className="px-12 py-6 bg-gradient-to-r from-green-500 to-emerald-600 text-white rounded-2xl font-bold text-2xl shadow-2xl hover:scale-105 transition-transform animate-pulse"
               >
                 {isHe ? '▶ התחל אימון' : '▶ Start Training'}
               </button>
-              {!poseReady && (
-                <p className="text-white/80 text-sm bg-black/50 rounded-lg px-4 py-2">
-                  {isHe ? 'ממתין לזיהוי תנוחה...' : 'Waiting for pose detection...'}
-                </p>
-              )}
             </div>
           </div>
         )}
@@ -2543,7 +2548,7 @@ export default function Training() {
                     {isHe ? '\u25B6 \u05D4\u05DE\u05E9\u05DA' : '\u25B6 Resume'}
                   </button>
                 ) : phase === PHASE.IDLE || phase === PHASE.EXERCISE_DONE ? (
-                  <button onClick={handleStartBriefing} disabled={!cameraActive || !poseReady}
+                  <button onClick={handleStartBriefing} disabled={!cameraActive}
                     className="flex-1 py-3 min-h-[52px] bg-gradient-to-r from-green-500 to-emerald-600 text-white rounded-lg font-bold text-lg shadow-lg disabled:opacity-50">
                     {t('training.startExercise')}
                   </button>
@@ -2720,7 +2725,7 @@ export default function Training() {
                         {isHe ? '\u25B6 \u05D4\u05DE\u05E9\u05DA' : '\u25B6 Resume'}
                       </button>
                     ) : phase === PHASE.IDLE || phase === PHASE.EXERCISE_DONE ? (
-                      <button onClick={handleStartBriefing} disabled={!cameraActive || !poseReady} className="flex-1 py-2 min-h-[44px] bg-green-500 text-white rounded-lg font-medium disabled:opacity-50">
+                      <button onClick={handleStartBriefing} disabled={!cameraActive} className="flex-1 py-2 min-h-[44px] bg-green-500 text-white rounded-lg font-medium disabled:opacity-50">
                         {t('training.startExercise')}
                       </button>
                     ) : phase === PHASE.EXERCISING ? (
@@ -2872,7 +2877,7 @@ export default function Training() {
                         {isHe ? '\u25B6 \u05D4\u05DE\u05E9\u05DA' : '\u25B6 Resume'}
                       </button>
                     ) : phase === PHASE.IDLE || phase === PHASE.EXERCISE_DONE ? (
-                      <button onClick={handleStartBriefing} disabled={!cameraActive || !poseReady} className="flex-1 py-2 min-h-[44px] bg-green-500 text-white rounded-lg font-medium disabled:opacity-50">
+                      <button onClick={handleStartBriefing} disabled={!cameraActive} className="flex-1 py-2 min-h-[44px] bg-green-500 text-white rounded-lg font-medium disabled:opacity-50">
                         {t('training.startExercise')}
                       </button>
                     ) : phase === PHASE.EXERCISING ? (
