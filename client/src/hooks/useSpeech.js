@@ -987,6 +987,27 @@ export function useSpeech(lang = 'he-IL', age) {
     speakPriority(text);
   }, [isHe, speakPriority]);
 
+  // Achievement ding — oscillator frequency sweep (E5→E6, 300ms)
+  const playAchievementDing = useCallback(() => {
+    const ctx = getAudioCtx();
+    if (!ctx) return;
+    try {
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(659, ctx.currentTime); // E5
+      osc.frequency.exponentialRampToValueAtTime(1319, ctx.currentTime + 0.3); // E6
+      gain.gain.setValueAtTime(0.3, ctx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.3);
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.start(ctx.currentTime);
+      osc.stop(ctx.currentTime + 0.35);
+    } catch (e) {
+      console.warn('[Speech] Achievement ding error:', e);
+    }
+  }, [getAudioCtx]);
+
   const stop = useCallback(() => {
     window.speechSynthesis?.cancel();
     speaking.current = false;
@@ -998,6 +1019,7 @@ export function useSpeech(lang = 'he-IL', age) {
   const isSpeaking = () => speaking.current;
 
   return {
+    playAchievementDing,
     speak,
     speakPriority,
     speakCritical,

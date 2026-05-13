@@ -53,6 +53,7 @@ export default function Dashboard() {
   });
   const [weeklyProgress, setWeeklyProgress] = useState({ sessions: 0 });
   const [weeklyReminder, setWeeklyReminder] = useState(null);
+  const [streak, setStreak] = useState(0);
   const generatingRef = useRef(false);
 
   const name = userProfile?.name || '';
@@ -84,13 +85,37 @@ export default function Dashboard() {
     }).catch(() => {});
   }, []);
 
-  // Load workout count
+  // Load workout count + streak
   useEffect(() => {
     async function loadCount() {
       if (!user) return;
       try {
         const snap = await getDocs(collection(db, 'users', user.uid, 'workouts'));
         setWorkoutCount(snap.size);
+
+        // Calculate streak: count consecutive LOCAL days with workouts backwards from today
+        // Use local date to avoid timezone issues (late-night workout = same local day)
+        const toLocalDate = (d) => {
+          const y = d.getFullYear(), m = d.getMonth() + 1, day = d.getDate();
+          return `${y}-${String(m).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+        };
+        const dates = new Set();
+        snap.forEach(d => {
+          const data = d.data();
+          const ts = data.date?.toDate?.() || (data.date ? new Date(data.date) : null);
+          if (ts) dates.add(toLocalDate(ts));
+        });
+        let count = 0;
+        const day = new Date();
+        // Check today first — if no workout today, start from yesterday
+        if (!dates.has(toLocalDate(day))) {
+          day.setDate(day.getDate() - 1);
+        }
+        while (dates.has(toLocalDate(day))) {
+          count++;
+          day.setDate(day.getDate() - 1);
+        }
+        setStreak(count);
       } catch {}
     }
     loadCount();
@@ -450,38 +475,82 @@ export default function Dashboard() {
         </div>
       )}
 
-      {/* Weekly Goal Progress */}
+      {/* Streak + Weekly Goal */}
       {setupComplete && (
-        <div className="bg-gradient-to-r from-green-50 to-blue-50 rounded-xl shadow p-4">
-          <div className="flex items-center justify-between mb-2">
-            <h3 className="text-sm font-semibold text-gray-700">
-              {isHe ? 'מטרה שבועית' : 'Weekly Goal'}
-            </h3>
-            <span className="text-xs text-gray-400">
-              {new Date().toLocaleDateString(isHe ? 'he-IL' : 'en-US', { weekday: 'long' })}
+        <div className="bg-gradient-to-r from-orange-50 via-yellow-50 to-blue-50 rounded-xl shadow p-4 space-y-4">
+          {/* Streak — large, always visible */}
+          <div className="flex items-center justify-center gap-3">
+            <span
+              className="text-5xl"
+              style={{
+                filter: streak > 0 ? 'none' : 'grayscale(1) opacity(0.5)',
+                animation: streak > 0 ? 'streakPulse 2s ease-in-out infinite' : 'none',
+              }}
+            >
+              🔥
             </span>
-          </div>
-          <div className="flex items-center gap-4">
-            <div className="flex-1">
-              <div className="flex justify-between text-xs mb-1">
-                <span className="text-gray-600">
-                  {weeklyProgress.sessions} / {userProfile?.trainingDays || 3} {isHe ? 'אימונים' : 'sessions'}
-                </span>
-                <span className="text-gray-600">
-                  {Math.round((weeklyProgress.sessions / (userProfile?.trainingDays || 3)) * 100)}%
-                </span>
-              </div>
-              <div className="w-full bg-gray-200 rounded-full h-3">
-                <div
-                  className="bg-gradient-to-r from-green-500 to-blue-500 h-3 rounded-full transition-all duration-500"
-                  style={{ width: `${Math.min((weeklyProgress.sessions / (userProfile?.trainingDays || 3)) * 100, 100)}%` }}
-                />
-              </div>
+            <div className="flex flex-col items-center">
+              <span className={`text-3xl font-black ${streak > 0 ? 'text-orange-500' : 'text-gray-400'}`}>
+                {streak}
+              </span>
+              <span className={`text-sm font-semibold ${streak > 0 ? 'text-orange-400' : 'text-gray-400'}`}>
+                {isHe ? 'ימים רצופים' : 'day streak'}
+              </span>
             </div>
-            <span className="text-2xl">
-              {weeklyProgress.sessions >= (userProfile?.trainingDays || 3) ? '🎉' : '💪'}
-            </span>
           </div>
+
+          {/* Divider */}
+          <div className="border-t border-gray-200" />
+
+          {/* Weekly Goal — circular ring */}
+          {(() => {
+            const goal = userProfile?.trainingDays || 3;
+            const pct = Math.min(weeklyProgress.sessions / goal, 1);
+            const r = 40, stroke = 8;
+            const circ = 2 * Math.PI * r;
+            const offset = circ * (1 - pct);
+            const done = weeklyProgress.sessions >= goal;
+            return (
+              <div>
+                <h3 className="text-sm font-semibold text-gray-700 mb-2 text-center">
+                  {isHe ? 'מטרה שבועית' : 'Weekly Goal'}
+                </h3>
+                <div className="flex items-center gap-4">
+                  <div className="relative" style={{ width: 100, height: 100 }}>
+                    <svg width="100" height="100" viewBox="0 0 100 100">
+                      <circle cx="50" cy="50" r={r} fill="none" stroke="#e5e7eb" strokeWidth={stroke} />
+                      <circle
+                        cx="50" cy="50" r={r} fill="none"
+                        stroke={done ? '#22c55e' : '#3b82f6'}
+                        strokeWidth={stroke}
+                        strokeLinecap="round"
+                        strokeDasharray={circ}
+                        strokeDashoffset={offset}
+                        transform="rotate(-90 50 50)"
+                        style={{ transition: 'stroke-dashoffset 0.8s ease' }}
+                      />
+                    </svg>
+                    <div className="absolute inset-0 flex flex-col items-center justify-center">
+                      <span className="text-lg font-bold text-gray-800">{weeklyProgress.sessions}/{goal}</span>
+                      <span className="text-xs text-gray-500">{isHe ? 'אימונים' : 'sessions'}</span>
+                    </div>
+                  </div>
+                  <div className="flex-1">
+                    <p className="text-sm text-gray-600">
+                      {done
+                        ? (isHe ? '🎉 כל הכבוד! השלמת את המטרה השבועית!' : '🎉 Great job! Weekly goal completed!')
+                        : (isHe
+                          ? `עוד ${goal - weeklyProgress.sessions} אימונים להשלמת המטרה`
+                          : `${goal - weeklyProgress.sessions} more to reach your goal`)}
+                    </p>
+                    <p className="text-xs text-gray-400 mt-1">
+                      {new Date().toLocaleDateString(isHe ? 'he-IL' : 'en-US', { weekday: 'long' })}
+                    </p>
+                  </div>
+                </div>
+              </div>
+            );
+          })()}
         </div>
       )}
 

@@ -22,6 +22,7 @@ import { apiUrl } from '../utils/api';
 import { markDayCompleted, sanitizePlan, saveActiveWorkout, loadActiveWorkout, clearActiveWorkout } from '../utils/workoutStorage';
 import { incrementWeeklySession } from '../utils/weeklyGoals';
 import { getExerciseInstruction, getWarmUpInstruction } from '../utils/exerciseInstructions';
+import { drawFormCorrection } from '../utils/canvasDrawing';
 
 const PHASE = {
   IDLE: 'idle',
@@ -120,6 +121,7 @@ export default function Training() {
     speakNotVisible, speakPositiveReinforcement,
     speakMissingBodyParts, speakSideCamera, speakResumeWelcome, speakCalibrationStart, speakCalibrationDone,
     speakLevelUpPrompt, speakCritical, unlockAudio,
+    playAchievementDing,
     stop: stopSpeech, isSpeaking
   } = useSpeech(lang, userProfile?.age);
 
@@ -356,6 +358,10 @@ export default function Training() {
   // Per-exercise history from Firestore (loaded once at training init)
   const exerciseHistoryRef = useRef({});
 
+  // Set grade display (A+/A/B) — shown briefly after set completion
+  const [setGrade, setSetGrade] = useState(null); // { grade: 'A+', color: '#...' }
+  const gradeTimerRef = useRef(null);
+
   // Feedback tracking
   const lastSpokenRef = useRef('');
   const timerRef = useRef(null);
@@ -531,13 +537,14 @@ export default function Training() {
     }
   }, [currentIdx, currentExercise]);
 
-  // Ghost skeleton: set beforeDrawRef during EXERCISING phase
+  // Ghost skeleton + form correction arcs: set beforeDrawRef during EXERCISING phase
   useEffect(() => {
-    if (phase === PHASE.EXERCISING && ghostEnabled && analyzerRef.current) {
+    if (phase === PHASE.EXERCISING && analyzerRef.current) {
       const cueKey = analyzerRef.current.cueKey;
       const sportKey = userProfile?.sport || 'fitness';
       beforeDrawRef.current = (ctx, lm, w, h) => {
-        drawGhost(ctx, sportKey, cueKey, lm, w, h);
+        if (ghostEnabled) drawGhost(ctx, sportKey, cueKey, lm, w, h);
+        drawFormCorrection(ctx, lm, w, h, cueKey);
       };
     } else {
       beforeDrawRef.current = null;
@@ -1800,7 +1807,27 @@ export default function Training() {
       ? repScoresRef.current.reduce((a, b) => a + b, 0) / repScoresRef.current.length
       : 0;
 
-    setSetsPerformance(prev => [...prev, { set: currentSet, quality: wasPerfect ? 'perfect' : wasGood ? 'good' : 'needs_work', avgScore: Math.round(setAvgScore * 10) / 10 }]);
+    // Compute set grade (A+/A/B)
+    const romReport = performanceReportRef.current;
+    const romPct = romReport?.romPercentage ?? 0;
+    let grade, gradeColor;
+    if (setAvgScore >= 9.0 && romPct >= 95) {
+      grade = 'A+'; gradeColor = '#00FF00';
+    } else if (setAvgScore >= 7.5 || romPct >= 85) {
+      grade = 'A'; gradeColor = '#FFD700';
+    } else {
+      grade = 'B'; gradeColor = '#FF8C00';
+    }
+
+    // Show grade overlay with auto-dismiss
+    clearTimeout(gradeTimerRef.current);
+    setSetGrade({ grade, color: gradeColor });
+    gradeTimerRef.current = setTimeout(() => setSetGrade(null), 2500);
+
+    // Play achievement ding on A+
+    if (grade === 'A+') playAchievementDing();
+
+    setSetsPerformance(prev => [...prev, { set: currentSet, quality: wasPerfect ? 'perfect' : wasGood ? 'good' : 'needs_work', avgScore: Math.round(setAvgScore * 10) / 10, grade }]);
 
     if (wasPerfect) {
       const langKey = isHe ? 'he' : 'en';
@@ -2094,6 +2121,21 @@ export default function Training() {
         {phase === PHASE.EXERCISING && cameraActive && (
           <div className="absolute bottom-3 right-3 z-20 pointer-events-none">
             <ROMGauge ref={romGaugeRef} isHe={isHe} />
+          </div>
+        )}
+
+        {/* Set Grade Overlay (A+/A/B) */}
+        {setGrade && (
+          <div className="absolute inset-0 flex items-center justify-center z-30 pointer-events-none">
+            <div
+              className="text-8xl font-black drop-shadow-lg"
+              style={{
+                color: setGrade.color,
+                animation: 'gradePopIn 0.4s ease-out forwards, gradePopOut 0.5s ease-in 2s forwards',
+              }}
+            >
+              {setGrade.grade}
+            </div>
           </div>
         )}
 
