@@ -477,23 +477,24 @@ export default function Dashboard() {
 
       {/* Streak + Weekly Goal */}
       {setupComplete && (
-        <div className="bg-gradient-to-r from-orange-50 via-yellow-50 to-blue-50 rounded-xl shadow p-4 space-y-4">
+        <div className="bg-gradient-to-r from-orange-50 via-yellow-50 to-blue-50 rounded-xl shadow-md border border-gray-200 p-4 space-y-4">
           {/* Streak — large, always visible */}
           <div className="flex items-center justify-center gap-3">
             <span
               className="text-5xl"
               style={{
-                filter: streak > 0 ? 'none' : 'grayscale(1) opacity(0.5)',
+                filter: streak > 0 ? 'none' : 'grayscale(1)',
+                opacity: streak > 0 ? 1 : 0.7,
                 animation: streak > 0 ? 'streakPulse 2s ease-in-out infinite' : 'none',
               }}
             >
               🔥
             </span>
             <div className="flex flex-col items-center">
-              <span className={`text-3xl font-black ${streak > 0 ? 'text-orange-500' : 'text-gray-400'}`}>
+              <span className={`text-3xl font-black ${streak > 0 ? 'text-orange-500' : 'text-gray-500'}`}>
                 {streak}
               </span>
-              <span className={`text-sm font-semibold ${streak > 0 ? 'text-orange-400' : 'text-gray-400'}`}>
+              <span className={`text-base font-semibold ${streak > 0 ? 'text-orange-400' : 'text-gray-500'}`}>
                 {isHe ? 'ימים רצופים' : 'day streak'}
               </span>
             </div>
