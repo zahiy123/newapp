@@ -2381,29 +2381,54 @@ export function getLocalFallbackWeek({ profile, sport, goals, daysPerWeek, locat
     : 'football';
   const fallbackThemes = fallbackThemesBySport[themeKey];
 
-  function applyProgression(ex) {
+  // Constraint variations per week to ensure variety
+  const weekConstraints = [
+    ['עם עצירה של 2 שניות', 'בטמפו איטי 3-0-1', 'עם החזקה עליונה', 'עם שינוי קצב'],
+    ['ביד/רגל אחת לסירוגין', 'עם סיבוב 90 מעלות', 'בתנועה מעגלית', 'עם ספירה לאחור'],
+    ['עם מעבר עמדה', 'בתנועה פיצוצית מבוקרת', 'עם נגיעת רצפה בין חזרות', 'בקצב עולה'],
+    ['עם החזקה של 3 שניות למטה', 'בשילוב נשיפה מלאה', 'עם הנפה מבוקרת', 'בתנועה רציפה ללא עצירה'],
+  ];
+  const weekTargets = [
+    ['השלם {reps} חזרות מבוקרות', 'בצע {reps} חזרות ב-60 שניות', 'השלם {sets} סטים ללא הפסקה'],
+    ['{reps} חזרות לכל צד', 'השלם מעגל של {reps} חזרות', '{sets} סטים עם ירידה בזמן מנוחה'],
+    ['השלם {reps} חזרות עם טכניקה מושלמת', 'בצע {reps}+ חזרות לפני כשלון', '{sets}×{reps} ללא ירידה באיכות'],
+    ['{reps} חזרות עם שיפור מהשבוע הקודם', 'שבור שיא אישי ב-{reps} חזרות', '{sets} סטים של {reps} בטמפו מושלם'],
+  ];
+
+  function applyProgression(ex, dayIdx) {
     const e = { ...ex };
-    // Apply week progression for reps-based exercises (not timed holds)
-    const isTimedHold = e.name === 'פלאנק' || e.name === 'פלאנק צידי' || e.name === 'ישיבה על הקיר';
+    const isTimedHold = (e.name || '').includes('פלאנק') || (e.name || '').includes('החזקה') || e.name === 'ישיבה על הקיר';
     e.sets = prog.sets;
     if (!isTimedHold) {
       e.reps = String(prog.reps);
     }
     e.restSeconds = prog.rest;
+
+    // Transform generic names into formula-based names
+    const wk = (weekNumber - 1) % 4;
+    const constraintIdx = ((dayIdx || 0) + wk) % weekConstraints[wk].length;
+    const constraint = weekConstraints[wk][constraintIdx];
+    const targetTemplate = weekTargets[wk][constraintIdx];
+    const target = targetTemplate.replace('{reps}', e.reps).replace('{sets}', String(e.sets));
+
+    // Only transform if name looks generic (no '—' already in it)
+    if (!e.name.includes('—')) {
+      e.name = `${e.name} ${constraint} — ${target}`;
+    }
     return e;
   }
 
   for (let d = 0; d < numDays; d++) {
     const exercises = [];
-    exercises.push(applyProgression(drillPool[d % drillPool.length]));
+    exercises.push(applyProgression(drillPool[d % drillPool.length], d));
     if (hasStrength) {
-      exercises.push(applyProgression(strengthPool[(d * 2) % strengthPool.length]));
-      exercises.push(applyProgression(strengthPool[(d * 2 + 1) % strengthPool.length]));
+      exercises.push(applyProgression(strengthPool[(d * 2) % strengthPool.length], d));
+      exercises.push(applyProgression(strengthPool[(d * 2 + 1) % strengthPool.length], d + 1));
     } else {
-      exercises.push(applyProgression(strengthPool[d % strengthPool.length]));
+      exercises.push(applyProgression(strengthPool[d % strengthPool.length], d));
     }
     if (exercises.length < 4) {
-      exercises.push(applyProgression(drillPool[(d + 1) % drillPool.length]));
+      exercises.push(applyProgression(drillPool[(d + 1) % drillPool.length], d + 2));
     }
 
     const focus = isFitness
