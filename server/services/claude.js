@@ -1664,51 +1664,50 @@ function buildWeekPrompt({ profile, sport, goals, daysPerWeek, location, weekNum
   const periodPhase = goalPeriodization[goalTrack][weekNumber] || goalPeriodization.DEFAULT[1];
 
   const equipmentRules = {
-    none: `BODYWEIGHT ONLY — NO WEIGHTS, NO DUMBBELLS, NO BARBELLS, NO MACHINES, NO RESISTANCE BANDS.
-The athlete has ZERO equipment. Every exercise must use bodyweight only.
-Strength exercises MUST use these EXACT Hebrew names (pick from this list):
-שכיבות סמיכה, סקוואט, פלאנק, לאנג'ים, דיפס, כפיפות מרפק, גשר ישבן, כפיפות בטן, מטפס הרים, ישיבה על הקיר, פלאנק צידי,
-הרמות עקב, סקוואט סומו, לאנג' הפוך, ספליט סקוואט בולגרי, דדליפט חד-רגלי, סטפ-אפ, הרמה קדמית, כיווץ כתפיים,
-סופרמן, דד באג, ציפור-כלב, סיבוב רוסי, הרמות רגליים, בעיטות פרפר, כפיפות אופניים, כפיפות בטן הפוכות, הרמת ירכיים, כפיפות V, בעיטות חמור,
-ברכיים גבוהות, בעיטות ישבן, קפיצות מחליק, קפיצות טאק, זחילת דוב, תולעת, גוד מורנינג, החזקת גוף חלול, פלאנק לשכיבות סמיכה, קפיצות כוכב, פלאנק עם נגיעת כתף, סופרמן-בננה,
-סיבוב כתף פסיבי, הרמת יד קדמית מבוקרת, סיבוב חיצוני, כיפוף מרפק אקטיבי, יישור מרפק מבוקר, פרונציה-סופינציה, חתול-פרה, הטיית אגן, יישור גב כנגד קיר, הרמת רגל ישרה, כיפוף ברך בישיבה, מיני סקוואט, הושטת יד, העברת משקל, עמידה-ישיבה.
-NEVER suggest exercises that require any equipment when equipment is "none".`,
-    dumbbells: `Strength exercises MUST use these EXACT Hebrew names (pick from this list):
-שכיבות סמיכה, סקוואט, פלאנק, לאנג'ים, דיפס, כפיפות מרפק, גשר ישבן, כפיפות בטן, מטפס הרים, ישיבה על הקיר, פלאנק צידי,
-כתפיים עם משקולות, גובלט סקוואט, הרמה צידית, משיכת משקולת, הרחבת מרפק,
-הרמות עקב, סקוואט סומו, לאנג' הפוך, ספליט סקוואט בולגרי, דדליפט חד-רגלי, סטפ-אפ, הרמה קדמית, משיכה זקופה, כיווץ כתפיים, לחיצת ארנולד, כפיפות פטיש, הרחבת טריצפס מעל הראש,
-סופרמן, דד באג, ציפור-כלב, סיבוב רוסי, הרמות רגליים, כפיפות V, בעיטות חמור, גוד מורנינג.
-Prefer dumbbell exercises when possible.`,
-    resistance_bands: `Strength exercises MUST use these EXACT Hebrew names (pick from this list):
-שכיבות סמיכה, סקוואט, פלאנק, לאנג'ים, דיפס, כפיפות מרפק, גשר ישבן, כפיפות בטן, מטפס הרים, ישיבה על הקיר, פלאנק צידי,
-לחיצת כתפיים עם גומייה, סקוואט עם גומייה, כפיפות מרפק עם גומייה, משיכת גומייה, מתיחת גומייה,
-הרמות עקב, סקוואט סומו, לאנג' הפוך, דדליפט חד-רגלי, סטפ-אפ, הרמה קדמית, כיווץ כתפיים,
-סופרמן, דד באג, ציפור-כלב, סיבוב רוסי, הרמות רגליים, כפיפות V, גוד מורנינג.
-Prefer resistance band exercises when possible.`,
+    none: `EQUIPMENT CONSTRAINT: BODYWEIGHT ONLY — ZERO equipment available.
+Every exercise must use only the athlete's body and environment (floor, wall, chair).
+FORBIDDEN: Any mention of weights, dumbbells, barbells, machines, resistance bands, kettlebells.
+GENERATE exercises using bodyweight movement patterns: push, pull, squat, hinge, lunge, plank, rotation, crawl.
+Apply the Universal Formula: [movement pattern] + [unique constraint] = [measurable target]. Do NOT use generic names.`,
+    dumbbells: `EQUIPMENT CONSTRAINT: DUMBBELLS AVAILABLE.
+The athlete has dumbbells. GENERATE exercises that incorporate dumbbell load where appropriate.
+Mix bodyweight + dumbbell exercises. Apply the Universal Formula with dumbbell-specific constraints (e.g. "with 5kg dumbbell overhead", "alternating arms").
+FORBIDDEN: barbells, machines, cables, resistance bands.`,
+    resistance_bands: `EQUIPMENT CONSTRAINT: RESISTANCE BANDS AVAILABLE.
+The athlete has resistance bands. GENERATE exercises that incorporate band tension where appropriate.
+Mix bodyweight + band exercises. Apply the Universal Formula with band-specific constraints (e.g. "against band resistance", "band around knees").
+FORBIDDEN: dumbbells, barbells, machines, cables.`,
   };
 
   const disabilityStrength = {
-    one_arm: `For ONE-ARM athletes: ONLY use exercises they can do with one arm.
-PREFERRED: סקוואט, לאנג'ים, גשר ישבן, כפיפות בטן, פלאנק, מטפס הרים, ישיבה על הקיר, פלאנק צידי, כפיפות מרפק (one arm), הרמות עקב, סקוואט סומו, דדליפט חד-רגלי, סיבוב רוסי, הרמות רגליים, ברכיים גבוהות, בעיטות ישבן.
-AVOID: שכיבות סמיכה (unless modified), מתיחת גומייה, דד באג, ציפור-כלב (require two arms). Focus on core and legs.`,
-    one_leg: `For ONE-LEG amputee athletes (crutches): ONLY upper body + core + adapted exercises.
+    one_arm: `DISABILITY CONSTRAINT (ONE-ARM): Generate exercises using ONE arm only + core + legs.
+MOVEMENT CONSTRAINTS: All upper body exercises must be unilateral (single-arm). Legs are fully functional — generate bilateral leg exercises freely.
+FORBIDDEN PATTERNS: Any exercise requiring two-hand grip, bilateral arm push/pull, two-arm support positions.
+GENERATE creative single-arm variations with unique constraints using the Universal Formula.`,
+    one_leg: `DISABILITY CONSTRAINT (ONE-LEG AMPUTEE on crutches):
 AMPUTATION SIDE: ${profile.amputationSide || 'unknown'}. LEVEL: ${profile.amputationLevel || 'unknown'}.
-COMPENSATION ANALYSIS: Watch for hip shift to the amputated side during standing exercises. Core engagement compensates for missing leg stability.
-IGNORE all analysis of the amputated leg — focus on standing leg alignment, crutch positioning, and trunk stability.
-PREFERRED: שכיבות סמיכה, דיפס, פלאנק, כפיפות מרפק, כפיפות בטן, גשר ישבן, פלאנק צידי, כתפיים עם משקולות, הרמה צידית, הרחבת מרפק, משיכת משקולת, סופרמן, דד באג, ציפור-כלב, סיבוב רוסי, הרמות רגליים, כפיפות V, הרמה קדמית, כיווץ כתפיים, גוד מורנינג.
-AVOID: סקוואט, לאנג'ים, מטפס הרים, ברכיים גבוהות, קפיצות מחליק, קפיצות טאק, הרמות עקב (require two legs). Squat only if described as single-leg with crutch support.`,
-    two_legs: `For WHEELCHAIR athletes: ONLY upper body exercises done seated.
-PREFERRED: שכיבות סמיכה, דיפס, כפיפות מרפק, כפיפות בטן, פלאנק, כתפיים עם משקולות, הרמה צידית, הרחבת מרפק, משיכת משקולת, מתיחת גומייה, הרמה קדמית, כיווץ כתפיים, לחיצת ארנולד, כפיפות פטיש, סיבוב רוסי, הרמות רגליים, כפיפות V.
-AVOID: סקוואט, לאנג'ים, גשר ישבן, מטפס הרים, ישיבה על הקיר, הרמות עקב, ברכיים גבוהות, קפיצות, דדליפט (require standing/legs).`,
-    rehab_one_arm: `For ONE-ARM rehab: Focus on sound arm ROM/strength + core stability + adapted bilateral exercises.
-PREFERRED: סיבוב כתף פסיבי, הרמת יד קדמית מבוקרת, סיבוב חיצוני, כיפוף מרפק אקטיבי, יישור מרפק מבוקר, חתול-פרה, הטיית אגן, מיני סקוואט, העברת משקל, עמידה-ישיבה
-AVOID: פרונציה-סופינציה (if affected arm)`,
-    rehab_one_leg: `For ONE-LEG rehab (amputee): Focus on residual limb ROM + core/spine stability + sound leg strength.
-PREFERRED: סיבוב כתף פסיבי, הרמת יד קדמית מבוקרת, כיפוף מרפק אקטיבי, חתול-פרה, הטיית אגן, יישור גב כנגד קיר, הושטת יד, העברת משקל
-AVOID: מיני סקוואט, עמידה-ישיבה (if no prosthesis), הרמת רגל ישרה (affected side)`,
-    rehab_wheelchair: `For WHEELCHAIR rehab: Upper body + seated core exercises only.
-PREFERRED: סיבוב כתף פסיבי, הרמת יד קדמית מבוקרת, סיבוב חיצוני, כיפוף מרפק אקטיבי, יישור מרפק מבוקר, פרונציה-סופינציה, הושטת יד
-AVOID: מיני סקוואט, עמידה-ישיבה, הרמת רגל ישרה, העברת משקל (standing exercises)`,
+MOVEMENT CONSTRAINTS: Upper body + core are fully functional. Generate exercises for these freely.
+The athlete uses crutches — consider crutch-supported positions and seated/floor exercises.
+COMPENSATION FOCUS: Core stability compensates for missing leg. Hip alignment is critical.
+FORBIDDEN PATTERNS: Any exercise requiring bilateral leg drive, jumping, running, bilateral squats, lunges.
+GENERATE creative upper body + core exercises with unique constraints using the Universal Formula.`,
+    two_legs: `DISABILITY CONSTRAINT (WHEELCHAIR / BILATERAL LEG AMPUTEE):
+MOVEMENT CONSTRAINTS: ONLY upper body + seated core exercises. The athlete is seated at all times.
+GENERATE exercises using: push patterns (chest/shoulders/triceps), pull patterns (back/biceps), core rotation, seated cardio.
+FORBIDDEN PATTERNS: Any standing exercise, any exercise requiring legs, any exercise requiring the athlete to leave the wheelchair.
+GENERATE creative seated variations with unique constraints using the Universal Formula.`,
+    rehab_one_arm: `DISABILITY CONSTRAINT (ONE-ARM REHAB):
+MOVEMENT CONSTRAINTS: Focus on sound arm ROM/strength + core stability. Generate controlled, therapeutic exercises.
+FORBIDDEN PATTERNS: Explosive movements, heavy loads on affected side, bilateral arm exercises requiring full ROM.
+GENERATE rehab-specific exercises: controlled ROM, isometric holds, proprioceptive challenges. Use tempo 3-1-3 minimum.`,
+    rehab_one_leg: `DISABILITY CONSTRAINT (ONE-LEG REHAB):
+MOVEMENT CONSTRAINTS: Focus on residual limb ROM + core/spine stability + sound leg strength.
+FORBIDDEN PATTERNS: Standing on affected side without support, explosive leg movements, bilateral leg exercises.
+GENERATE rehab-specific exercises: seated/floor core work, upper body strength, sound leg conditioning. Use tempo 3-1-3 minimum.`,
+    rehab_wheelchair: `DISABILITY CONSTRAINT (WHEELCHAIR REHAB):
+MOVEMENT CONSTRAINTS: Upper body + seated core only. Focus on shoulder health and wheelchair propulsion strength.
+FORBIDDEN PATTERNS: Any standing exercise, any leg exercise, heavy overhead loading without spotter.
+GENERATE rehab-specific seated exercises: shoulder ROM, rotator cuff work, seated core rotation, controlled pressing.`,
   };
 
   const eqRule = equipmentRules[eq] || equipmentRules.none;
@@ -1872,8 +1871,9 @@ ${sport === 'fitness'
     ? `STRICT FITNESS-ONLY RULES:
 - ZERO balls, ZERO sport drills, ZERO dribbling/shooting/passing. This is a GYM/FITNESS program.
 - Each day MUST have 2-3 strength exercises + 1 cardio/conditioning exercise as finisher.
-- Rotate muscle groups: Day 1=upper body, Day 2=lower body, Day 3=full body/core, then repeat.
-- Cardio finisher examples: ריצת אינטרוולים, ספרינטים, jumping jacks, בורפיז, קפיצות חבל, מטפס הרים.
+- Rotate muscle groups: Day 1=push+core, Day 2=pull+legs, Day 3=full body, then repeat.
+- GENERATE each exercise using the Universal Formula: [movement pattern] + [unique constraint] = [measurable target].
+- Cardio finisher: GENERATE a unique high-intensity cardio challenge — do NOT reuse the same finisher across days.
 - RESPECT EQUIPMENT: If no equipment → bodyweight ONLY. If dumbbells → use them. If bands → use them.
 - If you include ANY ball or sport drill, the entire plan is INVALID.`
     : `SPORT-FOCUSED RULES (NON-NEGOTIABLE):
@@ -1892,14 +1892,14 @@ Phase 4 — RECOVERY (cooldown): Return to resting heart rate + targeted stretch
 
 EXERCISE ORDER within Phase 2-3:
 ${sport === 'fitness'
-    ? `1. Compound movement first (squat/deadlift/push-up pattern) — heaviest exercise when fresh
-2. Secondary compound or isolation (shoulder press/curl/row)
-3. Core/stability exercise (plank/crunch/russian twist)
-4. Cardio finisher LAST (jumping jacks/high knees/mountain climbers)`
-    : `1. TECHNIQUE drill first (low intensity skill: passing/dribbling/footwork) — practice form when fresh
-2. MAIN sport drill (shooting/kicking/advanced moves) — high intensity
-3. STRENGTH supplement (1 exercise: push-ups/squats/planks)
-4. CONDITIONING finisher LAST (sprints/agility/high knees)`}
+    ? `1. Compound push or pull pattern — heaviest exercise when fresh (generate with unique constraint)
+2. Secondary compound or isolation pattern — different muscle group (generate with unique constraint)
+3. Core/stability pattern — anti-rotation or anti-extension focus (generate with unique constraint)
+4. Cardio finisher LAST — high-intensity metabolic challenge (generate with unique constraint)`
+    : `1. TECHNIQUE Core Skill — low intensity, skill acquisition focus (generate with spatial constraint)
+2. MAIN Core Skill — high intensity, game-scenario challenge (generate with cognitive/tactical constraint)
+3. STRENGTH supplement — 1 exercise only, serves the sport (generate with tempo/load constraint)
+4. CONDITIONING finisher LAST — sport-specific endurance (generate with time/distance constraint)`}
 CRITICAL: Return ONLY raw JSON. NO markdown, NO backticks, NO prose.
 Use sport-specific terminology in Hebrew.
 EXERCISE NAME FORMAT — UNIVERSAL FORMULA OUTPUT:
