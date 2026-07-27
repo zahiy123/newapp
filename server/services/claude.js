@@ -1920,57 +1920,34 @@ CRITICAL: Return ONLY raw JSON. NO markdown, NO backticks, NO code fences, NO pr
 Start your response with the { character. End with }. Nothing else.
 DO NOT add "playerProfile" or any extra top-level key. ONLY: weekNumber, theme, days.
 
-═══ HEBREW LANGUAGE RULES — ISRAELI FOOTBALL COACH STYLE ═══
-Write like an experienced Israeli football coach talking to a player on the field. NOT like a textbook.
-MANDATORY TERMINOLOGY (use these exact words):
-- דריבל (NOT כדרור, NOT טרימה, NOT "כדרור בעל עיניים")
-- מסירה / מסירה מדויקת / מסירה בתנועה (NOT "תמיכה ידעת", NOT "מסירה במצע")
-- עצירת כדור / שליטה בכדור (NOT "טראפ יציב")
-- בעיטה / בעיטה לשער (NOT "ירייה")
-- פלאנק, שכיבות סמיכה, גשר ישבן (standard Hebrew fitness terms)
-- קורה לקורה, חתך פנימה, פתיחה, חפיפה (tactical terms everyone knows)
-LANGUAGE STYLE:
-- Short, direct, action-driven sentences. Max 10 words per sentence.
-- Use field language, not academic language.
-- If there is no good Hebrew term that every player understands, use the common English football term (e.g. דריבל, not כדרור).
-- NEVER invent new Hebrew words or use literal translations that sound unnatural.
-- The player should understand what to do in ONE second without confusion.
-EXAMPLES:
-- GOOD: "דריבל בין קונוסים — 5 סבבים ב-40 שניות"
-- BAD: "כדרור סטטי עם שינויי קצב — 8 מטר" (unnatural, academic)
-- GOOD: "מסירה לקיר ברגל ימין — 20 מסירות ב-30 שניות"
-- BAD: "מסירות לקיר ביד חזקה — 20 מסירות ב-30 שניות" (hand? in football?)
-- GOOD: "עצירת כדור ומסירה בתנועה — 10 חזרות מדויקות"
-- BAD: "טראפ יציב ותמיכה ידעת — בדיוק קריטי"
+═══ HEBREW — ISRAELI COACH STYLE ═══
+Write like an Israeli football coach on the field. Short, direct, clear.
+Terms: דריבל (NOT כדרור), מסירה, עצירת כדור, בעיטה, פלאנק, חתך, שליטה.
+If no natural Hebrew term exists, use the English football term.
 
-EXERCISE NAME FORMAT — UNIVERSAL FORMULA OUTPUT:
-Each exercise name = "[Core Skill] [Constraint] — [Measurable Target]" in Hebrew.
-BAD: "דריבל", "מסירות", "שכיבות סמיכה" (generic, no formula, REJECTED)
-GOOD: "דריבל זיגזג בין 4 קונוסים — 5 סבבים ב-40 שניות" (skill + constraint + target)
-GOOD: "מסירה לקיר ברגל ימין — 20 מסירות ב-30 שניות" (skill + constraint + target)
-GOOD: "לחיצת חזה בטמפו 3-0-3 — 10 חזרות מבוקרות" (skill + constraint + target)
-If ANY exercise name is just a generic word without constraint+target, the ENTIRE plan is INVALID.
-DESCRIPTION STYLE: Write like a coach giving instructions on the field. Short, clear, action words. Max 12 words.
-TIPS: One short coaching tip. Max 8 words. Like a coach yelling from the sideline.
-INSTRUCTIONS: Array of 2-4 short Hebrew steps (max 6 words each). Direct commands.
-VOICE_PROMPT: One sentence a coach would shout on the field (max 12 words). Motivating and direct.
-REASONING: Short explanation WHY this drill fits this player (Hebrew, max 15 words). Reference disability/goals.
-TEMPO: Each exercise MUST have a "tempo" field (string, e.g. "2-0-1" = 2s eccentric, 0s pause, 1s concentric). Use controlled tempo for rehab/stability, explosive for power.
-RPE: Each exercise MUST have an "rpe" field (number 1-10) — Rate of Perceived Exertion target for this exercise.
+EXERCISE NAME = "[Skill] [Constraint] — [Target]" in Hebrew. Examples:
+"דריבל זיגזג בין 4 קונוסים — 5 סבבים ב-40 שניות"
+"מסירה לקיר ברגל ימין — 20 מסירות ב-30 שניות"
+Generic names like "דריבל" or "מסירות" without constraint+target = INVALID.
 
-WARMUP (MANDATORY): Each day MUST have a warmup object (not just text). The warmup prepares the body for the workout.
+FIELD LIMITS (MANDATORY — keep output SHORT):
+- description: max 8 words. Coach command style.
+- tips: max 6 words.
+- reasoning: max 10 words.
+- goal_summary: max 10 words.
+- EXACTLY 4 exercises per day. No more, no less.
+- DO NOT include "instructions" or "voicePrompt" fields on exercises.
+
+WARMUP: Each day needs a warmup object.
 ${warmupRule}
-warmup format: {"text":"תיאור קצר","instructions":["שלב 1","שלב 2","שלב 3"],"voicePrompt":"משפט מעודד למאמן"}
-- warmup.text: max 8 words summary.
-- warmup.instructions: 2-4 short Hebrew steps specific to the warmup.
-- warmup.voicePrompt: one encouraging Hebrew sentence (max 15 words) referencing the player's condition if applicable.
-cooldown: max 8 words.
-${sport === 'fitness' ? (hasStrength ? '4-5' : '3-4') : '4-5'} exercises per day${sport !== 'fitness' ? ` (at LEAST 3-4 Core Skill drills using the Universal Formula + max 1 strength supplement — 80/20 rule)` : ' (all fitness exercises using the Universal Formula, NO sport drills, rotate muscle groups daily)'}.
-MINIMUM exercises per day: 4. If time calculation shows <40 min, ADD another exercise.
+Format: {"text":"6 words max","instructions":["step1","step2","step3"]}
+cooldown: max 5 words.
 
-{"weekNumber":${weekNumber},"theme":"${theme}","days":[{"day":"יום א","focus":"מיקוד","workout_title":"כותרת אימון","goal_summary":"מה נעבוד היום ולמה","exercises":[{"name":"שם","description":"הסבר פשוט איך לבצע","sets":${prog.sets},"reps":"${prog.reps}","restSeconds":${prog.rest},"tempo":"2-0-1","rpe":7,"tips":"דגש בטיחות קצר","reasoning":"נימוק מקצועי אנטומי","instructions":["צעד 1","צעד 2","צעד 3"],"voicePrompt":"הסבר קולי קצר למאמן"}],"warmup":{"text":"חימום ספציפי לענף + הפעלה עצבית","instructions":["שלב 1","שלב 2","שלב 3"],"voicePrompt":"משפט מעודד"},"cooldown":"חזרה לדופק מנוחה + מתיחות ממוקדות","durationMinutes":50}]}
+COMPACT JSON — use minimal whitespace. Keep total output under 5000 characters.
 
-Hebrew only. ${daysPerWeek} days.`;
+{"weekNumber":${weekNumber},"theme":"${theme}","days":[{"day":"יום א","focus":"מיקוד","workout_title":"כותרת","goal_summary":"10 מילים מקס","exercises":[{"name":"[skill]+[constraint]—[target]","description":"8 מילים","sets":${prog.sets},"reps":"${prog.reps}","restSeconds":${prog.rest},"tempo":"2-0-1","rpe":7,"tips":"6 מילים","reasoning":"10 מילים"}],"warmup":{"text":"חימום","instructions":["1","2","3"]},"cooldown":"מתיחות","durationMinutes":50}]}
+
+Hebrew only. ${daysPerWeek} days. 4 exercises each.`;
 }
 
 // Local fallback week generator when API is unavailable
@@ -2773,6 +2750,8 @@ export async function generateWeek(params) {
           ex.tempo = ex.tempo || '2-0-1';
           ex.rpe = ex.rpe || 6;
           ex.reasoning = ex.reasoning || '';
+          ex.instructions = ex.instructions || [];
+          ex.voicePrompt = ex.voicePrompt || '';
         }
       }
     }
