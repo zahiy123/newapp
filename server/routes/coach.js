@@ -44,10 +44,7 @@ router.post('/training-week', async (req, res) => {
     res.json(week);
   } catch (error) {
     console.error('Week generation error:', error.message);
-    // Double-layer fallback: return local template instead of 500
-    console.log('Using route-level fallback for week', weekNumber);
-    const fallback = getLocalFallbackWeek({ profile, sport, goals, daysPerWeek, location, weekNumber, equipment: req.body.equipment });
-    res.json(fallback);
+    res.status(502).json({ error: 'AI generation failed', details: error.message });
   } finally {
     inFlight.delete(key);
   }

@@ -28,17 +28,29 @@ function sanitizeInput(value, maxLength = 50) {
 }
 
 export function extractJSON(text) {
+  if (!text || typeof text !== 'string') return null;
+  // 1. Direct parse
   try { return JSON.parse(text); } catch {}
-  const codeBlockMatch = text.match(/```(?:json)?\s*([\s\S]*?)```/);
-  if (codeBlockMatch) {
-    try { return JSON.parse(codeBlockMatch[1].trim()); } catch {}
+  // 2. Strip markdown code fences (greedy match for the LAST closing ```)
+  let stripped = text;
+  if (stripped.includes('```')) {
+    stripped = stripped.replace(/^[\s\S]*?```(?:json)?\s*/, '').replace(/```[\s\S]*$/, '').trim();
+    try { return JSON.parse(stripped); } catch {}
   }
-  let start = text.indexOf('{');
+  // 3. Find the outermost { ... } accounting for strings
+  const start = text.indexOf('{');
   if (start === -1) return null;
   let depth = 0;
+  let inString = false;
+  let escape = false;
   for (let i = start; i < text.length; i++) {
-    if (text[i] === '{') depth++;
-    else if (text[i] === '}') depth--;
+    const ch = text[i];
+    if (escape) { escape = false; continue; }
+    if (ch === '\\' && inString) { escape = true; continue; }
+    if (ch === '"') { inString = !inString; continue; }
+    if (inString) continue;
+    if (ch === '{') depth++;
+    else if (ch === '}') depth--;
     if (depth === 0) {
       try { return JSON.parse(text.substring(start, i + 1)); } catch { return null; }
     }
@@ -101,6 +113,9 @@ async function callClaudeHaiku(system, content, maxTokens = 2048, retries = 2) {
         system,
         messages: [{ role: 'user', content }]
       });
+      if (message.stop_reason === 'max_tokens') {
+        console.warn(`[Haiku] Response truncated at ${maxTokens} tokens (stop_reason=max_tokens)`);
+      }
       return message.content[0].text;
     } catch (err) {
       if (err.status === 429 && attempt < retries) {
@@ -1900,7 +1915,9 @@ ${sport === 'fitness'
 2. MAIN Core Skill — high intensity, game-scenario challenge (generate with cognitive/tactical constraint)
 3. STRENGTH supplement — 1 exercise only, serves the sport (generate with tempo/load constraint)
 4. CONDITIONING finisher LAST — sport-specific endurance (generate with time/distance constraint)`}
-CRITICAL: Return ONLY raw JSON. NO markdown, NO backticks, NO prose.
+CRITICAL: Return ONLY raw JSON. NO markdown, NO backticks, NO code fences, NO prose, NO explanation.
+Start your response with the { character. End with }. Nothing else.
+DO NOT add "playerProfile" or any extra top-level key. ONLY: weekNumber, theme, days.
 Use sport-specific terminology in Hebrew.
 EXERCISE NAME FORMAT — UNIVERSAL FORMULA OUTPUT:
 Each exercise name = "[Core Skill] [Constraint] — [Measurable Target]" in Hebrew.
@@ -2408,7 +2425,7 @@ export function getLocalFallbackWeek({ profile, sport, goals, daysPerWeek, locat
     const wk = (weekNumber - 1) % 4;
     const constraintIdx = ((dayIdx || 0) + wk) % weekConstraints[wk].length;
     const constraint = weekConstraints[wk][constraintIdx];
-    const targetTemplate = weekTargets[wk][constraintIdx];
+    const targetTemplate = weekTargets[wk][constraintIdx % weekTargets[wk].length];
     const target = targetTemplate.replace('{reps}', e.reps).replace('{sets}', String(e.sets));
 
     // Only transform if name looks generic (no '—' already in it)
@@ -2648,51 +2665,95 @@ export async function generateWeek(params) {
   const prompt = buildWeekPrompt(params);
 
   console.log(`Generating week ${params.weekNumber}/4 (${params.profile.skillLevel || 'beginner'}, ${params.location})...`);
-  try {
-    const text = await callClaudeHaiku(sportContext, prompt, 2048);
-    const parsed = extractJSON(text);
-    if (parsed) {
-      // Ensure new fields exist + safety validation
-      if (parsed.days) {
-        const disability = params.profile?.disability || 'none';
-        for (const day of parsed.days) {
-          day.workout_title = day.workout_title || day.focus || '';
-          day.goal_summary = day.goal_summary || '';
-          if (day.exercises) {
-            // Safety blacklist enforcement (post-processing guard)
-            if (disability === 'one_leg') {
-              day.exercises = day.exercises.filter(ex => {
-                const n = (ex.name || '').toLowerCase();
-                const banned = ['דיפס על קביים', 'קפיצות', 'סקוואט דו-רגלי', 'לאנג\'ים', 'מטפס הרים', 'ברכיים גבוהות', 'בורפיז', 'קפיצות מחליק', 'קפיצות טאק', 'קפיצות כוכב'];
-                return !banned.some(b => n.includes(b));
-              });
-            } else if (disability === 'two_legs') {
-              day.exercises = day.exercises.filter(ex => {
-                const n = (ex.name || '').toLowerCase();
-                const banned = ['סקוואט', 'לאנג\'ים', 'גשר ישבן', 'מטפס הרים', 'הרמות עקב', 'ברכיים גבוהות', 'קפיצות', 'דדליפט', 'בורפיז'];
-                return !banned.some(b => n.includes(b));
-              });
-            }
-            for (const ex of day.exercises) {
-              ex.tempo = ex.tempo || '2-0-1';
-              ex.rpe = ex.rpe || 6;
-              ex.reasoning = ex.reasoning || '';
-            }
-          }
+  const text = await callClaudeHaiku(sportContext, prompt, 8192);
+  console.log(`[AI RAW] Length: ${text.length}, Start: ${text.substring(0, 80)}`);
+  let parsed = extractJSON(text);
+  // If parse failed and response was likely truncated, try to repair by closing open JSON structures
+  if (!parsed && text.length > 2000) {
+    console.warn(`[AI] JSON parse failed, attempting truncation repair...`);
+    let repaired = text;
+    // Strip markdown fences
+    if (repaired.includes('```')) {
+      repaired = repaired.replace(/^[\s\S]*?```(?:json)?\s*/, '').replace(/```[\s\S]*$/, '').trim();
+    }
+    // Find all open structures and close them
+    let inStr = false, esc = false;
+    const stack = [];
+    for (let i = 0; i < repaired.length; i++) {
+      const ch = repaired[i];
+      if (esc) { esc = false; continue; }
+      if (ch === '\\' && inStr) { esc = true; continue; }
+      if (ch === '"') { inStr = !inStr; continue; }
+      if (inStr) continue;
+      if (ch === '{') stack.push('}');
+      else if (ch === '[') stack.push(']');
+      else if (ch === '}' || ch === ']') stack.pop();
+    }
+    // If we're inside a string, close it first
+    if (inStr) repaired += '"';
+    // Close all open structures
+    while (stack.length) repaired += stack.pop();
+    try {
+      parsed = JSON.parse(repaired);
+      console.log(`[AI] Truncation repair successful! Recovered ${parsed.days?.length || 0} days.`);
+    } catch (e) {
+      // Last resort: try to find the last complete day and build a valid JSON from it
+      const lastDayEnd = repaired.lastIndexOf('"cooldown"');
+      if (lastDayEnd > 0) {
+        // Find the closing } for this day object
+        let depth2 = 0, cutPos = -1;
+        for (let i = lastDayEnd; i < repaired.length; i++) {
+          if (repaired[i] === '{') depth2++;
+          else if (repaired[i] === '}') { depth2--; if (depth2 < 0) { cutPos = i; break; } }
+        }
+        if (cutPos > 0) {
+          const trimmed = repaired.substring(0, cutPos + 1) + ']}';
+          try {
+            parsed = JSON.parse(trimmed);
+            console.log(`[AI] Partial recovery: got ${parsed.days?.length || 0} complete days out of ${params.daysPerWeek}.`);
+          } catch {}
         }
       }
-      return filterCrossSportLeakage(parsed, params.sport);
     }
-
-    console.error(`Week ${params.weekNumber} parse failed. Length: ${text.length}`);
-    console.error('Start:', text.substring(0, 300));
-  } catch (err) {
-    console.error(`Week ${params.weekNumber} API error:`, err.message);
   }
+  if (!parsed) {
+    const errMsg = `Week ${params.weekNumber} JSON parse failed. Raw length: ${text.length}. Start: ${text.substring(0, 300)}`;
+    console.error(errMsg);
+    throw new Error(errMsg);
+  }
+  // Strip extraneous top-level keys the AI sometimes adds (playerProfile, etc.)
+  if (parsed.playerProfile) delete parsed.playerProfile;
 
-  // Fallback to local template
-  console.log(`Using local fallback for week ${params.weekNumber}`);
-  return filterCrossSportLeakage(getLocalFallbackWeek(params), params.sport);
+  // Ensure new fields exist + safety validation
+  if (parsed.days) {
+    const disability = params.profile?.disability || 'none';
+    for (const day of parsed.days) {
+      day.workout_title = day.workout_title || day.focus || '';
+      day.goal_summary = day.goal_summary || '';
+      if (day.exercises) {
+        // Safety blacklist enforcement (post-processing guard)
+        if (disability === 'one_leg') {
+          day.exercises = day.exercises.filter(ex => {
+            const n = (ex.name || '').toLowerCase();
+            const banned = ['דיפס על קביים', 'קפיצות', 'סקוואט דו-רגלי', 'לאנג\'ים', 'מטפס הרים', 'ברכיים גבוהות', 'בורפיז', 'קפיצות מחליק', 'קפיצות טאק', 'קפיצות כוכב'];
+            return !banned.some(b => n.includes(b));
+          });
+        } else if (disability === 'two_legs') {
+          day.exercises = day.exercises.filter(ex => {
+            const n = (ex.name || '').toLowerCase();
+            const banned = ['סקוואט', 'לאנג\'ים', 'גשר ישבן', 'מטפס הרים', 'הרמות עקב', 'ברכיים גבוהות', 'קפיצות', 'דדליפט', 'בורפיז'];
+            return !banned.some(b => n.includes(b));
+          });
+        }
+        for (const ex of day.exercises) {
+          ex.tempo = ex.tempo || '2-0-1';
+          ex.rpe = ex.rpe || 6;
+          ex.reasoning = ex.reasoning || '';
+        }
+      }
+    }
+  }
+  return filterCrossSportLeakage(parsed, params.sport);
 }
 
 // Generate tips

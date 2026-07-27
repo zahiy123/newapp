@@ -79,7 +79,7 @@ export default function Dashboard() {
 
   // Early server warm-up: wake Render instance while user browses dashboard
   useEffect(() => {
-    fetch('https://newapp-nujg.onrender.com/api/coach/analyze-rep', {
+    fetch(apiUrl('/api/coach/analyze-rep'), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ frames: [], exercise: 'calibration', sport: 'warmup', playerName: 'warmup', repNumber: 0 })

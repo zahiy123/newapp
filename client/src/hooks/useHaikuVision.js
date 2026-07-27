@@ -1,5 +1,6 @@
 import { useRef, useCallback } from 'react';
-const ANALYZE_REP_URL = 'https://newapp-nujg.onrender.com/api/coach/analyze-rep';
+import { apiUrl } from '../utils/api';
+const ANALYZE_REP_URL = apiUrl('/api/coach/analyze-rep');
 const MAX_SESSION_IMAGES = 960;
 const MAX_CONSECUTIVE_FAILURES = 10;
 
