@@ -8,14 +8,18 @@ export function useSpeech(lang = 'he-IL', age) {
   const speechStartedAtRef = useRef(0);
   const audioUnlockedRef = useRef(false);
   const preferredVoiceRef = useRef(null);
-  const audioCtxRef = useRef(null);
-  const silentSourceRef = useRef(null);
+  // audioCtxRef/silentSourceRef removed — AudioContext was conflicting with speechSynthesis
   const isHe = lang.startsWith('he');
   const lifeStage = getLifeStage(age);
   const processingQueueRef = useRef(false);
   const processQueueRef = useRef(null); // ref to processQueue function (avoids circular deps)
   const nameSpokenAtRef = useRef(0); // Timestamp when name was last spoken (60s cooldown)
   const NAME_COOLDOWN_MS = 60000; // Say name at most once per 60s
+
+  // Dedup: track last spoken text + timestamp to prevent repeating the same phrase within 10s
+  const lastSpokenTextRef = useRef('');
+  const lastSpokenTimeRef = useRef(0);
+  const DEDUP_WINDOW_MS = 10000;
 
   // Split long text into TTS-safe chunks (max ~15 words per chunk)
   // Mobile TTS engines crash on long sentences — this prevents mid-sentence cuts
@@ -47,21 +51,47 @@ export function useSpeech(lang = 'he-IL', age) {
     return chunks.filter(c => c.length > 0);
   }, []);
 
-  // Pick Hebrew/English voice — broad search for Android compatibility
+  // Track effective lang (may switch to en-US if no working Hebrew voice)
+  const effectiveLangRef = useRef(lang);
+
+  // Pick voice — prefer Google Hebrew, then Microsoft Hebrew, then Google English
   const pickVoice = useCallback(() => {
     if (!window.speechSynthesis) return;
     const voices = window.speechSynthesis.getVoices();
     if (!voices.length) return;
-    console.log('[Speech] Available voices:', voices.length, voices.map(v => `${v.name}(${v.lang})`).slice(0, 10));
+    console.log('[Speech] Available voices:', voices.length, voices.map(v => `${v.name}(${v.lang})`).join(', '));
+
+    const googleVoices = voices.filter(v => v.name.toLowerCase().includes('google'));
     const langBase = lang.split('-')[0]; // 'he' or 'en'
-    // Search order: exact match → prefix match → name contains "Hebrew"/"Israel"
-    const exact = voices.find(v => v.lang === lang);
-    const prefix = voices.find(v => v.lang.startsWith(langBase));
-    const byName = voices.find(v => v.name.toLowerCase().includes(langBase === 'he' ? 'hebrew' : 'english')
-      || v.name.toLowerCase().includes(langBase === 'he' ? 'israel' : 'united states'));
-    const chosen = exact || prefix || byName || null;
+
+    // Priority 1: Google voice matching requested language (e.g. Google Hebrew)
+    const googleLang = googleVoices.find(v => v.lang === lang || v.lang.startsWith(langBase));
+
+    // Priority 2: Microsoft Hebrew voice (e.g. Microsoft Asaf) — fallback for Hebrew when no Google Hebrew exists
+    const msHebrew = langBase === 'he'
+      ? voices.find(v => v.name.toLowerCase().includes('microsoft') && v.lang.startsWith('he'))
+      : null;
+
+    // Priority 3: Google US English (reliable fallback)
+    const googleEn = googleVoices.find(v => v.lang === 'en-US')
+      || googleVoices.find(v => v.lang.startsWith('en'));
+
+    // Priority 4: Any Google voice at all
+    const googleAny = googleVoices[0];
+
+    const chosen = googleLang || msHebrew || googleEn || googleAny || null;
     preferredVoiceRef.current = chosen;
-    console.log('[Speech] Picked voice:', chosen?.name, chosen?.lang);
+
+    // Update effective lang to match the chosen voice
+    if (chosen) {
+      effectiveLangRef.current = chosen.lang || lang;
+    }
+
+    const isGoogle = chosen?.name?.toLowerCase().includes('google') || false;
+    console.log('[Speech] Picked voice:', chosen?.name, chosen?.lang,
+      '| isGoogle:', isGoogle,
+      '| effectiveLang:', effectiveLangRef.current,
+      '| requestedLang:', lang);
   }, [lang]);
 
   // useEffect for onvoiceschanged — critical for Android Chrome
@@ -78,58 +108,36 @@ export function useSpeech(lang = 'he-IL', age) {
     };
   }, [pickVoice]);
 
-  // Get or create AudioContext
-  const getAudioCtx = useCallback(() => {
-    try {
-      if (!audioCtxRef.current) {
-        audioCtxRef.current = new (window.AudioContext || window.webkitAudioContext)();
-        console.log('[Speech] AudioContext created, state:', audioCtxRef.current.state);
-      }
-      if (audioCtxRef.current.state === 'suspended') {
-        audioCtxRef.current.resume();
-      }
-      return audioCtxRef.current;
-    } catch (e) {
-      console.warn('[Speech] AudioContext error:', e);
-      return null;
-    }
-  }, []);
-
-  // Start a silent audio loop — keeps Android audio channel alive
-  const startSilentLoop = useCallback(() => {
-    if (silentSourceRef.current) return; // already running
-    const ctx = getAudioCtx();
-    if (!ctx) return;
-    try {
-      // Create a silent oscillator at near-zero gain — holds the audio channel open
-      const osc = ctx.createOscillator();
-      const gain = ctx.createGain();
-      gain.gain.value = 0.001; // practically silent
-      osc.connect(gain);
-      gain.connect(ctx.destination);
-      osc.start();
-      silentSourceRef.current = { osc, gain };
-      console.log('[Speech] Silent audio loop started');
-    } catch (e) {
-      console.warn('[Speech] Silent loop error:', e);
-    }
-  }, [getAudioCtx]);
-
   // Low-level helper: speak a single utterance, does NOT clear queue
   const _utterSpeak = useCallback((text, options = {}) => {
     if (!window.speechSynthesis || !text) return;
 
-    // Android Chrome: resume speechSynthesis + AudioContext before every speak
+    // Dedup: skip if identical text was spoken within the last 10 seconds
+    const now = Date.now();
+    if (text === lastSpokenTextRef.current && now - lastSpokenTimeRef.current < DEDUP_WINDOW_MS) {
+      console.log('[Speech] DEDUP skipped (same text within 10s):', text.substring(0, 40));
+      // Still trigger queue processing so queued items aren't stuck
+      if (processQueueRef.current) processQueueRef.current();
+      return;
+    }
+    lastSpokenTextRef.current = text;
+    lastSpokenTimeRef.current = now;
+
+    // Resume before every speak (Android/iOS requirement)
     try { window.speechSynthesis.resume(); } catch {}
-    getAudioCtx(); // ensure AudioContext is alive
 
     const utterance = new SpeechSynthesisUtterance(text);
-    utterance.lang = lang;
-    // Clamp rate to safe range for Google TTS engine (0.8-1.2)
-    const rawRate = options.rate || 1;
-    utterance.rate = Math.min(Math.max(rawRate, 0.8), 1.2);
-    utterance.pitch = options.pitch || 1;
-    utterance.volume = 1; // Always max volume
+    utterance.lang = effectiveLangRef.current;
+    utterance.rate = 1.0;
+    utterance.pitch = 1.0;
+    utterance.volume = 1.0;
+    // Apply custom rate if provided, clamped to safe range
+    if (options.rate) {
+      utterance.rate = Math.min(Math.max(options.rate, 0.8), 1.2);
+    }
+    if (options.pitch) {
+      utterance.pitch = options.pitch;
+    }
     // Use preferred voice if available
     if (preferredVoiceRef.current) {
       utterance.voice = preferredVoiceRef.current;
@@ -139,71 +147,89 @@ export function useSpeech(lang = 'he-IL', age) {
     speechStartedAtRef.current = Date.now();
     currentUtteranceRef.current = utterance;
 
+    const t0 = Date.now();
     utterance.onstart = () => {
-      console.log('[Speech] onstart:', text.substring(0, 40));
+      console.log('[Speech] onstart:', text.substring(0, 50), '| delay:', Date.now() - t0, 'ms');
     };
     utterance.onend = () => {
-      console.log('[Speech] onend:', text.substring(0, 40));
+      console.log('[Speech] onend:', text.substring(0, 50), '| duration:', Date.now() - t0, 'ms');
       speaking.current = false;
       currentUtteranceRef.current = null;
       speechStartedAtRef.current = 0;
       if (processQueueRef.current) processQueueRef.current();
     };
     utterance.onerror = (e) => {
-      console.warn('[Speech] onerror:', e.error, text.substring(0, 40));
+      console.warn('[Speech] onerror:', e.error, '| text:', text.substring(0, 50));
       speaking.current = false;
       currentUtteranceRef.current = null;
       speechStartedAtRef.current = 0;
       if (processQueueRef.current) processQueueRef.current();
     };
 
+    console.log('[Speech] SPEAK:', {
+      text: text.substring(0, 50),
+      voice: utterance.voice?.name || 'default',
+      lang: utterance.lang,
+      volume: utterance.volume,
+      rate: utterance.rate,
+      synthSpeaking: window.speechSynthesis.speaking,
+      synthPending: window.speechSynthesis.pending,
+    });
     window.speechSynthesis.speak(utterance);
-  }, [lang, getAudioCtx]);
+  }, [lang]);
 
-  // Unlock audio on mobile — must be called from a user gesture (tap/click)
+  // Unlock audio — must be called from a user gesture (tap/click)
   const unlockAudio = useCallback(() => {
+    if (audioUnlockedRef.current) return;
     if (!window.speechSynthesis) return;
     console.log('[Speech] unlockAudio called');
 
-    // 1. Resume speechSynthesis
-    try { window.speechSynthesis.resume(); } catch {}
+    // Pick voice (will choose Google, never Microsoft)
+    pickVoice();
 
-    // 2. Cancel any stuck queue, then speak silent dot to unlock pipeline
-    window.speechSynthesis.cancel();
-    const utterance = new SpeechSynthesisUtterance('.');
-    utterance.volume = 0.01;
-    utterance.lang = lang;
-    if (preferredVoiceRef.current) utterance.voice = preferredVoiceRef.current;
-    utterance.onstart = () => console.log('[Speech] unlock utterance started');
-    utterance.onend = () => console.log('[Speech] unlock utterance ended');
-    utterance.onerror = (e) => console.warn('[Speech] unlock utterance error:', e.error);
-    window.speechSynthesis.speak(utterance);
+    audioUnlockedRef.current = true;
 
-    // 3. Create AudioContext + start silent loop to hold the channel
-    getAudioCtx();
-    startSilentLoop();
+    // Sanity test: wake up audio pipeline + speak "System Ready"
+    // This proves the speaker works before real speech begins.
+    try {
+      const ctx = new (window.AudioContext || window.webkitAudioContext)();
+      ctx.resume().then(() => {
+        console.log('[Speech] AudioContext sanity: resumed OK');
+        setTimeout(() => { try { ctx.close(); } catch {} }, 1000);
+      }).catch(() => {});
+    } catch {}
 
-    // 4. Keepalive interval for both iOS Safari and Android Chrome
+    // Speak sanity test in English with Google voice (inside click stack)
+    try {
+      window.speechSynthesis.cancel();
+      const test = new SpeechSynthesisUtterance('System Ready');
+      test.lang = 'en-US';
+      test.volume = 1.0;
+      test.rate = 1.0;
+      // Force Google English voice for the test
+      const voices = window.speechSynthesis.getVoices();
+      const googleEn = voices.find(v => v.name.toLowerCase().includes('google') && v.lang.startsWith('en'));
+      if (googleEn) test.voice = googleEn;
+      test.onstart = () => console.log('[Speech] SANITY onstart: System Ready');
+      test.onend = () => console.log('[Speech] SANITY onend: System Ready | duration:', Date.now() - sanityT0, 'ms');
+      test.onerror = (e) => console.warn('[Speech] SANITY onerror:', e.error);
+      const sanityT0 = Date.now();
+      window.speechSynthesis.speak(test);
+    } catch {}
+
+    // Keepalive interval — nudge speechSynthesis to prevent 15s auto-pause
     if (!window._speechKeepAlive) {
       window._speechKeepAlive = setInterval(() => {
         if (!window.speechSynthesis) return;
-        // Nudge speechSynthesis to prevent 15s auto-pause (iOS/Android)
         if (window.speechSynthesis.speaking) {
-          window.speechSynthesis.pause();
-          window.speechSynthesis.resume();
+          try {
+            window.speechSynthesis.pause();
+            window.speechSynthesis.resume();
+          } catch {}
         }
-        // Keep AudioContext alive
-        try {
-          if (audioCtxRef.current?.state === 'suspended') audioCtxRef.current.resume();
-        } catch {}
-      }, 5000); // Every 5s (more aggressive)
+      }, 5000);
     }
-
-    // 5. Pick voice if not yet found (Android late-load)
-    if (!preferredVoiceRef.current) pickVoice();
-
-    audioUnlockedRef.current = true;
-  }, [lang, pickVoice, getAudioCtx, startSilentLoop]);
+  }, [pickVoice]);
 
   // Process queue: speak next item if nothing is playing
   const processQueue = useCallback(() => {
@@ -263,6 +289,12 @@ export function useSpeech(lang = 'he-IL', age) {
   // If nothing is playing, starts immediately. If busy, adds to queue.
   const speak = useCallback((text, options = {}) => {
     if (!window.speechSynthesis || !text) return;
+    // Full-text dedup: skip if exact same text was requested within 10s
+    const now = Date.now();
+    if (text === lastSpokenTextRef.current && now - lastSpokenTimeRef.current < DEDUP_WINDOW_MS) {
+      console.log('[Speech] DEDUP speak() skipped:', text.substring(0, 40));
+      return;
+    }
     unstickSpeaking();
     const chunks = splitToChunks(text);
     if (chunks.length === 0) return;
@@ -284,6 +316,12 @@ export function useSpeech(lang = 'he-IL', age) {
   // Does NOT hard-cancel current speech — avoids interrupted/onerror loops
   const speakPriority = useCallback((text, options = {}) => {
     if (!window.speechSynthesis || !text) return;
+    // Full-text dedup: skip if exact same text was requested within 10s
+    const now = Date.now();
+    if (text === lastSpokenTextRef.current && now - lastSpokenTimeRef.current < DEDUP_WINDOW_MS) {
+      console.log('[Speech] DEDUP speakPriority() skipped:', text.substring(0, 40));
+      return;
+    }
     unstickSpeaking();
     const chunks = splitToChunks(text);
     if (chunks.length === 0) return;
@@ -342,9 +380,8 @@ export function useSpeech(lang = 'he-IL', age) {
   // Uses chunking for each segment to prevent TTS cuts on mobile
   const speakBriefing = useCallback((exerciseName, description, tips, locationProps, playerName) => {
     if (!window.speechSynthesis) return;
-    // Resume + ensure audio before briefing
+    // Resume before briefing
     try { window.speechSynthesis.resume(); } catch {}
-    getAudioCtx();
     window.speechSynthesis.cancel();
     queueRef.current = [];
     speaking.current = false;
@@ -389,7 +426,7 @@ export function useSpeech(lang = 'he-IL', age) {
     if (setupText) queueChunked(setupText);
     queueChunked(startCue, { rate: 1.1 });
     _utterSpeak(intro, { rate: 1.1 });
-  }, [lang, _utterSpeak, isHe, getAudioCtx, splitToChunks]);
+  }, [lang, _utterSpeak, isHe, splitToChunks]);
 
   // Encouragement for good form (only when actively moving) - low priority, don't cut
   const speakEncouragement = useCallback(() => {
@@ -989,9 +1026,8 @@ export function useSpeech(lang = 'he-IL', age) {
 
   // Achievement ding — oscillator frequency sweep (E5→E6, 300ms)
   const playAchievementDing = useCallback(() => {
-    const ctx = getAudioCtx();
-    if (!ctx) return;
     try {
+      const ctx = new (window.AudioContext || window.webkitAudioContext)();
       const osc = ctx.createOscillator();
       const gain = ctx.createGain();
       osc.type = 'sine';
@@ -1003,10 +1039,12 @@ export function useSpeech(lang = 'he-IL', age) {
       gain.connect(ctx.destination);
       osc.start(ctx.currentTime);
       osc.stop(ctx.currentTime + 0.35);
-    } catch (e) {
-      console.warn('[Speech] Achievement ding error:', e);
+      // Close context after sound finishes to avoid lingering conflicts
+      setTimeout(() => { try { ctx.close(); } catch {} }, 500);
+    } catch {
+      // Silent failure — ding is cosmetic
     }
-  }, [getAudioCtx]);
+  }, []);
 
   const stop = useCallback(() => {
     window.speechSynthesis?.cancel();

@@ -38,7 +38,6 @@ export default function Header() {
                 <Link to="/profile" className="hover:text-blue-200 transition">{t('nav.profile')}</Link>
                 <Link to="/training" className="hover:text-blue-200 transition">{t('nav.training')}</Link>
                 <Link to="/stats" className="hover:text-blue-200 transition">{t('nav.stats')}</Link>
-                <Link to="/game" className="hover:text-blue-200 transition">{t('nav.game')}</Link>
               </nav>
               <button
                 onClick={handleLogout}
@@ -58,7 +57,6 @@ export default function Header() {
           <Link to="/profile" className="hover:text-blue-200">{t('nav.profile')}</Link>
           <Link to="/training" className="hover:text-blue-200">{t('nav.training')}</Link>
           <Link to="/stats" className="hover:text-blue-200">{t('nav.stats')}</Link>
-          <Link to="/game" className="hover:text-blue-200">{t('nav.game')}</Link>
         </nav>
       )}
     </header>

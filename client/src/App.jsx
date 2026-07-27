@@ -5,7 +5,7 @@ import ErrorBoundary from './components/ErrorBoundary';
 import './i18n';
 import Layout from './components/Layout/Layout';
 import Login from './pages/Login';
-import Profile from './pages/Profile';
+import ProfileGate from './pages/ProfileGate';
 import SportSelection from './pages/SportSelection';
 import Goals from './pages/Goals';
 import Dashboard from './pages/Dashboard';
@@ -13,6 +13,7 @@ import Training from './pages/Training';
 import Stats from './pages/Stats';
 import GameMode from './pages/GameMode';
 import RehabSelection from './pages/RehabSelection';
+import AnatomicScan from './pages/AnatomicScan';
 
 function PrivateRoute({ children }) {
   const { user, loading, authError, refreshProfile } = useAuth();
@@ -45,13 +46,14 @@ function App() {
             <Route path="/login" element={<PublicRoute><Login /></PublicRoute>} />
             <Route element={<PrivateRoute><Layout /></PrivateRoute>}>
               <Route path="/" element={<Dashboard />} />
-              <Route path="/profile" element={<Profile />} />
+              <Route path="/profile" element={<ProfileGate />} />
               <Route path="/sport-selection" element={<SportSelection />} />
               <Route path="/rehab-selection" element={<RehabSelection />} />
               <Route path="/goals" element={<Goals />} />
               <Route path="/training" element={<Training />} />
               <Route path="/stats" element={<Stats />} />
               <Route path="/game" element={<GameMode />} />
+              <Route path="/scan" element={<AnatomicScan />} />
             </Route>
           </Routes>
         </LanguageProvider>

@@ -12,6 +12,9 @@ import { apiUrl } from '../utils/api';
 import { db } from '../services/firebase';
 import { collection, addDoc, serverTimestamp } from 'firebase/firestore';
 import VideoAnalysisPlayer from '../components/VideoAnalysisPlayer';
+import { FieldAnchorTracker } from '../utils/fieldAnchor';
+import { TeamDetector } from '../utils/teamDetection';
+import { FoulTriggerEngine } from '../utils/foulTrigger';
 
 const GAME_PHASE = {
   SETUP_SPORT: 'setup_sport',
@@ -38,7 +41,7 @@ export default function GameMode() {
   const playerName = userProfile?.name || '';
 
   const { videoRef, active: cameraActive, start: startCamera, stop: stopCamera } = useCamera();
-  const { ready: poseReady, allPoses, playerCount, startLoop, stopLoop } = useMultiPose(canvasRef);
+  const { ready: poseReady, allPoses, playerCount, detect, startLoop, stopLoop } = useMultiPose(canvasRef);
   const { shortWhistle, longWhistle, foulHorn, goalHorn, halfTimeWhistle } = useWhistle();
   const { speakPriority, stop: stopSpeech } = useSpeech(lang);
   const { extractBatch, getTotalBatches, progress: extractProgress, duration: videoDuration, abort: abortExtraction, reset: resetExtraction } = useVideoFrames();
@@ -63,6 +66,17 @@ export default function GameMode() {
 
   // Foul detection throttle
   const lastFoulTimeRef = useRef(0);
+
+  // AI Referee systems
+  const fieldTrackerRef = useRef(null);
+  const teamDetectorRef = useRef(null);
+  const foulEngineRef = useRef(null);
+  const frameCaptureCanvasRef = useRef(null);
+  const [teamCalibrated, setTeamCalibrated] = useState(false);
+  const [calibrationProgress, setCalibrationProgress] = useState(0);
+  const [varOverlay, setVarOverlay] = useState(null); // null | 'checking' | 'foul' | 'clean'
+  const varOverlayTimerRef = useRef(null);
+  const frameCountForTeamRef = useRef(0);
 
   // Video upload state
   const [videoFile, setVideoFile] = useState(null);
@@ -109,6 +123,62 @@ export default function GameMode() {
     }
   }, [gamePhase]);
 
+  // Capture a JPEG frame from the live video for VAR
+  function captureVideoFrame() {
+    if (!videoRef.current || videoRef.current.readyState < 2) return null;
+    if (!frameCaptureCanvasRef.current) {
+      frameCaptureCanvasRef.current = document.createElement('canvas');
+    }
+    const c = frameCaptureCanvasRef.current;
+    const v = videoRef.current;
+    c.width = 320; // small for fast base64
+    c.height = Math.round(320 * (v.videoHeight / v.videoWidth));
+    const ctx = c.getContext('2d');
+    ctx.drawImage(v, 0, 0, c.width, c.height);
+    return c.toDataURL('image/jpeg', 0.6).split(',')[1]; // base64 without prefix
+  }
+
+  // VAR trigger handler — sends frame to Claude for analysis
+  async function handleVARTrigger(triggerData) {
+    if (varOverlay) return; // already checking
+    setVarOverlay('checking');
+
+    try {
+      const frame = triggerData.frames?.[0]?.data || captureVideoFrame();
+      if (!frame) { setVarOverlay(null); return; }
+
+      const resp = await fetch(apiUrl('/api/coach/analyze-var'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          frame,
+          sport: selectedSport?.key || 'football',
+          triggerReason: triggerData.reasonText || triggerData.reason,
+          teamContext: { playerA: triggerData.playerA, playerB: triggerData.playerB },
+        }),
+      });
+
+      const result = await resp.json();
+
+      if (result.isFoul) {
+        setVarOverlay('foul');
+        const team = triggerData.playerA !== '?' ? triggerData.playerA : '?';
+        addFoul(team, result.reason);
+      } else {
+        setVarOverlay('clean');
+        shortWhistle();
+      }
+    } catch (err) {
+      console.error('VAR error:', err);
+      setVarOverlay(null);
+      return;
+    }
+
+    // Clear overlay after 2.5s
+    clearTimeout(varOverlayTimerRef.current);
+    varOverlayTimerRef.current = setTimeout(() => setVarOverlay(null), 2500);
+  }
+
   // Start game
   function handleStartGame() {
     setScoreA(0);
@@ -118,6 +188,16 @@ export default function GameMode() {
     setEvents([]);
     setGamePaused(false);
     setGamePhase(GAME_PHASE.PLAYING);
+    setTeamCalibrated(false);
+    setCalibrationProgress(0);
+    setVarOverlay(null);
+    frameCountForTeamRef.current = 0;
+
+    // Initialize AI referee systems
+    const sportKey = selectedSport?.key || 'football';
+    fieldTrackerRef.current = new FieldAnchorTracker(sportKey);
+    teamDetectorRef.current = new TeamDetector();
+    foulEngineRef.current = new FoulTriggerEngine(sportKey);
 
     longWhistle();
     speakPriority(
@@ -233,28 +313,55 @@ export default function GameMode() {
     );
   }
 
-  // Live foul detection from poses
+  // AI Referee: track players, detect teams, check fouls, capture frames
   useEffect(() => {
     if (gamePhase !== GAME_PHASE.PLAYING || gamePaused) return;
-    if (allPoses.length < 2) return;
+    if (allPoses.length < 1) return;
 
-    const now = Date.now();
-    if (now - lastFoulTimeRef.current < 5000) return; // 5s cooldown
-
-    // Track players
+    // Track players with stable IDs
     trackedPlayersRef.current = trackPlayers(trackedPlayersRef.current, allPoses);
+    const tracked = trackedPlayersRef.current;
 
-    // Check foul rules
-    const sportKey = selectedSport?.key || 'football';
-    const rules = FOUL_RULES[sportKey] || [];
+    // Update field anchor tracking (camera pan compensation)
+    if (fieldTrackerRef.current) {
+      fieldTrackerRef.current.update(tracked);
+    }
 
-    for (const rule of rules) {
-      const result = rule.detect(trackedPlayersRef.current);
-      if (result) {
-        lastFoulTimeRef.current = now;
-        const foulName = isHe ? rule.name.he : rule.name.en;
-        addFoul('?', foulName);
-        break;
+    // Capture frame into foul engine ring buffer (every 2nd frame to save CPU)
+    frameCountForTeamRef.current++;
+    if (foulEngineRef.current && frameCountForTeamRef.current % 2 === 0) {
+      const frameB64 = captureVideoFrame();
+      if (frameB64) foulEngineRef.current.pushFrame(frameB64);
+    }
+
+    // Team color sampling (every 10 frames during first 60s)
+    const td = teamDetectorRef.current;
+    if (td && !td.isCalibrated() && frameCountForTeamRef.current % 10 === 0 && videoRef.current) {
+      for (const p of tracked) {
+        if (p.landmarks) {
+          const rgb = td.sampleTorsoColor(
+            videoRef.current, p.landmarks,
+            videoRef.current.videoWidth, videoRef.current.videoHeight
+          );
+          td.addSample(p.trackId, rgb);
+        }
+      }
+      td.classify();
+      setCalibrationProgress(td.getProgress());
+      if (td.isCalibrated() && !teamCalibrated) {
+        setTeamCalibrated(true);
+        speakPriority(
+          isHe ? 'זיהיתי את הקבוצות!' : 'Teams identified!',
+          { rate: 1.1 }
+        );
+      }
+    }
+
+    // Run foul trigger engine (needs ≥2 players)
+    if (foulEngineRef.current && tracked.length >= 2) {
+      const triggerResult = foulEngineRef.current.update(tracked, td, null);
+      if (triggerResult && triggerResult.trigger) {
+        handleVARTrigger(triggerResult);
       }
     }
   }, [allPoses, gamePhase, gamePaused]);
@@ -303,6 +410,8 @@ export default function GameMode() {
   // End game
   function handleEndGame() {
     clearInterval(gameTimerRef.current);
+    clearTimeout(varOverlayTimerRef.current);
+    setVarOverlay(null);
     setGamePhase(GAME_PHASE.FULL_TIME);
     longWhistle();
     speakPriority(
@@ -322,10 +431,14 @@ export default function GameMode() {
   useEffect(() => {
     return () => {
       clearInterval(gameTimerRef.current);
+      clearTimeout(varOverlayTimerRef.current);
       stopLoop();
       stopCamera();
       stopSpeech();
       if (videoPreviewUrl) URL.revokeObjectURL(videoPreviewUrl);
+      if (fieldTrackerRef.current) fieldTrackerRef.current = null;
+      if (teamDetectorRef.current) { teamDetectorRef.current.reset(); teamDetectorRef.current = null; }
+      if (foulEngineRef.current) { foulEngineRef.current.reset(); foulEngineRef.current = null; }
     };
   }, []);
 
@@ -821,7 +934,7 @@ export default function GameMode() {
             </div>
           )}
 
-          {/* PLAYING: Scoreboard + Timer */}
+          {/* PLAYING: Scoreboard + Timer + AI Referee overlays */}
           {gamePhase === GAME_PHASE.PLAYING && (
             <>
               {/* Scoreboard */}
@@ -839,6 +952,48 @@ export default function GameMode() {
                 <span className="text-2xl font-bold font-mono">{formatTime(gameTimer)}</span>
                 {gamePaused && <span className="ml-2 text-yellow-400 text-sm animate-pulse">||</span>}
               </div>
+
+              {/* Team calibration progress */}
+              {!teamCalibrated && (
+                <div className="absolute bottom-3 left-3 bg-black/70 text-white rounded-lg px-3 py-1.5 text-xs">
+                  <div className="flex items-center gap-2">
+                    <div className="w-16 h-1.5 bg-white/30 rounded-full overflow-hidden">
+                      <div className="h-full bg-green-400 rounded-full transition-all" style={{ width: `${calibrationProgress * 100}%` }} />
+                    </div>
+                    <span>{isHe ? 'מזהה קבוצות...' : 'Detecting teams...'}</span>
+                  </div>
+                </div>
+              )}
+
+              {/* Team calibrated badge */}
+              {teamCalibrated && (
+                <div className="absolute bottom-3 left-3 bg-green-600/80 text-white rounded-lg px-3 py-1.5 text-xs font-medium">
+                  {isHe ? 'קבוצות זוהו' : 'Teams detected'}
+                </div>
+              )}
+
+              {/* VAR overlay */}
+              {varOverlay === 'checking' && (
+                <div className="absolute inset-0 bg-black/40 flex items-center justify-center pointer-events-none">
+                  <div className="bg-yellow-500 text-black px-6 py-3 rounded-xl text-xl font-bold animate-pulse">
+                    VAR {isHe ? 'בודק...' : 'Checking...'}
+                  </div>
+                </div>
+              )}
+              {varOverlay === 'foul' && (
+                <div className="absolute inset-0 bg-red-500/30 flex items-center justify-center pointer-events-none">
+                  <div className="bg-red-600 text-white px-6 py-3 rounded-xl text-xl font-bold">
+                    {isHe ? 'עבירה!' : 'FOUL!'}
+                  </div>
+                </div>
+              )}
+              {varOverlay === 'clean' && (
+                <div className="absolute inset-0 bg-green-500/20 flex items-center justify-center pointer-events-none">
+                  <div className="bg-green-600 text-white px-6 py-3 rounded-xl text-xl font-bold">
+                    {isHe ? 'משחק נקי' : 'Play On'}
+                  </div>
+                </div>
+              )}
             </>
           )}
 

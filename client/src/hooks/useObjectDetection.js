@@ -24,14 +24,18 @@ export function classifyDetectedObjects(detections) {
   return { equipment, hazards, other };
 }
 
-export function useObjectDetection() {
+export function useObjectDetection(enabled = true) {
   const detectorRef = useRef(null);
   const animFrameRef = useRef(null);
   const frameCountRef = useRef(0);
   const [ready, setReady] = useState(false);
   const [detectedObjects, setDetectedObjects] = useState([]);
+  // Offscreen canvas for MediaPipe input — sets explicit IMAGE_DIMENSIONS
+  const mpCanvasRef = useRef(null);
 
+  // Hard Initialization: only load MediaPipe WASM after component mount + camera approved
   useEffect(() => {
+    if (!enabled) return;
     let cancelled = false;
     async function init() {
       try {
@@ -57,12 +61,28 @@ export function useObjectDetection() {
     }
     init();
     return () => { cancelled = true; };
+  }, [enabled]);
+
+  // Draw video to offscreen canvas with exact dimensions for MediaPipe
+  const getInputCanvas = useCallback((videoEl) => {
+    if (!videoEl || !videoEl.videoWidth || !videoEl.videoHeight) return videoEl;
+    if (!mpCanvasRef.current) {
+      mpCanvasRef.current = document.createElement('canvas');
+    }
+    const c = mpCanvasRef.current;
+    if (c.width !== videoEl.videoWidth || c.height !== videoEl.videoHeight) {
+      c.width = videoEl.videoWidth;
+      c.height = videoEl.videoHeight;
+    }
+    c.getContext('2d').drawImage(videoEl, 0, 0, c.width, c.height);
+    return c;
   }, []);
 
   const detect = useCallback((videoEl) => {
     if (!detectorRef.current || !videoEl || videoEl.readyState < 2) return [];
 
-    const result = detectorRef.current.detectForVideo(videoEl, performance.now());
+    const input = getInputCanvas(videoEl);
+    const result = detectorRef.current.detectForVideo(input, performance.now());
     const filtered = (result.detections || [])
       .filter(d => d.categories?.some(c => EQUIPMENT_LABELS.includes(c.categoryName)))
       .map(d => ({
@@ -79,7 +99,8 @@ export function useObjectDetection() {
   const scanEnvironment = useCallback((videoEl) => {
     if (!detectorRef.current || !videoEl || videoEl.readyState < 2) return [];
 
-    const result = detectorRef.current.detectForVideo(videoEl, performance.now());
+    const input = getInputCanvas(videoEl);
+    const result = detectorRef.current.detectForVideo(input, performance.now());
     return (result.detections || [])
       .map(d => ({
         label: d.categories[0].categoryName,

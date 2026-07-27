@@ -1,6 +1,6 @@
 import { Router } from 'express';
-import { generateWeek, generateTips, analyzeMovement, generateWorkoutSummary, getLocalFallbackWeek, generateRealtimeFeedback, adaptWorkout, analyzeRepFrames } from '../services/claude.js';
-import { analyzeGameFrames } from '../services/gameAnalysis.js';
+import { generateWeek, generateTips, analyzeMovement, generateWorkoutSummary, getLocalFallbackWeek, generateRealtimeFeedback, adaptWorkout, analyzeRepFrames, analyzeAnatomy } from '../services/claude.js';
+import { analyzeGameFrames, analyzeVARFrame } from '../services/gameAnalysis.js';
 import { analyzeEnvironment } from '../services/environmentAnalysis.js';
 
 const router = Router();
@@ -105,6 +105,23 @@ router.post('/analyze-game-frames', async (req, res) => {
   } catch (error) {
     console.error('Game analysis error:', error.message);
     res.status(500).json({ error: error.message });
+  }
+});
+
+// === VAR SINGLE-FRAME ANALYSIS ===
+router.post('/analyze-var', async (req, res) => {
+  try {
+    const { frame, sport, triggerReason, teamContext } = req.body;
+    if (!frame) {
+      return res.status(400).json({ error: 'No frame provided' });
+    }
+    console.log(`VAR analysis: sport=${sport}, reason="${triggerReason}"`);
+    const result = await analyzeVARFrame({ frame, sport, triggerReason, teamContext });
+    console.log(`VAR result: isFoul=${result.isFoul}, reason="${result.reason}"`);
+    res.json(result);
+  } catch (error) {
+    console.error('VAR analysis error:', error.message);
+    res.json({ isFoul: false, reason: 'שגיאת ניתוח' });
   }
 });
 
@@ -244,6 +261,64 @@ router.get('/debug-frames', async (req, res) => {
   } catch (error) {
     res.json({ totalFrames: 0, error: error.message });
   }
+});
+
+// Anatomical Vision Diagnosis — sends camera frames to Claude for body analysis
+router.post('/analyze-anatomy', async (req, res) => {
+  try {
+    const { frames, kineticHints } = req.body;
+
+    if (!frames || !Array.isArray(frames) || frames.length === 0) {
+      return res.status(400).json({ error: 'No frames provided' });
+    }
+    if (frames.length > 5) {
+      return res.status(400).json({ error: 'Too many frames (max 5)' });
+    }
+
+    const result = await analyzeAnatomy(frames, kineticHints || null);
+    res.json(result);
+  } catch (error) {
+    console.error('analyze-anatomy error:', error);
+    res.json({
+      classification: 'NATURAL',
+      adaptedTrack: 'NORMAL',
+      prostheticSide: null,
+      aids: [],
+      confidence: 0,
+      description: 'No anatomical abnormalities detected',
+      description_he: 'לא זוהו חריגות אנטומיות',
+      specialProtocol: null,
+    });
+  }
+});
+
+// === ANATOMY DIAGNOSIS CORRECTION ===
+// User reports that the AI got the side wrong — log and return corrected result
+router.post('/correct-anatomy', (req, res) => {
+  const { originalDiagnosis, correctedSide } = req.body;
+  if (!originalDiagnosis || !correctedSide) {
+    return res.status(400).json({ error: 'Missing originalDiagnosis or correctedSide' });
+  }
+
+  console.log('[Coach] Anatomy correction received:',
+    `original side="${originalDiagnosis.prostheticSide}"`,
+    `corrected side="${correctedSide}"`,
+    `classification="${originalDiagnosis.classification}"`);
+
+  // Build corrected diagnosis
+  const corrected = {
+    ...originalDiagnosis,
+    prostheticSide: correctedSide,
+    correctedByUser: true,
+    description_he: originalDiagnosis.description_he
+      ? originalDiagnosis.description_he.replace(
+          correctedSide === 'left' ? 'ימין' : 'שמאל',
+          correctedSide === 'left' ? 'שמאל' : 'ימין'
+        )
+      : originalDiagnosis.description_he,
+  };
+
+  res.json(corrected);
 });
 
 export default router;

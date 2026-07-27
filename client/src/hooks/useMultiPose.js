@@ -104,7 +104,7 @@ export function useMultiPose(canvasRef) {
     setPlayerCount(0);
   }, []);
 
-  return { ready, allPoses, playerCount, startLoop, stopLoop };
+  return { ready, allPoses, playerCount, detect, startLoop, stopLoop };
 }
 
 function computeBBox(landmarks) {

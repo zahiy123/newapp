@@ -49,7 +49,7 @@ function getAmputatedIndices(profile) {
   return indices;
 }
 
-export function usePose(canvasRef, beforeDrawRef, amputationProfile) {
+export function usePose(canvasRef, beforeDrawRef, amputationProfile, enabled = true) {
   const landmarkerRef = useRef(null);
   const animFrameRef = useRef(null);
   const [ready, setReady] = useState(false);
@@ -57,9 +57,14 @@ export function usePose(canvasRef, beforeDrawRef, amputationProfile) {
   const landmarksRef = useRef(null);
   const [landmarks, setLandmarks] = useState(null);
   const lastStateUpdateRef = useRef(0);
+  const lastTimestampRef = useRef(0);
   const ANALYSIS_INTERVAL_MS = 50; // Push to React state at ~20fps (every 50ms)
+  // Offscreen canvas for MediaPipe input — sets explicit IMAGE_DIMENSIONS
+  const mpCanvasRef = useRef(null);
 
+  // Hard Initialization: only load MediaPipe WASM after component mount + camera approved
   useEffect(() => {
+    if (!enabled) return;
     let cancelled = false;
     async function init() {
       const vision = await FilesetResolver.forVisionTasks(
@@ -83,14 +88,33 @@ export function usePose(canvasRef, beforeDrawRef, amputationProfile) {
     }
     init();
     return () => { cancelled = true; };
-  }, []);
+  }, [enabled]);
 
   const detect = useCallback((videoEl) => {
     if (!landmarkerRef.current || !videoEl || videoEl.readyState < 2) return;
-    // Guard against NORM_RECT error: video must have valid dimensions
-    if (!videoEl.videoWidth || !videoEl.videoHeight) return;
+    // Guard against NORM_RECT error: video must have valid, non-zero dimensions
+    if (!videoEl.videoWidth || !videoEl.videoHeight || videoEl.videoWidth === 0 || videoEl.videoHeight === 0) return;
 
-    const result = landmarkerRef.current.detectForVideo(videoEl, performance.now());
+    // Draw to offscreen canvas with exact video dimensions — provides explicit
+    // IMAGE_DIMENSIONS to MediaPipe, eliminating NORM_RECT warnings
+    if (!mpCanvasRef.current) {
+      mpCanvasRef.current = document.createElement('canvas');
+    }
+    const mpCanvas = mpCanvasRef.current;
+    if (mpCanvas.width !== videoEl.videoWidth || mpCanvas.height !== videoEl.videoHeight) {
+      mpCanvas.width = videoEl.videoWidth;
+      mpCanvas.height = videoEl.videoHeight;
+    }
+    mpCanvas.getContext('2d').drawImage(videoEl, 0, 0, mpCanvas.width, mpCanvas.height);
+
+    // Ensure monotonically increasing timestamps to avoid MediaPipe errors
+    let timestamp = performance.now();
+    if (timestamp <= lastTimestampRef.current) {
+      timestamp = lastTimestampRef.current + 1;
+    }
+    lastTimestampRef.current = timestamp;
+
+    const result = landmarkerRef.current.detectForVideo(mpCanvas, timestamp);
     const lm = result.landmarks?.[0] || null;
 
     // Always update ref immediately (60fps — for canvas drawing)

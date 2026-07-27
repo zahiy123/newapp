@@ -37,7 +37,10 @@ export default function Profile() {
       if (!user) return;
       const profileDoc = await getDoc(doc(db, 'users', user.uid));
       if (profileDoc.exists()) {
-        setForm((prev) => ({ ...prev, ...profileDoc.data() }));
+        const data = profileDoc.data();
+        // disability, amputationSide, amputationLevel, mobilityAid are saved
+        // as top-level fields by the scan flow — they merge directly into form
+        setForm((prev) => ({ ...prev, ...data }));
       }
     }
     loadProfile();
@@ -349,6 +352,34 @@ export default function Profile() {
           {loading ? t('app.loading') : t('profile.save')}
         </button>
       </form>
+
+      {/* Anatomic Scan button — saves profile then navigates to scan */}
+      <button
+        onClick={async () => {
+          setLoading(true);
+          setError('');
+          try {
+            await setDoc(doc(db, 'users', user.uid), {
+              ...form,
+              age: Number(form.age),
+              height: Number(form.height),
+              weight: Number(form.weight),
+              trainingDays: Number(form.trainingDays),
+              updatedAt: new Date().toISOString()
+            }, { merge: true });
+            await refreshProfile();
+            navigate('/scan');
+          } catch (err) {
+            console.error(err);
+            setError(err.message);
+          }
+          setLoading(false);
+        }}
+        disabled={loading}
+        className="w-full mt-4 py-3 bg-gradient-to-r from-teal-500 to-cyan-600 text-white rounded-lg font-medium hover:opacity-90 transition disabled:opacity-50"
+      >
+        {t('profile.startScan')}
+      </button>
     </div>
   );
 }

@@ -2,6 +2,12 @@ import Anthropic from '@anthropic-ai/sdk';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import dotenv from 'dotenv';
+
+// Load .env from the server directory (works regardless of cwd)
+const __filename_claude = fileURLToPath(import.meta.url);
+const __dirname_claude = path.dirname(__filename_claude);
+dotenv.config({ path: path.resolve(__dirname_claude, '..', '.env') });
 
 const client = new Anthropic({
   apiKey: process.env.ANTHROPIC_API_KEY
@@ -1528,38 +1534,72 @@ Score 8-10: "ביצוע מצוין" + one refinement point
 EXERCISE LIST: סיבוב כתף פסיבי, הרמת יד קדמית מבוקרת, סיבוב חיצוני, כיפוף מרפק אקטיבי, יישור מרפק מבוקר, פרונציה-סופינציה, חתול-פרה, הטיית אגן, יישור גב כנגד קיר, הרמת רגל ישרה, כיפוף ברך בישיבה, מיני סקוואט, הושטת יד, העברת משקל, עמידה-ישיבה`,
 };
 
+// ── SAFETY BLACKLIST — exercises FORBIDDEN per disability ──
+const SAFETY_BLACKLIST = {
+  one_leg: `BLACKLISTED EXERCISES (ONE-LEG AMPUTEE — ABSOLUTELY FORBIDDEN):
+- דיפס על קביים (crutch dips) — extreme wrist/shoulder injury risk
+- קפיצות (any jumping) — no landing leg
+- סקוואט דו-רגלי (bilateral squat) — impossible without second leg
+- לאנג'ים (lunges) — requires two legs
+- מטפס הרים (mountain climbers) — requires bilateral leg drive
+- ברכיים גבוהות (high knees) — single-leg impact danger
+- קפיצות מחליק / קפיצות טאק / קפיצות כוכב — all jumping banned
+- בורפיז (burpees) — require jump + bilateral leg drive
+- דדליפט חד-רגלי ללא תמיכה — balance risk without support
+If you include ANY blacklisted exercise, the ENTIRE plan is INVALID and DANGEROUS.`,
+  one_arm: `BLACKLISTED EXERCISES (ONE-ARM AMPUTEE — ABSOLUTELY FORBIDDEN):
+- שכיבות סמיכה רגילות (standard push-ups) — require two arms
+- דד באג (dead bug) — requires bilateral arm movement
+- ציפור-כלב (bird-dog) — requires bilateral arm support
+- מתיחת גומייה דו-צדדית — impossible with one arm
+- תרגילים שדורשים אחיזה בשתי ידיים (pull-ups, barbell exercises)
+If you include ANY blacklisted exercise, the ENTIRE plan is INVALID and DANGEROUS.`,
+  two_legs: `BLACKLISTED EXERCISES (WHEELCHAIR / BILATERAL AMPUTEE — ABSOLUTELY FORBIDDEN):
+- כל תרגיל עמידה (standing exercises) — impossible
+- סקוואט, לאנג'ים, גשר ישבן, מטפס הרים — require legs
+- הרמות עקב, ברכיים גבוהות, קפיצות — require legs
+- דדליפט — requires standing
+- בורפיז — require full body
+If you include ANY blacklisted exercise, the ENTIRE plan is INVALID and DANGEROUS.`,
+  none: '',
+};
+
+
 const LOCATION_RULES = {
-  home: `LOCATION: INDOOR/HOME - Limited space.
-- Focus on ball feel, tight-space dribbling, seated/floor strength work.
-- NO long sprints, NO high kicks, NO shooting drills.
-- VIRTUAL OPPONENT: "Place 2 chairs 1.5m apart to simulate a defender."`,
-  yard: `LOCATION: YARD - Medium space (5-15m).
-- Short sprints, passing against wall/fence, controlled shooting.
-- VIRTUAL OPPONENT: "Set up 3-4 bottles for slalom dribbling."`,
-  field: `LOCATION: FULL FIELD - Open space.
-- Explosive sprints, long passing, power shooting at goal.
-- VIRTUAL OPPONENT: "Place bags/cones at 5m intervals as defensive line."`,
-  gym: `LOCATION: GYM - Equipment available.
-- Strength training with machines/weights, core on mats, ball work in open areas.`
+  home: `LOCATION: INDOOR/HOME — 2×2 meter space MAXIMUM.
+ALLOWED: Ball feel drills (in place), tight-space dribbling, seated/floor strength, technique (Skill Acquisition).
+FORBIDDEN: Long sprints, high kicks, power shooting, cone work, running drills, ANY exercise requiring >2m space.
+TRAINING FOCUS: 80% technique/skill acquisition + 20% bodyweight conditioning.
+VIRTUAL OPPONENT: "Place 2 chairs 1.5m apart to simulate a defender."
+All exercises MUST be executable in a living room with furniture nearby.`,
+  yard: `LOCATION: YARD — Medium space (5-15m).
+ALLOWED: Short sprints (up to 15m), passing against wall/fence, controlled shooting, agility work with bottles/cones.
+FORBIDDEN: Power shooting at goal (no goal), full-field tactical drills.
+TRAINING FOCUS: 60% sport drills + 20% agility + 20% conditioning.
+VIRTUAL OPPONENT: "Set up 3-4 bottles for slalom dribbling."`,
+  field: `LOCATION: FULL FIELD — Open space, full tactical training.
+ALLOWED: Everything — explosive sprints, long passing, power shooting at goal, tactical drills, full game simulation.
+TRAINING FOCUS: 80% sport-specific drills (tactical + technical) + 20% conditioning.
+VIRTUAL OPPONENT: "Place bags/cones at 5m intervals as defensive line."`,
+  gym: `LOCATION: GYM — Equipment available.
+ALLOWED: Strength machines, free weights, cardio machines, core on mats, ball work in open areas.
+TRAINING FOCUS: If sport goal → 50% sport drills (open area) + 50% strength. If fitness goal → 100% structured resistance + cardio.`,
 };
 
 const LOCATION_RULES_FITNESS = {
-  home: `LOCATION: HOME - Limited space, bodyweight focus.
-- Bodyweight circuits: push-ups, squats, lunges, planks, burpees.
-- Small space cardio: jumping jacks, high knees, mountain climbers.
-- NO equipment needed, use furniture for dips/elevated push-ups.`,
-  yard: `LOCATION: YARD - Medium outdoor space.
-- Jump rope, burpees, agility ladder drills.
-- Bodyweight circuits with more range of movement.
-- Sprint intervals between two points (10-20m).`,
-  field: `LOCATION: FIELD - Open space for running.
-- Sprint intervals, shuttle runs, outdoor conditioning.
-- Long distance intervals (200-400m repeats).
-- Combine running with bodyweight stations.`,
-  gym: `LOCATION: GYM - Full equipment available.
-- Machines, free weights, barbells, cardio equipment.
-- Use treadmill/bike/rower for cardio finisher.
-- Full strength training with proper equipment.`
+  home: `LOCATION: HOME — 2×2 meter space, bodyweight ONLY.
+ALLOWED: Push-ups, squats, lunges, planks, burpees, jumping jacks, high knees, mountain climbers.
+FORBIDDEN: Running drills, cone work, sprints, ANY exercise requiring >2m space.
+Use furniture for dips/elevated push-ups. All exercises must be silent-floor-friendly.`,
+  yard: `LOCATION: YARD — Medium outdoor space (5-15m).
+ALLOWED: Jump rope, burpees, agility ladder drills, sprint intervals (10-20m), outdoor circuits.
+Bodyweight circuits with more range of movement.`,
+  field: `LOCATION: FIELD — Open space for running.
+ALLOWED: Sprint intervals, shuttle runs, outdoor conditioning, 200-400m repeats.
+Combine running with bodyweight stations.`,
+  gym: `LOCATION: GYM — Full equipment available.
+ALLOWED: Machines, free weights, barbells, cardio equipment, treadmill/bike/rower.
+Full strength training with proper equipment.`,
 };
 
 const LEVEL_FOCUS = {
@@ -1578,6 +1618,50 @@ function buildWeekPrompt({ profile, sport, goals, daysPerWeek, location, weekNum
   const levelDirective = LEVEL_FOCUS[skillLevel] || LEVEL_FOCUS.beginner;
   const hasStrength = goals.some(g => ['strength', 'weightLoss'].includes(g));
   const eq = equipment || 'none';
+
+  // ── Goal-based periodization track ──
+  const isRehab = sport === 'rehab' || goals.some(g => g === 'flexibility');
+  const isCompetitive = ['technique', 'speed'].some(g => goals.includes(g)) && sport !== 'fitness';
+  const isAesthetic = ['strength', 'weightLoss'].some(g => goals.includes(g)) || sport === 'fitness';
+  // Determine training track
+  let goalTrack;
+  if (isRehab) {
+    goalTrack = 'REHAB';
+  } else if (isCompetitive) {
+    goalTrack = 'COMPETITIVE';
+  } else if (isAesthetic) {
+    goalTrack = 'AESTHETIC';
+  } else {
+    goalTrack = 'DEFAULT'; // no clear goal → anatomical adaptation
+  }
+
+  const goalPeriodization = {
+    REHAB: {
+      1: 'STABILITY — controlled ROM exercises, isometric holds, proprioceptive drills. Tempo 3-1-3. RPE 3-5. NO explosive movements.',
+      2: 'ROM EXPANSION — increase range of motion gradually, add coordination drills, balance challenges. Tempo 2-1-2. RPE 4-6.',
+      3: 'FUNCTIONAL INTEGRATION — combine stability + ROM into functional movement patterns. Tempo 2-0-2. RPE 5-7.',
+      4: 'REASSESSMENT — test functional gains, identify remaining limitations, plan next block. Tempo 2-0-1. RPE 4-6.',
+    },
+    COMPETITIVE: {
+      1: 'SPORT-SPECIFIC FOUNDATION — technique drills at low intensity, movement patterns for the sport. Tempo 2-0-1. RPE 5-6.',
+      2: 'SPORT-SPECIFIC ENDURANCE — increase drill volume, add sport-specific conditioning, interval work. Tempo 1-0-1. RPE 6-8.',
+      3: 'EXPLOSIVE POWER — plyometrics, speed drills, reactive agility, max effort sport movements. Tempo 1-0-X (explosive). RPE 8-9.',
+      4: 'TAPER/PEAK — reduce volume 40%, maintain intensity, simulate game scenarios, test peak performance. RPE 6-8.',
+    },
+    AESTHETIC: {
+      1: 'ANATOMICAL ADAPTATION — foundation, motor learning, lower volume, controlled tempo (3-0-2). RPE 5-6.',
+      2: 'HYPERTROPHY — increase total volume, moderate tempo (2-0-1), time under tension focus. RPE 7-8.',
+      3: 'STRENGTH — peak intensity, heavier loads, lower reps, longer rest. Tempo 2-0-1. RPE 8-9.',
+      4: 'DELOAD — reduce volume 40%, maintain intensity, test max performance, assess progress. RPE 5-7.',
+    },
+    DEFAULT: {
+      1: 'ANATOMICAL ADAPTATION — safe foundation, motor learning, assess movement quality. Tempo 3-0-2. RPE 4-5.',
+      2: 'ANATOMICAL ADAPTATION — increase volume slightly, refine form, build base. Tempo 2-0-2. RPE 5-6.',
+      3: 'GENERAL PREP — moderate intensity, introduce variety. Tempo 2-0-1. RPE 6-7.',
+      4: 'ASSESSMENT — test baseline, identify strengths/weaknesses for next training block. RPE 5-7.',
+    },
+  };
+  const periodPhase = goalPeriodization[goalTrack][weekNumber] || goalPeriodization.DEFAULT[1];
 
   const equipmentRules = {
     none: `BODYWEIGHT ONLY — NO WEIGHTS, NO DUMBBELLS, NO BARBELLS, NO MACHINES, NO RESISTANCE BANDS.
@@ -1629,6 +1713,7 @@ AVOID: מיני סקוואט, עמידה-ישיבה, הרמת רגל ישרה, �
 
   const eqRule = equipmentRules[eq] || equipmentRules.none;
   const disaStrength = disabilityStrength[profile.disability] || '';
+  const safetyBlacklist = SAFETY_BLACKLIST[profile.disability] || SAFETY_BLACKLIST.none;
 
   // === SOUND LIMB FOCUS: Adaptive warmup rules per disability ===
   const warmupAdaptation = {
@@ -1664,7 +1749,7 @@ AVOID: מיני סקוואט, עמידה-ישיבה, הרמת רגל ישרה, �
     ? (hasStrength
       ? `MANDATORY: Every day MUST have 2-3 strength exercises + 1 cardio finisher. ${eqRule} ${disaStrength}`
       : `Each day: 1-2 strength exercises + 1 cardio finisher. ${eqRule} ${disaStrength}`)
-    : `Include MAX 1 strength/conditioning exercise per day — the rest must be sport-specific drills. ${eqRule} ${disaStrength}`;
+    : `SPORT PRIORITY RULE: On sport days (${sport}), 80% of exercises MUST be sport-specific drills. Strength is SUPPLEMENTARY ONLY (max 1 exercise per day). If the goal is NOT 'Hypertrophy', strength exercises serve the sport — never the opposite. ${eqRule} ${disaStrength}`;
 
   const fitnessThemes = {
     beginner: ['חיזוק בסיסי', 'עוצמה ושריפת שומן', 'סיבולת וכוח', 'אימון שיא'],
@@ -1719,11 +1804,69 @@ Equipment available: ${eq === 'none' ? 'NONE — bodyweight only, absolutely no 
 
 ${locationRules}
 
+${safetyBlacklist ? `SAFETY BLACKLIST (NON-NEGOTIABLE):\n${safetyBlacklist}` : ''}
+
+GENERATIVE COACH ENGINE — GLOBAL SYSTEM RULE (MANDATORY FOR ALL SPORTS):
+You are an elite ${sport} coach. You NEVER use pre-made exercise lists. You GENERATE every exercise from scratch using the Universal Exercise Formula below.
+
+ABSOLUTE BAN: No hardcoded exercise lists, no pre-stored drill names, no library lookups. Every exercise is a FRESH CREATION built from the formula.
+
+═══ UNIVERSAL EXERCISE FORMULA (applies to 100% of exercises) ═══
+[Core Skill] + [Environmental/Cognitive Constraint] = [Measurable Target]
+
+The 3 components:
+1. CORE SKILL — the fundamental ability being trained (sport-specific or fitness movement pattern)
+   Sport examples: דריבל, מסירה, בעיטה, סרב, קליעה, חסימה, לחיצה, משיכה, כריעה
+2. CONSTRAINT — the environmental or cognitive challenge that makes this drill UNIQUE
+   Constraint types: spatial (2m², 10m, full field), temporal (tempo 3-0-3), cognitive (react to signal), equipment (wall, chairs, bottles), movement-pattern (zigzag, circular, diagonal)
+3. MEASURABLE TARGET — a clear, quantifiable success criterion the athlete can measure
+   Target types: time ("ב-30 שניות"), count ("8 מתוך 10"), duration ("2 דקות רצוף"), distance ("10 מטר")
+
+FORMULA EXAMPLES:
+Football: דריבל (skill) + בשטח 2 מטר עם שינויי קצב (constraint) = השלם 5 מסלולים בפחות מ-30 שניות (target)
+Tennis: סרב (skill) + לנקודה מסומנת בקיר (constraint) = פגיעה במטרה 8 מתוך 10 פעמים (target)
+Fitness: לחיצה (skill) + טמפו איטי 3-0-3 (constraint) = ביצוע 10 חזרות מבוקרות (target)
+Basketball: קליעה (skill) + מ-5 נקודות שונות סביב הטבעת (constraint) = 7 קליעות מ-10 ניסיונות (target)
+
+═══ ENFORCEMENT RULES ═══
+1. 100% of exercises MUST follow the formula. Zero exceptions.
+2. CONSTRAINT ROTATION: You MUST change the [Constraint] for every workout. NEVER use the same constraint twice in a row for the same core skill. If yesterday's dribble used "zigzag", today use "circular" or "react to count" or "eyes closed".
+3. MOVEMENT PATTERN DIVERSITY: Consecutive exercises MUST use DIFFERENT movement patterns:
+   Linear (forward/back) → Lateral (side-to-side) → Rotational (turning) → Stationary (in-place) → Diagonal
+   NEVER place two same-pattern exercises back-to-back.
+4. SKILL CONTINUITY: The day's Core Skill focus stays consistent, but the CONSTRAINT must change each exercise.
+   Example: Day focus="Ball Control" → Ex1: touches + stationary constraint → Ex2: dribble + lateral constraint → Ex3: receive + rotational constraint → Ex4: strength supplement
+5. 80/20 BALANCE (ALL SPORTS): 80% of exercises = Core Skill drills (sport-specific). 20% = Strength supplement. This applies to football, tennis, basketball, fitness — ALL sports. For fitness, Core Skills = push/pull/squat/hinge patterns.
+6. LOCATION shapes the CONSTRAINT:
+   - home (2m²): Use "במקום", "בישיבה", "כנגד קיר", "על הרצפה" constraints. NO running.
+   - yard (5-15m): Use "קדימה ואחורה 10 מטר", "סלאלום בין בקבוקים" constraints.
+   - field: Full freedom — distances, sprints, goals, tactical scenarios.
+   - gym: Combine equipment with sport movement patterns.
+7. WEEK ${weekNumber} / DAY INDEX = unique seed. Each week+day combination MUST produce fundamentally different exercises.
+
+TIME INTEGRITY (MANDATORY CALCULATION):
+Target duration: 50 minutes. You MUST mentally calculate:
+Total = warmup (5-8 min) + SUM of all exercises [(sets × avg_rep_duration_sec) + (sets × restSeconds)] / 60 + cooldown (3-5 min).
+- avg_rep_duration = tempo eccentric + pause + concentric (e.g. tempo "2-0-1" = 3 sec/rep)
+- If total < 40 minutes → ADD more exercises or increase sets until total reaches 45-50 min.
+- If total > 55 minutes → REDUCE sets or rest until total is under 55 min.
+- Each day MUST show durationMinutes that reflects the REAL calculated time, not a guess.
+
+WARMUP RULES (MANDATORY ≥5 MINUTES):
+- Warmup MUST be at least 5 minutes, progressive, and sport-specific.
+- It MUST prepare the EXACT muscle groups used in the main workout.
+- Structure: 2 min general activation → 2 min sport-specific movement → 1 min neural activation/dynamic stretch.
+- The warmup object MUST have 3-4 instructions that follow this progression.
+
 STRENGTH: ${strengthRule}
 
-PROGRESSIVE OVERLOAD (Week ${weekNumber}):
-- ${sport === 'fitness' ? 'Strength' : 'All'} exercises: ${prog.sets} sets × ${prog.reps} reps, ${prog.rest}s rest
-- This is week ${weekNumber}/4 — ${weekNumber === 1 ? 'foundation, lower volume' : weekNumber === 2 ? 'build volume' : weekNumber === 3 ? 'peak intensity' : 'consolidate and test'}.
+TRAINING TRACK: ${goalTrack} (based on athlete goals: ${topGoals || 'none specified'})
+${goalTrack === 'REHAB' ? 'REHAB TRACK: Use stability, ROM, and coordination blocks ONLY. NO hypertrophy. NO explosive power. Focus on controlled movement and functional recovery.' : goalTrack === 'COMPETITIVE' ? 'COMPETITIVE TRACK: Use explosive power, sport-specific endurance, and speed blocks. Focus on sport performance, NOT muscle building.' : goalTrack === 'AESTHETIC' ? 'AESTHETIC/FITNESS TRACK: Use hypertrophy and strength blocks. Focus on muscle building, body composition, and progressive overload.' : 'DEFAULT TRACK: No clear goal specified. Start with anatomical adaptation for safety. In goal_summary, ask: "מה המטרה המרכזית שלך? שיקום, ספורט תחרותי, או כושר כללי?"'}
+
+PROGRESSIVE OVERLOAD (Week ${weekNumber}/4):
+- Base prescription: ${prog.sets} sets × ${prog.reps} reps, ${prog.rest}s rest
+- Periodization phase: ${periodPhase}
+- Each exercise reasoning MUST reference the overload progression: explain what changed from the previous week (more reps, heavier load, faster tempo, harder variation) and WHY.
 
 ${sport === 'fitness'
     ? `STRICT FITNESS-ONLY RULES:
@@ -1733,13 +1876,21 @@ ${sport === 'fitness'
 - Cardio finisher examples: ריצת אינטרוולים, ספרינטים, jumping jacks, בורפיז, קפיצות חבל, מטפס הרים.
 - RESPECT EQUIPMENT: If no equipment → bodyweight ONLY. If dumbbells → use them. If bands → use them.
 - If you include ANY ball or sport drill, the entire plan is INVALID.`
-    : `SPORT-FOCUSED RULES:
-- The sport (${sport}) is the PRIMARY focus. ${hasStrength ? '3' : '2-3'} exercises should be sport-specific drills.
-- Maximum 1 strength/conditioning exercise per day as a supplement — NOT the main focus.
-- Sport drills: dribbling, passing, shooting, agility, tactical movement for this specific sport.
-- SOLO TRAINING: Include household items as simulated defenders/targets in tips.`}
+    : `SPORT-FOCUSED RULES (NON-NEGOTIABLE):
+- The sport (${sport}) is the PRIMARY focus. 80% of exercises (at LEAST 3-4 out of 4-5) MUST be Core Skill drills built with the Universal Formula.
+- Maximum 1 strength/conditioning exercise per day as a SUPPLEMENT — it serves the sport, NOT the other way around.
+- If location=home: 80% Skill Acquisition (technique drills with spatial constraints), 20% conditioning. NO shooting, NO sprints.
+- If location=field: Full tactical + technical drills with measurable game-scenario targets.
+- SOLO TRAINING: Include household items as simulated defenders/targets in tips (chairs=defenders, bottles=cones, wall=passing partner).
+- EVERY exercise name MUST follow the Universal Formula: [Core Skill] + [Constraint] = [Measurable Target].`}
 
-WORKOUT SEQUENCE (MANDATORY ORDER of exercises in the day):
+PHYSIOLOGICAL TRAINING PHASES (MANDATORY structure for each day):
+Phase 1 — PREPARATION (warmup object): Sport-specific active warmup + neural activation drills. Must prepare the exact muscle groups and movement patterns used in Phase 2-3.
+Phase 2 — SPECIFIC TRAINING: Sport-specific technical/tactical work at moderate intensity. Focus on skill acquisition and movement quality.
+Phase 3 — LOAD/INTENSITY (main set): High-intensity work — this is where progressive overload applies. Define precise sets, reps, RPE, rest, and tempo.
+Phase 4 — RECOVERY (cooldown): Return to resting heart rate + targeted stretching for worked muscle groups.
+
+EXERCISE ORDER within Phase 2-3:
 ${sport === 'fitness'
     ? `1. Compound movement first (squat/deadlift/push-up pattern) — heaviest exercise when fresh
 2. Secondary compound or isolation (shoulder press/curl/row)
@@ -1749,17 +1900,22 @@ ${sport === 'fitness'
 2. MAIN sport drill (shooting/kicking/advanced moves) — high intensity
 3. STRENGTH supplement (1 exercise: push-ups/squats/planks)
 4. CONDITIONING finisher LAST (sprints/agility/high knees)`}
-LOCATION-SPECIFIC EXERCISE SELECTION:
-- home: ONLY floor + bodyweight + limited space. NO running drills, NO cone work, NO sprints. Prefer: ${sport === 'fitness' ? 'פלאנק, שכיבות סמיכה, סקוואט, דד באג, סופרמן, סיבוב רוסי, הרמות רגליים, ברכיים גבוהות' : 'עבודת רגליים, מסירות לקיר, דריבל במקום, שכיבות סמיכה'}.
-- yard: Running OK, agility OK, moderate space. Prefer: ${sport === 'fitness' ? 'ספרינטים, קפיצות מחליק, זחילת דוב, בורפיז, ריצת אינטרוולים' : 'ספרינטים, דריבלינג, מסירות, בעיטות, תרגיל זריזות קונוסים'}.
-- field: Full drills, sprints, large area. All exercises allowed.
-- gym: Equipment exercises priority. Prefer: ${sport === 'fitness' ? 'גובלט סקוואט, כתפיים עם משקולות, משיכת משקולת, הרמה צידית, כפיפות מרפק, הרחבת מרפק' : 'תרגילי כוח עם ציוד + תרגילי ספורט'}.
-
 CRITICAL: Return ONLY raw JSON. NO markdown, NO backticks, NO prose.
-DESCRIPTION STYLE: Write simple, clear action instructions in Hebrew. NOT "ביצוע פלנק סטטי" but "הישאר במצב שכיבת סמיכה על המרפקים עם גב ישר". Max 12 words.
-TIPS: One short safety/form tip per exercise. Max 10 words. Example: "שמור על גב ישר, אל תעגל את הכתפיים".
-INSTRUCTIONS: Array of 2-4 short Hebrew steps (max 8 words each). Example: ["עמוד ברוחב כתפיים","כופף ברכיים לאט","דחוף חזרה למעלה"].
-VOICE_PROMPT: One sentence in Hebrew (max 15 words) that a coach would say to explain the exercise aloud.
+Use sport-specific terminology in Hebrew.
+EXERCISE NAME FORMAT — UNIVERSAL FORMULA OUTPUT:
+Each exercise name = "[Core Skill] [Constraint] — [Measurable Target]" in Hebrew.
+BAD: "דריבל", "מסירות", "שכיבות סמיכה" (generic, no formula, REJECTED)
+GOOD: "דריבל זיגזג בין 4 כיסאות — 5 סבבים ב-40 שניות" (skill + constraint + target)
+GOOD: "מסירות לקיר ביד חזקה — 20 מסירות ב-30 שניות" (skill + constraint + target)
+GOOD: "לחיצת חזה בטמפו 3-0-3 — 10 חזרות מבוקרות ללא עצירה" (skill + constraint + target)
+If ANY exercise name is just a generic word without constraint+target, the ENTIRE plan is INVALID.
+DESCRIPTION STYLE: Write simple, clear action instructions in Hebrew. Max 15 words. Describe HOW to perform the drill.
+TIPS: One short safety/form tip per exercise. Max 10 words.
+INSTRUCTIONS: Array of 2-4 short Hebrew steps (max 8 words each).
+VOICE_PROMPT: One sentence in Hebrew (max 15 words) that a coach would say aloud.
+REASONING: Each exercise MUST have a "reasoning" field (Hebrew, max 20 words) explaining WHY this exercise suits this athlete's specific anatomical profile, disability, sport goals, and progressive overload context. Reference amputation side/level or specific physical need. Example: "עקב קטיעה מתחת לברך בשמאל, תרגיל זה מחזק את יציבות הירך הבריאה ומשפר שיווי משקל על קביים".
+TEMPO: Each exercise MUST have a "tempo" field (string, e.g. "2-0-1" = 2s eccentric, 0s pause, 1s concentric). Use controlled tempo for rehab/stability, explosive for power.
+RPE: Each exercise MUST have an "rpe" field (number 1-10) — Rate of Perceived Exertion target for this exercise.
 
 WARMUP (MANDATORY): Each day MUST have a warmup object (not just text). The warmup prepares the body for the workout.
 ${warmupRule}
@@ -1768,9 +1924,10 @@ warmup format: {"text":"תיאור קצר","instructions":["שלב 1","שלב 2"
 - warmup.instructions: 2-4 short Hebrew steps specific to the warmup.
 - warmup.voicePrompt: one encouraging Hebrew sentence (max 15 words) referencing the player's condition if applicable.
 cooldown: max 8 words.
-${sport === 'fitness' ? (hasStrength ? '3-4' : '3') : '3-4'} exercises per day${sport !== 'fitness' ? ` (${hasStrength ? '3' : '2-3'} sport drills + max 1 strength)` : ' (all fitness exercises, NO sport drills)'}.
+${sport === 'fitness' ? (hasStrength ? '4-5' : '3-4') : '4-5'} exercises per day${sport !== 'fitness' ? ` (at LEAST 3-4 Core Skill drills using the Universal Formula + max 1 strength supplement — 80/20 rule)` : ' (all fitness exercises using the Universal Formula, NO sport drills, rotate muscle groups daily)'}.
+MINIMUM exercises per day: 4. If time calculation shows <40 min, ADD another exercise.
 
-{"weekNumber":${weekNumber},"theme":"${theme}","days":[{"day":"יום א","focus":"מיקוד","exercises":[{"name":"שם","description":"הסבר פשוט איך לבצע","sets":${prog.sets},"reps":"${prog.reps}","restSeconds":${prog.rest},"tips":"דגש בטיחות קצר","instructions":["צעד 1","צעד 2","צעד 3"],"voicePrompt":"הסבר קולי קצר למאמן"}],"warmup":{"text":"חימום פשוט","instructions":["שלב 1","שלב 2","שלב 3"],"voicePrompt":"משפט מעודד"},"cooldown":"שחרור ומתיחות","durationMinutes":50}]}
+{"weekNumber":${weekNumber},"theme":"${theme}","days":[{"day":"יום א","focus":"מיקוד","workout_title":"כותרת אימון","goal_summary":"מה נעבוד היום ולמה","exercises":[{"name":"שם","description":"הסבר פשוט איך לבצע","sets":${prog.sets},"reps":"${prog.reps}","restSeconds":${prog.rest},"tempo":"2-0-1","rpe":7,"tips":"דגש בטיחות קצר","reasoning":"נימוק מקצועי אנטומי","instructions":["צעד 1","צעד 2","צעד 3"],"voicePrompt":"הסבר קולי קצר למאמן"}],"warmup":{"text":"חימום ספציפי לענף + הפעלה עצבית","instructions":["שלב 1","שלב 2","שלב 3"],"voicePrompt":"משפט מעודד"},"cooldown":"חזרה לדופק מנוחה + מתיחות ממוקדות","durationMinutes":50}]}
 
 Hebrew only. ${daysPerWeek} days.`;
 }
@@ -2249,18 +2406,30 @@ export function getLocalFallbackWeek({ profile, sport, goals, daysPerWeek, locat
       exercises.push(applyProgression(drillPool[(d + 1) % drillPool.length]));
     }
 
+    const focus = isFitness
+      ? (d % 3 === 0 ? 'פלג גוף עליון + קרדיו' : d % 3 === 1 ? 'פלג גוף תחתון + קרדיו' : 'גוף מלא + ליבה')
+      : themeKey === 'basketball'
+      ? (d % 2 === 0 ? 'כדרור וקליעה' : 'תנועה והגנה')
+      : themeKey === 'tennis'
+      ? (d % 2 === 0 ? 'מכות וטכניקה' : 'תנועה והגשה')
+      : (d % 2 === 0 ? 'טכניקה וכוח' : 'מהירות ושליטה');
+    // Add missing fields to fallback exercises
+    const enrichedExercises = exercises.map(ex => ({
+      ...ex,
+      tempo: ex.tempo || '2-0-1',
+      rpe: ex.rpe || 6,
+      reasoning: ex.reasoning || '',
+      instructions: ex.instructions || [],
+      voicePrompt: ex.voicePrompt || '',
+    }));
     days.push({
       day: dayNames[d],
-      focus: isFitness
-        ? (d % 3 === 0 ? 'פלג גוף עליון + קרדיו' : d % 3 === 1 ? 'פלג גוף תחתון + קרדיו' : 'גוף מלא + ליבה')
-        : themeKey === 'basketball'
-        ? (d % 2 === 0 ? 'כדרור וקליעה' : 'תנועה והגנה')
-        : themeKey === 'tennis'
-        ? (d % 2 === 0 ? 'מכות וטכניקה' : 'תנועה והגשה')
-        : (d % 2 === 0 ? 'טכניקה וכוח' : 'מהירות ושליטה'),
-      exercises,
+      focus,
+      workout_title: focus,
+      goal_summary: '',
+      exercises: enrichedExercises,
       warmup: warmupText,
-      cooldown: 'מתיחות סטטיות + נשימות',
+      cooldown: 'חזרה לדופק מנוחה + מתיחות ממוקדות',
       durationMinutes: 50,
     });
   }
@@ -2457,7 +2626,38 @@ export async function generateWeek(params) {
   try {
     const text = await callClaudeHaiku(sportContext, prompt, 2048);
     const parsed = extractJSON(text);
-    if (parsed) return filterCrossSportLeakage(parsed, params.sport);
+    if (parsed) {
+      // Ensure new fields exist + safety validation
+      if (parsed.days) {
+        const disability = params.profile?.disability || 'none';
+        for (const day of parsed.days) {
+          day.workout_title = day.workout_title || day.focus || '';
+          day.goal_summary = day.goal_summary || '';
+          if (day.exercises) {
+            // Safety blacklist enforcement (post-processing guard)
+            if (disability === 'one_leg') {
+              day.exercises = day.exercises.filter(ex => {
+                const n = (ex.name || '').toLowerCase();
+                const banned = ['דיפס על קביים', 'קפיצות', 'סקוואט דו-רגלי', 'לאנג\'ים', 'מטפס הרים', 'ברכיים גבוהות', 'בורפיז', 'קפיצות מחליק', 'קפיצות טאק', 'קפיצות כוכב'];
+                return !banned.some(b => n.includes(b));
+              });
+            } else if (disability === 'two_legs') {
+              day.exercises = day.exercises.filter(ex => {
+                const n = (ex.name || '').toLowerCase();
+                const banned = ['סקוואט', 'לאנג\'ים', 'גשר ישבן', 'מטפס הרים', 'הרמות עקב', 'ברכיים גבוהות', 'קפיצות', 'דדליפט', 'בורפיז'];
+                return !banned.some(b => n.includes(b));
+              });
+            }
+            for (const ex of day.exercises) {
+              ex.tempo = ex.tempo || '2-0-1';
+              ex.rpe = ex.rpe || 6;
+              ex.reasoning = ex.reasoning || '';
+            }
+          }
+        }
+      }
+      return filterCrossSportLeakage(parsed, params.sport);
+    }
 
     console.error(`Week ${params.weekNumber} parse failed. Length: ${text.length}`);
     console.error('Start:', text.substring(0, 300));
@@ -2615,6 +2815,128 @@ Skill level: ${data.skillLevel || 'intermediate'}${biomechanics ? `\n\nBIOMECHAN
 
 // === DYNAMIC WORKOUT ADAPTATION ===
 
+// ============================================================
+// Anatomical Vision Diagnosis
+// Sends camera frames to Claude Vision for holistic body analysis.
+// Returns classification, prosthetic side, aids, and description.
+// ============================================================
+
+function buildAnatomyVisionPrompt(kineticHints) {
+  let kinetic = '';
+  if (kineticHints) {
+    kinetic = `\n\nMovement-analysis results (already corrected for mirror — these use the person's actual body sides):
+- Affected limbs: ${JSON.stringify(kineticHints.frozenJoints || [])}
+- Affected side: ${kineticHints.affectedSide || 'none'}
+- Hip deviation: ${kineticHints.hipDeviation || 'none'}
+- Center of gravity bias: ${JSON.stringify(kineticHints.cogBias || 'none')}
+IMPORTANT: The limb names above (e.g. "left_leg") refer to the person's ACTUAL left leg. Trust these labels.`;
+  }
+
+  return `You are an anatomical diagnostic AI for an adaptive sports training app.
+
+CRITICAL MIRROR RULE: The camera feed is mirrored (selfie mode). The image you see is horizontally flipped.
+- A limb on the RIGHT side of the screen is the person's LEFT limb.
+- A limb on the LEFT side of the screen is the person's RIGHT limb.
+You MUST report all sides from the PERSON'S real-body perspective. If you see a prosthetic on the right side of the image, report it as LEFT.
+
+Analyze the person in these images and determine their physical profile.
+
+DETECT AND REPORT:
+1. Missing/prosthetic limbs — describe in detail: prosthetic type, mechanical components visible (knee axis, pylon, socket, blade runner, cosmetic cover), amputation level (above-knee, below-knee, above-elbow, below-elbow)
+2. Which side is affected (left/right/bilateral)
+3. Mobility aids — ONLY if explicitly and clearly visible in the frame (a cane, crutches, walker physically held by the person). Do NOT infer aids from posture, background objects, or gait patterns.
+4. Structural asymmetry (uneven shoulders, hip tilt, limb length difference)
+5. Signs of paralysis or limited mobility (dropped foot, arm held rigid)
+6. If MULTIPLE limbs are affected, report ALL of them — do not report only the most obvious one
+
+CLASSIFICATION (pick ONE):
+- NATURAL: No visible disability or prosthetics
+- TRANSFEMORAL_AMPUTEE: Above-knee amputation (one leg)
+- TRANSTIBIAL_AMPUTEE: Below-knee amputation (one leg)
+- BILATERAL_AMPUTEE: Both legs affected
+- ARM_AMPUTEE: Arm/hand prosthesis or amputation
+- WHEELCHAIR: Person in wheelchair
+- MEDICAL: Other mobility limitation (paralysis, cerebral palsy, etc.)
+${kinetic}
+
+CRITICAL RULES:
+- Even if the view is challenging, provide a structural analysis of the visible anatomy and movement patterns, focusing on identifying prosthetic components.
+- If the image is unclear, analyze whatever you CAN see — partial analysis is better than no analysis.
+- If you see a prosthetic leg, blade, or artificial limb — report the correct amputation type.
+- Look carefully for: metallic/carbon-fiber prosthetic blades, socket joints, skin-tone mismatch between limbs, asymmetric limb thickness, mechanical knee joints, pylons.
+- Only report "NATURAL" if you can CLEARLY see all limbs are intact biological limbs.
+- MOBILITY AIDS: Report aids ONLY if you can see the physical object (cane, crutch, walker) clearly held or used by the person. If unsure, set mobilityAid to "none" and aids to []. Do NOT hallucinate aids based on posture or limb angle.
+
+Respond ONLY with valid JSON (no markdown, no code fences):
+{
+  "classification": "NATURAL",
+  "adaptedTrack": "NORMAL",
+  "prostheticSide": null,
+  "aids": [],
+  "mobilityAid": "none",
+  "confidence": 0.95,
+  "description": "Detailed English description including prosthetic components, mechanical parts, and structural observations",
+  "description_he": "תיאור מפורט בעברית כולל רכיבים מכניים, ציר ברך, פיילון, שוקת ותצפיות מבניות",
+  "specialProtocol": null
+}
+
+mobilityAid values: "none", "cane", "crutches", "walker", "wheelchair" — use "none" unless a physical aid object is clearly visible.
+
+Classification → adaptedTrack mapping:
+- NATURAL → "NORMAL"
+- TRANSFEMORAL_AMPUTEE → "TRANSFEMORAL_AMPUTEE"
+- TRANSTIBIAL_AMPUTEE → "TRANSTIBIAL_AMPUTEE"
+- BILATERAL_AMPUTEE → "BILATERAL_AMPUTEE"
+- ARM_AMPUTEE → "ARM_AMPUTEE"
+- WHEELCHAIR → "WHEELCHAIR"
+- MEDICAL → "MEDICAL"
+
+specialProtocol values: null, "bilateral", "wheelchair", "paralysis"
+prostheticSide values: "left", "right", "bilateral", null`;
+}
+
+export async function analyzeAnatomy(frames, kineticHints = null) {
+  const contentBlocks = [];
+
+  for (const frame of frames) {
+    const cleaned = cleanBase64(frame);
+    if (!cleaned || cleaned.length < 500) continue;
+    contentBlocks.push({
+      type: 'image',
+      source: { type: 'base64', media_type: 'image/jpeg', data: cleaned },
+    });
+  }
+
+  if (contentBlocks.length === 0) {
+    return {
+      classification: 'NATURAL',
+      adaptedTrack: 'NORMAL',
+      prostheticSide: null,
+      aids: [],
+      confidence: 0,
+      description: 'No valid frames received',
+      description_he: 'לא התקבלו פריימים לניתוח',
+      specialProtocol: null,
+    };
+  }
+
+  contentBlocks.push({
+    type: 'text',
+    text: buildAnatomyVisionPrompt(kineticHints),
+  });
+
+  const responseText = await callClaudeVision(
+    'You are a medical-grade anatomical diagnostic system. Be precise and thorough.',
+    contentBlocks,
+    1024,
+    2
+  );
+  const parsed = extractJSON(responseText);
+
+  console.log('[analyzeAnatomy] Result:', JSON.stringify(parsed));
+  return parsed;
+}
+
 export async function adaptWorkout({ profile, completedExercises, performance, remainingPlan, environmentContext }) {
   const sportContext = SPORT_CONTEXTS[profile.sport] || SPORT_CONTEXTS.football || '';
 
@@ -2641,10 +2963,11 @@ RULES:
 4. Respect disability limitations strictly
 5. Progressive overload: challenge athletes who are crushing it
 6. All exercise names MUST be in Hebrew
-7. Each exercise must have: name, description (max 15 words Hebrew), sets, reps, restSeconds, tips
+7. Each exercise must have: name, description (max 15 words Hebrew), sets, reps, restSeconds, tempo, rpe, tips, reasoning
+8. reasoning MUST explain the adaptation logic: "הורדתי עומס כי הביצוע ירד" or "העליתי RPE כי הביצוע מעולה"
 
 Return ONLY valid JSON:
-{"adapted":true,"plan":[{"name":"שם","description":"תיאור","sets":3,"reps":"12","restSeconds":60,"tips":"טיפ"}],"reasoning":"Short Hebrew explanation"}
+{"adapted":true,"plan":[{"name":"שם","description":"תיאור","sets":3,"reps":"12","restSeconds":60,"tempo":"2-0-1","rpe":7,"tips":"טיפ","reasoning":"נימוק ההתאמה"}],"reasoning":"Short Hebrew explanation"}
 If no changes needed: {"adapted":false,"reasoning":"הכל בסדר"}`;
 
   const content = `Completed exercises:

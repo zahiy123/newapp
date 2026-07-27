@@ -41,6 +41,7 @@ export default function Dashboard() {
   const [currentEquipment, setCurrentEquipment] = useState('none');
   const [workoutCount, setWorkoutCount] = useState(0);
   const [progress, setProgress] = useState({ completedDays: [] });
+  const [expandedExercises, setExpandedExercises] = useState({});
   const [activeWorkout, setActiveWorkout] = useState(() => {
     // Validate on init — only show resume if exercises were actually completed
     const w = loadActiveWorkout();
@@ -214,6 +215,8 @@ export default function Dashboard() {
         height: userProfile.height,
         weight: userProfile.weight,
         disability: userProfile.disability,
+        amputationSide: userProfile.amputationSide || '',
+        amputationLevel: userProfile.amputationLevel || '',
         skillLevel: userProfile.skillLevel || 'beginner',
         mobilityAid: userProfile.mobilityAid || 'none'
       },
@@ -702,6 +705,12 @@ export default function Dashboard() {
                   <span className="text-sm text-gray-500">{day.durationMinutes} {t('dashboard.minutes')}</span>
                 </div>
                 <p className="text-sm text-purple-600 font-medium">{day.focus}</p>
+                {day.workout_title && (
+                  <p className="text-base font-bold text-gray-900">{day.workout_title}</p>
+                )}
+                {day.goal_summary && (
+                  <p className="text-sm text-gray-500 italic">{t('dashboard.goalSummary')}: {day.goal_summary}</p>
+                )}
 
                 {day.warmup && (
                   <div className="bg-orange-50 rounded-lg p-3 text-sm">
@@ -720,18 +729,61 @@ export default function Dashboard() {
                 )}
 
                 <div className="space-y-2">
-                  {day.exercises?.map((ex, j) => (
-                    <div key={j} className="border border-gray-100 rounded-lg p-3">
-                      <div className="font-medium text-gray-800">{ex.name}</div>
-                      <p className="text-sm text-gray-500">{ex.description}</p>
-                      <div className="flex gap-4 mt-1 text-xs text-gray-400">
-                        {ex.sets && <span>{ex.sets} {t('dashboard.sets')}</span>}
-                        {ex.reps && <span>{ex.reps} {t('dashboard.reps')}</span>}
-                        {ex.restSeconds && <span>{ex.restSeconds}{t('dashboard.secRest')}</span>}
+                  {day.exercises?.map((ex, j) => {
+                    const exKey = `${i}-${j}`;
+                    const isExpanded = expandedExercises[exKey];
+                    return (
+                      <div key={j} className="border border-gray-100 rounded-lg p-3 space-y-2">
+                        <div className="font-medium text-gray-800">{ex.name}</div>
+                        <p className="text-sm text-gray-500">{ex.description}</p>
+
+                        <div className="flex flex-wrap gap-3 text-xs text-gray-400">
+                          {ex.sets && <span>{ex.sets} {t('dashboard.sets')}</span>}
+                          {ex.reps && <span>{ex.reps} {t('dashboard.reps')}</span>}
+                          {ex.restSeconds && <span>{ex.restSeconds}{t('dashboard.secRest')}</span>}
+                          {ex.tempo && (
+                            <span className="bg-indigo-50 text-indigo-600 px-1.5 py-0.5 rounded font-medium">
+                              {t('dashboard.tempo')}: {ex.tempo}
+                            </span>
+                          )}
+                          {ex.rpe && (
+                            <span className="bg-amber-50 text-amber-600 px-1.5 py-0.5 rounded font-medium">
+                              {t('dashboard.rpe')}: {ex.rpe}/10
+                            </span>
+                          )}
+                        </div>
+
+                        {ex.reasoning && (
+                          <div className="bg-green-50 rounded-md px-3 py-1.5 text-xs text-green-700 flex items-start gap-1.5">
+                            <span className="mt-0.5 shrink-0">&#x1F4A1;</span>
+                            <span>{ex.reasoning}</span>
+                          </div>
+                        )}
+
+                        {ex.instructions?.length > 0 && (
+                          <div>
+                            <button
+                              type="button"
+                              onClick={() => setExpandedExercises(prev => ({ ...prev, [exKey]: !prev[exKey] }))}
+                              className="text-xs text-purple-600 font-medium flex items-center gap-1 hover:text-purple-800"
+                            >
+                              <span className={`transition-transform ${isExpanded ? 'rotate-90' : ''}`}>&#9654;</span>
+                              {t('dashboard.instructions')}
+                            </button>
+                            {isExpanded && (
+                              <ol className="mt-1 space-y-0.5 text-xs text-gray-600 list-decimal list-inside">
+                                {ex.instructions.map((step, si) => (
+                                  <li key={si}>{step}</li>
+                                ))}
+                              </ol>
+                            )}
+                          </div>
+                        )}
+
+                        {ex.tips && <p className="text-xs text-blue-500">{ex.tips}</p>}
                       </div>
-                      {ex.tips && <p className="text-xs text-blue-500 mt-1">{ex.tips}</p>}
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
 
                 {day.cooldown && (

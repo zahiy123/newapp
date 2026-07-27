@@ -29,6 +29,17 @@ export const GAME_SPORTS = {
     playersPerTeam: 5,
     rules: {}
   },
+  basketballWheelchair: {
+    key: 'basketballWheelchair',
+    name: { he: 'כדורסל כיסאות גלגלים', en: 'Wheelchair Basketball' },
+    icon: '♿',
+    defaultHalfLength: 10,
+    playersPerTeam: 5,
+    rules: {
+      wheelchairContact: true,
+      travelingPushes: 2, // max 2 pushes before dribble required
+    }
+  },
 };
 
 // Foul detection rules
@@ -88,6 +99,7 @@ export const FOUL_RULES = {
     }
   ],
   basketball: [],
+  basketballWheelchair: [],
 };
 
 // Event types per sport with marker colors for video analysis timeline
@@ -119,6 +131,14 @@ export const GAME_EVENT_TYPES = {
     foul: { color: '#eab308', icon: '\uD83D\uDFE8', he: 'עבירה', en: 'Foul' },
     turnover: { color: '#f97316', icon: '\uD83D\uDD04', he: 'איבוד כדור', en: 'Turnover' },
     block: { color: '#3b82f6', icon: '\u270B', he: 'חסימה', en: 'Block' },
+  },
+  basketballWheelchair: {
+    basket_2pt: { color: '#22c55e', icon: '\uD83C\uDFC0', he: 'סל 2 נקודות', en: '2-Point Basket' },
+    basket_3pt: { color: '#10b981', icon: '\uD83C\uDFC0', he: 'סל 3 נקודות', en: '3-Point Basket' },
+    foul: { color: '#eab308', icon: '\uD83D\uDFE8', he: 'עבירה', en: 'Foul' },
+    turnover: { color: '#f97316', icon: '\uD83D\uDD04', he: 'איבוד כדור', en: 'Turnover' },
+    block: { color: '#3b82f6', icon: '\u270B', he: 'חסימה', en: 'Block' },
+    wheelchair_tip: { color: '#a855f7', icon: '♿', he: 'הפיכת כיסא', en: 'Wheelchair Tip' },
   },
 };
 

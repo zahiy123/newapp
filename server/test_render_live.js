@@ -43,19 +43,19 @@ const REPS = [
       { shoulder: 120, elbow: 100, hip: 150, knee: 158 }
     ]},
   // ── דריבל ──
-  { exercise: 'דריבל', rep: 1, label: '🟢 10/10', prev: null,
+  { exercise: 'דריבלינג בקביים', rep: 1, label: '🟢 10/10', prev: null,
     angles: [
       { shoulder: 160, elbow: 155, hip: 170, knee: 170, trunk: 178 },
       { shoulder: 155, elbow: 150, hip: 165, knee: 168, trunk: 175 },
       { shoulder: 158, elbow: 152, hip: 168, knee: 170, trunk: 176 }
     ]},
-  { exercise: 'דריבל', rep: 2, label: '🟡 6/10', prev: 10,
+  { exercise: 'דריבלינג בקביים', rep: 2, label: '🟡 6/10', prev: 10,
     angles: [
       { shoulder: 150, elbow: 140, hip: 160, knee: 165, trunk: 168 },
       { shoulder: 145, elbow: 135, hip: 155, knee: 160, trunk: 163 },
       { shoulder: 148, elbow: 138, hip: 158, knee: 162, trunk: 165 }
     ]},
-  { exercise: 'דריבל', rep: 3, label: '🔴 3/10', prev: 6,
+  { exercise: 'דריבלינג בקביים', rep: 3, label: '🔴 3/10', prev: 6,
     angles: [
       { shoulder: 140, elbow: 120, hip: 150, knee: 155, trunk: 155 },
       { shoulder: 135, elbow: 110, hip: 145, knee: 150, trunk: 150 },
