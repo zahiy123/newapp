@@ -228,32 +228,28 @@ export default function Dashboard() {
     };
   }
 
-  async function fetchWeek(payload, weekNumber, retries = 1) {
-    for (let attempt = 0; attempt <= retries; attempt++) {
-      const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), 60000);
-      try {
-        const res = await fetch(apiUrl('/api/coach/training-week'), {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ ...payload, weekNumber }),
-          signal: controller.signal
-        });
-        clearTimeout(timeout);
-        if (!res.ok) {
-          const err = await res.json().catch(() => ({}));
-          throw new Error(err.error || `Week ${weekNumber} failed`);
-        }
-        return res.json();
-      } catch (err) {
-        clearTimeout(timeout);
-        if (attempt < retries) {
-          console.log(`Week ${weekNumber} attempt ${attempt + 1} failed, retrying in 3s...`);
-          await new Promise(r => setTimeout(r, 3000));
-          continue;
-        }
-        throw err;
+  async function fetchWeek(payload, weekNumber) {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 120000);
+    try {
+      const res = await fetch(apiUrl('/api/coach/training-week'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ...payload, weekNumber }),
+        signal: controller.signal
+      });
+      clearTimeout(timeout);
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.details || err.error || `Week ${weekNumber} failed (${res.status})`);
       }
+      return res.json();
+    } catch (err) {
+      clearTimeout(timeout);
+      if (err.name === 'AbortError') {
+        throw new Error(`Week ${weekNumber} timed out — the server took too long to respond`);
+      }
+      throw err;
     }
   }
 
@@ -304,15 +300,7 @@ export default function Dashboard() {
       if (startFromWeek === 1) {
         // No cache — generate Week 1
         setGeneratingWeek(1);
-        let week1;
-        try {
-          week1 = await fetchWeek(payload, 1);
-        } catch (err) {
-          // Auto-retry once
-          console.log('Week 1 failed, auto-retrying once...');
-          await new Promise(r => setTimeout(r, 3000));
-          week1 = await fetchWeek(payload, 1, 0);
-        }
+        const week1 = await fetchWeek(payload, 1);
         plan = { weeks: [week1], generalTips: [], safetyNotes: [], sport: userProfile.sport };
         setTrainingPlan(plan);
         setActiveWeek(0);
