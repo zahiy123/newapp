@@ -25,13 +25,14 @@
 //   knee_var > 0.5 AND ankle_Yvar < 0.00005 → TRANSTIBIAL_AMPUTEE (below-knee)
 //   arm landmarks consistently invisible → ARM_AMPUTEE
 //
-// Diagnostic tracks:
-//   WHEELCHAIR:           arms_raise → left_arm_circle → right_arm_circle
-//   TRANSFEMORAL_AMPUTEE: hip_flexion → arms_raise
-//   TRANSTIBIAL_AMPUTEE:  squats_healthy_knee (side-specific) → arms_raise
+// Diagnostic tracks (full upper + lower body):
+//   WHEELCHAIR:           arms_raise → L/R arm_circle → shoulder_rotation → elbow_flex
+//   TRANSFEMORAL_AMPUTEE: hip_flexion → arms_raise → shoulder_rotation → elbow_flex
+//   TRANSTIBIAL_AMPUTEE:  squats_healthy_knee → arms_raise → shoulder_rotation → elbow_flex
+//   BILATERAL_AMPUTEE:    seated_hip_flexion → arms_raise → shoulder_rotation → elbow_flex
 //   ARM_AMPUTEE:          squats → march_in_place
-//   MEDICAL:              squats → march_in_place → arms_raise
-//   NORMAL:               squats → march_in_place → arms_raise
+//   MEDICAL:              squats → march → weight_shift → ankle_circles → arms_raise → shoulder_rotation → elbow_flex
+//   NORMAL:               squats → march → weight_shift → ankle_circles → arms_raise → shoulder_rotation → elbow_flex → wrist_circles
 //
 // Strict blocking: segments advance ONLY on detected movement.
 // No safety timeout — segments never advance without real movement.
@@ -72,6 +73,7 @@ const STATE = Object.freeze({
   CERTAINTY:              'CERTAINTY',
   RETRY:                  'RETRY',
   AWAITING_USER:          'AWAITING_USER',
+  PAUSED:                 'PAUSED',
   COMPLETE:               'COMPLETE',
   ERROR:                  'ERROR',
 });
@@ -137,6 +139,32 @@ const VISIBILITY_HALT_INSTRUCTION = "Camera can't detect your leg. Please move b
 const VISIBILITY_HALT_INSTRUCTION_HE = 'המצלמה לא מזהה את הרגל. אנא התרחק או כוון מחדש את המצלמה.';
 // Prosthetic detection: if a limb's landmarks are visible in less than this ratio of frames, it's prosthetic
 const PROSTHETIC_VISIBILITY_RATIO = 0.2;
+
+// ---- Full-Body Visibility Gate (continuous) ----
+// Critical landmarks that must remain visible during the entire scan (head to feet, including arms)
+const FULL_BODY_GATE_LANDMARKS = Object.freeze([
+  0,   // NOSE (head)
+  11,  // LEFT_SHOULDER
+  12,  // RIGHT_SHOULDER
+  13,  // LEFT_ELBOW
+  14,  // RIGHT_ELBOW
+  15,  // LEFT_WRIST
+  16,  // RIGHT_WRIST
+  23,  // LEFT_HIP
+  24,  // RIGHT_HIP
+  25,  // LEFT_KNEE
+  26,  // RIGHT_KNEE
+  27,  // LEFT_ANKLE
+  28,  // RIGHT_ANKLE
+]);
+// Visibility threshold for full-body gate (slightly below calibration's 0.6)
+const FULL_BODY_GATE_VISIBILITY = 0.5;
+// Debounce: N consecutive bad frames before halting (1s at 30fps)
+const FULL_BODY_GATE_DEBOUNCE = 30;
+// Instruction interval when halted (seconds)
+const FULL_BODY_GATE_INTERVAL_SEC = 4;
+const FULL_BODY_GATE_INSTRUCTION = 'Your full body must be visible. Please step back so the camera can see you from head to feet.';
+const FULL_BODY_GATE_INSTRUCTION_HE = 'כל הגוף חייב להיות גלוי. אנא התרחק כדי שהמצלמה תראה אותך מהראש ועד כפות הרגליים.';
 
 // ---- Anatomical Profiler ----
 // Image context confidence threshold
@@ -205,6 +233,9 @@ const CONFIDENCE_THRESHOLD = 0.95;
 const DETECTION_BLOCKED_INSTRUCTION = 'Detection inconclusive. Please ensure full body is visible and stand naturally.';
 const DETECTION_BLOCKED_INSTRUCTION_HE = 'הזיהוי לא חד-משמעי. אנא ודא שכל הגוף נראה ועמוד בצורה טבעית.';
 
+const PAUSED_INSTRUCTION = 'Scan paused. Fix the issue and press Resume to continue.';
+const PAUSED_INSTRUCTION_HE = 'הסריקה הושהתה. תקן את הבעיה ולחץ המשך כדי להמשיך.';
+
 const VISION_ANALYZING_INSTRUCTION = 'Analyzing your body with AI vision...';
 const VISION_ANALYZING_INSTRUCTION_HE = 'מנתח את גופך באמצעות ראייה ממוחשבת...';
 
@@ -218,8 +249,8 @@ const DIAG_TRACKS = Object.freeze({
       id: 'arms_raise',
       instruction_en: 'Raise both arms above your head and lower them',
       instruction_he: 'הרם את שתי הידיים מעל הראש והורד אותן',
-      durationSec: 8,
-      minDurationSec: 4,
+      durationSec: 12,
+      minDurationSec: 10,
       targetJoints: ['left_elbow', 'right_elbow'],
       nudge_en: 'Please try to raise your arms, no movement detected',
       nudge_he: 'אנא נסה להרים את הידיים, לא זוהתה תנועה',
@@ -228,8 +259,8 @@ const DIAG_TRACKS = Object.freeze({
       id: 'left_arm_circle',
       instruction_en: 'Circle your left arm slowly',
       instruction_he: 'סובב את יד שמאל לאט',
-      durationSec: 6,
-      minDurationSec: 3,
+      durationSec: 12,
+      minDurationSec: 10,
       targetJoints: ['left_elbow'],
       nudge_en: 'Please try to move your left arm, no movement detected',
       nudge_he: 'אנא נסה להניע את יד שמאל, לא זוהתה תנועה',
@@ -238,11 +269,31 @@ const DIAG_TRACKS = Object.freeze({
       id: 'right_arm_circle',
       instruction_en: 'Circle your right arm slowly',
       instruction_he: 'סובב את יד ימין לאט',
-      durationSec: 6,
-      minDurationSec: 3,
+      durationSec: 12,
+      minDurationSec: 10,
       targetJoints: ['right_elbow'],
       nudge_en: 'Please try to move your right arm, no movement detected',
       nudge_he: 'אנא נסה להניע את יד ימין, לא זוהתה תנועה',
+    },
+    {
+      id: 'shoulder_rotation',
+      instruction_en: 'Rotate both shoulders in circles, forward then backward',
+      instruction_he: 'סובב את שתי הכתפיים בתנועה מעגלית, קדימה ואז אחורה',
+      durationSec: 12,
+      minDurationSec: 10,
+      targetJoints: ['left_elbow', 'right_elbow'],
+      nudge_en: 'Please try to rotate your shoulders, no movement detected',
+      nudge_he: 'אנא נסה לסובב את הכתפיים, לא זוהתה תנועה',
+    },
+    {
+      id: 'elbow_flex',
+      instruction_en: 'Bend and extend both elbows fully, like bicep curls',
+      instruction_he: 'כופף ופשוט את שני המרפקים במלואם, כמו כפיפות מרפק',
+      durationSec: 12,
+      minDurationSec: 10,
+      targetJoints: ['left_elbow', 'right_elbow'],
+      nudge_en: 'Please try to bend your elbows, no movement detected',
+      nudge_he: 'אנא נסה לכופף את המרפקים, לא זוהתה תנועה',
     },
   ],
 
@@ -251,8 +302,8 @@ const DIAG_TRACKS = Object.freeze({
       id: 'hip_flexion',
       instruction_en: 'Swing your leg forward and back from the hip',
       instruction_he: 'נדנד את הרגל קדימה ואחורה מהירך',
-      durationSec: 10,
-      minDurationSec: 5,
+      durationSec: 12,
+      minDurationSec: 10,
       targetJoints: ['left_hip', 'right_hip'],
       nudge_en: 'Please try to swing your leg from the hip, no movement detected',
       nudge_he: 'אנא נסה לנדנד את הרגל מהירך, לא זוהתה תנועה',
@@ -261,11 +312,31 @@ const DIAG_TRACKS = Object.freeze({
       id: 'arms_raise',
       instruction_en: 'Raise both arms above your head and lower them',
       instruction_he: 'הרם את שתי הידיים מעל הראש והורד אותן',
-      durationSec: 6,
-      minDurationSec: 3,
+      durationSec: 12,
+      minDurationSec: 10,
       targetJoints: ['left_elbow', 'right_elbow'],
       nudge_en: 'Please try to raise your arms, no movement detected',
       nudge_he: 'אנא נסה להרים את הידיים, לא זוהתה תנועה',
+    },
+    {
+      id: 'shoulder_rotation',
+      instruction_en: 'Rotate both shoulders in circles, forward then backward',
+      instruction_he: 'סובב את שתי הכתפיים בתנועה מעגלית, קדימה ואז אחורה',
+      durationSec: 12,
+      minDurationSec: 10,
+      targetJoints: ['left_elbow', 'right_elbow'],
+      nudge_en: 'Please try to rotate your shoulders, no movement detected',
+      nudge_he: 'אנא נסה לסובב את הכתפיים, לא זוהתה תנועה',
+    },
+    {
+      id: 'elbow_flex',
+      instruction_en: 'Bend and extend both elbows fully, like bicep curls',
+      instruction_he: 'כופף ופשוט את שני המרפקים במלואם, כמו כפיפות מרפק',
+      durationSec: 12,
+      minDurationSec: 10,
+      targetJoints: ['left_elbow', 'right_elbow'],
+      nudge_en: 'Please try to bend your elbows, no movement detected',
+      nudge_he: 'אנא נסה לכופף את המרפקים, לא זוהתה תנועה',
     },
   ],
 
@@ -274,8 +345,8 @@ const DIAG_TRACKS = Object.freeze({
       id: 'seated_hip_flexion',
       instruction_en: 'While seated, lift each knee toward your chest alternately',
       instruction_he: 'בישיבה, הרם כל ברך לכיוון החזה לסירוגין',
-      durationSec: 10,
-      minDurationSec: 5,
+      durationSec: 12,
+      minDurationSec: 10,
       targetJoints: ['left_hip', 'right_hip'],
       nudge_en: 'Please try to lift your knees while seated, no movement detected',
       nudge_he: 'אנא נסה להרים את הברכיים בישיבה, לא זוהתה תנועה',
@@ -284,11 +355,31 @@ const DIAG_TRACKS = Object.freeze({
       id: 'arms_raise',
       instruction_en: 'Raise both arms above your head and lower them',
       instruction_he: 'הרם את שתי הידיים מעל הראש והורד אותן',
-      durationSec: 6,
-      minDurationSec: 3,
+      durationSec: 12,
+      minDurationSec: 10,
       targetJoints: ['left_elbow', 'right_elbow'],
       nudge_en: 'Please try to raise your arms, no movement detected',
       nudge_he: 'אנא נסה להרים את הידיים, לא זוהתה תנועה',
+    },
+    {
+      id: 'shoulder_rotation',
+      instruction_en: 'Rotate both shoulders in circles, forward then backward',
+      instruction_he: 'סובב את שתי הכתפיים בתנועה מעגלית, קדימה ואז אחורה',
+      durationSec: 12,
+      minDurationSec: 10,
+      targetJoints: ['left_elbow', 'right_elbow'],
+      nudge_en: 'Please try to rotate your shoulders, no movement detected',
+      nudge_he: 'אנא נסה לסובב את הכתפיים, לא זוהתה תנועה',
+    },
+    {
+      id: 'elbow_flex',
+      instruction_en: 'Bend and extend both elbows fully, like bicep curls',
+      instruction_he: 'כופף ופשוט את שני המרפקים במלואם, כמו כפיפות מרפק',
+      durationSec: 12,
+      minDurationSec: 10,
+      targetJoints: ['left_elbow', 'right_elbow'],
+      nudge_en: 'Please try to bend your elbows, no movement detected',
+      nudge_he: 'אנא נסה לכופף את המרפקים, לא זוהתה תנועה',
     },
   ],
 
@@ -297,8 +388,8 @@ const DIAG_TRACKS = Object.freeze({
       id: 'squats',
       instruction_en: 'Please do 5 slow knee bends',
       instruction_he: 'אנא בצע 5 כפיפות ברכיים איטיות',
-      durationSec: 10,
-      minDurationSec: 5,
+      durationSec: 12,
+      minDurationSec: 10,
       targetJoints: ['left_knee', 'right_knee'],
       nudge_en: 'Please try to bend your knees, no movement detected',
       nudge_he: 'אנא נסה לכופף את הברכיים, לא זוהתה תנועה',
@@ -307,8 +398,8 @@ const DIAG_TRACKS = Object.freeze({
       id: 'march_in_place',
       instruction_en: 'Please do 5 steps in place',
       instruction_he: 'אנא בצע 5 צעדים במקום',
-      durationSec: 10,
-      minDurationSec: 5,
+      durationSec: 12,
+      minDurationSec: 10,
       useGaitDetection: true,
       nudge_en: 'Please try to march in place, no movement detected',
       nudge_he: 'אנא נסה לצעוד במקום, לא זוהתה תנועה',
@@ -316,12 +407,13 @@ const DIAG_TRACKS = Object.freeze({
   ],
 
   MEDICAL: [
+    // ── Lower body ──
     {
       id: 'squats',
       instruction_en: 'Please do 5 slow knee bends',
       instruction_he: 'אנא בצע 5 כפיפות ברכיים איטיות',
-      durationSec: 10,
-      minDurationSec: 5,
+      durationSec: 12,
+      minDurationSec: 10,
       targetJoints: ['left_knee', 'right_knee'],
       nudge_en: 'Please try to bend your knees, no movement detected',
       nudge_he: 'אנא נסה לכופף את הברכיים, לא זוהתה תנועה',
@@ -330,31 +422,74 @@ const DIAG_TRACKS = Object.freeze({
       id: 'march_in_place',
       instruction_en: 'Please do 5 steps in place',
       instruction_he: 'אנא בצע 5 צעדים במקום',
-      durationSec: 10,
-      minDurationSec: 5,
+      durationSec: 12,
+      minDurationSec: 10,
       useGaitDetection: true,
       nudge_en: 'Please try to march in place, no movement detected',
       nudge_he: 'אנא נסה לצעוד במקום, לא זוהתה תנועה',
     },
     {
+      id: 'weight_shift',
+      instruction_en: 'Shift your weight from one leg to the other, like a slow walk',
+      instruction_he: 'העבר את המשקל מרגל לרגל, כמו הליכה איטית',
+      durationSec: 12,
+      minDurationSec: 10,
+      targetJoints: ['left_hip', 'right_hip'],
+      useGaitDetection: true,
+      nudge_en: 'Please try shifting weight between legs, no movement detected',
+      nudge_he: 'אנא נסה להעביר משקל בין הרגליים, לא זוהתה תנועה',
+    },
+    {
+      id: 'ankle_circles',
+      instruction_en: 'Lift one foot and rotate your ankle in circles. Switch feet.',
+      instruction_he: 'הרם רגל אחת וסובב את הקרסול בתנועה מעגלית. החלף רגליים.',
+      durationSec: 12,
+      minDurationSec: 10,
+      targetJoints: ['left_knee', 'right_knee'],
+      nudge_en: 'Please try to rotate your ankle, no movement detected',
+      nudge_he: 'אנא נסה לסובב את הקרסול, לא זוהתה תנועה',
+    },
+    // ── Upper body ──
+    {
       id: 'arms_raise',
       instruction_en: 'Raise both arms above your head and lower them',
       instruction_he: 'הרם את שתי הידיים מעל הראש והורד אותן',
-      durationSec: 6,
-      minDurationSec: 3,
+      durationSec: 12,
+      minDurationSec: 10,
       targetJoints: ['left_elbow', 'right_elbow'],
       nudge_en: 'Please try to raise your arms, no movement detected',
       nudge_he: 'אנא נסה להרים את הידיים, לא זוהתה תנועה',
+    },
+    {
+      id: 'shoulder_rotation',
+      instruction_en: 'Rotate both shoulders in circles, forward then backward',
+      instruction_he: 'סובב את שתי הכתפיים בתנועה מעגלית, קדימה ואז אחורה',
+      durationSec: 12,
+      minDurationSec: 10,
+      targetJoints: ['left_elbow', 'right_elbow'],
+      nudge_en: 'Please try to rotate your shoulders, no movement detected',
+      nudge_he: 'אנא נסה לסובב את הכתפיים, לא זוהתה תנועה',
+    },
+    {
+      id: 'elbow_flex',
+      instruction_en: 'Bend and extend both elbows fully, like bicep curls',
+      instruction_he: 'כופף ופשוט את שני המרפקים במלואם, כמו כפיפות מרפק',
+      durationSec: 12,
+      minDurationSec: 10,
+      targetJoints: ['left_elbow', 'right_elbow'],
+      nudge_en: 'Please try to bend your elbows, no movement detected',
+      nudge_he: 'אנא נסה לכופף את המרפקים, לא זוהתה תנועה',
     },
   ],
 
   NORMAL: [
+    // ── Lower body ──
     {
       id: 'squats',
       instruction_en: 'Please do 5 slow knee bends',
       instruction_he: 'אנא בצע 5 כפיפות ברכיים איטיות',
-      durationSec: 10,
-      minDurationSec: 5,
+      durationSec: 12,
+      minDurationSec: 10,
       targetJoints: ['left_knee', 'right_knee'],
       nudge_en: 'Please try to bend your knees, no movement detected',
       nudge_he: 'אנא נסה לכופף את הברכיים, לא זוהתה תנועה',
@@ -363,21 +498,73 @@ const DIAG_TRACKS = Object.freeze({
       id: 'march_in_place',
       instruction_en: 'Please do 5 steps in place',
       instruction_he: 'אנא בצע 5 צעדים במקום',
-      durationSec: 10,
-      minDurationSec: 5,
+      durationSec: 12,
+      minDurationSec: 10,
       useGaitDetection: true,
       nudge_en: 'Please try to march in place, no movement detected',
       nudge_he: 'אנא נסה לצעוד במקום, לא זוהתה תנועה',
     },
     {
+      id: 'weight_shift',
+      instruction_en: 'Shift your weight from one leg to the other, like a slow walk',
+      instruction_he: 'העבר את המשקל מרגל לרגל, כמו הליכה איטית',
+      durationSec: 12,
+      minDurationSec: 10,
+      targetJoints: ['left_hip', 'right_hip'],
+      useGaitDetection: true,
+      nudge_en: 'Please try shifting weight between legs, no movement detected',
+      nudge_he: 'אנא נסה להעביר משקל בין הרגליים, לא זוהתה תנועה',
+    },
+    {
+      id: 'ankle_circles',
+      instruction_en: 'Lift one foot and rotate your ankle in circles. Switch feet.',
+      instruction_he: 'הרם רגל אחת וסובב את הקרסול בתנועה מעגלית. החלף רגליים.',
+      durationSec: 12,
+      minDurationSec: 10,
+      targetJoints: ['left_knee', 'right_knee'],
+      nudge_en: 'Please try to rotate your ankle, no movement detected',
+      nudge_he: 'אנא נסה לסובב את הקרסול, לא זוהתה תנועה',
+    },
+    // ── Upper body ──
+    {
       id: 'arms_raise',
       instruction_en: 'Raise both arms above your head and lower them',
       instruction_he: 'הרם את שתי הידיים מעל הראש והורד אותן',
-      durationSec: 6,
-      minDurationSec: 3,
+      durationSec: 12,
+      minDurationSec: 10,
       targetJoints: ['left_elbow', 'right_elbow'],
       nudge_en: 'Please try to raise your arms, no movement detected',
       nudge_he: 'אנא נסה להרים את הידיים, לא זוהתה תנועה',
+    },
+    {
+      id: 'shoulder_rotation',
+      instruction_en: 'Rotate both shoulders in circles, forward then backward',
+      instruction_he: 'סובב את שתי הכתפיים בתנועה מעגלית, קדימה ואז אחורה',
+      durationSec: 12,
+      minDurationSec: 10,
+      targetJoints: ['left_elbow', 'right_elbow'],
+      nudge_en: 'Please try to rotate your shoulders, no movement detected',
+      nudge_he: 'אנא נסה לסובב את הכתפיים, לא זוהתה תנועה',
+    },
+    {
+      id: 'elbow_flex',
+      instruction_en: 'Bend and extend both elbows fully, like bicep curls',
+      instruction_he: 'כופף ופשוט את שני המרפקים במלואם, כמו כפיפות מרפק',
+      durationSec: 12,
+      minDurationSec: 10,
+      targetJoints: ['left_elbow', 'right_elbow'],
+      nudge_en: 'Please try to bend your elbows, no movement detected',
+      nudge_he: 'אנא נסה לכופף את המרפקים, לא זוהתה תנועה',
+    },
+    {
+      id: 'wrist_circles',
+      instruction_en: 'Extend your arms forward and rotate your wrists in circles',
+      instruction_he: 'פשוט את הידיים קדימה וסובב את פרקי כפות הידיים בתנועה מעגלית',
+      durationSec: 10,
+      minDurationSec: 8,
+      targetJoints: ['left_elbow', 'right_elbow'],
+      nudge_en: 'Please try to rotate your wrists, no movement detected',
+      nudge_he: 'אנא נסה לסובב את פרקי כפות הידיים, לא זוהתה תנועה',
     },
   ],
 });
@@ -439,14 +626,60 @@ export class ScanSequencer {
   }
 
   /**
-   * Report a detection error — resets scan with stricter criteria.
+   * Report a detection error — PAUSES the scan (freezes all timers and state).
    * Call this when the user indicates the system detected wrong.
+   * The scan can be resumed with resume() or fully reset with reset().
    * @returns {StateChange}
    */
   reportDetectionError() {
-    this._reset();
-    this._strictMode = true; // Preserved: _reset sets IDLE, start() won't re-reset
-    return this.start();
+    return this.pause();
+  }
+
+  /**
+   * Pause the scan — freezes all timers and state.
+   * The sequencer stops processing frames until resume() is called.
+   * All collected data is preserved.
+   * @returns {StateChange}
+   */
+  pause() {
+    if (this._state === STATE.IDLE || this._state === STATE.COMPLETE ||
+        this._state === STATE.PAUSED || this._state === STATE.ERROR) {
+      return null;
+    }
+    this._pausedFromState = this._state;
+    this._pausedTime = Date.now();
+    this._state = STATE.PAUSED;
+    return {
+      state: STATE.PAUSED,
+      progress: this.progress,
+      pausedFrom: this._pausedFromState,
+      instruction: PAUSED_INSTRUCTION,
+      instruction_he: PAUSED_INSTRUCTION_HE,
+    };
+  }
+
+  /**
+   * Resume the scan from paused state.
+   * Restores the state that was active before pausing.
+   * @returns {StateChange|null}
+   */
+  resume() {
+    if (this._state !== STATE.PAUSED || !this._pausedFromState) return null;
+    this._state = this._pausedFromState;
+    this._pausedFromState = null;
+    this._pausedTime = null;
+    // Reset debounce counters so scan doesn't immediately re-halt
+    this._qualityBadFrames = 0;
+    this._fullBodyGateBadFrames = 0;
+    this._fullBodyGatePaused = false;
+    this._qualityPaused = false;
+    return {
+      state: this._state,
+      progress: this.progress,
+      resumed: true,
+      instruction: this.currentInstruction,
+      instruction_he: this._getCurrentInstructionHe(),
+    };
   }
 
   /**
@@ -543,11 +776,12 @@ export class ScanSequencer {
    * @returns {StateChange|null} - Non-null when something meaningful changed
    */
   feedFrame(landmarks, objectDetections = null) {
-    // Skip in terminal, waiting, or input states
+    // Skip in terminal, waiting, paused, or input states
     if (
       this._state === STATE.IDLE ||
       this._state === STATE.COMPLETE ||
       this._state === STATE.ERROR ||
+      this._state === STATE.PAUSED ||
       this._state === STATE.AWAITING_USER ||
       this._state === STATE.PROFILE_INPUT
     ) {
@@ -608,6 +842,63 @@ export class ScanSequencer {
 
       // Good frame — reset debounce counter
       this._qualityBadFrames = 0;
+    }
+
+    // ── Full-Body Visibility Gate (continuous) ──
+    // Ensures ALL critical body parts remain visible during scanning
+    if (qualityScanStates.includes(this._state)) {
+      const fullBodyOk = ScanSequencer.checkFullBodyVisibility(landmarks);
+
+      if (this._fullBodyGatePaused) {
+        if (fullBodyOk) {
+          // Recovered — resume scanning
+          this._fullBodyGatePaused = false;
+          this._fullBodyGateBadFrames = 0;
+          return {
+            state: this._state,
+            progress: this.progress,
+            fullBodyResume: true,
+            instruction: this.currentInstruction,
+            instruction_he: this._getCurrentInstructionHe(),
+          };
+        }
+        // Still paused — throttled re-emit of instruction
+        const gateInterval = Math.floor(FULL_BODY_GATE_INTERVAL_SEC * this._sampleRate);
+        if (this._totalFrameCount - this._lastFullBodyGateFrame >= gateInterval) {
+          this._lastFullBodyGateFrame = this._totalFrameCount;
+          return {
+            state: this._state,
+            progress: this.progress,
+            fullBodyHalt: true,
+            instruction: FULL_BODY_GATE_INSTRUCTION,
+            instruction_he: FULL_BODY_GATE_INSTRUCTION_HE,
+            missingLandmarks: ScanSequencer.getMissingBodyParts(landmarks),
+          };
+        }
+        return null; // Still halted, throttled
+      }
+
+      if (!fullBodyOk) {
+        this._fullBodyGateBadFrames++;
+        if (this._fullBodyGateBadFrames >= FULL_BODY_GATE_DEBOUNCE) {
+          // 1 second of missing body parts — halt
+          this._fullBodyGatePaused = true;
+          this._lastFullBodyGateFrame = this._totalFrameCount;
+          return {
+            state: this._state,
+            progress: this.progress,
+            fullBodyHalt: true,
+            instruction: FULL_BODY_GATE_INSTRUCTION,
+            instruction_he: FULL_BODY_GATE_INSTRUCTION_HE,
+            missingLandmarks: ScanSequencer.getMissingBodyParts(landmarks),
+          };
+        }
+        // Within debounce — continue but don't use this frame
+        return null;
+      }
+
+      // Full body visible — reset counter
+      this._fullBodyGateBadFrames = 0;
     }
 
     switch (this._state) {
@@ -931,6 +1222,49 @@ export class ScanSequencer {
       }
     }
     return visible >= QUALITY_MIN_VISIBLE;
+  }
+
+  /**
+   * Check if ALL critical body landmarks (head to feet) are visible.
+   * Stricter than quality check — requires nose, shoulders, hips, knees, ankles.
+   *
+   * @param {Object[]} landmarks - MediaPipe 33-landmark array
+   * @returns {boolean}
+   */
+  static checkFullBodyVisibility(landmarks) {
+    if (!landmarks || !Array.isArray(landmarks)) return false;
+    for (const idx of FULL_BODY_GATE_LANDMARKS) {
+      const lm = landmarks[idx];
+      if (!lm || lm.visibility < FULL_BODY_GATE_VISIBILITY) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  /**
+   * Returns list of missing body part names for UI feedback.
+   *
+   * @param {Object[]} landmarks - MediaPipe 33-landmark array
+   * @returns {string[]}
+   */
+  static getMissingBodyParts(landmarks) {
+    const NAMES = {
+      0: 'head', 11: 'left_shoulder', 12: 'right_shoulder',
+      13: 'left_elbow', 14: 'right_elbow',
+      15: 'left_wrist', 16: 'right_wrist',
+      23: 'left_hip', 24: 'right_hip', 25: 'left_knee',
+      26: 'right_knee', 27: 'left_ankle', 28: 'right_ankle',
+    };
+    const missing = [];
+    if (!landmarks || !Array.isArray(landmarks)) return Object.values(NAMES);
+    for (const idx of FULL_BODY_GATE_LANDMARKS) {
+      const lm = landmarks[idx];
+      if (!lm || lm.visibility < FULL_BODY_GATE_VISIBILITY) {
+        missing.push(NAMES[idx]);
+      }
+    }
+    return missing;
   }
 
 
@@ -2017,6 +2351,11 @@ export class ScanSequencer {
     this._qualityPaused = false;
     this._qualityBadFrames = 0;
 
+    // Full-body visibility gate (continuous)
+    this._fullBodyGatePaused = false;
+    this._fullBodyGateBadFrames = 0;
+    this._lastFullBodyGateFrame = 0;
+
     // Phase A — detection + diagnostics
     this._landmarkFrames = [];
     this._objectFrames = [];
@@ -2072,6 +2411,10 @@ export class ScanSequencer {
     this._pendingUserQueries = [];
     this._userAnswers = {};
 
+    // Pause state
+    this._pausedFromState = null;
+    this._pausedTime = null;
+
     // Results
     this._passportFields = null;
     this._error = null;
@@ -2093,25 +2436,47 @@ function _buildTranstibialSegments(affectedSide) {
   const sideLabelHe = healthySide === 'left' ? 'שמאל' : 'ימין';
 
   return [
+    // ── Lower body (healthy side) ──
     {
       id: 'squats_healthy_knee',
       instruction_en: `Please do 5 slow knee bends (${sideLabel} leg)`,
       instruction_he: `אנא בצע 5 כפיפות ברכיים איטיות (רגל ${sideLabelHe})`,
-      durationSec: 10,
-      minDurationSec: 5,
+      durationSec: 12,
+      minDurationSec: 10,
       targetJoints: [healthyKnee],
       nudge_en: 'Please try to bend your knee, no movement detected',
       nudge_he: 'אנא נסה לכופף את הברך, לא זוהתה תנועה',
     },
+    // ── Upper body ──
     {
       id: 'arms_raise',
       instruction_en: 'Raise both arms above your head and lower them',
       instruction_he: 'הרם את שתי הידיים מעל הראש והורד אותן',
-      durationSec: 6,
-      minDurationSec: 3,
+      durationSec: 12,
+      minDurationSec: 10,
       targetJoints: ['left_elbow', 'right_elbow'],
       nudge_en: 'Please try to raise your arms, no movement detected',
       nudge_he: 'אנא נסה להרים את הידיים, לא זוהתה תנועה',
+    },
+    {
+      id: 'shoulder_rotation',
+      instruction_en: 'Rotate both shoulders in circles, forward then backward',
+      instruction_he: 'סובב את שתי הכתפיים בתנועה מעגלית, קדימה ואז אחורה',
+      durationSec: 12,
+      minDurationSec: 10,
+      targetJoints: ['left_elbow', 'right_elbow'],
+      nudge_en: 'Please try to rotate your shoulders, no movement detected',
+      nudge_he: 'אנא נסה לסובב את הכתפיים, לא זוהתה תנועה',
+    },
+    {
+      id: 'elbow_flex',
+      instruction_en: 'Bend and extend both elbows fully, like bicep curls',
+      instruction_he: 'כופף ופשוט את שני המרפקים במלואם, כמו כפיפות מרפק',
+      durationSec: 12,
+      minDurationSec: 10,
+      targetJoints: ['left_elbow', 'right_elbow'],
+      nudge_en: 'Please try to bend your elbows, no movement detected',
+      nudge_he: 'אנא נסה לכופף את המרפקים, לא זוהתה תנועה',
     },
   ];
 }

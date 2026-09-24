@@ -7,6 +7,8 @@
 export const LIMB_STATUS = Object.freeze({
   PROSTHETIC_BELOW_KNEE: 'prosthetic_below_knee',
   PROSTHETIC_ABOVE_KNEE: 'prosthetic_above_knee',
+  PROSTHETIC_BELOW_ELBOW: 'prosthetic_below_elbow',
+  PROSTHETIC_ABOVE_ELBOW: 'prosthetic_above_elbow',
   ANATOMICAL_HEALTHY: 'anatomical_healthy',
   ANATOMICAL_WEAK: 'anatomical_weak',
   ABSENT: 'absent',

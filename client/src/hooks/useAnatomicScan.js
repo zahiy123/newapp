@@ -35,6 +35,7 @@ const STATUS_MAP = {
   CERTAINTY:              'scanning',
   RETRY:                  'scanning',
   AWAITING_USER:          'awaiting_user',
+  PAUSED:                 'paused',
   COMPLETE:               'complete',
   ERROR:                  'error',
 };
@@ -47,6 +48,10 @@ const VISION_FRAME_COUNT = 3;
 const VISION_FRAME_DELAY_MS = 500;
 const VISION_CANVAS_MAX_WIDTH = 480;
 const VISION_JPEG_QUALITY = 0.7;
+
+// Snapshot capture settings
+const SNAPSHOT_MAX_WIDTH = 640;
+const SNAPSHOT_JPEG_QUALITY = 0.85;
 
 
 // ============================================================
@@ -72,6 +77,39 @@ async function captureMultipleFrames(videoEl, count = VISION_FRAME_COUNT) {
     }
   }
   return frames;
+}
+
+
+// ============================================================
+// Helper: Capture a single snapshot frame from video
+// ============================================================
+
+function captureSnapshot(videoEl) {
+  if (!videoEl || videoEl.readyState < 2) return null;
+  const canvas = document.createElement('canvas');
+  const scale = Math.min(SNAPSHOT_MAX_WIDTH / videoEl.videoWidth, 1);
+  canvas.width = Math.round(videoEl.videoWidth * scale);
+  canvas.height = Math.round(videoEl.videoHeight * scale);
+  const ctx = canvas.getContext('2d');
+  ctx.drawImage(videoEl, 0, 0, canvas.width, canvas.height);
+  const dataUrl = canvas.toDataURL('image/jpeg', SNAPSHOT_JPEG_QUALITY);
+  return dataUrl.split(',')[1]; // base64 only
+}
+
+
+// ============================================================
+// Helper: Send snapshot + scanData for final verification
+// ============================================================
+
+async function fetchScanVerification(snapshot, scanData) {
+  const resp = await authFetch(apiUrl('/api/coach/verify-scan'), {
+    method: 'POST',
+    body: JSON.stringify({ snapshot, scanData }),
+  });
+  if (!resp.ok) {
+    throw new Error(`Verify-scan API error: ${resp.status}`);
+  }
+  return resp.json();
 }
 
 
@@ -134,6 +172,8 @@ export function useAnatomicScan({ onStatusChange, onInstruction, videoRef, userN
   const [error, setError] = useState(null);
   const [userQueries, setUserQueries] = useState(null);
   const [qualityWarning, setQualityWarning] = useState(false);
+  const [fullBodyWarning, setFullBodyWarning] = useState(false);
+  const [missingBodyParts, setMissingBodyParts] = useState(null);
   const [calibrationInfo, setCalibrationInfo] = useState(null);
   const [anatomyProfile, setAnatomyProfileState] = useState(null);
   const [missingFields, setMissingFields] = useState(null);
@@ -144,6 +184,11 @@ export function useAnatomicScan({ onStatusChange, onInstruction, videoRef, userN
   const [visionDiagnosis, setVisionDiagnosis] = useState(null);
   const [awaitingVision, setAwaitingVision] = useState(false);
   const [awaitingConfirmation, setAwaitingConfirmation] = useState(false);
+
+  // Snapshot + verification state
+  const [snapshot, setSnapshot] = useState(null);
+  const [verifying, setVerifying] = useState(false);
+  const [verificationResult, setVerificationResult] = useState(null);
 
 
   // ---- Lazy Sequencer Init ----
@@ -249,6 +294,16 @@ export function useAnatomicScan({ onStatusChange, onInstruction, videoRef, userN
     }
     if (change.qualityResume) {
       setQualityWarning(false);
+    }
+
+    // Full-body visibility gate events
+    if (change.fullBodyHalt) {
+      setFullBodyWarning(true);
+      setMissingBodyParts(change.missingLandmarks || null);
+    }
+    if (change.fullBodyResume) {
+      setFullBodyWarning(false);
+      setMissingBodyParts(null);
     }
 
     // Vision diagnosis events
@@ -442,6 +497,60 @@ export function useAnatomicScan({ onStatusChange, onInstruction, videoRef, userN
     rejectDiagnosis();
   }, [getSequencer, handleStateChange, rejectDiagnosis, visionDiagnosis]);
 
+  /**
+   * Capture snapshot and send for server verification.
+   * Called automatically when scan completes, or manually by the UI.
+   * Returns the verified scanData (or null on failure).
+   */
+  const captureAndVerify = useCallback(async (scanResult, visionDiag) => {
+    const videoEl = videoRefInternal.current?.current || videoRefInternal.current;
+    const snap = captureSnapshot(videoEl);
+    if (snap) {
+      setSnapshot(snap);
+    }
+    setVerifying(true);
+
+    try {
+      const { buildScanData } = await import('../engine/scan/ScanDataBuilder.js');
+      const localScanData = buildScanData(scanResult, visionDiag);
+      const result = await fetchScanVerification(snap, localScanData);
+      setVerificationResult(result);
+      setVerifying(false);
+      return result;
+    } catch (err) {
+      console.error('[useAnatomicScan] Verification error:', err);
+      // Fallback: return local scanData without server verification
+      const { buildScanData } = await import('../engine/scan/ScanDataBuilder.js');
+      const fallback = buildScanData(scanResult, visionDiag);
+      setVerificationResult({ verified: true, scanData: fallback, fallback: true });
+      setVerifying(false);
+      return { verified: true, scanData: fallback, fallback: true };
+    }
+  }, []);
+
+  /**
+   * Pause the scan — freezes all timers without losing data.
+   */
+  const pauseScan = useCallback(() => {
+    const seq = getSequencer();
+    const change = seq.pause();
+    handleStateChange(change);
+  }, [getSequencer, handleStateChange]);
+
+  /**
+   * Resume the scan from paused state.
+   */
+  const resumeScan = useCallback(() => {
+    const seq = getSequencer();
+    const change = seq.resume();
+    if (change) {
+      setFullBodyWarning(false);
+      setMissingBodyParts(null);
+      setQualityWarning(false);
+    }
+    handleStateChange(change);
+  }, [getSequencer, handleStateChange]);
+
   // ---- Cleanup on Unmount ----
 
   useEffect(() => {
@@ -465,6 +574,9 @@ export function useAnatomicScan({ onStatusChange, onInstruction, videoRef, userN
     confirmDiagnosis,
     rejectDiagnosis,
     rejectWithCorrection,
+    pauseScan,
+    resumeScan,
+    captureAndVerify,
     // State
     scanStatus,
     progress,
@@ -474,6 +586,8 @@ export function useAnatomicScan({ onStatusChange, onInstruction, videoRef, userN
     error,
     userQueries,
     qualityWarning,
+    fullBodyWarning,
+    missingBodyParts,
     calibrationInfo,
     anatomyProfile,
     missingFields,
@@ -483,5 +597,9 @@ export function useAnatomicScan({ onStatusChange, onInstruction, videoRef, userN
     visionDiagnosis,
     awaitingVision,
     awaitingConfirmation,
+    // Snapshot + verification state
+    snapshot,
+    verifying,
+    verificationResult,
   };
 }

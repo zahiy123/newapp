@@ -112,6 +112,13 @@ function getAvailableSportsFromScan(scanData) {
     }
   }
 
+  // Arm amputee: ensure amputee GK is available
+  if (classification.includes('ARM_AMPUTEE') || classification.includes('ARM')) {
+    if (!available.find(s => s.key === 'footballAmputeeGK')) {
+      available.push(SPORTS.footballAmputeeGK);
+    }
+  }
+
   // Fitness and rehab are always available
   if (!available.find(s => s.key === 'fitness')) {
     available.push(SPORTS.fitness);
@@ -211,6 +218,7 @@ export function getAvailableMuscleGroups(scanData) {
  */
 export function getAvailableGoals(scanData) {
   return GOALS.map(goal => {
+    // Speed requires at least one functional leg
     if (goal === 'speed' && scanData?.specialProtocol === 'wheelchair') {
       return { key: goal, blocked: true };
     }
@@ -218,6 +226,14 @@ export function getAvailableGoals(scanData) {
       const leftLeg = scanData.limbStatus.left_leg;
       const rightLeg = scanData.limbStatus.right_leg;
       if (leftLeg && !leftLeg.canTrain && rightLeg && !rightLeg.canTrain) {
+        return { key: goal, blocked: true };
+      }
+    }
+    // Strength requires at least one functional arm
+    if (goal === 'strength' && scanData?.limbStatus) {
+      const leftArm = scanData.limbStatus.left_arm;
+      const rightArm = scanData.limbStatus.right_arm;
+      if (leftArm && !leftArm.canTrain && rightArm && !rightArm.canTrain) {
         return { key: goal, blocked: true };
       }
     }

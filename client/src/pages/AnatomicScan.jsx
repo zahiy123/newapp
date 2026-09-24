@@ -96,12 +96,20 @@ export default function AnatomicScan({ onScanComplete }) {
     error: scanError,
     userQueries,
     qualityWarning,
+    fullBodyWarning,
+    missingBodyParts,
     calibrationInfo,
     setAnatomyProfile,
     confirmProfile,
     confirmDiagnosis,
     rejectDiagnosis,
     rejectWithCorrection,
+    pauseScan,
+    resumeScan,
+    captureAndVerify,
+    snapshot,
+    verifying,
+    verificationResult,
     missingFields,
     kineticProfile,
     kineticInferredProfile,
@@ -132,8 +140,8 @@ export default function AnatomicScan({ onScanComplete }) {
   const latestObjDetsRef = useRef(null);
 
   useEffect(() => {
-    // Run rAF loop during calibration and scanning phases only
-    if (scanStatus !== 'scanning' && scanStatus !== 'calibrating') return;
+    // Run rAF loop during calibration, scanning, and paused phases
+    if (scanStatus !== 'scanning' && scanStatus !== 'calibrating' && scanStatus !== 'paused') return;
 
     function loop() {
       const landmarks = landmarksRef.current;
@@ -163,7 +171,7 @@ export default function AnatomicScan({ onScanComplete }) {
         scanLoopRef.current = null;
       }
     };
-  }, [scanStatus, feedFrame, landmarksRef, objReady, detectForScan, videoRef]);
+  }, [scanStatus, feedFrame, landmarksRef, objReady, detectForScan, videoRef, pauseScan, resumeScan]);
 
   // ---- Voice Feedback ----
 
@@ -237,22 +245,51 @@ export default function AnatomicScan({ onScanComplete }) {
     }
   }, [qualityWarning, isFailed, speakPriority, t]);
 
-  // ---- Save scan results to Firestore on completion ----
+  // Speak full-body visibility warnings
+  const lastFullBodyWarningRef = useRef(false);
+  useEffect(() => {
+    if (isFailed) return;
+    if (fullBodyWarning && !lastFullBodyWarningRef.current) {
+      lastFullBodyWarningRef.current = true;
+      speakPriority(isHe
+        ? 'כל הגוף חייב להיות גלוי. אנא התרחק מהמצלמה.'
+        : 'Full body must be visible. Please step back from the camera.');
+    } else if (!fullBodyWarning) {
+      lastFullBodyWarningRef.current = false;
+    }
+  }, [fullBodyWarning, isFailed, speakPriority, isHe]);
+
+  // ---- Snapshot + Verify + Save on completion ----
   const savedRef = useRef(false);
   useEffect(() => {
     if (scanStatus !== 'complete' || !result || !user || savedRef.current) return;
 
     savedRef.current = true;
 
-    async function saveResults() {
+    async function verifyAndSave() {
       setSaving(true);
       try {
+        // 1. Capture snapshot + send for server verification
+        const verification = await captureAndVerify(result, visionDiagnosis);
+
+        // 2. Use verified scanData (with corrections applied) or fallback to local
+        const verifiedScanData = verification?.scanData || buildScanData(result, visionDiagnosis);
+
+        // 3. Build save payload
         const saveData = {
           scanComplete: true,
           scanResult: result.passportFields,
           scanDate: new Date().toISOString(),
           updatedAt: new Date().toISOString(),
-          scanData: buildScanData(result, visionDiagnosis),
+          scanData: verifiedScanData,
+          scanVerification: {
+            verified: verification?.verified ?? true,
+            confidence: verification?.confidence ?? 0,
+            corrections: verification?.corrections ?? null,
+            description: verification?.description ?? '',
+            description_he: verification?.description_he ?? '',
+            fallback: verification?.fallback ?? false,
+          },
         };
         if (result.anatomyProfile) {
           saveData.anatomyProfile = result.anatomyProfile;
@@ -266,20 +303,22 @@ export default function AnatomicScan({ onScanComplete }) {
         if (result.anatomyClassification) {
           saveData.anatomyClassification = result.anatomyClassification;
         }
+
+        // 4. Save to Firestore
         await setDoc(doc(db, 'users', user.uid), saveData, { merge: true });
         await refreshProfile();
         setSaved(true);
         onScanComplete?.();
-        // Navigate to profile so user can complete training preferences
-        setTimeout(() => navigate('/profile'), 1500);
+        // Navigate to profile after brief delay
+        setTimeout(() => navigate('/profile'), 2000);
       } catch (err) {
-        console.error('Failed to save scan results:', err);
+        console.error('Failed to verify/save scan results:', err);
       }
       setSaving(false);
     }
 
-    saveResults();
-  }, [scanStatus, result, user, visionDiagnosis, refreshProfile, onScanComplete, navigate]);
+    verifyAndSave();
+  }, [scanStatus, result, user, visionDiagnosis, captureAndVerify, refreshProfile, onScanComplete, navigate]);
 
   // ---- Actions ----
   const handleStart = useCallback(async () => {
@@ -314,7 +353,7 @@ export default function AnatomicScan({ onScanComplete }) {
     lastSpokenRef.current = { status: 'idle', instruction: null, warning: false };
   }, [resetScan, stopSpeech]);
 
-  // Confirm vision diagnosis → stop everything, save, navigate to profile
+  // Confirm vision diagnosis → stop everything, verify, save, navigate to profile
   const handleConfirmAndFinish = useCallback(async () => {
     // 1. Stop scan, pose loop, and speech
     stopScan();
@@ -323,6 +362,7 @@ export default function AnatomicScan({ onScanComplete }) {
 
     // 2. Save vision diagnosis data to Firestore — no flips, AI already reports correct side
     if (user && visionDiagnosis) {
+      setSaving(true);
       try {
         const cls = visionDiagnosis.classification || 'NATURAL';
         const side = (visionDiagnosis.prostheticSide || '').toLowerCase() || null;
@@ -335,8 +375,11 @@ export default function AnatomicScan({ onScanComplete }) {
           WHEELCHAIR: 'other', MEDICAL: 'other', NATURAL: 'none',
         };
         const levelMap = { TRANSFEMORAL_AMPUTEE: 'above_knee', TRANSTIBIAL_AMPUTEE: 'below_knee' };
-        // Use explicit mobilityAid from AI response — no guessing from aids[]
         const mobilityAid = visionDiagnosis.mobilityAid || 'none';
+
+        // Capture snapshot + verify with server
+        const verification = await captureAndVerify(result, visionDiagnosis);
+        const verifiedScanData = verification?.scanData || buildScanData(result, visionDiagnosis);
 
         console.log('[ScanConfirm] Saving — classification:', cls, 'side:', side, 'mobilityAid:', mobilityAid);
 
@@ -358,18 +401,28 @@ export default function AnatomicScan({ onScanComplete }) {
             description_he: visionDiagnosis.description_he,
             specialProtocol: visionDiagnosis.specialProtocol,
           },
-          scanData: buildScanData(result, visionDiagnosis),
+          scanData: verifiedScanData,
+          scanVerification: {
+            verified: verification?.verified ?? true,
+            confidence: verification?.confidence ?? 0,
+            corrections: verification?.corrections ?? null,
+            description: verification?.description ?? '',
+            description_he: verification?.description_he ?? '',
+            fallback: verification?.fallback ?? false,
+          },
         };
         await setDoc(doc(db, 'users', user.uid), saveData, { merge: true });
         await refreshProfile();
+        setSaved(true);
       } catch (err) {
         console.error('Failed to save scan results:', err);
       }
+      setSaving(false);
     }
 
     // 3. Navigate to profile
-    navigate('/profile');
-  }, [stopScan, stopPoseLoop, stopSpeech, user, result, visionDiagnosis, refreshProfile, navigate]);
+    setTimeout(() => navigate('/profile'), 1500);
+  }, [stopScan, stopPoseLoop, stopSpeech, user, result, visionDiagnosis, captureAndVerify, refreshProfile, navigate]);
 
   const handleRetryCamera = useCallback(() => {
     startCamera();
@@ -423,6 +476,23 @@ export default function AnatomicScan({ onScanComplete }) {
         {qualityWarning && (
           <div style={styles.qualityOverlay}>
             <p style={styles.qualityText}>{t('scan.qualityLost')}</p>
+          </div>
+        )}
+
+        {/* Full-body visibility warning overlay */}
+        {fullBodyWarning && !qualityWarning && (
+          <div style={styles.fullBodyOverlay}>
+            <p style={styles.fullBodyText}>
+              {isHe
+                ? 'כל הגוף חייב להיות גלוי! התרחק מהמצלמה.'
+                : 'Full body must be visible! Step back from the camera.'}
+            </p>
+            {missingBodyParts && missingBodyParts.length > 0 && (
+              <p style={styles.fullBodyMissing}>
+                {isHe ? 'חסר: ' : 'Missing: '}
+                {missingBodyParts.join(', ')}
+              </p>
+            )}
           </div>
         )}
       </div>
@@ -576,7 +646,7 @@ export default function AnatomicScan({ onScanComplete }) {
                 <button onClick={handleConfirmAndFinish} style={styles.visionConfirmBtn}>
                   {isHe ? 'מאשר' : 'Confirm'}
                 </button>
-                <button onClick={() => setShowCorrectionPicker(true)} style={styles.visionRejectBtn}>
+                <button onClick={() => { pauseScan(); setShowCorrectionPicker(true); }} style={styles.visionRejectBtn}>
                   {isHe ? 'דווח על טעות' : 'Report Error'}
                 </button>
               </div>
@@ -663,6 +733,38 @@ export default function AnatomicScan({ onScanComplete }) {
         <div style={styles.center}>
           <h2 style={styles.subtitle}>{t('scan.complete')}</h2>
 
+          {/* Verification status */}
+          {verifying && (
+            <div style={styles.verifyingCard}>
+              <div style={styles.visionSpinner} />
+              <p style={styles.verifyingText}>
+                {isHe ? 'מאמת תוצאות סריקה...' : 'Verifying scan results...'}
+              </p>
+            </div>
+          )}
+          {verificationResult && !verifying && (
+            <div style={{
+              ...styles.verificationBadge,
+              backgroundColor: verificationResult.verified ? '#e8f5e9' : '#fff3e0',
+              borderColor: verificationResult.verified ? '#4caf50' : '#ff9800',
+            }}>
+              <span style={{
+                ...styles.verificationIcon,
+                color: verificationResult.verified ? '#4caf50' : '#ff9800',
+              }}>
+                {verificationResult.verified ? '\u2713' : '\u26A0'}
+              </span>
+              <span style={styles.verificationLabel}>
+                {verificationResult.verified
+                  ? (isHe ? 'אומת בהצלחה' : 'Verified')
+                  : (isHe ? 'נדרשת בדיקה נוספת' : 'Needs review')}
+                {verificationResult.fallback
+                  ? (isHe ? ' (מקומי)' : ' (local)')
+                  : ` (${Math.round((verificationResult.confidence || 0) * 100)}%)`}
+              </span>
+            </div>
+          )}
+
           {saving && <p style={styles.savingText}>{t('scan.savingResult')}</p>}
           {saved && <p style={styles.savedText}>{t('scan.savedResult')}</p>}
 
@@ -684,6 +786,30 @@ export default function AnatomicScan({ onScanComplete }) {
           <button onClick={handleReset} style={styles.button}>
             {t('scan.newScan')}
           </button>
+        </div>
+      )}
+
+      {/* PAUSED — show resume + reset buttons */}
+      {scanStatus === 'paused' && (
+        <div style={styles.center}>
+          <div style={styles.pausedCard}>
+            <p style={styles.pausedTitle}>
+              {isHe ? 'הסריקה הושהתה' : 'Scan Paused'}
+            </p>
+            <p style={styles.pausedDesc}>
+              {isHe
+                ? 'תקן את הבעיה ולחץ המשך. כל הנתונים שנאספו נשמרים.'
+                : 'Fix the issue and press Resume. All collected data is preserved.'}
+            </p>
+            <div style={styles.visionButtons}>
+              <button onClick={resumeScan} style={styles.visionConfirmBtn}>
+                {isHe ? 'המשך סריקה' : 'Resume Scan'}
+              </button>
+              <button onClick={handleReset} style={styles.buttonSecondary}>
+                {isHe ? 'התחל מחדש' : 'Start Over'}
+              </button>
+            </div>
+          </div>
         </div>
       )}
 
@@ -1044,5 +1170,89 @@ const styles = {
     borderRadius: '50%',
     margin: '0 auto',
     animation: 'spin 1s linear infinite',
+  },
+  // Full-body visibility gate overlay
+  fullBodyOverlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: 'rgba(255, 152, 0, 0.8)',
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: 12,
+  },
+  fullBodyText: {
+    color: '#fff',
+    fontSize: 20,
+    fontWeight: 700,
+    textAlign: 'center',
+    padding: 16,
+  },
+  fullBodyMissing: {
+    color: '#fff3e0',
+    fontSize: 14,
+    textAlign: 'center',
+    padding: '0 16px',
+  },
+  // Paused state card
+  pausedCard: {
+    padding: 32,
+    margin: '24px auto',
+    maxWidth: 420,
+    border: '2px solid #ff9800',
+    borderRadius: 16,
+    backgroundColor: '#fff8e1',
+    textAlign: 'center',
+  },
+  pausedTitle: {
+    fontSize: 22,
+    fontWeight: 700,
+    color: '#e65100',
+    marginBottom: 12,
+  },
+  pausedDesc: {
+    fontSize: 15,
+    color: '#bf360c',
+    marginBottom: 20,
+    lineHeight: 1.5,
+  },
+  // Verification status styles
+  verifyingCard: {
+    padding: 20,
+    margin: '12px auto',
+    maxWidth: 360,
+    border: '1px solid #bbdefb',
+    borderRadius: 12,
+    backgroundColor: '#e3f2fd',
+    textAlign: 'center',
+  },
+  verifyingText: {
+    fontSize: 15,
+    fontWeight: 600,
+    color: '#1565c0',
+    marginTop: 12,
+  },
+  verificationBadge: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: 8,
+    padding: '8px 20px',
+    borderRadius: 24,
+    border: '2px solid',
+    margin: '12px auto',
+    fontSize: 14,
+    fontWeight: 600,
+  },
+  verificationIcon: {
+    fontSize: 18,
+    fontWeight: 700,
+  },
+  verificationLabel: {
+    fontSize: 14,
+    color: '#333',
   },
 };

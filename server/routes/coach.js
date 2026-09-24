@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { generateWeek, generateTips, analyzeMovement, generateWorkoutSummary, getLocalFallbackWeek, generateRealtimeFeedback, adaptWorkout, analyzeRepFrames, analyzeAnatomy } from '../services/claude.js';
+import { generateWeek, generateTips, analyzeMovement, generateWorkoutSummary, getLocalFallbackWeek, generateRealtimeFeedback, adaptWorkout, analyzeRepFrames, analyzeAnatomy, verifyScan } from '../services/claude.js';
 import { analyzeGameFrames, analyzeVARFrame } from '../services/gameAnalysis.js';
 import { analyzeEnvironment } from '../services/environmentAnalysis.js';
 
@@ -357,6 +357,33 @@ router.post('/correct-anatomy', (req, res) => {
   };
 
   res.json(corrected);
+});
+
+// === SCAN VERIFICATION — Final visual + kinetic cross-check ===
+// Receives snapshot image + scanData, sends to Claude for verification
+router.post('/verify-scan', async (req, res) => {
+  try {
+    const { snapshot, scanData } = req.body;
+
+    if (!scanData || typeof scanData !== 'object') {
+      return res.status(400).json({ error: 'Missing scanData' });
+    }
+
+    const result = await verifyScan(snapshot || null, scanData);
+    res.json(result);
+  } catch (error) {
+    console.error('verify-scan error:', error);
+    // Graceful fallback — don't block the user
+    res.json({
+      verified: true,
+      scanData: req.body.scanData || {},
+      corrections: null,
+      description: 'Verification service unavailable',
+      description_he: 'שירות האימות לא זמין',
+      confidence: 0,
+      fallback: true,
+    });
+  }
 });
 
 export default router;

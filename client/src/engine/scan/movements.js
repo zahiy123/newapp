@@ -44,6 +44,7 @@ export { LM };
 // ============================================================
 
 export const TRACK_ALPHA = Object.freeze([
+  // ── Upper body ──
   {
     id: 'alpha_arms_raise',
     instruction_he: 'הרם את הידיים לצדדים לאט, והורד אותן בחזרה. חזור על התנועה.',
@@ -58,6 +59,32 @@ export const TRACK_ALPHA = Object.freeze([
       LM.LEFT_HIP, LM.RIGHT_HIP,
     ],
   },
+  {
+    id: 'alpha_shoulder_circles',
+    instruction_he: 'סובב את שתי הכתפיים בתנועה מעגלית, קדימה ואז אחורה.',
+    instruction_en: 'Rotate both shoulders in circles, forward then backward.',
+    duration_ms: 12000,
+    target_limbs: ['left_arm', 'right_arm'],
+    analysis_type: 'damping',
+    landmarks_of_interest: [
+      LM.LEFT_SHOULDER, LM.RIGHT_SHOULDER,
+      LM.LEFT_ELBOW, LM.RIGHT_ELBOW,
+    ],
+  },
+  {
+    id: 'alpha_elbow_flex',
+    instruction_he: 'כופף ופשוט את שני המרפקים במלואם, כמו כפיפות מרפק.',
+    instruction_en: 'Bend and extend both elbows fully, like bicep curls.',
+    duration_ms: 12000,
+    target_limbs: ['left_arm', 'right_arm'],
+    analysis_type: 'damping',
+    landmarks_of_interest: [
+      LM.LEFT_SHOULDER, LM.RIGHT_SHOULDER,
+      LM.LEFT_ELBOW, LM.RIGHT_ELBOW,
+      LM.LEFT_WRIST, LM.RIGHT_WRIST,
+    ],
+  },
+  // ── Lower body ──
   {
     id: 'alpha_weight_shift',
     instruction_he: 'העבר את המשקל מצד לצד, בקצב שנוח לך.',
@@ -96,6 +123,7 @@ export const TRACK_ALPHA = Object.freeze([
 // ============================================================
 
 export const TRACK_BETA = Object.freeze([
+  // ── Lower body ──
   {
     id: 'beta_step_right_left',
     instruction_he: 'צעד צעד אחד קדימה עם הרגל הימנית, ואז צעד קדימה עם השמאלית. חזור.',
@@ -112,9 +140,9 @@ export const TRACK_BETA = Object.freeze([
   },
   {
     id: 'beta_single_leg_right',
-    instruction_he: 'עמוד על הרגל הימנית בלבד. נסה להחזיק 5 שניות.',
-    instruction_en: 'Stand on your right leg only. Try to hold for 5 seconds.',
-    duration_ms: 7000,
+    instruction_he: 'עמוד על הרגל הימנית בלבד. נסה להחזיק 10 שניות.',
+    instruction_en: 'Stand on your right leg only. Try to hold for 10 seconds.',
+    duration_ms: 10000,
     target_limbs: ['right_leg'],
     analysis_type: 'stability',
     landmarks_of_interest: [
@@ -125,9 +153,9 @@ export const TRACK_BETA = Object.freeze([
   },
   {
     id: 'beta_single_leg_left',
-    instruction_he: 'עכשיו עמוד על הרגל השמאלית בלבד. נסה להחזיק 5 שניות.',
-    instruction_en: 'Now stand on your left leg only. Try to hold for 5 seconds.',
-    duration_ms: 7000,
+    instruction_he: 'עכשיו עמוד על הרגל השמאלית בלבד. נסה להחזיק 10 שניות.',
+    instruction_en: 'Now stand on your left leg only. Try to hold for 10 seconds.',
+    duration_ms: 10000,
     target_limbs: ['left_leg'],
     analysis_type: 'stability',
     landmarks_of_interest: [
@@ -150,6 +178,47 @@ export const TRACK_BETA = Object.freeze([
       LM.LEFT_SHOULDER, LM.RIGHT_SHOULDER,
     ],
   },
+  // ── Upper body ──
+  {
+    id: 'beta_shoulder_press',
+    instruction_he: 'הרם ידיים מעל הראש ותוריד לאט. חזור 5 פעמים.',
+    instruction_en: 'Press arms overhead and lower slowly. Repeat 5 times.',
+    duration_ms: 12000,
+    target_limbs: ['left_arm', 'right_arm'],
+    analysis_type: 'damping',
+    landmarks_of_interest: [
+      LM.LEFT_SHOULDER, LM.RIGHT_SHOULDER,
+      LM.LEFT_ELBOW, LM.RIGHT_ELBOW,
+      LM.LEFT_WRIST, LM.RIGHT_WRIST,
+    ],
+  },
+  {
+    id: 'beta_elbow_flex',
+    instruction_he: 'כופף ופשוט את המרפקים לאט. חזור 5 פעמים.',
+    instruction_en: 'Bend and extend your elbows slowly. Repeat 5 times.',
+    duration_ms: 12000,
+    target_limbs: ['left_arm', 'right_arm'],
+    analysis_type: 'damping',
+    landmarks_of_interest: [
+      LM.LEFT_SHOULDER, LM.RIGHT_SHOULDER,
+      LM.LEFT_ELBOW, LM.RIGHT_ELBOW,
+      LM.LEFT_WRIST, LM.RIGHT_WRIST,
+    ],
+  },
+  {
+    id: 'beta_arm_reach',
+    instruction_he: 'הושט יד ימין קדימה ואז יד שמאל. חזור 3 פעמים.',
+    instruction_en: 'Reach your right arm forward then your left arm. Repeat 3 times.',
+    duration_ms: 12000,
+    target_limbs: ['left_arm', 'right_arm'],
+    analysis_type: 'compensation',
+    landmarks_of_interest: [
+      LM.LEFT_SHOULDER, LM.RIGHT_SHOULDER,
+      LM.LEFT_ELBOW, LM.RIGHT_ELBOW,
+      LM.LEFT_WRIST, LM.RIGHT_WRIST,
+      LM.LEFT_HIP, LM.RIGHT_HIP,
+    ],
+  },
 ]);
 
 
@@ -159,6 +228,7 @@ export const TRACK_BETA = Object.freeze([
 // ============================================================
 
 export const TRACK_GAMMA = Object.freeze([
+  // ── Lower body ──
   {
     id: 'gamma_walk',
     instruction_he: 'לך קדימה ואחורה בקצב טבעי.',
@@ -215,6 +285,44 @@ export const TRACK_GAMMA = Object.freeze([
       LM.LEFT_KNEE, LM.RIGHT_KNEE,
       LM.LEFT_ANKLE, LM.RIGHT_ANKLE,
       LM.LEFT_SHOULDER, LM.RIGHT_SHOULDER,
+    ],
+  },
+  // ── Upper body ──
+  {
+    id: 'gamma_shoulder_circles',
+    instruction_he: 'סובב את שתי הכתפיים בתנועה מעגלית. 5 סיבובים קדימה, 5 אחורה.',
+    instruction_en: 'Rotate both shoulders in circles. 5 forward, 5 backward.',
+    duration_ms: 12000,
+    target_limbs: ['left_arm', 'right_arm'],
+    analysis_type: 'damping',
+    landmarks_of_interest: [
+      LM.LEFT_SHOULDER, LM.RIGHT_SHOULDER,
+      LM.LEFT_ELBOW, LM.RIGHT_ELBOW,
+    ],
+  },
+  {
+    id: 'gamma_elbow_flex',
+    instruction_he: 'כופף ופשוט את שני המרפקים במלואם. חזור 5 פעמים.',
+    instruction_en: 'Fully bend and extend both elbows. Repeat 5 times.',
+    duration_ms: 12000,
+    target_limbs: ['left_arm', 'right_arm'],
+    analysis_type: 'damping',
+    landmarks_of_interest: [
+      LM.LEFT_SHOULDER, LM.RIGHT_SHOULDER,
+      LM.LEFT_ELBOW, LM.RIGHT_ELBOW,
+      LM.LEFT_WRIST, LM.RIGHT_WRIST,
+    ],
+  },
+  {
+    id: 'gamma_wrist_circles',
+    instruction_he: 'פשוט ידיים קדימה וסובב את פרקי כפות הידיים בתנועה מעגלית.',
+    instruction_en: 'Extend arms forward and rotate your wrists in circles.',
+    duration_ms: 10000,
+    target_limbs: ['left_arm', 'right_arm'],
+    analysis_type: 'damping',
+    landmarks_of_interest: [
+      LM.LEFT_WRIST, LM.RIGHT_WRIST,
+      LM.LEFT_ELBOW, LM.RIGHT_ELBOW,
     ],
   },
 ]);
@@ -321,6 +429,24 @@ export const WHEELCHAIR_OVERRIDES = Object.freeze({
       LM.LEFT_ELBOW, LM.RIGHT_ELBOW,
       LM.LEFT_WRIST, LM.RIGHT_WRIST,
       LM.LEFT_HIP, LM.RIGHT_HIP,
+    ],
+  },
+  // New upper body movements — NOT overridden: undefined = keep original
+  // gamma_shoulder_circles, gamma_elbow_flex, gamma_wrist_circles: kept as-is
+  // alpha_shoulder_circles, alpha_elbow_flex: kept as-is
+  // beta_shoulder_press, beta_elbow_flex, beta_arm_reach: kept as-is
+  beta_step_right_left: null,    // skip — no leg stepping
+  beta_mini_squat: {
+    id: 'beta_upper_body_push',
+    instruction_he: 'דחוף ידיים קדימה ומשוך אחורה, כמו דחיפת קיר. חזור 3 פעמים.',
+    instruction_en: 'Push hands forward and pull back, like pushing a wall. Repeat 3 times.',
+    duration_ms: 15000,
+    target_limbs: ['left_arm', 'right_arm'],
+    analysis_type: 'damping',
+    landmarks_of_interest: [
+      LM.LEFT_SHOULDER, LM.RIGHT_SHOULDER,
+      LM.LEFT_ELBOW, LM.RIGHT_ELBOW,
+      LM.LEFT_WRIST, LM.RIGHT_WRIST,
     ],
   },
 });

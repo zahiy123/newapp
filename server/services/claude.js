@@ -3116,6 +3116,146 @@ export async function analyzeAnatomy(frames, kineticHints = null) {
   return parsed;
 }
 
+/**
+ * Verify scan results — final visual + kinetic confirmation.
+ * Sends a snapshot image + scanData to Claude for cross-verification.
+ * The model confirms or corrects the limb statuses before saving.
+ *
+ * @param {string} snapshot - base64 JPEG image
+ * @param {Object} scanData - assembled scanData from ScanDataBuilder
+ * @returns {Object} { verified, scanData, corrections, description, description_he }
+ */
+export async function verifyScan(snapshot, scanData) {
+  const contentBlocks = [];
+
+  if (snapshot) {
+    const cleaned = cleanBase64(snapshot);
+    if (cleaned && cleaned.length >= 500) {
+      contentBlocks.push({
+        type: 'image',
+        source: { type: 'base64', media_type: 'image/jpeg', data: cleaned },
+      });
+    }
+  }
+
+  const scanSummary = scanData ? JSON.stringify({
+    classification: scanData.classification,
+    adaptedTrack: scanData.adaptedTrack,
+    prostheticSide: scanData.prostheticSide,
+    aids: scanData.aids,
+    specialProtocol: scanData.specialProtocol,
+    limbStatus: scanData.limbStatus,
+    bodyMap: scanData.bodyMap,
+    compensationMap: scanData.compensationMap,
+    riskZones: scanData.riskZones,
+  }, null, 2) : 'No scan data available';
+
+  contentBlocks.push({
+    type: 'text',
+    text: `You are a medical-grade anatomical verification system for an adaptive sports training app.
+
+TASK: Cross-verify the kinetic scan data against the visual image. This is the FINAL verification step before the athlete's training plan is generated.
+
+CRITICAL MIRROR RULE: The camera feed is mirrored (selfie mode). A limb on the RIGHT side of the image is the person's LEFT limb, and vice versa. Report all sides from the PERSON'S real-body perspective.
+
+KINETIC SCAN DATA (from movement analysis):
+${scanSummary}
+
+VERIFY:
+1. Does the image MATCH the kinetic scan classification? (e.g., if scan says TRANSTIBIAL_AMPUTEE left leg, is a below-knee prosthetic visible on the person's left leg?)
+2. Are there any ADDITIONAL limitations or prosthetics visible that the kinetic scan MISSED?
+3. Are there any FALSE POSITIVES — things the kinetic scan flagged that look normal in the image?
+4. Check BOTH arms AND legs — verify every limb status individually
+
+RULES:
+- If the image confirms the scan data → verified = true, return the scanData as-is
+- If you see corrections needed → verified = true but include corrections object with the specific fields to override
+- Only set verified = false if the image fundamentally contradicts the scan (e.g., scan says amputee but person clearly has all intact limbs)
+- Partial corrections are fine — fix individual fields without rejecting the whole scan
+
+Respond ONLY with valid JSON (no markdown, no code fences):
+{
+  "verified": true,
+  "corrections": null,
+  "description": "Brief English verification summary",
+  "description_he": "סיכום אימות קצר בעברית",
+  "confidence": 0.95
+}
+
+If corrections are needed, corrections object can include any scanData fields to override:
+{
+  "verified": true,
+  "corrections": {
+    "classification": "CORRECTED_VALUE",
+    "prostheticSide": "corrected_side",
+    "limbStatus": { "right_arm": { "status": "anatomical_weak", "canTrain": true } }
+  },
+  "description": "Corrected: right arm shows weakness not detected by kinetic scan",
+  "description_he": "תוקן: יד ימין מראה חולשה שלא זוהתה בסריקה הקינטית",
+  "confidence": 0.85
+}`,
+  });
+
+  if (contentBlocks.length < 2) {
+    // No image — return unverified pass-through
+    return {
+      verified: true,
+      scanData,
+      corrections: null,
+      description: 'No snapshot available for verification',
+      description_he: 'אין תמונה זמינה לאימות',
+      confidence: 0,
+      fallback: true,
+    };
+  }
+
+  try {
+    const responseText = await callClaudeVision(
+      'You are a medical-grade anatomical verification system. Be precise, thorough, and compare visual evidence against kinetic data.',
+      contentBlocks,
+      1024,
+      2
+    );
+    const parsed = extractJSON(responseText);
+    console.log('[verifyScan] Result:', JSON.stringify(parsed));
+
+    // Apply corrections if any
+    let finalScanData = scanData ? { ...scanData } : {};
+    if (parsed?.corrections && typeof parsed.corrections === 'object') {
+      // Deep merge corrections into scanData
+      for (const [key, value] of Object.entries(parsed.corrections)) {
+        if (key === 'limbStatus' && typeof value === 'object' && finalScanData.limbStatus) {
+          finalScanData.limbStatus = { ...finalScanData.limbStatus, ...value };
+        } else {
+          finalScanData[key] = value;
+        }
+      }
+    }
+
+    return {
+      verified: parsed?.verified !== false,
+      scanData: finalScanData,
+      corrections: parsed?.corrections || null,
+      description: parsed?.description || '',
+      description_he: parsed?.description_he || '',
+      confidence: parsed?.confidence || 0,
+    };
+  } catch (err) {
+    console.error('[verifyScan] Error:', err.message);
+    // Fallback: return unverified pass-through
+    return {
+      verified: true,
+      scanData,
+      corrections: null,
+      description: 'Verification unavailable',
+      description_he: 'אימות לא זמין',
+      confidence: 0,
+      fallback: true,
+    };
+  }
+}
+
+
 export async function adaptWorkout({ profile, completedExercises, performance, remainingPlan, environmentContext }) {
   const sportContext = SPORT_CONTEXTS[profile.sport] || SPORT_CONTEXTS.football || '';
 

@@ -22,10 +22,10 @@ const LIMB_KEYS = ['left_leg', 'right_leg', 'left_arm', 'right_arm'];
 
 // Map limb keys to joint keys for bodyMap
 const LIMB_TO_JOINTS = {
-  left_leg:  ['left_knee', 'left_hip'],
-  right_leg: ['right_knee', 'right_hip'],
-  left_arm:  ['left_elbow', 'left_shoulder'],
-  right_arm: ['right_elbow', 'right_shoulder'],
+  left_leg:  ['left_knee', 'left_hip', 'left_ankle'],
+  right_leg: ['right_knee', 'right_hip', 'right_ankle'],
+  left_arm:  ['left_elbow', 'left_shoulder', 'left_wrist'],
+  right_arm: ['right_elbow', 'right_shoulder', 'right_wrist'],
 };
 
 // ROM percentage by damping class
@@ -39,6 +39,7 @@ const ROM_BY_DAMPING = {
 const NO_TRAIN_STATUSES = new Set([
   LIMB_STATUS.ABSENT,
   LIMB_STATUS.PROSTHETIC_ABOVE_KNEE,
+  LIMB_STATUS.PROSTHETIC_ABOVE_ELBOW,
 ]);
 
 // Statuses that are risk zones
@@ -46,6 +47,8 @@ const RISK_STATUSES = new Set([
   LIMB_STATUS.ANATOMICAL_WEAK,
   LIMB_STATUS.PROSTHETIC_BELOW_KNEE,
   LIMB_STATUS.PROSTHETIC_ABOVE_KNEE,
+  LIMB_STATUS.PROSTHETIC_BELOW_ELBOW,
+  LIMB_STATUS.PROSTHETIC_ABOVE_ELBOW,
 ]);
 
 // Classification to specialProtocol mapping
@@ -214,6 +217,8 @@ function computeRomPercent(status, dampingClass, dampingFactor) {
     case LIMB_STATUS.ANATOMICAL_WEAK: return 55;
     case LIMB_STATUS.PROSTHETIC_BELOW_KNEE: return 30;
     case LIMB_STATUS.PROSTHETIC_ABOVE_KNEE: return 20;
+    case LIMB_STATUS.PROSTHETIC_BELOW_ELBOW: return 30;
+    case LIMB_STATUS.PROSTHETIC_ABOVE_ELBOW: return 15;
     default: return 70; // unresolved — conservative
   }
 }
@@ -272,6 +277,19 @@ function buildRiskZones(bodyMap, compensationMap, gateResult) {
     // Trunk lean affects shoulders on the compensating side
     riskSet.add('left_shoulder');
     riskSet.add('right_shoulder');
+  }
+
+  if (compensationMap.shoulder_elevation) {
+    // Shoulder elevation: arms with risk status → add elbows + wrists
+    const armLimbs = gateResult.limbs || {};
+    for (const key of ['left_arm', 'right_arm']) {
+      const v = armLimbs[key];
+      if (v && RISK_STATUSES.has(v.status)) {
+        riskSet.add(key.replace('_arm', '_elbow'));
+        riskSet.add(key.replace('_arm', '_wrist'));
+        riskSet.add(key.replace('_arm', '_shoulder'));
+      }
+    }
   }
 
   // From inconclusive verdicts
