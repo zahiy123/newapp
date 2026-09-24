@@ -219,6 +219,21 @@ export const TRACK_BETA = Object.freeze([
       LM.LEFT_HIP, LM.RIGHT_HIP,
     ],
   },
+  // ── Dynamic gait analysis ──
+  {
+    id: 'beta_walk_forward_back',
+    instruction_he: 'צעד 3 צעדים קדימה ו-3 אחורה. שמור על יציבה ישרה.',
+    instruction_en: 'Walk 3 steps forward and 3 back. Keep posture upright.',
+    duration_ms: 15000,
+    target_limbs: ['left_leg', 'right_leg'],
+    analysis_type: 'compensation',
+    landmarks_of_interest: [
+      LM.LEFT_HIP, LM.RIGHT_HIP,
+      LM.LEFT_KNEE, LM.RIGHT_KNEE,
+      LM.LEFT_ANKLE, LM.RIGHT_ANKLE,
+      LM.LEFT_SHOULDER, LM.RIGHT_SHOULDER,
+    ],
+  },
 ]);
 
 
@@ -242,6 +257,20 @@ export const TRACK_GAMMA = Object.freeze([
       LM.LEFT_ANKLE, LM.RIGHT_ANKLE,
       LM.LEFT_SHOULDER, LM.RIGHT_SHOULDER,
       LM.LEFT_WRIST, LM.RIGHT_WRIST,
+    ],
+  },
+  {
+    id: 'gamma_bilateral_sync',
+    instruction_he: 'הרם שתי ידיים ורגל אחת בו-זמנית. החלף רגליים. חזור 5 פעמים.',
+    instruction_en: 'Raise both arms and one leg simultaneously. Switch legs. Repeat 5 times.',
+    duration_ms: 12000,
+    target_limbs: ['left_leg', 'right_leg', 'left_arm', 'right_arm'],
+    analysis_type: 'compensation',
+    landmarks_of_interest: [
+      LM.LEFT_SHOULDER, LM.RIGHT_SHOULDER,
+      LM.LEFT_ELBOW, LM.RIGHT_ELBOW,
+      LM.LEFT_HIP, LM.RIGHT_HIP,
+      LM.LEFT_KNEE, LM.RIGHT_KNEE,
     ],
   },
   {
@@ -435,6 +464,7 @@ export const WHEELCHAIR_OVERRIDES = Object.freeze({
   // gamma_shoulder_circles, gamma_elbow_flex, gamma_wrist_circles: kept as-is
   // alpha_shoulder_circles, alpha_elbow_flex: kept as-is
   // beta_shoulder_press, beta_elbow_flex, beta_arm_reach: kept as-is
+  beta_walk_forward_back: null,   // skip — no walking
   beta_step_right_left: null,    // skip — no leg stepping
   beta_mini_squat: {
     id: 'beta_upper_body_push',

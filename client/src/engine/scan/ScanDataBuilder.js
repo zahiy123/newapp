@@ -115,6 +115,9 @@ export function buildScanData(scanResult, visionDiagnosis) {
   // 9. Limb status — for Iron Rule enforcement
   const limbStatus = buildLimbStatus(gateResult, passportFields);
 
+  // 10. ROM baseline — timestamped snapshot for progress tracking
+  const romBaseline = buildRomBaseline(bodyMap, gateResult, passportFields);
+
   return {
     classification,
     adaptedTrack,
@@ -125,6 +128,7 @@ export function buildScanData(scanResult, visionDiagnosis) {
     riskZones,
     specialProtocol,
     limbStatus,
+    romBaseline,
   };
 }
 
@@ -331,4 +335,38 @@ function buildLimbStatus(gateResult, passportFields) {
   }
 
   return limbStatus;
+}
+
+
+/**
+ * Build ROM baseline — timestamped per-joint ROM snapshot.
+ * Used for progress tracking: baseline → current comparison.
+ */
+function buildRomBaseline(bodyMap, gateResult, passportFields) {
+  const joints = {};
+  const limbs = gateResult.limbs || {};
+
+  for (const limbKey of LIMB_KEYS) {
+    const verdict = limbs[limbKey];
+    const passport = passportFields[limbKey];
+    const dampingClass = verdict?.damping_class || passport?.damping_class || null;
+    const limbJoints = LIMB_TO_JOINTS[limbKey];
+    if (!limbJoints) continue;
+
+    for (const jointKey of limbJoints) {
+      const entry = bodyMap[jointKey];
+      if (entry) {
+        joints[jointKey] = {
+          rom: entry.rom,
+          status: entry.status,
+          damping: dampingClass || 'unknown',
+        };
+      }
+    }
+  }
+
+  return {
+    timestamp: new Date().toISOString(),
+    joints,
+  };
 }

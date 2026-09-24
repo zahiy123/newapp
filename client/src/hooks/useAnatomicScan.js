@@ -50,8 +50,8 @@ const VISION_CANVAS_MAX_WIDTH = 480;
 const VISION_JPEG_QUALITY = 0.7;
 
 // Snapshot capture settings
-const SNAPSHOT_MAX_WIDTH = 640;
-const SNAPSHOT_JPEG_QUALITY = 0.85;
+const SNAPSHOT_MAX_WIDTH = 480;
+const SNAPSHOT_JPEG_QUALITY = 0.6;
 
 
 // ============================================================

@@ -275,6 +275,15 @@ export default function AnatomicScan({ onScanComplete }) {
         // 2. Use verified scanData (with corrections applied) or fallback to local
         const verifiedScanData = verification?.scanData || buildScanData(result, visionDiagnosis);
 
+        // 2b. Preserve ROM history — carry forward previous baselines
+        const existingBaselines = userProfile?.scanData?.previousBaselines || [];
+        const existingRom = userProfile?.scanData?.romBaseline || null;
+        if (existingRom && verifiedScanData.romBaseline) {
+          // Push old baseline into history (max 10)
+          const history = [...existingBaselines, existingRom].slice(-10);
+          verifiedScanData.previousBaselines = history;
+        }
+
         // 3. Build save payload
         const saveData = {
           scanComplete: true,
@@ -380,6 +389,14 @@ export default function AnatomicScan({ onScanComplete }) {
         // Capture snapshot + verify with server
         const verification = await captureAndVerify(result, visionDiagnosis);
         const verifiedScanData = verification?.scanData || buildScanData(result, visionDiagnosis);
+
+        // Preserve ROM history — carry forward previous baselines
+        const existingBaselines = userProfile?.scanData?.previousBaselines || [];
+        const existingRom = userProfile?.scanData?.romBaseline || null;
+        if (existingRom && verifiedScanData.romBaseline) {
+          const history = [...existingBaselines, existingRom].slice(-10);
+          verifiedScanData.previousBaselines = history;
+        }
 
         console.log('[ScanConfirm] Saving — classification:', cls, 'side:', side, 'mobilityAid:', mobilityAid);
 

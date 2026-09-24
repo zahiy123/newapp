@@ -1867,9 +1867,9 @@ GENERATE rehab-specific seated exercises: shoulder ROM, rotator cuff work, seate
   // ── NEW: Muscle Group Focus ──
   const muscleFocus = MUSCLE_FOCUS_MAP[muscleGroupFocus] || MUSCLE_FOCUS_MAP.full_body;
 
-  // ── NEW: Scan Results ──
+  // ── NEW: Scan Results (always sent — even NATURAL athletes have ROM data) ──
   let scanBlock = '';
-  if (scanData && typeof scanData === 'object' && scanData.classification && scanData.classification !== 'NATURAL') {
+  if (scanData && typeof scanData === 'object' && scanData.classification) {
     const parts = [`SCAN RESULTS (from kinetic body scan):`];
     parts.push(`Classification: ${scanData.classification}. Track: ${scanData.adaptedTrack || 'NORMAL'}.`);
     if (scanData.prostheticSide) parts.push(`Prosthetic side: ${scanData.prostheticSide}.`);
@@ -1890,6 +1890,31 @@ GENERATE rehab-specific seated exercises: shoulder ROM, rotator cuff work, seate
       parts.push(`Risk zones: ${scanData.riskZones.join(', ')}. Reduce load and add stability work for these areas.`);
     }
     if (scanData.specialProtocol) parts.push(`Special protocol: ${scanData.specialProtocol}.`);
+
+    // ROM progress tracking — compare current vs previous baselines
+    if (scanData.romBaseline && scanData.previousBaselines && Array.isArray(scanData.previousBaselines) && scanData.previousBaselines.length > 0) {
+      const prev = scanData.previousBaselines[scanData.previousBaselines.length - 1];
+      const currentJoints = scanData.romBaseline.joints || {};
+      const prevJoints = prev.joints || {};
+      const progressLines = [];
+      for (const [joint, cur] of Object.entries(currentJoints)) {
+        const prevEntry = prevJoints[joint];
+        if (prevEntry && typeof prevEntry.rom === 'number' && typeof cur.rom === 'number') {
+          const diff = cur.rom - prevEntry.rom;
+          if (diff !== 0) {
+            const sign = diff > 0 ? '+' : '';
+            const note = diff < -5 ? ' (REGRESSION — watch closely)' : diff > 10 ? ' (significant improvement)' : '';
+            progressLines.push(`  ${joint}: ${prevEntry.rom}% → ${cur.rom}% (${sign}${diff}%${note})`);
+          }
+        }
+      }
+      if (progressLines.length > 0) {
+        parts.push(`\nROM PROGRESS (vs previous scan on ${prev.timestamp?.split('T')[0] || 'unknown'}):`);
+        parts.push(...progressLines);
+        parts.push('Adapt training intensity based on ROM changes. Increase load on improved joints, protect regressing ones.');
+      }
+    }
+
     scanBlock = parts.join('\n');
   }
 
@@ -3152,48 +3177,18 @@ export async function verifyScan(snapshot, scanData) {
 
   contentBlocks.push({
     type: 'text',
-    text: `You are a medical-grade anatomical verification system for an adaptive sports training app.
+    text: `Verify kinetic scan vs image. MIRROR RULE: image is mirrored (selfie). RIGHT in image = person's LEFT.
 
-TASK: Cross-verify the kinetic scan data against the visual image. This is the FINAL verification step before the athlete's training plan is generated.
-
-CRITICAL MIRROR RULE: The camera feed is mirrored (selfie mode). A limb on the RIGHT side of the image is the person's LEFT limb, and vice versa. Report all sides from the PERSON'S real-body perspective.
-
-KINETIC SCAN DATA (from movement analysis):
+SCAN DATA:
 ${scanSummary}
 
-VERIFY:
-1. Does the image MATCH the kinetic scan classification? (e.g., if scan says TRANSTIBIAL_AMPUTEE left leg, is a below-knee prosthetic visible on the person's left leg?)
-2. Are there any ADDITIONAL limitations or prosthetics visible that the kinetic scan MISSED?
-3. Are there any FALSE POSITIVES — things the kinetic scan flagged that look normal in the image?
-4. Check BOTH arms AND legs — verify every limb status individually
+Check: classification match? Missing limitations? False positives? All 4 limbs.
+- Confirmed → verified:true, corrections:null
+- Partial fix → verified:true, corrections:{field:value}
+- Contradiction → verified:false
 
-RULES:
-- If the image confirms the scan data → verified = true, return the scanData as-is
-- If you see corrections needed → verified = true but include corrections object with the specific fields to override
-- Only set verified = false if the image fundamentally contradicts the scan (e.g., scan says amputee but person clearly has all intact limbs)
-- Partial corrections are fine — fix individual fields without rejecting the whole scan
-
-Respond ONLY with valid JSON (no markdown, no code fences):
-{
-  "verified": true,
-  "corrections": null,
-  "description": "Brief English verification summary",
-  "description_he": "סיכום אימות קצר בעברית",
-  "confidence": 0.95
-}
-
-If corrections are needed, corrections object can include any scanData fields to override:
-{
-  "verified": true,
-  "corrections": {
-    "classification": "CORRECTED_VALUE",
-    "prostheticSide": "corrected_side",
-    "limbStatus": { "right_arm": { "status": "anatomical_weak", "canTrain": true } }
-  },
-  "description": "Corrected: right arm shows weakness not detected by kinetic scan",
-  "description_he": "תוקן: יד ימין מראה חולשה שלא זוהתה בסריקה הקינטית",
-  "confidence": 0.85
-}`,
+JSON ONLY:
+{"verified":true,"corrections":null,"description":"...","description_he":"...","confidence":0.95}`,
   });
 
   if (contentBlocks.length < 2) {
@@ -3210,11 +3205,11 @@ If corrections are needed, corrections object can include any scanData fields to
   }
 
   try {
-    const responseText = await callClaudeVision(
-      'You are a medical-grade anatomical verification system. Be precise, thorough, and compare visual evidence against kinetic data.',
+    const responseText = await callClaudeHaiku(
+      'Anatomical verification: compare image vs kinetic scan data. Return JSON only.',
       contentBlocks,
-      1024,
-      2
+      512,
+      1
     );
     const parsed = extractJSON(responseText);
     console.log('[verifyScan] Result:', JSON.stringify(parsed));
