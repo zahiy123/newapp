@@ -2,13 +2,14 @@ import { useState, useEffect, useRef, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useAuth } from '../context/AuthContext';
 import { db } from '../services/firebase';
-import { doc, getDoc, setDoc, collection, getDocs } from 'firebase/firestore';
-import { apiUrl } from '../utils/api';
+import { doc, getDoc, setDoc, addDoc, collection, getDocs, Timestamp } from 'firebase/firestore';
+import { apiUrl, authFetch } from '../utils/api';
 import { Link, useNavigate } from 'react-router-dom';
 import {
   buildFingerprint, savePlan, loadPlan, clearPlan, sanitizePlan,
   loadProgress, isDayCompleted, areAllWeeksComplete, getNextWorkoutDay, clearProgress,
-  loadActiveWorkout, clearActiveWorkout
+  loadActiveWorkout, clearActiveWorkout,
+  loadPendingSessions, removePendingSession
 } from '../utils/workoutStorage';
 import { loadWeeklyProgress, checkWeeklyReminder } from '../utils/weeklyGoals';
 
@@ -79,12 +80,41 @@ export default function Dashboard() {
 
   // Early server warm-up: wake Render instance while user browses dashboard
   useEffect(() => {
-    fetch(apiUrl('/api/coach/analyze-rep'), {
+    authFetch(apiUrl('/api/coach/analyze-rep'), {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ frames: [], exercise: 'calibration', sport: 'warmup', playerName: 'warmup', repNumber: 0 })
     }).catch(() => {});
   }, []);
+
+  // Sync any pending sessions that failed to save during previous workouts
+  useEffect(() => {
+    if (!user) return;
+    async function syncPendingSessions() {
+      const pending = loadPendingSessions();
+      if (pending.length === 0) return;
+      let synced = 0;
+      for (const entry of pending) {
+        try {
+          const data = { ...entry.data };
+          // Restore Firestore Timestamp from serialized seconds
+          if (data.date?.seconds) {
+            data.date = Timestamp.fromMillis(data.date.seconds * 1000);
+          }
+          const uid = data.uid || user.uid;
+          delete data.uid;
+          await addDoc(collection(db, 'users', uid, 'workouts'), data);
+          removePendingSession(entry.id);
+          synced++;
+        } catch (err) {
+          console.warn('[syncPendingSessions] Failed to sync session:', entry.id, err.message);
+        }
+      }
+      if (synced > 0) {
+        console.log(`[syncPendingSessions] Synced ${synced} pending session(s)`);
+      }
+    }
+    syncPendingSessions();
+  }, [user]);
 
   // Load workout count + streak
   useEffect(() => {
@@ -224,7 +254,9 @@ export default function Dashboard() {
       goals: userProfile.goals,
       daysPerWeek: userProfile.trainingDays || 3,
       location: loc || currentLocation,
-      equipment: currentEquipment
+      equipment: currentEquipment,
+      muscleGroupFocus: userProfile.muscleGroupFocus || 'full_body',
+      scanData: userProfile.scanData || null
     };
   }
 
@@ -232,9 +264,8 @@ export default function Dashboard() {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 120000);
     try {
-      const res = await fetch(apiUrl('/api/coach/training-week'), {
+      const res = await authFetch(apiUrl('/api/coach/training-week'), {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ ...payload, weekNumber }),
         signal: controller.signal
       });
@@ -254,9 +285,8 @@ export default function Dashboard() {
   }
 
   async function fetchTips(payload) {
-    const res = await fetch(apiUrl('/api/coach/training-tips'), {
+    const res = await authFetch(apiUrl('/api/coach/training-tips'), {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload)
     });
     if (!res.ok) return { generalTips: [], safetyNotes: [] };

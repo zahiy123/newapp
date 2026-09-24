@@ -1,15 +1,9 @@
 import { useRef, useCallback } from 'react';
-import { apiUrl } from '../utils/api';
+import { apiUrl, authFetch } from '../utils/api';
+import { PeakDetector, getPeakTriggers } from '../utils/kineticEngine';
 const ANALYZE_REP_URL = apiUrl('/api/coach/analyze-rep');
 const MAX_SESSION_IMAGES = 960;
 const MAX_CONSECUTIVE_FAILURES = 10;
-
-// Relative ROM: a rep counts if the athlete dropped at least this % from starting angle
-const MIN_ROM_PERCENT = 0.15; // 15%
-// Absolute fallback: never require deeper than this (rehabilitation safety)
-const ABSOLUTE_MIN_ANGLE = 140;
-// Shoulder Y displacement threshold (normalized 0-1 coords): confirms movement even with noisy angles
-const SHOULDER_Y_MIN_DISPLACEMENT = 0.03; // 3% of frame height
 
 // Key landmark indices: shoulders(11,12), elbows(13,14), wrists(15,16), hips(23,24), knees(25,26), ankles(27,28)
 const KEY_LANDMARK_INDICES = [11, 12, 13, 14, 15, 16, 23, 24, 25, 26, 27, 28];
@@ -41,16 +35,6 @@ function getPrimaryAngle(angles) {
   return null;
 }
 
-// Get average shoulder Y from landmarks (indices 11, 12)
-function getShoulderY(landmarks) {
-  if (!landmarks || !Array.isArray(landmarks)) return null;
-  const l = landmarks[11];
-  const r = landmarks[12];
-  if (!l && !r) return null;
-  if (l && r) return (l.y + r.y) / 2;
-  return (l || r).y;
-}
-
 export function useHaikuVision({ onVisionFeedback } = {}) {
   const enabledRef = useRef(false);
   const disabledRef = useRef(false);
@@ -62,22 +46,10 @@ export function useHaikuVision({ onVisionFeedback } = {}) {
   const startFrameRef = useRef(null);       // Frame 1: captured at descent start
   const startAnglesRef = useRef(null);
   const startLandmarksRef = useRef(null);
-
-  // Best-frame buffer: holds the frame at the deepest angle during "down" phase
-  const minAngleDuringDownRef = useRef(Infinity);
-  const bestFrameRef = useRef(null);
-  const bestAnglesRef = useRef(null);
-  const bestLandmarksRef = useRef(null);
-  const peakSentRef = useRef(false);
-  const prevAngleRef = useRef(null);
   const lastPhaseRef = useRef(null);
 
-  // Relative thresholding: learned from calibration + adaptive during set
-  const startingAngleRef = useRef(null);       // Angle at "up" position (from calibration or first up phase)
-  const startShoulderYRef = useRef(null);       // Shoulder Y at start of down phase
-  const bestShoulderYRef = useRef(null);        // Deepest shoulder Y during down phase
-  const adaptiveMinAngleRef = useRef(null);     // Best observed peak across the set (tightens over time)
-  const calibrationBaselineRef = useRef(null);  // Calibration data passed from Training.jsx
+  // Kinetic Engine: schema-driven peak detector
+  const peakDetectorRef = useRef(null);
 
   // Rep tracking
   const repCountRef = useRef(0);
@@ -106,7 +78,7 @@ export function useHaikuVision({ onVisionFeedback } = {}) {
   }, []);
 
   // === SEND WITH REQUEST LOCKING: block concurrent requests ===
-  const sendToServer = useCallback(async (frame1, frame2, repNumber, angles1, angles2, landmarks1, landmarks2, triggerTs) => {
+  const sendToServer = useCallback(async (frame1, frame2, repNumber, angles1, angles2, landmarks1, landmarks2, triggerTs, equipmentSnapshot) => {
     if (disabledRef.current) {
       console.warn(`[HaikuVision] NOT SENDING: disabled after ${MAX_CONSECUTIVE_FAILURES} failures`);
       return;
@@ -136,10 +108,7 @@ export function useHaikuVision({ onVisionFeedback } = {}) {
     // Log the photo proof
     const f1Size = frame1 ? Math.round(frame1.length / 1024) : 0;
     const f2Size = frame2 ? Math.round(frame2.length / 1024) : 0;
-    console.log(`[HaikuVision] 📸 PHOTO CAPTURED at peak angle: ${Math.round(minAngleDuringDownRef.current)}° | frame1=${f1Size}KB, frame2=${f2Size}KB`);
-    if (frame2) {
-      console.log(`[HaikuVision] 📸 Peak frame preview (first 80 chars): ${frame2.substring(0, 80)}...`);
-    }
+    console.log(`[HaikuVision] 📸 PHOTO CAPTURED | frame1=${f1Size}KB, frame2=${f2Size}KB`);
 
     const payloadKB = Math.round((frames.reduce((s, f) => s + (f?.length || 0), 0)) / 1024);
     console.log(`[Speed-Check] Payload size: ${payloadKB} KB`);
@@ -149,9 +118,8 @@ export function useHaikuVision({ onVisionFeedback } = {}) {
     console.log(`[HaikuVision] 🚀 Sending REAL camera frames to server... rep #${repNumber} | exercise=${ctx?.exerciseName} | sport=${ctx?.sport} | peakToSend=${peakToSendMs}ms`);
 
     try {
-      const resp = await fetch(url, {
+      const resp = await authFetch(url, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           frames,
           jointAngles,
@@ -161,7 +129,10 @@ export function useHaikuVision({ onVisionFeedback } = {}) {
           playerProfile: ctx?.playerProfile,
           playerName: ctx?.playerName || '',
           repNumber,
-          previousScore: ctx?.previousScore || null
+          previousScore: ctx?.previousScore || null,
+          equipment: equipmentSnapshot?.length > 0
+            ? equipmentSnapshot.map(e => ({ class: e.className, x: e.x, y: e.y, confidence: e.confidence }))
+            : undefined
         })
       });
 
@@ -217,154 +188,39 @@ export function useHaikuVision({ onVisionFeedback } = {}) {
     }
   }, [onVisionFeedback]);
 
-  // Compute the dynamic rep threshold based on starting angle + adaptive learning
-  const getRepThreshold = useCallback(() => {
-    const base = startingAngleRef.current;
-    if (base !== null) {
-      // Relative: 15% drop from starting angle
-      const relativeThreshold = base * (1 - MIN_ROM_PERCENT);
-      // If we've seen deeper reps, adapt: require at least 80% of best observed ROM
-      if (adaptiveMinAngleRef.current !== null) {
-        const adaptiveRange = base - adaptiveMinAngleRef.current; // e.g. 160-90 = 70
-        const adaptiveThreshold = base - adaptiveRange * 0.8;    // e.g. 160-56 = 104
-        const threshold = Math.max(relativeThreshold, adaptiveThreshold);
-        return Math.min(threshold, ABSOLUTE_MIN_ANGLE);
-      }
-      return Math.min(relativeThreshold, ABSOLUTE_MIN_ANGLE);
-    }
-    return ABSOLUTE_MIN_ANGLE; // absolute fallback
-  }, []);
-
-  // Check if the current down phase qualifies as a rep
-  const isRepQualified = useCallback((minAngle, shoulderDisplacement) => {
-    const threshold = getRepThreshold();
-    // Angle-based: did the athlete go deep enough?
-    const angleQualified = minAngle <= threshold;
-    // Shoulder Y displacement: confirms real movement even with noisy angles
-    const yQualified = shoulderDisplacement !== null && shoulderDisplacement >= SHOULDER_Y_MIN_DISPLACEMENT;
-    return angleQualified || (yQualified && minAngle <= ABSOLUTE_MIN_ANGLE);
-  }, [getRepThreshold]);
-
   // === MAIN LOOP: called every frame from Training.jsx ===
-  const feedPhaseData = useCallback((newState, angles, landmarks) => {
+  const feedPhaseData = useCallback((newState, angles, landmarks, ballData, equipmentData) => {
     if (!enabledRef.current || disabledRef.current) return;
     if (!newState) return;
 
     const currentPhase = newState.phase;
     const prevPhase = lastPhaseRef.current;
     const reps = newState.reps ?? 0;
-    const primaryAngle = getPrimaryAngle(angles);
-    const shoulderY = getShoulderY(landmarks);
 
-    // === Learn starting angle from "up" phase or calibration ===
-    if (currentPhase === 'up' && primaryAngle !== null && startingAngleRef.current === null) {
-      startingAngleRef.current = primaryAngle;
-      console.log(`[HaikuVision] 📐 Starting angle learned: ${Math.round(primaryAngle)}° | threshold=${Math.round(getRepThreshold())}°`);
-    }
-
-    // === ANY down phase start (from up OR from null) — capture Frame 1, reset bestFrame ===
+    // === Capture "start frame" when entering down/active phase ===
     if (currentPhase === 'down' && prevPhase !== 'down') {
       const f1 = captureFrame();
       startFrameRef.current = f1;
       startAnglesRef.current = angles || null;
       startLandmarksRef.current = landmarks || null;
-      // Reset best-frame buffer for this new rep
-      minAngleDuringDownRef.current = Infinity;
-      bestFrameRef.current = null;
-      bestAnglesRef.current = null;
-      bestLandmarksRef.current = null;
-      peakSentRef.current = false;
-      prevAngleRef.current = primaryAngle;
-      startShoulderYRef.current = shoulderY;
-      bestShoulderYRef.current = null;
-      console.log(`[HaikuVision] ⬇️ DOWN START | angle=${primaryAngle !== null ? Math.round(primaryAngle) : '?'}° | shoulderY=${shoulderY !== null ? shoulderY.toFixed(3) : '?'} | threshold=${Math.round(getRepThreshold())}° | frame1=${f1 ? Math.round(f1.length/1024)+'KB' : 'FAILED'}`);
+      // Reset detector for new rep
+      peakDetectorRef.current?.resetForNewRep();
+      const primaryAngle = getPrimaryAngle(angles);
+      console.log(`[HaikuVision] ⬇️ DOWN START | angle=${primaryAngle !== null ? Math.round(primaryAngle) : '?'}° | frame1=${f1 ? Math.round(f1.length/1024)+'KB' : 'FAILED'}`);
       lastPhaseRef.current = currentPhase;
       return;
     }
 
-    // === DURING DOWN: continuously update bestFrame at the deepest angle ===
-    if (currentPhase === 'down' && primaryAngle !== null) {
-      // Update best frame whenever we reach a new minimum angle
-      if (primaryAngle < minAngleDuringDownRef.current) {
-        minAngleDuringDownRef.current = primaryAngle;
-        const bf = captureFrame();
-        if (bf) {
-          bestFrameRef.current = bf;
-          bestAnglesRef.current = angles || null;
-          bestLandmarksRef.current = landmarks || null;
-        }
-      }
-      // Track shoulder Y displacement
-      if (shoulderY !== null) {
-        if (bestShoulderYRef.current === null || shoulderY > bestShoulderYRef.current) {
-          bestShoulderYRef.current = shoulderY; // In normalized coords, Y increases downward
-        }
-      }
-
-      // === TREND REVERSAL: angle rising by 2°+ → send the BUFFERED best frame ===
-      const prev = prevAngleRef.current;
-      if (!peakSentRef.current && prev !== null && primaryAngle > prev + 2 && bestFrameRef.current) {
-        const shoulderDisp = (startShoulderYRef.current !== null && bestShoulderYRef.current !== null)
-          ? bestShoulderYRef.current - startShoulderYRef.current : null;
-        const qualified = isRepQualified(minAngleDuringDownRef.current, shoulderDisp);
-
-        if (!qualified) {
-          console.log(`[HaikuVision] ⚠️ PEAK at ${Math.round(minAngleDuringDownRef.current)}° | threshold=${Math.round(getRepThreshold())}° | shoulderDY=${shoulderDisp !== null ? shoulderDisp.toFixed(3) : '?'} — too shallow, skipping`);
-        } else {
-          peakSentRef.current = true;
-          const triggerTs = Date.now();
-          const anticipatedRep = repCountRef.current + 1;
-          earlySentRepRef.current = anticipatedRep;
-
-          // Adaptive: update best observed peak for this set
-          if (adaptiveMinAngleRef.current === null || minAngleDuringDownRef.current < adaptiveMinAngleRef.current) {
-            adaptiveMinAngleRef.current = minAngleDuringDownRef.current;
-            console.log(`[HaikuVision] 📊 Adaptive ROM updated: best peak=${Math.round(adaptiveMinAngleRef.current)}° | new threshold=${Math.round(getRepThreshold())}°`);
-          }
-
-          console.log(`[HaikuVision] 🎯 PEAK REVERSAL at ${Math.round(minAngleDuringDownRef.current)}° (now ${Math.round(primaryAngle)}°) | shoulderDY=${shoulderDisp !== null ? shoulderDisp.toFixed(3) : '?'} → sending BEST FRAME rep #${anticipatedRep}`);
-
-          const f1 = startFrameRef.current || bestFrameRef.current;
-          const f2 = bestFrameRef.current;
-          sendToServer(f1, f2, anticipatedRep, startAnglesRef.current, bestAnglesRef.current, startLandmarksRef.current, bestLandmarksRef.current, triggerTs);
-        }
-      }
-
-      prevAngleRef.current = primaryAngle;
-    }
-
-    // === PHASE: down → up — fallback using BUFFERED best frame only ===
-    if (prevPhase === 'down' && currentPhase === 'up') {
-      if (peakSentRef.current) {
-        console.log(`[HaikuVision] ⬆️ UP | already sent best frame at peak`);
-      } else {
-        const shoulderDisp = (startShoulderYRef.current !== null && bestShoulderYRef.current !== null)
-          ? bestShoulderYRef.current - startShoulderYRef.current : null;
-        const qualified = bestFrameRef.current && isRepQualified(minAngleDuringDownRef.current, shoulderDisp);
-
-        if (qualified) {
-          const f1 = startFrameRef.current || bestFrameRef.current;
-          const f2 = bestFrameRef.current;
-          const anticipatedRep = repCountRef.current + 1;
-          const fallbackTs = Date.now();
-          earlySentRepRef.current = anticipatedRep;
-
-          // Adaptive update
-          if (adaptiveMinAngleRef.current === null || minAngleDuringDownRef.current < adaptiveMinAngleRef.current) {
-            adaptiveMinAngleRef.current = minAngleDuringDownRef.current;
-          }
-
-          console.log(`[HaikuVision] ⬆️ FALLBACK SEND best frame for rep #${anticipatedRep} (peak=${Math.round(minAngleDuringDownRef.current)}°, threshold=${Math.round(getRepThreshold())}°)`);
-          sendToServer(f1, f2, anticipatedRep, startAnglesRef.current, bestAnglesRef.current, startLandmarksRef.current, bestLandmarksRef.current, fallbackTs);
-        } else {
-          console.warn(`[HaikuVision] ⬆️ NOT SENDING: bestFrame=${!!bestFrameRef.current}, minAngle=${Math.round(minAngleDuringDownRef.current)}°, threshold=${Math.round(getRepThreshold())}°, shoulderDY=${(startShoulderYRef.current !== null && bestShoulderYRef.current !== null) ? (bestShoulderYRef.current - startShoulderYRef.current).toFixed(3) : '?'}`);
-        }
-      }
-
-      // Update starting angle from "up" position for better accuracy
-      if (primaryAngle !== null) {
-        startingAngleRef.current = primaryAngle;
-      }
+    // === Feed frame data to the PeakDetector ===
+    if (peakDetectorRef.current) {
+      peakDetectorRef.current.feed({
+        angles,
+        landmarks,
+        ballData: ballData || null,
+        equipmentData: equipmentData || null,
+        analyzerState: newState,
+        captureFrame,
+      });
     }
 
     // Sync rep count
@@ -374,7 +230,7 @@ export function useHaikuVision({ onVisionFeedback } = {}) {
     }
 
     lastPhaseRef.current = currentPhase;
-  }, [captureFrame, sendToServer, getRepThreshold, isRepQualified]);
+  }, [captureFrame, sendToServer]);
 
   // === SERVER WARM-UP: fire once during calibration to open SSL + wake AI ===
   const performWarmUpCalibration = useCallback((captureFrameFn, videoEl) => {
@@ -386,9 +242,8 @@ export function useHaikuVision({ onVisionFeedback } = {}) {
     const frameKB = Math.round(frame.length / 1024);
     console.log(`[WarmUp] Sending calibration frame to wake server (${frameKB} KB)...`);
     const t0 = Date.now();
-    fetch(ANALYZE_REP_URL, {
+    authFetch(ANALYZE_REP_URL, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         frames: [frame],
         exercise: 'calibration',
@@ -415,38 +270,37 @@ export function useHaikuVision({ onVisionFeedback } = {}) {
     repCountRef.current = 0;
     earlySentRepRef.current = 0;
     consecutiveFailuresRef.current = 0;
-    minAngleDuringDownRef.current = Infinity;
-    bestFrameRef.current = null;
-    bestAnglesRef.current = null;
-    bestLandmarksRef.current = null;
-    peakSentRef.current = false;
-    prevAngleRef.current = null;
     enabledRef.current = true;
     disabledRef.current = false;
     warmUpSentRef.current = false;
     confirmedRepsRef.current = new Set();
-    // Relative thresholding: seed from calibration if available
-    calibrationBaselineRef.current = calibration || null;
-    startShoulderYRef.current = null;
-    bestShoulderYRef.current = null;
-    adaptiveMinAngleRef.current = null;
-    // Use calibration max angle as starting angle if available
-    if (calibration) {
-      const calMax = Object.entries(calibration)
-        .filter(([k]) => !k.startsWith('_'))
-        .reduce((best, [, v]) => v.max > best ? v.max : best, 0);
-      startingAngleRef.current = calMax > 0 ? calMax : null;
-      console.log(`[HaikuVision] 🟢 Vision STARTED | exercise=${context?.exerciseName} | startAngle=${calMax > 0 ? Math.round(calMax) : 'auto'}° | calibration=${!!calibration}`);
-    } else {
-      startingAngleRef.current = null;
-      console.log(`[HaikuVision] 🟢 Vision STARTED | exercise=${context?.exerciseName} | startAngle=auto (will learn from first up phase)`);
-    }
-  }, []);
+
+    // Instantiate PeakDetector with exercise-specific triggers
+    const cueKey = context?.cueKey || 'default';
+    const triggers = (context?.peakTrigger) || getPeakTriggers(cueKey);
+    peakDetectorRef.current = new PeakDetector(triggers, {
+      onPeak: (snapshot) => {
+        const anticipatedRep = repCountRef.current + 1;
+        earlySentRepRef.current = anticipatedRep;
+        console.log(`[HaikuVision] 🎯 KINETIC PEAK: trigger=${snapshot.triggerId} | type=${snapshot.triggerType} | rep #${anticipatedRep}${snapshot.extremeValue != null ? ' | value=' + (typeof snapshot.extremeValue === 'number' ? snapshot.extremeValue.toFixed(1) : snapshot.extremeValue) : ''}`);
+        const f1 = startFrameRef.current || snapshot.frame;
+        const f2 = snapshot.frame;
+        sendToServer(f1, f2, anticipatedRep, startAnglesRef.current, snapshot.angles, startLandmarksRef.current, snapshot.landmarks, snapshot.timestamp, snapshot.equipmentData);
+      }
+    });
+
+    const triggerIds = triggers.map(t => t.id || t.type).join(',');
+    console.log(`[HaikuVision] 🟢 Vision STARTED | exercise=${context?.exerciseName} | cueKey=${cueKey} | triggers=[${triggerIds}]`);
+  }, [sendToServer]);
 
   const stopVision = useCallback(() => {
     enabledRef.current = false;
     startFrameRef.current = null;
     lastPhaseRef.current = null;
+    if (peakDetectorRef.current) {
+      peakDetectorRef.current.destroy();
+      peakDetectorRef.current = null;
+    }
     console.log(`[HaikuVision] 🔴 Vision STOPPED`);
   }, []);
 

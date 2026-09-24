@@ -1,5 +1,5 @@
 import { useRef, useCallback, useEffect } from 'react';
-import { apiUrl } from '../utils/api';
+import { apiUrl, authFetch } from '../utils/api';
 
 const AI_INTERVAL_MS = 20000; // Send to Claude every 20s
 const MAX_FAILURES = 3;
@@ -133,9 +133,8 @@ export function useAICoach({ onCoaching }) {
     inFlightRef.current = true;
 
     try {
-      const resp = await fetch(apiUrl('/api/coach/realtime-feedback'), {
+      const resp = await authFetch(apiUrl('/api/coach/realtime-feedback'), {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
       });
 

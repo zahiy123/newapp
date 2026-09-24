@@ -8,7 +8,7 @@ import { useSpeech } from '../hooks/useSpeech';
 import { useVideoFrames } from '../hooks/useVideoFrames';
 import { GAME_SPORTS, FOUL_RULES, GAME_EVENT_TYPES, trackPlayers } from '../utils/gameRules';
 import { useNavigate } from 'react-router-dom';
-import { apiUrl } from '../utils/api';
+import { apiUrl, authFetch } from '../utils/api';
 import { db } from '../services/firebase';
 import { collection, addDoc, serverTimestamp } from 'firebase/firestore';
 import VideoAnalysisPlayer from '../components/VideoAnalysisPlayer';
@@ -147,9 +147,8 @@ export default function GameMode() {
       const frame = triggerData.frames?.[0]?.data || captureVideoFrame();
       if (!frame) { setVarOverlay(null); return; }
 
-      const resp = await fetch(apiUrl('/api/coach/analyze-var'), {
+      const resp = await authFetch(apiUrl('/api/coach/analyze-var'), {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           frame,
           sport: selectedSport?.key || 'football',
@@ -496,9 +495,8 @@ export default function GameMode() {
 
         // Send to API
         try {
-          const resp = await fetch(apiUrl('/api/coach/analyze-game-frames'), {
+          const resp = await authFetch(apiUrl('/api/coach/analyze-game-frames'), {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
               frames,
               sport: selectedSport.key,
@@ -512,9 +510,8 @@ export default function GameMode() {
           if (!resp.ok) {
             console.error(`Batch ${i} failed: ${resp.status}`);
             // Retry once
-            const retry = await fetch(apiUrl('/api/coach/analyze-game-frames'), {
+            const retry = await authFetch(apiUrl('/api/coach/analyze-game-frames'), {
               method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({
                 frames,
                 sport: selectedSport.key,

@@ -27,8 +27,49 @@ setInterval(() => {
   }
 }, 300000);
 
+// ─── Profile validation for training endpoints ───
+function validateTrainingRequest(req, res, next) {
+  const { profile, sport, goals } = req.body;
+  const errors = [];
+
+  if (!profile || typeof profile !== 'object') {
+    return res.status(400).json({ error: 'Missing profile data' });
+  }
+
+  if (!profile.name || typeof profile.name !== 'string' || profile.name.trim().length < 2) {
+    errors.push('name must be at least 2 characters');
+  }
+  if (!['male', 'female', 'other'].includes(profile.gender)) {
+    errors.push('gender must be male, female, or other');
+  }
+  const age = Number(profile.age);
+  if (!age || age < 5 || age > 99) {
+    errors.push('age must be between 5 and 99');
+  }
+  const height = Number(profile.height);
+  if (!height || height < 50 || height > 250) {
+    errors.push('height must be between 50 and 250 cm');
+  }
+  const weight = Number(profile.weight);
+  if (!weight || weight < 10 || weight > 300) {
+    errors.push('weight must be between 10 and 300 kg');
+  }
+  if (!sport || typeof sport !== 'string') {
+    errors.push('sport is required');
+  }
+  if (!Array.isArray(goals) || goals.length === 0) {
+    errors.push('at least one goal is required');
+  }
+
+  if (errors.length > 0) {
+    return res.status(400).json({ error: 'Validation failed', details: errors.join('; ') });
+  }
+
+  next();
+}
+
 // Generate a single week
-router.post('/training-week', async (req, res) => {
+router.post('/training-week', validateTrainingRequest, async (req, res) => {
   const { profile, sport, goals, daysPerWeek, location, weekNumber } = req.body;
   const key = `${profile?.name}-w${weekNumber}`;
 
@@ -39,7 +80,7 @@ router.post('/training-week', async (req, res) => {
 
   try {
     console.log('Generating week', weekNumber, 'for:', profile?.name);
-    const week = await generateWeek({ profile, sport, goals, daysPerWeek, location, weekNumber, equipment: req.body.equipment });
+    const week = await generateWeek({ profile, sport, goals, daysPerWeek, location, weekNumber, equipment: req.body.equipment, muscleGroupFocus: req.body.muscleGroupFocus, scanData: req.body.scanData });
     console.log('Week', weekNumber, 'generated successfully');
     res.json(week);
   } catch (error) {
@@ -51,7 +92,7 @@ router.post('/training-week', async (req, res) => {
 });
 
 // Generate tips
-router.post('/training-tips', async (req, res) => {
+router.post('/training-tips', validateTrainingRequest, async (req, res) => {
   try {
     const { profile, sport, goals, location } = req.body;
     const tips = await generateTips({ profile, sport, goals, location });

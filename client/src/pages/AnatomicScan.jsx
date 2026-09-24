@@ -21,7 +21,8 @@ import { useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { useCamera } from '../hooks/useCamera';
 import { usePose } from '../hooks/usePose';
-import { useObjectDetection } from '../hooks/useObjectDetection';
+import { useEquipmentDetection } from '../hooks/useEquipmentDetection';
+import { buildScanData } from '../engine/scan/ScanDataBuilder';
 import { useAnatomicScan } from '../hooks/useAnatomicScan';
 import { useSpeech } from '../hooks/useSpeech';
 import { useLanguage } from '../context/LanguageContext';
@@ -77,8 +78,8 @@ export default function AnatomicScan({ onScanComplete }) {
 
   const {
     ready: objReady,
-    detect: detectObjects,
-  } = useObjectDetection(cameraActive);
+    detectForScan,
+  } = useEquipmentDetection();
 
   // ---- Scan Pipeline ----
   const {
@@ -128,6 +129,7 @@ export default function AnatomicScan({ onScanComplete }) {
   // ---- rAF Bridge Loop ----
   const scanLoopRef = useRef(null);
   const objThrottleRef = useRef(0);
+  const latestObjDetsRef = useRef(null);
 
   useEffect(() => {
     // Run rAF loop during calibration and scanning phases only
@@ -136,15 +138,19 @@ export default function AnatomicScan({ onScanComplete }) {
     function loop() {
       const landmarks = landmarksRef.current;
       if (landmarks) {
-        let objDets = null;
+        // Async YOLO detection — store results in ref for next feedFrame
         if (objReady && videoRef.current) {
           const now = performance.now();
           if (now - objThrottleRef.current >= OBJ_DETECT_INTERVAL_MS) {
             objThrottleRef.current = now;
-            objDets = detectObjects(videoRef.current);
+            detectForScan(videoRef.current).then(dets => {
+              if (dets) latestObjDetsRef.current = dets;
+            });
           }
         }
-        feedFrame(landmarks, objDets);
+        // Pass latest detections (may be from previous async cycle)
+        feedFrame(landmarks, latestObjDetsRef.current);
+        latestObjDetsRef.current = null;
       }
       scanLoopRef.current = requestAnimationFrame(loop);
     }
@@ -157,7 +163,7 @@ export default function AnatomicScan({ onScanComplete }) {
         scanLoopRef.current = null;
       }
     };
-  }, [scanStatus, feedFrame, landmarksRef, objReady, detectObjects, videoRef]);
+  }, [scanStatus, feedFrame, landmarksRef, objReady, detectForScan, videoRef]);
 
   // ---- Voice Feedback ----
 
@@ -246,6 +252,7 @@ export default function AnatomicScan({ onScanComplete }) {
           scanResult: result.passportFields,
           scanDate: new Date().toISOString(),
           updatedAt: new Date().toISOString(),
+          scanData: buildScanData(result, visionDiagnosis),
         };
         if (result.anatomyProfile) {
           saveData.anatomyProfile = result.anatomyProfile;
@@ -272,7 +279,7 @@ export default function AnatomicScan({ onScanComplete }) {
     }
 
     saveResults();
-  }, [scanStatus, result, user, refreshProfile, onScanComplete, navigate]);
+  }, [scanStatus, result, user, visionDiagnosis, refreshProfile, onScanComplete, navigate]);
 
   // ---- Actions ----
   const handleStart = useCallback(async () => {
@@ -351,6 +358,7 @@ export default function AnatomicScan({ onScanComplete }) {
             description_he: visionDiagnosis.description_he,
             specialProtocol: visionDiagnosis.specialProtocol,
           },
+          scanData: buildScanData(result, visionDiagnosis),
         };
         await setDoc(doc(db, 'users', user.uid), saveData, { merge: true });
         await refreshProfile();
@@ -361,7 +369,7 @@ export default function AnatomicScan({ onScanComplete }) {
 
     // 3. Navigate to profile
     navigate('/profile');
-  }, [stopScan, stopPoseLoop, stopSpeech, user, visionDiagnosis, refreshProfile, navigate]);
+  }, [stopScan, stopPoseLoop, stopSpeech, user, result, visionDiagnosis, refreshProfile, navigate]);
 
   const handleRetryCamera = useCallback(() => {
     startCamera();

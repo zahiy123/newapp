@@ -5,14 +5,14 @@ import {
   Title, Tooltip, Legend
 } from 'chart.js';
 import { Bar } from 'react-chartjs-2';
-import { apiUrl } from '../utils/api';
+import { apiUrl, authFetch } from '../utils/api';
 
 ChartJS.register(CategoryScale, LinearScale, BarElement, Title, Tooltip, Legend);
 
-export default function WorkoutSummary({ sessionData, profile, sport, isHe, onBackToPlan }) {
-  const [aiSummary, setAiSummary] = useState('');
-  const [proTips, setProTips] = useState([]);
-  const [loading, setLoading] = useState(true);
+export default function WorkoutSummary({ sessionData, profile, sport, isHe, onBackToPlan, prefetchedSummary }) {
+  const [aiSummary, setAiSummary] = useState(prefetchedSummary?.summary || '');
+  const [proTips, setProTips] = useState(prefetchedSummary?.tips || []);
+  const [loading, setLoading] = useState(!prefetchedSummary);
 
   const exercises = sessionData?.exerciseResults || [];
   const totalReps = exercises.reduce((s, e) => s + (e.repsActual || 0), 0);
@@ -28,11 +28,12 @@ export default function WorkoutSummary({ sessionData, profile, sport, isHe, onBa
   const overall = avgQ >= 2.5 ? 'perfect' : avgQ >= 1.5 ? 'good' : 'needs_work';
 
   useEffect(() => {
+    // Skip duplicate API call if Training.jsx already fetched the summary
+    if (prefetchedSummary) return;
     async function fetchSummary() {
       try {
-        const resp = await fetch(apiUrl('/api/coach/workout-summary'), {
+        const resp = await authFetch(apiUrl('/api/coach/workout-summary'), {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             profile: { name: profile?.name, age: profile?.age, disability: profile?.disability },
             sessionData: { sport, status: 'completed', totalDuration, totalCalories, warmUpCompleted: sessionData?.warmUpCompleted, exercises }

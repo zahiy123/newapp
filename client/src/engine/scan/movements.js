@@ -191,6 +191,19 @@ export const TRACK_GAMMA = Object.freeze([
     ],
   },
   {
+    id: 'gamma_hip_rotation',
+    instruction_he: 'סובב את האגן בתנועה מעגלית. 3 סיבובים לכל כיוון.',
+    instruction_en: 'Rotate your hips in a circle. 3 rotations each direction.',
+    duration_ms: 12000,
+    target_limbs: ['left_leg', 'right_leg'],
+    analysis_type: 'compensation',
+    landmarks_of_interest: [
+      LM.LEFT_HIP, LM.RIGHT_HIP,
+      LM.LEFT_KNEE, LM.RIGHT_KNEE,
+      LM.LEFT_SHOULDER, LM.RIGHT_SHOULDER,
+    ],
+  },
+  {
     id: 'gamma_lateral_shift',
     instruction_he: 'העבר את המשקל מצד לצד, ימינה ושמאלה.',
     instruction_en: 'Shift your weight side to side, right and left.',
@@ -281,6 +294,19 @@ export const WHEELCHAIR_OVERRIDES = Object.freeze({
       LM.LEFT_SHOULDER, LM.RIGHT_SHOULDER,
       LM.LEFT_ELBOW, LM.RIGHT_ELBOW,
       LM.LEFT_WRIST, LM.RIGHT_WRIST,
+    ],
+  },
+  gamma_hip_rotation: {
+    id: 'gamma_trunk_rotation',
+    instruction_he: 'סובב את הגוף העליון ימינה ושמאלה.',
+    instruction_en: 'Rotate your upper body right and left.',
+    duration_ms: 12000,
+    target_limbs: ['left_arm', 'right_arm'],
+    analysis_type: 'compensation',
+    landmarks_of_interest: [
+      LM.LEFT_SHOULDER, LM.RIGHT_SHOULDER,
+      LM.LEFT_ELBOW, LM.RIGHT_ELBOW,
+      LM.LEFT_HIP, LM.RIGHT_HIP,
     ],
   },
   gamma_lateral_shift: {

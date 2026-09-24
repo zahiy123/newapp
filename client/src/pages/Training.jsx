@@ -6,6 +6,7 @@ import { usePose } from '../hooks/usePose';
 import { useSpeech } from '../hooks/useSpeech';
 import { useObjectDetection, classifyDetectedObjects } from '../hooks/useObjectDetection';
 import { useBallDetection } from '../hooks/useBallDetection';
+import { useEquipmentDetection } from '../hooks/useEquipmentDetection';
 import { useAICoach } from '../hooks/useAICoach';
 import { useHaikuVision } from '../hooks/useHaikuVision';
 import { useGhostSkeleton } from '../hooks/useGhostSkeleton';
@@ -18,8 +19,8 @@ import WorkoutSummary from '../components/WorkoutSummary';
 import { db } from '../services/firebase';
 import { doc, getDoc, addDoc, updateDoc, collection, Timestamp, getDocs, query, orderBy, limit } from 'firebase/firestore';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { apiUrl } from '../utils/api';
-import { markDayCompleted, sanitizePlan, saveActiveWorkout, loadActiveWorkout, clearActiveWorkout } from '../utils/workoutStorage';
+import { apiUrl, authFetch, fetchWithTimeout } from '../utils/api';
+import { markDayCompleted, sanitizePlan, saveActiveWorkout, loadActiveWorkout, clearActiveWorkout, queuePendingSession } from '../utils/workoutStorage';
 import { incrementWeeklySession } from '../utils/weeklyGoals';
 import { getExerciseInstruction, getWarmUpInstruction } from '../utils/exerciseInstructions';
 import { drawFormCorrection } from '../utils/canvasDrawing';
@@ -104,6 +105,13 @@ export default function Training() {
   const { drawGhost, toggle: toggleGhost, isEnabled: ghostEnabled } = useGhostSkeleton();
   const { ready: objReady, detectedObjects, startLoop: startObjLoop, stopLoop: stopObjLoop, hasEquipment, scanEnvironment, captureFrame } = useObjectDetection();
   const { ready: ballReady, getBallData, startLoop: startBallLoop, stopLoop: stopBallLoop } = useBallDetection(userProfile?.sport);
+  const { ready: equipReady, getEquipmentData, getBallData: getEquipBallData, startLoop: startEquipLoop, stopLoop: stopEquipLoop } = useEquipmentDetection(userProfile?.sport);
+
+  // Unified ball data: prefer equipment model (16-class), fall back to dedicated ball model
+  const getBallDataUnified = useCallback(() => {
+    if (equipReady) return getEquipBallData();
+    return getBallData();
+  }, [equipReady, getEquipBallData, getBallData]);
 
   // Equipment check state
   const [equipmentFound, setEquipmentFound] = useState(false);
@@ -327,6 +335,10 @@ export default function Training() {
   const [activeTimer, setActiveTimer] = useState(0);
   const [workoutDone, setWorkoutDone] = useState(false);
 
+  // Readiness rating (pre-workout)
+  const [readinessRating, setReadinessRating] = useState(0); // 0 = not set, 1-5
+  const [readinessApplied, setReadinessApplied] = useState(false);
+
   // Set management
   const [currentSet, setCurrentSet] = useState(1);
   const [totalSets, setTotalSets] = useState(3);
@@ -418,6 +430,7 @@ export default function Training() {
     warmUpCompleted: false,
   });
   const sessionSavedRef = useRef(false);
+  const aiSummaryRef = useRef(null);
 
   // Load exercises
   useEffect(() => {
@@ -702,7 +715,8 @@ export default function Training() {
     const { analyze, ballAware, orientation } = analyzerRef.current;
     const prevState = exerciseStateRef.current;
     // Pass ball data to ball-aware sport drill analyzers
-    const ballData = ballAware ? getBallData() : null;
+    const ballData = ballAware ? getBallDataUnified() : null;
+    const equipData = equipReady ? getEquipmentData() : null;
     const newState = analyze(stableLandmarks, prevState, ballData);
     const posture = newState.posture;
     const isMoving = newState.moving;
@@ -1029,7 +1043,7 @@ export default function Training() {
     exerciseStateRef.current = newState;
     // Always feed phase data — the hook handles its own gating
     const repAngles = computeJointAngles(stableLandmarks);
-    feedPhaseData(newState, repAngles, stableLandmarks);
+    feedPhaseData(newState, repAngles, stableLandmarks, ballData, equipData);
   }, [landmarks, phase]);
 
   // === INACTIVITY NUDGES: AGGRESSIVE & FAST ===
@@ -1142,8 +1156,10 @@ export default function Training() {
   // Ball detection + AI coaching lifecycle
   useEffect(() => {
     if (phase === PHASE.EXERCISING) {
-      // Start ball detection for ball-aware sport drills
-      if (analyzerRef.current?.ballAware && ballReady && videoRef.current) {
+      // Start equipment detection (unified model) or fall back to ball-only
+      if (equipReady && videoRef.current) {
+        startEquipLoop(videoRef.current);
+      } else if (analyzerRef.current?.ballAware && ballReady && videoRef.current) {
         startBallLoop(videoRef.current);
       }
       // Start AI coaching
@@ -1165,16 +1181,19 @@ export default function Training() {
       startVision({
         sport: userProfile?.sport,
         exerciseName: currentExercise?.name,
+        cueKey: analyzerRef.current?.cueKey || 'default',
+        peakTrigger: analyzerRef.current?.peakTrigger || null,
         playerProfile: userProfile,
         playerName,
         previousScore
       }, captureFrame, videoRef.current, exerciseStateRef.current?._calibration || null);
     } else {
+      stopEquipLoop();
       stopBallLoop();
       stopAICoaching();
       stopVision();
     }
-    return () => { stopBallLoop(); stopAICoaching(); stopVision(); };
+    return () => { stopEquipLoop(); stopBallLoop(); stopAICoaching(); stopVision(); };
   }, [phase]);
 
   // Environment scan effect
@@ -1230,9 +1249,8 @@ export default function Training() {
 
         // Send to server for Claude Vision analysis
         try {
-          const resp = await fetch(apiUrl('/api/coach/analyze-environment'), {
+          const resp = await authFetch(apiUrl('/api/coach/analyze-environment'), {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
               frame,
               cocoDetections: uniqueObjects,
@@ -1509,11 +1527,11 @@ export default function Training() {
   }, [startCamera, videoRef, unlockAudio]);
 
   const handleStopCamera = useCallback(() => {
-    stopLoop(); stopObjLoop(); stopBallLoop(); stopCamera(); stopSpeech(); stopAICoaching(); stopVision();
+    stopLoop(); stopObjLoop(); stopEquipLoop(); stopBallLoop(); stopCamera(); stopSpeech(); stopAICoaching(); stopVision();
     clearInterval(warmUpTimerRef.current);
     poseLoopStartedRef.current = false;
     setPhase(PHASE.IDLE);
-  }, [stopLoop, stopObjLoop, stopBallLoop, stopCamera, stopSpeech, stopAICoaching]);
+  }, [stopLoop, stopObjLoop, stopEquipLoop, stopBallLoop, stopCamera, stopSpeech, stopAICoaching]);
 
   function resetAllTracking() {
     lastSpokenRef.current = '';
@@ -1607,55 +1625,74 @@ export default function Training() {
       aiSummary: null,
     };
 
-    try {
-      const ref = await addDoc(collection(db, 'users', user.uid, 'workouts'), data);
-      // Mark day as completed in localStorage for Dashboard progress tracking
-      if (status === 'completed') {
-        const weekIdx = parseInt(searchParams.get('week') || '0');
-        const dayIdx = parseInt(searchParams.get('day') || '0');
-        markDayCompleted(weekIdx, dayIdx);
-        incrementWeeklySession();
+    // Retry with exponential backoff: 3 attempts (0s, 1s, 3s delays)
+    const delays = [0, 1000, 3000];
+    let saved = false;
+    for (let attempt = 0; attempt < delays.length; attempt++) {
+      if (attempt > 0) await new Promise(r => setTimeout(r, delays[attempt]));
+      try {
+        const ref = await addDoc(collection(db, 'users', user.uid, 'workouts'), data);
+        saved = true;
+        // Mark day as completed in localStorage for Dashboard progress tracking
+        if (status === 'completed') {
+          const weekIdx = parseInt(searchParams.get('week') || '0');
+          const dayIdx = parseInt(searchParams.get('day') || '0');
+          markDayCompleted(weekIdx, dayIdx);
+          incrementWeeklySession();
 
-        // Check level-up from Firestore (last 3 completed workouts)
-        try {
-          const recentQ = query(
-            collection(db, 'users', user.uid, 'workouts'),
-            orderBy('date', 'desc'),
-            limit(3)
-          );
-          const recentSnap = await getDocs(recentQ);
-          const recentScores = recentSnap.docs
-            .map(d => d.data().technicalQuality)
-            .filter(s => s != null && s > 0);
+          // Check level-up from Firestore (last 3 completed workouts)
+          try {
+            const recentQ = query(
+              collection(db, 'users', user.uid, 'workouts'),
+              orderBy('date', 'desc'),
+              limit(3)
+            );
+            const recentSnap = await getDocs(recentQ);
+            const recentScores = recentSnap.docs
+              .map(d => d.data().technicalQuality)
+              .filter(s => s != null && s > 0);
 
-          if (recentScores.length >= 3) {
-            const avg3 = recentScores.reduce((a, b) => a + b, 0) / recentScores.length;
-            if (avg3 > 8.5) {
-              setTimeout(() => {
-                speakIfIdle(isHe
-                  ? `${playerName}, שלושה אימונים ברמה גבוהה! הגיע הזמן לעלות לרמת Pro`
-                  : `${playerName}, three high-level sessions! Time to upgrade to Pro level`,
-                  { rate: 1.2 });
-              }, 3000);
+            if (recentScores.length >= 3) {
+              const avg3 = recentScores.reduce((a, b) => a + b, 0) / recentScores.length;
+              if (avg3 > 8.5) {
+                setTimeout(() => {
+                  speakIfIdle(isHe
+                    ? `${playerName}, שלושה אימונים ברמה גבוהה! הגיע הזמן לעלות לרמת Pro`
+                    : `${playerName}, three high-level sessions! Time to upgrade to Pro level`,
+                    { rate: 1.2 });
+                }, 3000);
+              }
             }
+          } catch (err) {
+            console.error('Level-up check failed:', err);
           }
-        } catch (err) {
-          console.error('Level-up check failed:', err);
         }
+        // Fire-and-forget AI summary
+        fetchAISummary(ref.id, data);
+        break;
+      } catch (err) {
+        console.error(`[saveSession] Attempt ${attempt + 1}/${delays.length} failed:`, err.message);
       }
-      // Fire-and-forget AI summary
-      fetchAISummary(ref.id, data);
-    } catch (err) {
-      console.error('Failed to save session:', err);
-      sessionSavedRef.current = false; // allow retry
+    }
+
+    // All retries failed — queue to localStorage so it syncs later
+    if (!saved) {
+      console.warn('[saveSession] All attempts failed, queuing to localStorage');
+      const serializable = { ...data, date: { seconds: Math.floor(Date.now() / 1000) }, uid: user.uid };
+      queuePendingSession(serializable);
+      // Still mark day completed locally so Dashboard shows progress
+      if (status === 'completed') {
+        markDayCompleted(parseInt(searchParams.get('week') || '0'), parseInt(searchParams.get('day') || '0'));
+        incrementWeeklySession();
+      }
+      sessionSavedRef.current = false; // allow retry on next open
     }
   }
 
   async function fetchAISummary(docId, sessionData) {
     try {
-      const resp = await fetch(apiUrl('/api/coach/workout-summary'), {
+      const resp = await fetchWithTimeout(apiUrl('/api/coach/workout-summary'), {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           profile: {
             name: userProfile?.name,
@@ -1664,23 +1701,16 @@ export default function Training() {
           },
           sessionData,
         }),
-      });
+      }, 15000);
       if (resp.ok) {
         const data = await resp.json();
         if (data.summary) {
+          aiSummaryRef.current = { summary: data.summary, tips: data.tips || [] };
           await updateDoc(doc(db, 'users', user.uid, 'workouts', docId), { aiSummary: data.summary });
         }
       }
     } catch (err) {
-      // Fallback: generate local template summary
-      const completedCount = sessionData.exercises.filter(e => e.setsCompleted >= e.setsTarget).length;
-      const totalCount = sessionData.exercises.length;
-      const fallback = isHe
-        ? `${userProfile?.name || 'שחקן'}, סיימת ${completedCount} מתוך ${totalCount} תרגילים. ${sessionData.status === 'completed' ? 'כל הכבוד!' : 'בפעם הבאה ננסה לסיים הכל!'}`
-        : `${userProfile?.name || 'Player'}, you completed ${completedCount} of ${totalCount} exercises. ${sessionData.status === 'completed' ? 'Great job!' : 'Next time let\'s try to finish them all!'}`;
-      try {
-        await updateDoc(doc(db, 'users', user.uid, 'workouts', docId), { aiSummary: fallback });
-      } catch {}
+      console.warn('[fetchAISummary] Failed (non-critical):', err.message);
     }
   }
 
@@ -1741,6 +1771,28 @@ export default function Training() {
   }
 
   function handleStartBriefing() {
+    // Apply readiness adjustment once at workout start
+    if (readinessRating > 0 && !readinessApplied && exercises.length > 0) {
+      const adjusted = exercises.map(ex => {
+        const orig = { ...ex };
+        if (readinessRating <= 2) {
+          // Low readiness: reduce volume
+          orig.sets = Math.max(1, (ex.sets || 3) - 1);
+          orig.restSeconds = (ex.restSeconds || 60) + 15;
+        } else if (readinessRating >= 4) {
+          // High readiness: bump reps slightly
+          const repsNum = parseInt(ex.reps, 10);
+          if (!isNaN(repsNum)) {
+            orig.reps = String(repsNum + 1);
+          }
+        }
+        return orig;
+      });
+      // Update exercises in the parent state (setExercises comes from the plan loader)
+      setExercises(adjusted);
+      setReadinessApplied(true);
+    }
+
     unlockAudio(); // Ensure mobile audio is unlocked on every exercise start
     exerciseStateRef.current = { _userProfile: userProfile }; setDisplayReps(0);
     setTimer(0);
@@ -1935,6 +1987,7 @@ export default function Training() {
     clearTimeout(analyzeTimeoutRef.current);
     stopSpeech();
     stopAICoaching();
+    stopEquipLoop();
     stopBallLoop();
     setPhase(PHASE.PAUSED);
   }
@@ -2009,9 +2062,8 @@ export default function Training() {
 
       if (shouldAdapt) {
         try {
-          const resp = await fetch(apiUrl('/api/coach/adapt-workout'), {
+          const resp = await authFetch(apiUrl('/api/coach/adapt-workout'), {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
               profile: { name: userProfile?.name, age: userProfile?.age, disability: userProfile?.disability, sport: userProfile?.sport, skillLevel: userProfile?.skillLevel },
               completedExercises: sessionDataRef.current.exerciseResults,
@@ -2068,6 +2120,7 @@ export default function Training() {
         sport={userProfile?.sport}
         isHe={isHe}
         onBackToPlan={() => navigate('/')}
+        prefetchedSummary={aiSummaryRef.current}
       />
     );
   }
@@ -2331,15 +2384,50 @@ export default function Training() {
           </div>
         )}
 
-        {/* START TRAINING — big overlay button when IDLE and camera ready */}
+        {/* START TRAINING — readiness rating + start button when IDLE and camera ready */}
         {phase === PHASE.IDLE && cameraActive && exercises.length > 0 && (
           <div className="absolute inset-0 flex items-center justify-center z-[6]">
             <div className="text-center space-y-4">
+              {/* Readiness Rating */}
+              {!readinessApplied && (
+                <div className="bg-white/95 backdrop-blur rounded-2xl px-6 py-4 shadow-xl mb-2">
+                  <div className="text-gray-800 font-bold text-lg mb-3">{t('training.readinessTitle')}</div>
+                  <div className="flex justify-center gap-3">
+                    {[
+                      { val: 1, emoji: '\uD83D\uDE2B', label: t('training.readiness1') },
+                      { val: 2, emoji: '\uD83D\uDE10', label: t('training.readiness2') },
+                      { val: 3, emoji: '\uD83D\uDE42', label: t('training.readiness3') },
+                      { val: 4, emoji: '\uD83D\uDCAA', label: t('training.readiness4') },
+                      { val: 5, emoji: '\uD83D\uDD25', label: t('training.readiness5') },
+                    ].map(r => (
+                      <button
+                        key={r.val}
+                        onClick={() => setReadinessRating(r.val)}
+                        className={`flex flex-col items-center p-2 rounded-xl transition ${
+                          readinessRating === r.val
+                            ? 'bg-blue-100 border-2 border-blue-500 scale-110'
+                            : 'border-2 border-transparent hover:bg-gray-100'
+                        }`}
+                      >
+                        <span className="text-2xl">{r.emoji}</span>
+                        <span className="text-xs text-gray-600 mt-1">{r.label}</span>
+                      </button>
+                    ))}
+                  </div>
+                  {readinessRating > 0 && readinessRating <= 2 && (
+                    <div className="text-sm text-amber-600 mt-2">{t('training.readinessAdjusted')}</div>
+                  )}
+                  {readinessRating >= 4 && (
+                    <div className="text-sm text-green-600 mt-2">{t('training.readinessBoosted')}</div>
+                  )}
+                </div>
+              )}
               <button
                 onClick={() => { unlockAudio(); handleStartBriefing(); }}
-                className="px-12 py-6 bg-gradient-to-r from-green-500 to-emerald-600 text-white rounded-2xl font-bold text-2xl shadow-2xl hover:scale-105 transition-transform animate-pulse"
+                disabled={readinessRating === 0 && !readinessApplied}
+                className="px-12 py-6 bg-gradient-to-r from-green-500 to-emerald-600 text-white rounded-2xl font-bold text-2xl shadow-2xl hover:scale-105 transition-transform animate-pulse disabled:opacity-50 disabled:animate-none"
               >
-                {isHe ? '▶ התחל אימון' : '▶ Start Training'}
+                {isHe ? '\u25B6 \u05D4\u05EA\u05D7\u05DC \u05D0\u05D9\u05DE\u05D5\u05DF' : '\u25B6 Start Training'}
               </button>
             </div>
           </div>

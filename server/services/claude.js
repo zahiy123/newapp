@@ -1624,7 +1624,52 @@ const LEVEL_FOCUS = {
   pro: 'High-speed dribbling, power shooting, explosive sprints, match-endurance.'
 };
 
-function buildWeekPrompt({ profile, sport, goals, daysPerWeek, location, weekNumber, equipment }) {
+// ── Energy System Specificity per Sport ──
+const ENERGY_SYSTEMS = {
+  football:             { system: 'Alactic + Glycolytic', workRest: '1:3–1:5', intervals: '10-30s sprints, 60-90s rest' },
+  footballAmputee:      { system: 'Alactic + Glycolytic', workRest: '1:4–1:6', intervals: '10-20s crutch sprints, 80-120s rest (higher crutch fatigue)' },
+  footballAmputeeGK:    { system: 'Alactic', workRest: '1:5–1:8', intervals: '3-8s explosive dives, 30-60s rest' },
+  basketball:           { system: 'Glycolytic', workRest: '1:2–1:3', intervals: '15-40s bursts, 45-90s rest' },
+  basketballWheelchair: { system: 'Glycolytic', workRest: '1:2–1:4', intervals: '15-30s push bursts, 60-90s rest (shoulder recovery)' },
+  tennis:               { system: 'Alactic + Aerobic', workRest: '1:3–1:4', intervals: '5-15s rallies, 20-60s rest' },
+  tennisWheelchair:     { system: 'Alactic + Aerobic', workRest: '1:3–1:5', intervals: '5-15s rallies, 30-75s rest (wheelchair repositioning)' },
+  fitness:              { system: 'Mixed (Aerobic + Glycolytic)', workRest: '1:1–1:2', intervals: '30-60s work, 30-60s rest' },
+  rehab:                { system: 'Aerobic (low-intensity)', workRest: '1:1', intervals: 'Continuous low-intensity, controlled tempo 3-1-3' },
+};
+
+// ── Training Mode Rotation by Week ──
+const TRAINING_MODES = {
+  1: { mode: 'linear', directive: 'TRAINING MODE: LINEAR — Straight sets. Complete all sets of one exercise before moving to the next. Full rest between sets.' },
+  2: { mode: 'superset', directive: 'TRAINING MODE: SUPERSET — Pair exercises A1/A2. Perform A1 then immediately A2 with no rest. Rest only after both. Pair opposing muscle groups or skill+strength.' },
+  3: { mode: 'circuit', directive: 'TRAINING MODE: CIRCUIT — All exercises performed in sequence as a circuit. Minimal rest between exercises (15-20s transition). Full rest (60-90s) after completing one round. Repeat circuit for prescribed sets.' },
+  4: { mode: 'EMOM', directive: 'TRAINING MODE: EMOM (Every Minute On the Minute) — Each exercise has a fixed rep count to complete within 60 seconds. Remaining time in the minute = rest. Start next exercise at the top of the next minute. Prescribe reps that take 30-40s to complete.' },
+};
+
+// ── Intensity Rotation Patterns ──
+const INTENSITY_PATTERNS = {
+  2: ['HIGH', 'LOW'],
+  3: ['HIGH', 'LOW', 'MEDIUM'],
+  4: ['HIGH', 'LOW', 'MEDIUM', 'HIGH'],
+  5: ['HIGH', 'LOW', 'MEDIUM', 'HIGH', 'LOW'],
+  6: ['HIGH', 'LOW', 'MEDIUM', 'HIGH', 'LOW', 'MEDIUM'],
+};
+
+const INTENSITY_RULES = {
+  HIGH:   'RPE 8-9, full prescribed sets and reps, push limits, shortest rest allowed.',
+  MEDIUM: 'RPE 6-7, full sets but -2 reps per set, moderate rest (+10s).',
+  LOW:    'RPE 5-6, -1 set per exercise, -30% volume, focus on technique and recovery, +15s rest.',
+};
+
+// ── Muscle Group Focus Mapping ──
+const MUSCLE_FOCUS_MAP = {
+  full_body:      { label: 'Full Body', directive: 'Distribute exercises evenly across all muscle groups. No specific bias.' },
+  upper_body:     { label: 'Upper Body', directive: 'MUSCLE FOCUS: 60% of exercises must target UPPER BODY (chest, back, shoulders, arms, upper core). Remaining 40% can target legs/full body.' },
+  lower_body:     { label: 'Lower Body', directive: 'MUSCLE FOCUS: 60% of exercises must target LOWER BODY (quads, hamstrings, glutes, calves, hip flexors). Remaining 40% can target upper body/core.' },
+  core:           { label: 'Core', directive: 'MUSCLE FOCUS: 60% of exercises must target CORE (abs, obliques, lower back, hip stabilizers, anti-rotation). Remaining 40% can target limbs.' },
+  shoulders_arms: { label: 'Shoulders & Arms', directive: 'MUSCLE FOCUS: 60% of exercises must target SHOULDERS & ARMS (deltoids, biceps, triceps, forearms, rotator cuff). Remaining 40% can target other groups.' },
+};
+
+function buildWeekPrompt({ profile, sport, goals, daysPerWeek, location, weekNumber, equipment, muscleGroupFocus, scanData }) {
   const skillLevel = profile.skillLevel || 'beginner';
   const mobilityAid = profile.mobilityAid || 'none';
   const topGoals = goals.slice(0, 3).join(', ');
@@ -1808,6 +1853,46 @@ GENERATE rehab-specific seated exercises: shoulder ROM, rotator cuff work, seate
     ? 'AGE GROUP PERFORMANCE (13-50): Full access to all exercises. Intensity and volume based on skill level. Push limits. Bio-mechanical precision.'
     : 'AGE GROUP LONGEVITY (51-99): Low impact ONLY, NO explosive movements (burpees, jumping jacks, sprints, mountain climbers), focus on stability, balance, mobility, and joint health. Longer rest (+15s), longer warm-up (8-10 min). Breathing cues in tips.';
 
+  // ── NEW: Energy System ──
+  const energySys = ENERGY_SYSTEMS[sport] || ENERGY_SYSTEMS.fitness;
+  const energyDirective = `ENERGY SYSTEM: ${energySys.system}. Work:Rest ratio ${energySys.workRest}. Conditioning prescription: ${energySys.intervals}.`;
+
+  // ── NEW: Training Mode ──
+  const trainingMode = TRAINING_MODES[weekNumber] || TRAINING_MODES[1];
+
+  // ── NEW: Day Intensity Rotation ──
+  const pattern = INTENSITY_PATTERNS[daysPerWeek] || INTENSITY_PATTERNS[3];
+  const intensityLines = pattern.map((level, i) => `Day ${i + 1}=${level} (${INTENSITY_RULES[level]})`).join(', ');
+
+  // ── NEW: Muscle Group Focus ──
+  const muscleFocus = MUSCLE_FOCUS_MAP[muscleGroupFocus] || MUSCLE_FOCUS_MAP.full_body;
+
+  // ── NEW: Scan Results ──
+  let scanBlock = '';
+  if (scanData && typeof scanData === 'object' && scanData.classification && scanData.classification !== 'NATURAL') {
+    const parts = [`SCAN RESULTS (from kinetic body scan):`];
+    parts.push(`Classification: ${scanData.classification}. Track: ${scanData.adaptedTrack || 'NORMAL'}.`);
+    if (scanData.prostheticSide) parts.push(`Prosthetic side: ${scanData.prostheticSide}.`);
+    if (scanData.aids && scanData.aids.length > 0) parts.push(`Aids: ${scanData.aids.join(', ')}.`);
+    if (scanData.bodyMap && typeof scanData.bodyMap === 'object') {
+      const limited = Object.entries(scanData.bodyMap)
+        .filter(([, v]) => v && typeof v === 'object' && v.rom && v.rom < 80)
+        .map(([joint, v]) => `${joint}: ROM ${v.rom}%${v.pain ? ' (pain reported)' : ''}`);
+      if (limited.length > 0) parts.push(`Limited ROM joints: ${limited.join('; ')}. REDUCE load on these joints.`);
+    }
+    if (scanData.compensationMap && typeof scanData.compensationMap === 'object') {
+      const comps = Object.entries(scanData.compensationMap)
+        .filter(([, v]) => v)
+        .map(([pattern]) => pattern);
+      if (comps.length > 0) parts.push(`Compensation patterns detected: ${comps.join(', ')}. AVOID exercises that reinforce these patterns.`);
+    }
+    if (scanData.riskZones && Array.isArray(scanData.riskZones) && scanData.riskZones.length > 0) {
+      parts.push(`Risk zones: ${scanData.riskZones.join(', ')}. Reduce load and add stability work for these areas.`);
+    }
+    if (scanData.specialProtocol) parts.push(`Special protocol: ${scanData.specialProtocol}.`);
+    scanBlock = parts.join('\n');
+  }
+
   return `Create week ${weekNumber}/4. Theme: "${theme}"
 
 PLAYER: ${sanitizeInput(profile.name, 30)}, Age ${Number(profile.age) || 25}, ${sanitizeInput(profile.gender, 10)}, ${Number(profile.height) || 170}cm, ${Number(profile.weight) || 70}kg
@@ -1817,6 +1902,11 @@ ${ageRule}
 Sport: ${sport}. Goals: ${topGoals}. Days/week: ${daysPerWeek}.
 Equipment available: ${eq === 'none' ? 'NONE — bodyweight only, absolutely no weights or equipment exercises' : eq === 'dumbbells' ? 'Dumbbells' : 'Resistance bands'}.
 
+${muscleFocus.directive}
+${energyDirective}
+${trainingMode.directive}
+DAY INTENSITY ROTATION: ${intensityLines}
+${scanBlock ? `\n${scanBlock}\n` : ''}
 ${locationRules}
 
 ${safetyBlacklist ? `SAFETY BLACKLIST (NON-NEGOTIABLE):\n${safetyBlacklist}` : ''}
@@ -1945,9 +2035,9 @@ cooldown: max 5 words.
 
 COMPACT JSON — use minimal whitespace. Keep total output under 5000 characters.
 
-{"weekNumber":${weekNumber},"theme":"${theme}","days":[{"day":"יום א","focus":"מיקוד","workout_title":"כותרת","goal_summary":"10 מילים מקס","exercises":[{"name":"[skill]+[constraint]—[target]","description":"8 מילים","sets":${prog.sets},"reps":"${prog.reps}","restSeconds":${prog.rest},"tempo":"2-0-1","rpe":7,"tips":"6 מילים","reasoning":"10 מילים"}],"warmup":{"text":"חימום","instructions":["1","2","3"]},"cooldown":"מתיחות","durationMinutes":50}]}
+{"weekNumber":${weekNumber},"theme":"${theme}","mode":"${trainingMode.mode}","days":[{"day":"יום א","focus":"מיקוד","intensity":"HIGH","workout_title":"כותרת","goal_summary":"10 מילים מקס","exercises":[{"name":"[skill]+[constraint]—[target]","description":"8 מילים","sets":${prog.sets},"reps":"${prog.reps}","restSeconds":${prog.rest},"tempo":"2-0-1","rpe":7,"tips":"6 מילים","reasoning":"10 מילים"}],"warmup":{"text":"חימום","instructions":["1","2","3"]},"cooldown":"מתיחות","durationMinutes":50}]}
 
-Hebrew only. ${daysPerWeek} days. 4 exercises each.`;
+Hebrew only. ${daysPerWeek} days. 4 exercises each. Each day MUST include the "intensity" field (HIGH/MEDIUM/LOW) matching the rotation above.`;
 }
 
 // Local fallback week generator when API is unavailable

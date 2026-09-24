@@ -261,3 +261,41 @@ export function loadActiveWorkout() {
 export function clearActiveWorkout() {
   localStorage.removeItem(ACTIVE_WORKOUT_KEY);
 }
+
+// --- Pending session queue (offline resilience) ---
+const PENDING_SESSIONS_KEY = 'pending_sessions';
+
+export function queuePendingSession(sessionData) {
+  try {
+    const pending = loadPendingSessions();
+    const entry = {
+      id: `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+      data: sessionData,
+      queuedAt: Date.now(),
+    };
+    pending.push(entry);
+    localStorage.setItem(PENDING_SESSIONS_KEY, JSON.stringify(pending));
+    return entry.id;
+  } catch (err) {
+    console.warn('Failed to queue pending session:', err);
+    return null;
+  }
+}
+
+export function loadPendingSessions() {
+  try {
+    const raw = localStorage.getItem(PENDING_SESSIONS_KEY);
+    return raw ? JSON.parse(raw) : [];
+  } catch {
+    return [];
+  }
+}
+
+export function removePendingSession(id) {
+  try {
+    const pending = loadPendingSessions().filter(s => s.id !== id);
+    localStorage.setItem(PENDING_SESSIONS_KEY, JSON.stringify(pending));
+  } catch (err) {
+    console.warn('Failed to remove pending session:', err);
+  }
+}

@@ -4282,10 +4282,10 @@ export function getAnalyzer(exerciseName) {
   for (const entry of ANALYZER_MAP) {
     if (entry.keywords.some(kw => name.includes(kw))) {
       const ballAware = entry.type === 'form'; // sport drills can use ball data
-      return { analyze: entry.analyze, type: entry.type, cueKey: entry.cueKey, ballAware, orientation: entry.orientation || O.ANY };
+      return { analyze: entry.analyze, type: entry.type, cueKey: entry.cueKey, ballAware, orientation: entry.orientation || O.ANY, peakTrigger: entry.peakTrigger || null };
     }
   }
-  return { analyze: analyzeGenericReps, type: 'reps', cueKey: 'default', ballAware: false, orientation: O.STANDING };
+  return { analyze: analyzeGenericReps, type: 'reps', cueKey: 'default', ballAware: false, orientation: O.STANDING, peakTrigger: null };
 }
 
 // Calibration: measure key joint angles for a given exercise type

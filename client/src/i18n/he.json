@@ -90,7 +90,8 @@
     "tennisWheelchair": "טניס כיסאות גלגלים",
     "fitness": "כושר כללי",
     "rehab": "שיקום ושיפור תפקוד",
-    "continue": "המשך"
+    "continue": "המשך",
+    "adaptedNote": "הסריקה הקינטית זיהתה את המצב הפיזי שלך. מוצגים רק ענפי ספורט מותאמים עבורך."
   },
   "rehab": {
     "title": "מסלול שיקום",
@@ -125,7 +126,17 @@
     "speed": "מהירות",
     "flexibility": "גמישות",
     "continue": "המשך לתוכנית האימונים שלי",
-    "selectAtLeast": "בחר לפחות מטרה אחת"
+    "selectAtLeast": "בחר לפחות מטרה אחת",
+    "blocked": "לא זמין",
+    "legs_unavailable": "לא ניתן — רגליים לא פעילות",
+    "arms_unavailable": "לא ניתן — ידיים לא פעילות",
+    "muscleGroupTitle": "מיקוד קבוצת שרירים",
+    "muscleGroupSubtitle": "באיזה אזור בגוף לשים דגש?",
+    "muscle_full_body": "כל הגוף",
+    "muscle_upper_body": "פלג גוף עליון",
+    "muscle_lower_body": "פלג גוף תחתון",
+    "muscle_core": "ליבה",
+    "muscle_shoulders_arms": "כתפיים וידיים"
   },
   "dashboard": {
     "welcome": "שלום",
@@ -203,7 +214,15 @@
     "perfectSet": "סט מושלם!",
     "setsCompleted": "סטים שהושלמו",
     "nudgeMessage": "יאללה נתחיל לזוז!",
-    "howToStart": "עמוד 2 מטר מהמצלמה והתחל"
+    "howToStart": "עמוד 2 מטר מהמצלמה והתחל",
+    "readinessTitle": "איך אתה מרגיש היום?",
+    "readinessAdjusted": "אימון מותאם לפי ההרגשה שלך",
+    "readinessBoosted": "הרגשה מעולה! הוספנו עוד קצת עומס",
+    "readiness1": "מותש",
+    "readiness2": "עייף",
+    "readiness3": "בסדר",
+    "readiness4": "טוב",
+    "readiness5": "שיא"
   },
   "stats": {
     "title": "סטטיסטיקות והתקדמות",

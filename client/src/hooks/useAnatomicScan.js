@@ -20,7 +20,7 @@
 
 import { useRef, useState, useCallback, useEffect } from 'react';
 import { ScanSequencer } from '../engine/scan/ScanSequencer.js';
-import { apiUrl } from '../utils/api.js';
+import { apiUrl, authFetch } from '../utils/api.js';
 
 
 // ---- Status Mapping ----
@@ -80,9 +80,8 @@ async function captureMultipleFrames(videoEl, count = VISION_FRAME_COUNT) {
 // ============================================================
 
 async function fetchVisionDiagnosis(frames, kineticResult) {
-  const resp = await fetch(apiUrl('/api/coach/analyze-anatomy'), {
+  const resp = await authFetch(apiUrl('/api/coach/analyze-anatomy'), {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       frames,
       kineticHints: kineticResult ? {
@@ -417,9 +416,8 @@ export function useAnatomicScan({ onStatusChange, onInstruction, videoRef, userN
   const rejectWithCorrection = useCallback(async (correctedSide) => {
     console.log('[useAnatomicScan] rejectWithCorrection called, correctedSide:', correctedSide);
     try {
-      const resp = await fetch(apiUrl('/api/coach/correct-anatomy'), {
+      const resp = await authFetch(apiUrl('/api/coach/correct-anatomy'), {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           originalDiagnosis: visionDiagnosis,
           correctedSide,

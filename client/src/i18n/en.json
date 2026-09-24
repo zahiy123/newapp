@@ -90,7 +90,8 @@
     "tennisWheelchair": "Wheelchair Tennis",
     "fitness": "General Fitness",
     "rehab": "Rehabilitation & Recovery",
-    "continue": "Continue"
+    "continue": "Continue",
+    "adaptedNote": "Your kinetic scan detected your physical condition. Only adapted sports are shown for you."
   },
   "rehab": {
     "title": "Rehabilitation Path",
@@ -125,7 +126,17 @@
     "speed": "Speed",
     "flexibility": "Flexibility",
     "continue": "Continue to My Training Plan",
-    "selectAtLeast": "Select at least one goal"
+    "selectAtLeast": "Select at least one goal",
+    "blocked": "Not available",
+    "legs_unavailable": "Unavailable — legs not functional",
+    "arms_unavailable": "Unavailable — arms not functional",
+    "muscleGroupTitle": "Muscle Group Focus",
+    "muscleGroupSubtitle": "Which body area should we emphasize?",
+    "muscle_full_body": "Full Body",
+    "muscle_upper_body": "Upper Body",
+    "muscle_lower_body": "Lower Body",
+    "muscle_core": "Core",
+    "muscle_shoulders_arms": "Shoulders & Arms"
   },
   "dashboard": {
     "welcome": "Hello",
@@ -203,7 +214,15 @@
     "perfectSet": "Perfect set!",
     "setsCompleted": "Sets completed",
     "nudgeMessage": "Let's get moving!",
-    "howToStart": "Stand 2m from camera and start"
+    "howToStart": "Stand 2m from camera and start",
+    "readinessTitle": "How are you feeling today?",
+    "readinessAdjusted": "Workout adjusted to match how you feel",
+    "readinessBoosted": "Feeling great! Added a bit more load",
+    "readiness1": "Exhausted",
+    "readiness2": "Tired",
+    "readiness3": "OK",
+    "readiness4": "Good",
+    "readiness5": "Peak"
   },
   "stats": {
     "title": "Statistics & Progress",

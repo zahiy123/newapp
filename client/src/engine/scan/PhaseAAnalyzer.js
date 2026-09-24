@@ -53,7 +53,7 @@ const OPPOSITE_LIMB = Object.freeze({
 const MOBILITY_AID_LABELS = Object.freeze({
   crutches: ['crutch', 'crutches', 'walking_stick', 'walking stick', 'cane'],
   wheelchair: ['wheelchair', 'wheel chair', 'mobility scooter'],
-  prosthetic: ['prosthetic', 'artificial limb', 'prosthesis'],
+  prosthetic: ['prosthetic', 'artificial limb', 'prosthesis', 'prosthetic_leg', 'prosthetic_arm'],
   brace: ['brace', 'splint', 'orthotic', 'support'],
 });
 
