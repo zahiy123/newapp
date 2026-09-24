@@ -386,9 +386,32 @@ export default function AnatomicScan({ onScanComplete }) {
         const levelMap = { TRANSFEMORAL_AMPUTEE: 'above_knee', TRANSTIBIAL_AMPUTEE: 'below_knee' };
         const mobilityAid = visionDiagnosis.mobilityAid || 'none';
 
-        // Capture snapshot + verify with server
-        const verification = await captureAndVerify(result, visionDiagnosis);
-        const verifiedScanData = verification?.scanData || buildScanData(result, visionDiagnosis);
+        // Build scanData from vision diagnosis (result may be null during early confirmation)
+        let verifiedScanData = buildScanData(result, visionDiagnosis) || {
+          classification: cls,
+          adaptedTrack: visionDiagnosis.adaptedTrack || 'NORMAL',
+          prostheticSide: side,
+          aids: aidsList,
+          bodyMap: {},
+          compensationMap: {},
+          riskZones: [],
+          specialProtocol: visionDiagnosis.specialProtocol || null,
+          limbStatus: {},
+          romBaseline: null,
+        };
+
+        // Capture snapshot + verify with server (only if scanData is meaningful)
+        let verification = null;
+        if (verifiedScanData.classification) {
+          try {
+            verification = await captureAndVerify(result, visionDiagnosis);
+            if (verification?.scanData) {
+              verifiedScanData = verification.scanData;
+            }
+          } catch (verifyErr) {
+            console.warn('[ScanConfirm] Verification failed, using local scanData:', verifyErr.message);
+          }
+        }
 
         // Preserve ROM history — carry forward previous baselines
         const existingBaselines = userProfile?.scanData?.previousBaselines || [];
@@ -425,7 +448,7 @@ export default function AnatomicScan({ onScanComplete }) {
             corrections: verification?.corrections ?? null,
             description: verification?.description ?? '',
             description_he: verification?.description_he ?? '',
-            fallback: verification?.fallback ?? false,
+            fallback: verification?.fallback ?? !verification,
           },
         };
         await setDoc(doc(db, 'users', user.uid), saveData, { merge: true });

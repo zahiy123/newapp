@@ -907,8 +907,15 @@ export class ScanSequencer {
     }
 
     // ── Full-Body Visibility Gate (continuous) ──
-    // Ensures ALL critical body parts remain visible during scanning
-    if (qualityScanStates.includes(this._state)) {
+    // Ensures ALL critical body parts remain visible during scanning.
+    // BYPASSED during active diagnostic exercises — dynamic movements
+    // (walking, bilateral arms/legs) cause temporary landmark occlusion.
+    // The per-exercise visibility guard in _handleDiagnostics checks
+    // the relevant target joints instead.
+    const isDiagnosticsActive = this._state === STATE.PHASE_A &&
+      this._phaseASubState === 'diagnostics';
+
+    if (qualityScanStates.includes(this._state) && !isDiagnosticsActive) {
       const fullBodyOk = ScanSequencer.checkFullBodyVisibility(landmarks);
 
       if (this._fullBodyGatePaused) {
@@ -960,6 +967,12 @@ export class ScanSequencer {
       }
 
       // Full body visible — reset counter
+      this._fullBodyGateBadFrames = 0;
+    }
+
+    // When entering diagnostics, clear any lingering gate pause from detection phase
+    if (isDiagnosticsActive && this._fullBodyGatePaused) {
+      this._fullBodyGatePaused = false;
       this._fullBodyGateBadFrames = 0;
     }
 
