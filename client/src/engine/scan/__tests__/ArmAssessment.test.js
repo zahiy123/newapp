@@ -162,7 +162,7 @@ describe('ScanSequencer per-arm calibration', () => {
       const movement = MOTION_CAL_MOVEMENTS[seq._motionCalIndex];
       counters[movement.id] = (counters[movement.id] || 0) + 1;
       const change = seq.feedFrame(frameForMovement(movement, counters[movement.id]));
-      if (change?.subState === 'detection') return change;
+      if ((change?.subState === 'detection' || change?.subState === 'visionDiagnosis')) return change;
     }
     return null;
   }
@@ -234,7 +234,7 @@ describe('ScanSequencer per-arm calibration', () => {
       counters[movement.id] = (counters[movement.id] || 0) + 1;
       const change = seq.feedFrame(healthyRightLimitedLeft(movement, counters[movement.id]));
       if (change?.instruction) instructions.push(change.instruction);
-      if (change?.subState === 'detection') { end = change; break; }
+      if (seq._phaseASubState !== 'motionCalibration') { end = change; break; }  // first change after calibration
     }
     expect(end).not.toBeNull();
     expect(end.calibrationResults.marchInPlace.status).toBe('skipped_wheelchair');
@@ -492,7 +492,7 @@ describe('ScanSequencer calibration sensitivity', () => {
       const lift = Math.max(0, Math.sin((2 * Math.PI * i) / 30)) * 0.025;
       lm[LM.RIGHT_ANKLE] = { ...lm[LM.RIGHT_ANKLE], y: 0.88 - lift };
       const change = seq.feedFrame(lm);
-      if (change?.subState === 'detection') end = change;
+      if ((change?.subState === 'detection' || change?.subState === 'visionDiagnosis')) end = change;
     }
     expect(end?.calibrationResults.marchInPlace.status).toBe('assessed');
     expect(end.calibrationResults.incompleteSteps).toEqual([]);

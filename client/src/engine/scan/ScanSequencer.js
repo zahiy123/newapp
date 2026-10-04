@@ -127,6 +127,8 @@ const DETECTION_INSTRUCTION_HE = 'מנתח את גופך, אנא עמוד במק
 
 // ---- Phase A Detection ----
 const DETECTION_DURATION_SEC = 2;
+// Minimum standing-still frames (from the first get-ready phase) to skip the end-of-scan detection wait
+const MIN_STILL_FRAMES = 30;
 
 // ---- Phase A Strict Blocking ----
 // Movement must exceed this variance to advance (high bar — must be real movement, not noise)
@@ -1274,6 +1276,7 @@ export class ScanSequencer {
       this._motionCalAttempt = 1;
       this._motionCalTexts = null;
       this._motionCalIncomplete = [];
+      this._stillFrameRange = null;
       this._calfRaiseResult = null;
       const first = MOTION_CAL_MOVEMENTS[0];
       return {
@@ -1474,6 +1477,17 @@ export class ScanSequencer {
    * Mirror correction: swap left/right landmarks if camera is mirrored.
    * @private
    */
+  /**
+   * Mark the camera stream as mirrored and correct the frames already recorded,
+   * so every stored frame uses the same (anatomical) left/right convention.
+   * @private
+   */
+  _setMirrored() {
+    if (this._mirrored) return;
+    this._mirrored = true;
+    this._landmarkFrames = this._landmarkFrames.map(f => this._correctMirror(f));
+  }
+
   _correctMirror(landmarks) {
     if (!this._mirrored) return landmarks;
     const corrected = [...landmarks];
@@ -1520,6 +1534,14 @@ export class ScanSequencer {
 
     // ── Phase 1: GET READY — the instruction is being spoken ──
     const prepFrames = this._motionCalPrepFrames;
+    // The first get-ready phase of the scan = the user standing still, listening.
+    // These frames replace the separate 2 s "stand still" detection at the end (faster results).
+    if (this._motionCalIndex === 0 && this._motionCalAttempt === 1 &&
+        this._motionCalFrames.length <= prepFrames) {
+      const idx = this._landmarkFrames.length;  // current frame already pushed
+      if (!this._stillFrameRange) this._stillFrameRange = { start: idx - 1, end: idx };
+      else this._stillFrameRange.end = idx;
+    }
     if (this._motionCalFrames.length <= prepFrames) return null;
 
     // ── Phase 2: MEASURE ──
@@ -1640,7 +1662,26 @@ export class ScanSequencer {
     }
 
     if (this._motionCalIndex >= MOTION_CAL_MOVEMENTS.length) {
-      // All calibration movements done — transition to detection
+      const calibrationSummary = {
+        mirrored: this._mirrored,
+        calfRaiseResult: this._calfRaiseResult,
+        armAssessment: this.armAssessment,
+        calibrationResults: this.calibrationResults,
+      };
+
+      // Fast path: analyze the standing-still frames recorded at the start of the scan
+      // right away, instead of asking the user to stand still for another 2 s.
+      const still = this._stillFrameRange;
+      if (!this._strictMode && still && still.end - still.start >= MIN_STILL_FRAMES) {
+        this._phaseASubState = 'detection';
+        this._detectionFrameStart = still.start;
+        this._detectionFrameTarget = still.end;
+        this._snapshotEmitted = true;
+        const analysis = this._handleDetection();
+        return { ...analysis, ...calibrationSummary };
+      }
+
+      // Fallback (strict mode / not enough still frames): a short stand-still detection
       this._phaseASubState = 'detection';
       this._detectionFrameStart = this._landmarkFrames.length;
       this._detectionFrameTarget = this._landmarkFrames.length +
@@ -1651,10 +1692,7 @@ export class ScanSequencer {
         progress: this.progress,
         instruction: DETECTION_INSTRUCTION,
         instruction_he: DETECTION_INSTRUCTION_HE,
-        mirrored: this._mirrored,
-        calfRaiseResult: this._calfRaiseResult,
-        armAssessment: this.armAssessment,
-        calibrationResults: this.calibrationResults,
+        ...calibrationSummary,
       };
     }
 
@@ -1744,7 +1782,7 @@ export class ScanSequencer {
       if (!this._motionCalDetected &&
           leftRise >= MOTION_CAL_WRIST_THRESHOLD && rightRise < MOTION_CAL_WRIST_THRESHOLD * 0.3) {
         // LEFT wrist rose instead of RIGHT → camera is mirrored
-        this._mirrored = true;
+        this._setMirrored();
         return true;
       }
       return false;
@@ -1758,7 +1796,7 @@ export class ScanSequencer {
       if (!this._motionCalDetected && !this._mirrored && !this._handRaiseResult.right?.raised &&
           rightRise >= MOTION_CAL_WRIST_THRESHOLD && leftRise < MOTION_CAL_WRIST_THRESHOLD * 0.3) {
         // Right-hand step was not detected and the RIGHT wrist rose now → camera is mirrored
-        this._mirrored = true;
+        this._setMirrored();
         return true;
       }
       return false;
@@ -2738,6 +2776,7 @@ export class ScanSequencer {
     this._motionCalAttempt = 1;
     this._motionCalTexts = null;
     this._motionCalIncomplete = [];
+    this._stillFrameRange = null;
     this._handRaiseResult = { right: null, left: null };
     this._armTests = { right: {}, left: {} };
     this._marchResult = null;

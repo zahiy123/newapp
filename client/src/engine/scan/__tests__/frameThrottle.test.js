@@ -76,7 +76,7 @@ describe('frameThrottle', () => {
       const change = seq.feedFrame(frameFor(movement, t));
       if (change?.motionCalPhase === 'prep') order.push(MOTION_CAL_MOVEMENTS[change.motionCalStep].id);
       if (change?.measureStart) measureStartAt[MOTION_CAL_MOVEMENTS[change.motionCalStep].id] = t;
-      if (change?.subState === 'detection') endAt = t;
+      if ((change?.subState === 'detection' || change?.subState === 'visionDiagnosis')) endAt = t;
     }
 
     // Every step, in order, with no skips

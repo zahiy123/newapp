@@ -19,7 +19,7 @@
 // ============================================================
 
 import { useRef, useState, useCallback, useEffect } from 'react';
-import { ScanSequencer } from '../engine/scan/ScanSequencer.js';
+import { ScanSequencer, MOTION_CAL_MOVEMENTS } from '../engine/scan/ScanSequencer.js';
 import { createFrameThrottle } from '../engine/scan/frameThrottle.js';
 import { apiUrl, authFetch } from '../utils/api.js';
 
@@ -48,6 +48,11 @@ const PROGRESS_THROTTLE_MS = 100;
 // measurement, timeouts) are counted in frames at this rate, so frames MUST arrive at
 // this real-time rate — not at the screen refresh rate of the rAF loop (60-144 Hz).
 const SCAN_SAMPLE_RATE = 30;
+
+// Vision diagnosis runs in the BACKGROUND during the scan, so the results screen appears
+// immediately after the last step. Frames are captured at the start of this calibration step
+// (standing, arms down, full body in frame) — about 20 s before the scan ends.
+const VISION_PREFETCH_STEP_ID = 'slight_bend';
 
 // Vision frame capture settings
 const VISION_FRAME_COUNT = 3;
@@ -177,6 +182,8 @@ export function useAnatomicScan({ onStatusChange, onInstruction, videoRef, userN
   const lastStatusRef = useRef('idle');
   const progressThrottleRef = useRef(0);
   const visionInFlightRef = useRef(false);
+  // Promise of the background (prefetched) vision diagnosis, or null
+  const visionPrefetchRef = useRef(null);
 
 
   // ---- React State (for UI consumers) ----
@@ -235,12 +242,41 @@ export function useAnatomicScan({ onStatusChange, onInstruction, videoRef, userN
 
   // ---- Vision Diagnosis Handler ----
 
+  /** Start the vision diagnosis in the background (once per scan). */
+  const startVisionPrefetch = useCallback(() => {
+    if (visionPrefetchRef.current) return;
+    const videoEl = videoRefInternal.current?.current || videoRefInternal.current;
+    console.log('[useAnatomicScan] Vision diagnosis started in background');
+    visionPrefetchRef.current = (async () => {
+      const frames = await captureMultipleFrames(videoEl, VISION_FRAME_COUNT, !!sequencerRef.current?.mirrored);
+      if (frames.length === 0) return null;
+      return fetchVisionDiagnosis(frames, null);
+    })().catch((err) => {
+      console.warn('[useAnatomicScan] Background vision diagnosis failed — will retry at the end:', err.message);
+      return null;
+    });
+  }, []);
+
   const handleVisionCapture = useCallback(async (kineticResult) => {
     if (visionInFlightRef.current) return;
     visionInFlightRef.current = true;
     setAwaitingVision(true);
 
     try {
+      // Background result (started mid-scan) → show the results immediately
+      const pending = visionPrefetchRef.current;
+      visionPrefetchRef.current = null;
+      const prefetched = pending ? await pending : null;
+      if (prefetched) {
+        const seq = getSequencer();
+        const change = seq.setVisionResult(prefetched);
+        setAwaitingVision(false);
+        setAwaitingConfirmation(true);
+        setVisionDiagnosis(prefetched);
+        handleStateChange(change);
+        return;
+      }
+
       const videoEl = videoRefInternal.current?.current || videoRefInternal.current;
       const frames = await captureMultipleFrames(videoEl, VISION_FRAME_COUNT, !!sequencerRef.current?.mirrored);
 
@@ -318,6 +354,10 @@ export function useAnatomicScan({ onStatusChange, onInstruction, videoRef, userN
     }
 
     // Motion calibration timing (get ready → measure)
+    if (change.motionCalPhase === 'prep' &&
+        MOTION_CAL_MOVEMENTS[change.motionCalStep]?.id === VISION_PREFETCH_STEP_ID) {
+      startVisionPrefetch();
+    }
     if (change.motionCalPhase) {
       console.log(`[useAnatomicScan] Calibration ${(change.motionCalStep ?? 0) + 1}/${change.motionCalTotal ?? '?'} — ${change.motionCalPhase}`);
       setMotionCalPhase(prev => ({
@@ -403,7 +443,7 @@ export function useAnatomicScan({ onStatusChange, onInstruction, videoRef, userN
     if (change.kineticInferredProfile) {
       setKineticInferredProfile(change.kineticInferredProfile);
     }
-  }, [handleVisionCapture]);
+  }, [handleVisionCapture, startVisionPrefetch]);
 
 
   // ---- Public API ----
@@ -425,12 +465,14 @@ export function useAnatomicScan({ onStatusChange, onInstruction, videoRef, userN
   }, [getSequencer, handleStateChange]);
 
   const start = useCallback(() => {
+    visionPrefetchRef.current = null;
     const seq = getSequencer();
     const change = seq.start();
     handleStateChange(change);
   }, [getSequencer, handleStateChange]);
 
   const stop = useCallback(() => {
+    visionPrefetchRef.current = null;
     const seq = getSequencer();
     seq.stop();
     lastStatusRef.current = 'idle';
@@ -446,6 +488,7 @@ export function useAnatomicScan({ onStatusChange, onInstruction, videoRef, userN
   }, [getSequencer]);
 
   const reset = useCallback(() => {
+    visionPrefetchRef.current = null;
     const seq = getSequencer();
     seq.reset();
     lastStatusRef.current = 'idle';
@@ -512,6 +555,7 @@ export function useAnatomicScan({ onStatusChange, onInstruction, videoRef, userN
    * Reject the vision diagnosis — restart scan with stricter criteria.
    */
   const rejectDiagnosis = useCallback(() => {
+    visionPrefetchRef.current = null;  // the re-scan captures fresh frames
     console.log('[useAnatomicScan] rejectDiagnosis called');
     const seq = getSequencer();
     const change = seq.rejectDiagnosis();

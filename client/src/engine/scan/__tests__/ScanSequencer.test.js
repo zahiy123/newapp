@@ -2424,7 +2424,7 @@ describe('ScanSequencer', () => {
           ? createPelvisRotatedFrame(n % 20 < 10 ? -0.02 : 0.02)
           : (frameFor[movement.id] || createHealthyLandmarks)();
         const change = seq.feedFrame(lm);
-        if (change && change.subState === 'detection') return change;
+        if (change && (change.subState === 'detection' || change.subState === 'visionDiagnosis')) return change;
       }
       return null;
     }
@@ -2444,7 +2444,8 @@ describe('ScanSequencer', () => {
       passCalibrationFull(seq);
       const result = passMotionCalibration(seq);
       expect(result).not.toBeNull();
-      expect(result.subState).toBe('detection');
+      // Fast path: straight to the vision diagnosis (standing-still frames from the start are analyzed)
+      expect(result.subState).toBe('visionDiagnosis');
     });
 
     it('detects mirror when left wrist rises instead of right', () => {
@@ -2501,7 +2502,7 @@ describe('ScanSequencer', () => {
         lm[LM.RIGHT_ANKLE].y = 0.85; // right rises (baseline 0.88 → 0.85 = 0.03 range)
         // left stays at 0.88 (no movement)
         const change = seq.feedFrame(lm);
-        if (change && change.subState === 'detection') {
+        if (change && (change.subState === 'detection' || change.subState === 'visionDiagnosis')) {
           result = change;
           break;
         }
@@ -2513,28 +2514,21 @@ describe('ScanSequencer', () => {
       expect(result.calfRaiseResult.leftAnkleMoved).toBe(false);
     });
 
-    it('ankleStatus emitted during detection in full mode', () => {
+    it('fast path: the last calibration step goes straight to vision diagnosis (no stand-still wait)', () => {
       const seq = createFullSeq();
       seq.start();
       passCalibrationFull(seq);
-      passMotionCalibration(seq);
+      const end = passMotionCalibration(seq);
 
-      // Feed 10 frames — should get ankleStatus on frame 10
-      let statusEmitted = false;
-      for (let i = 0; i < 30; i++) {
-        const change = seq.feedFrame(createHealthyLandmarks());
-        if (change && change.ankleStatus) {
-          statusEmitted = true;
-          expect(change.ankleStatus.left).toBeDefined();
-          expect(change.ankleStatus.right).toBeDefined();
-          expect(change.ankleStatus.left).toHaveProperty('visible');
-          expect(change.ankleStatus.left).toHaveProperty('moving');
-          expect(change.ankleStatus.right).toHaveProperty('visible');
-          expect(change.ankleStatus.right).toHaveProperty('moving');
-          break;
-        }
-      }
-      expect(statusEmitted).toBe(true);
+      // Same frame as the end of the last movement — no extra frames needed
+      expect(end.subState).toBe('visionDiagnosis');
+      expect(end.captureFrames).toBe(true);
+      expect(end.kineticResult).toBeDefined();
+      expect(end.calibrationResults).toBeDefined();
+      expect(end.armAssessment).toBeDefined();
+      // Detection used the standing-still frames recorded during the first get-ready phase
+      expect(seq._detectionFrameStart).toBe(seq._stillFrameRange.start);
+      expect(seq._detectionFrameTarget - seq._detectionFrameStart).toBeGreaterThanOrEqual(30);
     });
 
     it('reportDetectionError resets with strict mode', () => {
@@ -2572,11 +2566,11 @@ describe('ScanSequencer', () => {
       const seq = createFullSeq();
       seq.start();
       passCalibrationFull(seq);
-      passMotionCalibration(seq);
+      const end = passMotionCalibration(seq);
 
-      // Feed detection frames until detection completes → visionDiagnosis
-      let visionTransition = null;
-      for (let f = 0; f < 200; f++) {
+      // Fast path: the transition is returned by the last calibration frame
+      let visionTransition = end?.subState === 'visionDiagnosis' ? end : null;
+      for (let f = 0; f < 200 && !visionTransition; f++) {
         const change = seq.feedFrame(createHealthyLandmarks());
         if (change && change.subState === 'visionDiagnosis') {
           visionTransition = change;
