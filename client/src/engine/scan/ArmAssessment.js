@@ -36,8 +36,8 @@ export const ARM_TESTS = Object.freeze({
 
 // ---- Thresholds ----
 
-// Angle variance (deg²) that counts as real movement — same bar as the diagnostic segments
-export const ARM_MOVEMENT_VARIANCE = 12.0;
+// Angle variance (deg²) that counts as real movement (std ≈ 2.8° — above MediaPipe rest jitter)
+export const ARM_MOVEMENT_VARIANCE = 8.0;
 // Landmark visibility required for a frame to be measured
 const ARM_VISIBILITY_MIN = 0.5;
 // Below this average visibility the arm is treated as not visible (absent / out of frame)

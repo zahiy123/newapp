@@ -82,9 +82,9 @@ describe('frameThrottle', () => {
     // Every step, in order, with no skips
     expect(order).toEqual(MOTION_CAL_MOVEMENTS.map(m => m.id));
     expect(Object.keys(measureStartAt)).toHaveLength(MOTION_CAL_MOVEMENTS.length);
-    // Real time: each step ≥ get-ready (2.5 s) + measurement (4 s)
-    expect(endAt / 1000).toBeGreaterThanOrEqual(MOTION_CAL_MOVEMENTS.length * (2.5 + 4));
-    expect(endAt / 1000).toBeLessThanOrEqual(MOTION_CAL_MOVEMENTS.length * (6.5 + 8) + 2);
+    // Real time: each step ≥ get-ready (1.5 s) + measurement (2.5 s); flowing, ~1 min in total
+    expect(endAt / 1000).toBeGreaterThanOrEqual(MOTION_CAL_MOVEMENTS.length * (1.5 + 2.5));
+    expect(endAt / 1000).toBeLessThanOrEqual(80);
   });
 
   it('resyncs after a long pause instead of bursting', () => {

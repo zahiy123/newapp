@@ -234,6 +234,16 @@ Two critical corrections to the existing onboarding (Stages 1B/1C), completed **
   - "Report error → left/right leg" (`/correct-anatomy`) rebuilds the diagnosis from the per-limb data (`applySideCorrection`) instead of swapping words in the text.
 - *Tests:* `server/services/__tests__/anatomyDiagnosis.test.js` with 8 tests (`npm test` in `server/`), including the owner's exact case and "evidence-less amputation is not reported".
 
+**8. Pace + detection sensitivity tuning (DONE, 2026-10-04; owner feedback: "too slow, misses real movements")**
+- *Pace:* get-ready 1.5-4 s (was 2.5-6.5 s), measurement window 2.5-6 s (was 4-8 s). The 12-step calibration takes **about 68 s** when the movements are performed (was about 103 s). The order and the hermetic lock are unchanged.
+- *Sensitivity: 5 root causes of missed movements were fixed:*
+  1. Movement during the get-ready phase was ignored. Detection now runs on **every frame of the step**; only advancing waits for the window.
+  2. The hand raise was compared to the step's first frame (a hand already up at the start could never count). It is now measured as the rise above the wrist's lowest point in the step, with the threshold lowered from 12% to 8% of frame height.
+  3. The knee bend checked only the LEFT knee (the owner's prosthetic side). It now uses the knee-angle range of **either** knee, ≥ 5°.
+  4. The full-body visibility gate was active during calibration, so an arm raised out of frame froze the scan. It is now bypassed during calibration, as it already was during diagnostics.
+  5. Thresholds: walking lift 3% → 2% of frame height; pelvis 0.015 → 0.012; arm-movement variance 12 → 8 deg².
+- *Tests:* 7 new sensitivity tests (movement during get-ready, hand already up, right-knee-only bend, short step, arm out of frame, moderate raise, **no false positives from rest jitter**). Verified that 5 of them fail on the previous version (`b9d336f`). Client: 383 pass, 0 new failures, 23 pre-existing.
+
 **2. Muscle group selection only for the strength track (DONE)**
 - `Goals.jsx`: the muscle group section is **not rendered at all** unless the `strength` goal is selected. For any other goal set, the focus is automatically `full_body`, and deselecting strength resets it immediately.
 - Defensive layers: `Dashboard.jsx` sends `full_body` unless the goals include `strength` (this covers existing users with an old stored focus), and `buildWeekPrompt()` applies the muscle-group bias only when `strength` is in the goals.
@@ -444,3 +454,4 @@ Two critical corrections to the existing onboarding (Stages 1B/1C), completed **
 - **2026-10-04:** **Critical fix: the scan skipped steps (owner report).** Root cause: the scan loop fed the sequencer at the screen refresh rate (up to 144 Hz) while all windows assume 30 fps, so calibration ran about 5× too fast (about 23 s instead of about 2 min). Fixed with a real-time 30 fps throttle in `useAnatomicScan.feedFrame` (`frameThrottle.js`) and step logging. A new end-to-end 144 Hz test confirms all 12 steps run in order with full windows. Tests: 374 pass, 0 new failures, 23 pre-existing.
 - **2026-10-04:** **Owner report: the scan still jumped to results and the report confused the sides.** Found that the owner tested the deployed site (commit `2d69f93`), which has none of the session's fixes. Also added: (1) a hermetic step lock: no movement → the step is repeated with a spoken nudge (up to 3 attempts, then explicitly recorded as not performed), plus range-based walking detection; (2) an accurate per-limb diagnosis: an evidence-based vision prompt, with deterministic classification/side/summary in `server/services/anatomyDiagnosis.js`, plus a per-limb side correction. Tests: client 376 pass (0 new failures, 23 pre-existing); server 8/8.
 - **2026-10-04:** Committed and pushed Stage 1D to `main` (`b9d336f`). Remaining: redeploy the server; decide how to ship the untracked ONNX model files.
+- **2026-10-04:** Pace and sensitivity tuning (owner feedback). Calibration went from about 103 s to about 68 s (get-ready 1.5-4 s, measurement 2.5-6 s). Five causes of missed movements were fixed: detection during get-ready, a relative hand-raise baseline, either-knee bend, the full-body gate bypassed during calibration, and lower thresholds. 7 new tests, including no false positives. Not yet committed.

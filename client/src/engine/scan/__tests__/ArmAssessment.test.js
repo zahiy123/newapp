@@ -305,12 +305,15 @@ describe('ScanSequencer calibration timing', () => {
     return lm;
   }
 
-  it('get-ready time scales with the instruction and stays within 2.5-6.5 s', () => {
+  it('get-ready time scales with the instruction and stays within 1.5-4 s', () => {
     for (const m of MOTION_CAL_MOVEMENTS) {
       const sec = motionCalPrepSec(m);
-      expect(sec).toBeGreaterThanOrEqual(2.5);
-      expect(sec).toBeLessThanOrEqual(6.5);
+      expect(sec).toBeGreaterThanOrEqual(1.5);
+      expect(sec).toBeLessThanOrEqual(4);
     }
+    // Longer instruction → longer get-ready
+    expect(motionCalPrepSec({ instruction: 'a b c d e f g h' }))
+      .toBeGreaterThan(motionCalPrepSec({ instruction: 'a b c d' }));
   });
 
   it('does not advance immediately when the hand is raised — waits get-ready + a full measurement window', () => {
@@ -326,9 +329,9 @@ describe('ScanSequencer calibration timing', () => {
       if (change?.motionCalStep === idx('raise_left_hand')) { advancedAt = i; break; }
     }
     expect(advancedAt).not.toBeNull();
-    // Never earlier than get-ready + at least MOTION_CAL_MEASURE_MIN_SEC (≥ 3-5 s of measurement)
+    // Never earlier than get-ready + the minimum measurement window
     expect(advancedAt).toBeGreaterThanOrEqual(prepFrames + minFrames);
-    expect(MOTION_CAL_MEASURE_MIN_SEC).toBeGreaterThanOrEqual(3);
+    expect(MOTION_CAL_MEASURE_MIN_SEC).toBeGreaterThanOrEqual(2);
     expect(seq._handRaiseResult.right.raised).toBe(true);
   });
 
@@ -400,5 +403,118 @@ describe('ScanSequencer calibration timing', () => {
     expect(seq._motionCalIndex).toBe(idx('raise_left_hand'));
     expect(seq._handRaiseResult.right.raised).toBe(true);
     expect(seq.calibrationResults.incompleteSteps).toEqual([]);
+  });
+});
+
+
+// ============================================================
+// Detection sensitivity — real movements are caught, noise is not
+// ============================================================
+
+describe('ScanSequencer calibration sensitivity', () => {
+  const RATE = 30;
+  const idx = (id) => MOTION_CAL_MOVEMENTS.findIndex(m => m.id === id);
+
+  /** Start the scan and jump to the given calibration step. */
+  function atStep(id) {
+    const seq = new ScanSequencer({ sampleRate: RATE });
+    seq.start();
+    seq.feedFrame(baseBody());
+    seq._motionCalIndex = idx(id);
+    seq._motionCalFrames = [];
+    return seq;
+  }
+
+  /** Feed frames from gen(i) until the step changes; returns { advancedTo, nudged }. */
+  function runStep(seq, gen, maxFrames = 2000) {
+    const start = seq._motionCalIndex;
+    let nudged = false;
+    for (let i = 1; i <= maxFrames && seq._motionCalIndex === start; i++) {
+      const change = seq.feedFrame(gen(i));
+      if (change?.nudge) nudged = true;
+      if (seq._phaseASubState !== 'motionCalibration') break;
+    }
+    return { advancedTo: seq._motionCalIndex, nudged };
+  }
+
+  /** Tiny random jitter like MediaPipe at rest. */
+  function jitter(lm, amount = 0.004) {
+    return lm.map(p => ({ ...p, x: p.x + (Math.random() - 0.5) * amount, y: p.y + (Math.random() - 0.5) * amount }));
+  }
+
+  it('a hand raised and lowered DURING the get-ready phase still counts (no retry)', () => {
+    const seq = atStep('raise_right_hand');
+    const r = runStep(seq, i => {
+      const lm = baseBody();
+      if (i > 5 && i < 25) setArm(lm, 'right', 175, 0);   // quick raise while the instruction plays
+      return lm;
+    });
+    expect(r.nudged).toBe(false);
+    expect(r.advancedTo).toBe(idx('raise_left_hand'));
+    expect(seq._handRaiseResult.right.raised).toBe(true);
+  });
+
+  it('a hand that is already up at the start of the step is still detected after lowering and raising', () => {
+    const seq = atStep('raise_left_hand');
+    const r = runStep(seq, i => {
+      const lm = baseBody();
+      setArm(lm, 'left', i < 20 ? 170 : i < 50 ? 5 : 170, 0);
+      return lm;
+    });
+    expect(r.nudged).toBe(false);
+    expect(seq._handRaiseResult.left.raised).toBe(true);
+  });
+
+  it('a moderate hand raise (to shoulder height) is enough', () => {
+    const seq = atStep('raise_right_hand');
+    const r = runStep(seq, i => { const lm = baseBody(); if (i > 10) setArm(lm, 'right', 80, 0); return lm; });
+    expect(r.nudged).toBe(false);
+  });
+
+  it('knee bend on the RIGHT knee only (left prosthetic side stiff) is detected', () => {
+    const seq = atStep('slight_bend');
+    const r = runStep(seq, i => {
+      const lm = baseBody();
+      const bend = (1 - Math.cos((2 * Math.PI * i) / 60)) / 2;
+      lm[LM.RIGHT_KNEE] = { ...lm[LM.RIGHT_KNEE], x: 0.43 + 0.03 * bend };
+      lm[LM.RIGHT_ANKLE] = { ...lm[LM.RIGHT_ANKLE], x: 0.43 - 0.01 * bend };
+      return lm;
+    });
+    expect(r.nudged).toBe(false);
+    expect(r.advancedTo).toBe(idx('pelvis_rotation'));
+  });
+
+  it('a short walking-in-place step (2.5% of frame height) is detected', () => {
+    const seq = atStep('march_in_place_cal');
+    let end = null;
+    for (let i = 1; i < 2000 && seq._phaseASubState === 'motionCalibration'; i++) {
+      const lm = baseBody();
+      const lift = Math.max(0, Math.sin((2 * Math.PI * i) / 30)) * 0.025;
+      lm[LM.RIGHT_ANKLE] = { ...lm[LM.RIGHT_ANKLE], y: 0.88 - lift };
+      const change = seq.feedFrame(lm);
+      if (change?.subState === 'detection') end = change;
+    }
+    expect(end?.calibrationResults.marchInPlace.status).toBe('assessed');
+    expect(end.calibrationResults.incompleteSteps).toEqual([]);
+  });
+
+  it('standing still with camera jitter is NOT counted as a movement (no false positives)', () => {
+    for (const id of ['raise_right_hand', 'slight_bend', 'calf_raise', 'right_arm_flexion']) {
+      const seq = atStep(id);
+      const r = runStep(seq, () => jitter(baseBody()));
+      expect(r.nudged, id).toBe(true);
+    }
+  });
+
+  it('an arm going out of frame (wrist not visible) does not freeze the calibration', () => {
+    const seq = atStep('right_arm_flexion');
+    for (let i = 0; i < 60; i++) {
+      const lm = baseBody();
+      setArm(lm, 'right', 175, 0);
+      lm[LM.RIGHT_WRIST] = { ...lm[LM.RIGHT_WRIST], visibility: 0.0 };
+      seq.feedFrame(lm);
+    }
+    expect(seq._fullBodyGatePaused).toBeFalsy();
+    expect(seq._motionCalFrames.length).toBe(60);
   });
 });

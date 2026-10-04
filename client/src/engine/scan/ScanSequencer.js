@@ -262,12 +262,12 @@ const MOTION_CAL_MOVEMENTS = [
     instruction_he: 'אנא צעד במקום כמה צעדים' },
 ];
 // Timing (seconds)
-const MOTION_CAL_PREP_BASE_SEC = 1.0;
-const MOTION_CAL_PREP_PER_WORD_SEC = 0.4;
-const MOTION_CAL_PREP_MIN_SEC = 2.5;
-const MOTION_CAL_PREP_MAX_SEC = 6.5;
-const MOTION_CAL_MEASURE_MIN_SEC = 4;
-const MOTION_CAL_MEASURE_MAX_SEC = 8;
+const MOTION_CAL_PREP_BASE_SEC = 0.5;
+const MOTION_CAL_PREP_PER_WORD_SEC = 0.3;
+const MOTION_CAL_PREP_MIN_SEC = 1.5;
+const MOTION_CAL_PREP_MAX_SEC = 4.0;
+const MOTION_CAL_MEASURE_MIN_SEC = 2.5;
+const MOTION_CAL_MEASURE_MAX_SEC = 6;
 // Hermetic blocker: a movement without detected motion is REPEATED (with a spoken nudge),
 // never silently skipped. Only after this many attempts is it recorded as not performed
 // (so a paralyzed/absent limb can never trap the user forever).
@@ -286,11 +286,11 @@ function motionCalPrepSec(movement) {
   const sec = MOTION_CAL_PREP_BASE_SEC + maxWords * MOTION_CAL_PREP_PER_WORD_SEC;
   return Math.min(MOTION_CAL_PREP_MAX_SEC, Math.max(MOTION_CAL_PREP_MIN_SEC, sec));
 }
-const MOTION_CAL_WRIST_THRESHOLD = 0.12;   // Y decrease for hand raise
-const MOTION_CAL_KNEE_THRESHOLD = 3.0;     // degrees angle change
-const MOTION_CAL_HIP_THRESHOLD = 0.015;    // hip X difference range
+const MOTION_CAL_WRIST_THRESHOLD = 0.08;   // wrist rise above its lowest point in the step (8% of frame height)
+const MOTION_CAL_KNEE_THRESHOLD = 5.0;     // degrees knee-angle range, either knee
+const MOTION_CAL_HIP_THRESHOLD = 0.012;    // hip X difference range
 const MOTION_CAL_ANKLE_THRESHOLD = 0.008;  // ankle Y range for calf raise
-const MOTION_CAL_MARCH_LIFT = 0.03;        // ankle Y range (3% of frame height) for walking in place
+const MOTION_CAL_MARCH_LIFT = 0.02;        // ankle Y range (2% of frame height) for walking in place
 
 // ---- Confidence Gate ----
 const CONFIDENCE_THRESHOLD = 0.95;
@@ -974,12 +974,12 @@ export class ScanSequencer {
 
     // ── Full-Body Visibility Gate (continuous) ──
     // Ensures ALL critical body parts remain visible during scanning.
-    // BYPASSED during active diagnostic exercises — dynamic movements
-    // (walking, bilateral arms/legs) cause temporary landmark occlusion.
+    // BYPASSED during active diagnostic exercises and the motion calibration — dynamic movements
+    // (raising an arm overhead, walking, bilateral arms/legs) cause temporary landmark occlusion.
     // The per-exercise visibility guard in _handleDiagnostics checks
     // the relevant target joints instead.
     const isDiagnosticsActive = this._state === STATE.PHASE_A &&
-      this._phaseASubState === 'diagnostics';
+      (this._phaseASubState === 'diagnostics' || this._phaseASubState === 'motionCalibration');
 
     if (qualityScanStates.includes(this._state) && !isDiagnosticsActive) {
       const fullBodyOk = ScanSequencer.checkFullBodyVisibility(landmarks);
@@ -1511,7 +1511,14 @@ export class ScanSequencer {
     }
     this._motionCalFrames.push(landmarks);
 
-    // ── Phase 1: GET READY — the instruction is being spoken, nothing is measured ──
+    // Movement is detected on EVERY frame of the step — including the get-ready phase,
+    // because people naturally start moving while the instruction is still being spoken.
+    // Only ADVANCING waits for the get-ready + minimum measurement window.
+    if (!movement.windowed && this._detectMotionCalMovement(movement, landmarks)) {
+      this._motionCalDetected = true;
+    }
+
+    // ── Phase 1: GET READY — the instruction is being spoken ──
     const prepFrames = this._motionCalPrepFrames;
     if (this._motionCalFrames.length <= prepFrames) return null;
 
@@ -1554,79 +1561,6 @@ export class ScanSequencer {
       return measureStartChange;
     }
 
-    // Check if movement threshold met
-    let detected = false;
-
-    if (movement.id === 'raise_right_hand') {
-      // Check if RIGHT wrist Y decreased significantly (raised)
-      const baseY = this._motionCalBaseline[LM.RIGHT_WRIST]?.y || 0;
-      const currY = landmarks[LM.RIGHT_WRIST]?.y || 0;
-      const rightDelta = baseY - currY;
-      // Also check LEFT wrist to detect mirror
-      const leftBaseY = this._motionCalBaseline[LM.LEFT_WRIST]?.y || 0;
-      const leftCurrY = landmarks[LM.LEFT_WRIST]?.y || 0;
-      const leftDelta = leftBaseY - leftCurrY;
-
-      if (rightDelta >= MOTION_CAL_WRIST_THRESHOLD) {
-        detected = true;
-      } else if (!this._motionCalDetected &&
-                 leftDelta >= MOTION_CAL_WRIST_THRESHOLD && rightDelta < MOTION_CAL_WRIST_THRESHOLD * 0.3) {
-        // LEFT wrist rose instead of RIGHT → camera is mirrored
-        this._mirrored = true;
-        detected = true;
-      }
-    } else if (movement.id === 'raise_left_hand') {
-      // Frames are already mirror-corrected — LEFT wrist must rise
-      const leftDelta = (this._motionCalBaseline[LM.LEFT_WRIST]?.y || 0) - (landmarks[LM.LEFT_WRIST]?.y || 0);
-      const rightDelta = (this._motionCalBaseline[LM.RIGHT_WRIST]?.y || 0) - (landmarks[LM.RIGHT_WRIST]?.y || 0);
-      if (leftDelta >= MOTION_CAL_WRIST_THRESHOLD) {
-        detected = true;
-      } else if (!this._motionCalDetected && !this._mirrored && !this._handRaiseResult.right?.raised &&
-                 rightDelta >= MOTION_CAL_WRIST_THRESHOLD && leftDelta < MOTION_CAL_WRIST_THRESHOLD * 0.3) {
-        // Right-hand step was not detected and the RIGHT wrist rose now → camera is mirrored
-        this._mirrored = true;
-        detected = true;
-      }
-    } else if (movement.id === 'slight_bend') {
-      // Check knee angle change (any side)
-      const baseAngle = this._computeKneeAngle(this._motionCalBaseline);
-      const currAngle = this._computeKneeAngle(landmarks);
-      if (baseAngle !== null && currAngle !== null && Math.abs(currAngle - baseAngle) >= MOTION_CAL_KNEE_THRESHOLD) {
-        detected = true;
-      }
-    } else if (movement.id === 'pelvis_rotation') {
-      // Check hip X difference range across collected frames
-      const hipXDiffs = this._motionCalFrames.map(f => {
-        const lh = f[LM.LEFT_HIP], rh = f[LM.RIGHT_HIP];
-        if (!lh || !rh) return null;
-        return Math.abs(lh.x - rh.x);
-      }).filter(v => v !== null);
-      if (hipXDiffs.length >= 10) {
-        const range = Math.max(...hipXDiffs) - Math.min(...hipXDiffs);
-        if (range >= MOTION_CAL_HIP_THRESHOLD) detected = true;
-      }
-    } else if (movement.id === 'calf_raise') {
-      // Measure both ankles' Y range
-      const leftAnkleY = this._motionCalFrames.map(f => f[LM.LEFT_ANKLE]?.y).filter(v => v != null);
-      const rightAnkleY = this._motionCalFrames.map(f => f[LM.RIGHT_ANKLE]?.y).filter(v => v != null);
-      if (leftAnkleY.length >= 15 && rightAnkleY.length >= 15) {
-        const leftRange = Math.max(...leftAnkleY) - Math.min(...leftAnkleY);
-        const rightRange = Math.max(...rightAnkleY) - Math.min(...rightAnkleY);
-        // Any ankle moved = detected
-        if (leftRange >= MOTION_CAL_ANKLE_THRESHOLD || rightRange >= MOTION_CAL_ANKLE_THRESHOLD) {
-          detected = true;
-        }
-        // Store calf raise result regardless
-        this._calfRaiseResult = {
-          leftAnkleRange: leftRange,
-          rightAnkleRange: rightRange,
-          leftAnkleMoved: leftRange >= MOTION_CAL_ANKLE_THRESHOLD,
-          rightAnkleMoved: rightRange >= MOTION_CAL_ANKLE_THRESHOLD,
-        };
-      }
-    }
-
-    if (detected) this._motionCalDetected = true;
 
     // Advance only after the full measurement window AND real movement.
     // No movement by the max window → repeat the movement (up to MOTION_CAL_MAX_ATTEMPTS).
@@ -1787,11 +1721,97 @@ export class ScanSequencer {
     return null;
   }
 
+  /**
+   * Did the user perform this (non-windowed) calibration movement? Evaluated on every frame.
+   * Detection is relative to the step's own frames (not a single first-frame baseline), so a
+   * hand that was already up, or a movement started during the get-ready phase, still counts.
+   * @private
+   */
+  _detectMotionCalMovement(movement, landmarks) {
+    const frames = this._motionCalFrames;
+    // Rise of a wrist above its lowest point in this step (y grows downward)
+    const wristRise = (idx) => {
+      const ys = frames.map(f => f[idx]).filter(w => w && (w.visibility ?? 1) >= 0.3).map(w => w.y);
+      const cur = landmarks[idx];
+      if (ys.length === 0 || !cur || (cur.visibility ?? 1) < 0.3) return 0;
+      return Math.max(...ys) - cur.y;
+    };
+
+    if (movement.id === 'raise_right_hand') {
+      const rightRise = wristRise(LM.RIGHT_WRIST);
+      const leftRise = wristRise(LM.LEFT_WRIST);
+      if (rightRise >= MOTION_CAL_WRIST_THRESHOLD) return true;
+      if (!this._motionCalDetected &&
+          leftRise >= MOTION_CAL_WRIST_THRESHOLD && rightRise < MOTION_CAL_WRIST_THRESHOLD * 0.3) {
+        // LEFT wrist rose instead of RIGHT → camera is mirrored
+        this._mirrored = true;
+        return true;
+      }
+      return false;
+    }
+
+    if (movement.id === 'raise_left_hand') {
+      // Frames are already mirror-corrected — LEFT wrist must rise
+      const leftRise = wristRise(LM.LEFT_WRIST);
+      const rightRise = wristRise(LM.RIGHT_WRIST);
+      if (leftRise >= MOTION_CAL_WRIST_THRESHOLD) return true;
+      if (!this._motionCalDetected && !this._mirrored && !this._handRaiseResult.right?.raised &&
+          rightRise >= MOTION_CAL_WRIST_THRESHOLD && leftRise < MOTION_CAL_WRIST_THRESHOLD * 0.3) {
+        // Right-hand step was not detected and the RIGHT wrist rose now → camera is mirrored
+        this._mirrored = true;
+        return true;
+      }
+      return false;
+    }
+
+    if (movement.id === 'slight_bend') {
+      // Knee-angle range of EITHER knee (an amputee may bend only the intact knee)
+      for (const side of ['LEFT', 'RIGHT']) {
+        const angles = frames
+          .map(f => this._computeKneeAngle(f, side))
+          .filter(a => a !== null);
+        if (angles.length >= 3 && Math.max(...angles) - Math.min(...angles) >= MOTION_CAL_KNEE_THRESHOLD) return true;
+      }
+      return false;
+    }
+
+    if (movement.id === 'pelvis_rotation') {
+      // Hip X difference range across collected frames
+      const hipXDiffs = frames.map(f => {
+        const lh = f[LM.LEFT_HIP], rh = f[LM.RIGHT_HIP];
+        if (!lh || !rh) return null;
+        return Math.abs(lh.x - rh.x);
+      }).filter(v => v !== null);
+      return hipXDiffs.length >= 10 &&
+        Math.max(...hipXDiffs) - Math.min(...hipXDiffs) >= MOTION_CAL_HIP_THRESHOLD;
+    }
+
+    if (movement.id === 'calf_raise') {
+      // Both ankles' Y range — any ankle moving counts (an amputee rises on the intact foot)
+      const leftAnkleY = frames.map(f => f[LM.LEFT_ANKLE]?.y).filter(v => v != null);
+      const rightAnkleY = frames.map(f => f[LM.RIGHT_ANKLE]?.y).filter(v => v != null);
+      if (leftAnkleY.length >= 15 && rightAnkleY.length >= 15) {
+        const leftRange = Math.max(...leftAnkleY) - Math.min(...leftAnkleY);
+        const rightRange = Math.max(...rightAnkleY) - Math.min(...rightAnkleY);
+        this._calfRaiseResult = {
+          leftAnkleRange: leftRange,
+          rightAnkleRange: rightRange,
+          leftAnkleMoved: leftRange >= MOTION_CAL_ANKLE_THRESHOLD,
+          rightAnkleMoved: rightRange >= MOTION_CAL_ANKLE_THRESHOLD,
+        };
+        return leftRange >= MOTION_CAL_ANKLE_THRESHOLD || rightRange >= MOTION_CAL_ANKLE_THRESHOLD;
+      }
+      return false;
+    }
+
+    return false;
+  }
+
   /** @private */
-  _computeKneeAngle(frame) {
-    const hip = frame[LM.LEFT_HIP];
-    const knee = frame[LM.LEFT_KNEE];
-    const ankle = frame[LM.LEFT_ANKLE];
+  _computeKneeAngle(frame, side = 'LEFT') {
+    const hip = frame[LM[`${side}_HIP`]];
+    const knee = frame[LM[`${side}_KNEE`]];
+    const ankle = frame[LM[`${side}_ANKLE`]];
     if (!hip || !knee || !ankle) return null;
     return computeAngle(hip, knee, ankle);
   }
