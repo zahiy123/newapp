@@ -259,7 +259,10 @@ export default function Dashboard() {
       muscleGroupFocus: userProfile.goals?.includes('strength')
         ? (userProfile.muscleGroupFocus || 'full_body')
         : 'full_body',
-      scanData: userProfile.scanData || null
+      scanData: userProfile.scanData || null,
+      // Track: rehab_only | rehab_sport | sport_only (+ the sport combined with rehab)
+      trainingTrack: userProfile.trainingTrack || null,
+      rehabSport: userProfile.trainingTrack === 'rehab_sport' ? (userProfile.rehabSport || null) : null
     };
   }
 

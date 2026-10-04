@@ -54,6 +54,11 @@ export default function SportSelection() {
     if (prevSport && prevSport !== selected) {
       updates.trainingPlan = null;
     }
+    // A sport picked directly = sport-only track; 'rehab' → the track is chosen on the next screen
+    if (selected !== 'rehab') {
+      updates.trainingTrack = 'sport_only';
+      updates.rehabSport = null;
+    }
     await setDoc(doc(db, 'users', user.uid), updates, { merge: true });
     await refreshProfile();
     if (selected === 'rehab') {

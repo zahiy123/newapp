@@ -81,7 +81,7 @@ router.post('/training-week', validateTrainingRequest, async (req, res) => {
 
   try {
     console.log('Generating week', weekNumber, 'for:', profile?.name);
-    const week = await generateWeek({ profile, sport, goals, daysPerWeek, location, weekNumber, equipment: req.body.equipment, muscleGroupFocus: req.body.muscleGroupFocus, scanData: req.body.scanData });
+    const week = await generateWeek({ profile, sport, goals, daysPerWeek, location, weekNumber, equipment: req.body.equipment, muscleGroupFocus: req.body.muscleGroupFocus, scanData: req.body.scanData, trainingTrack: req.body.trainingTrack, rehabSport: req.body.rehabSport });
     console.log('Week', weekNumber, 'generated successfully');
     res.json(week);
   } catch (error) {

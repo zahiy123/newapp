@@ -95,7 +95,7 @@ Readiness Rating (1-5 emoji, 3 seconds)
 | 1B | Kinetic Scan Upgrade (inside onboarding) | DONE | ScanDataBuilder + YOLO equipment detection + hip rotation + scanData→Firestore |
 | 1C | Sport + Goals flow polish | DONE | Iron Rule sport filtering + limb-aware muscle groups + goal blocking |
 | 1D | **Onboarding Corrections** | **DONE (code + tests), awaiting a real-camera check** | Separate right/left arm assessment + walking in place in the scan calibration; muscle-group step only for the strength goal |
-| 2 | Pre-Workout: Quick Space Scan + Warm-up | **NEXT, awaiting approval** | Lightweight pre-workout checks + warm-up with basic Ghost |
+| 2 | Pre-Workout: Track Selection + Quick Space Scan + Warm-up | **IN PROGRESS** | 2.1 track selection DONE; 2.2 non-blocking space scan NEXT; 2.3 scan-connected 2.5-min warm-up with basic Ghost |
 | 3 | Kinetic Coach Core — Hybrid Architecture | PENDING | Blocked by 2. Includes the **scan-calibrated Ghost**, **Sport-Specific Rehab tracks**, **Adaptive Coach Styles**, **Two-way voice**, **Critical-only feedback**, **Pain Traffic Light**, **Personal-baseline analysis**, **Coach Notebook** |
 | 4 | Analytics Report + Load Adaptation | PENDING | Blocked by 3. Produces the reports the Physio Portal (4B) displays |
 | 4B | **Physiotherapist Portal (B2B Dashboard)** | PENDING | Blocked by 3, 4. Full permission isolation (Firestore rules), clinical reports, clinician-set limits enforced in real time |
@@ -257,15 +257,37 @@ Two critical corrections to the existing onboarding (Stages 1B/1C), completed **
 - `Goals.jsx`: the muscle group section is **not rendered at all** unless the `strength` goal is selected. For any other goal set, the focus is automatically `full_body`, and deselecting strength resets it immediately.
 - Defensive layers: `Dashboard.jsx` sends `full_body` unless the goals include `strength` (this covers existing users with an old stored focus), and `buildWeekPrompt()` applies the muscle-group bias only when `strength` is in the goals.
 
-### Stage 2: Pre-Workout — Quick Space Scan + Warm-up (awaiting approval, after 1D)
+### Stage 2: Pre-Workout — Track Selection + Quick Space Scan + Warm-up (IN PROGRESS, approved 2026-10-04)
 **Design principle: lightweight and fast. No heavy processes before workouts.**
 
-1. Quick space safety scan (~10 seconds): camera checks for obstacles, lighting, floor space.
-2. Brief safety summary (safe/caution), non-blocking.
-3. 5-minute sport-specific warm-up with guidance (partially built already).
-4. Warm-up adapted to workout type and physical limitations (warm-up rules already in claude.js).
-5. **[Strategy 2026-09] Rehab-aware warm-up:** the warm-up follows the trainee's track (rehab only / rehab + sport / sport only). In a rehab + sport session, it mixes rehab mobilization with sport-specific activation.
-6. **[Strategy 2026-09] Ghost, first use:** the warm-up movements are demonstrated with the existing basic Ghost Skeleton, which must respect `limbStatus` (never draw or instruct a non-trainable limb) and clamp its angles to the ROM in `scanData.bodyMap`. The full scan-calibrated silhouette comes in Stage 3.
+**Owner decisions (2026-10-04):**
+| Topic | Decision |
+|---|---|
+| Disability / amputation data | **Never asked manually.** Detected by the scan and shown read-only, with a "rescan" option |
+| Training track | Chosen in Stage 2 (moved forward from Stage 3 #11): **clean rehab** or **rehab combined with a sport**. Picking a sport directly = sport-only |
+| Warm-up length | **Short and efficient: about 2.5 minutes** (do not discourage the trainee) |
+| Space scan + obstacles | **Never blocking.** On an obstacle: announce it, suggest moving it, and state clearly that continuing without moving it is **the trainee's own responsibility**. Then continue |
+
+**2.1 Track selection + no manual disability questionnaires (DONE, 2026-10-04)**
+- `RehabSelection.jsx` rewritten. The old manual questionnaire (single/double amputation, wheelchair, injury → prosthesis yes/no → target area) was removed; its fields (`rehabCondition`, `rehabHasProsthesis`, `rehabTargetArea`) were saved but **never used** by the plan generator. The new screen shows:
+  - **"What the scan detected"** (read-only, the new `components/ScanFindings.jsx`, from the scan's deterministic description) with a "rescan" link.
+  - Track choice: **clean rehab** (`rehab_only`) or **rehab combined with a sport** (`rehab_sport`). For the combined track, the sport is picked from the sports the scan allows (Iron Rule via `getAvailableSports`).
+- Saved: `sport: 'rehab'`, `trainingTrack`, `rehabSport`. `SportSelection` marks a directly chosen sport as `trainingTrack: 'sport_only'`.
+- `Profile.jsx`: the manual disability/side/level/aid selects were replaced by the same read-only `ScanFindings` card. The fields are still filled by the scan and used across the app.
+- Plan generation: `Dashboard` sends `trainingTrack` + `rehabSport`. `buildWeekPrompt()` adds a TRAINING TRACK block (clean rehab = no sport drills; combined = about 60-70% rehab + 30-40% adapted sport drills, Iron Rule). The cross-sport filter uses the combined sport's rules (rehab's own list bans every ball/sport word and would have deleted all sport drills).
+- Scan "Report error → side": now shows the corrected diagnosis for confirmation (then saves like "Confirm"). Previously it continued into the old diagnostic tracks and the manual `AnatomyProfileForm`. Also fixed: "Report error" paused the scan, which hid the side picker.
+
+**2.2 Quick space safety scan (NEXT)**
+1. About 10 s, **non-blocking**: the existing `ENVIRONMENT_SCAN` phase waits for a Claude Vision reply before continuing. Make it run in the background (same approach as the scan results).
+2. Brief safety summary (safe / caution).
+3. Obstacle found → announce + suggest moving it + "continuing without moving it is your own responsibility" → continue (never block).
+
+**2.3 Warm-up (about 2.5 min), connected to the scan**
+4. Today: 3 × 45 s exercises chosen by the legacy `disability` field (`getWarmUpExercises`). Choose them by the scan's per-limb data instead (`limbStatus`, per-arm assessment, ROM).
+5. Iron Rule: never instruct a non-trainable limb; keep movements within the scanned ROM.
+6. **Track-aware:** clean rehab = rehab mobilization; rehab + sport = rehab mobilization + activation for the chosen sport; sport only = sport warm-up.
+7. **Ghost, first use:** the existing basic Ghost Skeleton is shown during the warm-up (today it appears only during exercises), respecting `limbStatus` and the scanned ROM. The full scan-calibrated silhouette comes in Stage 3.
+8. Check the Training page for the same refresh-rate pacing bug found in the scan (rAF-driven timing).
 
 ### Stage 3: Kinetic Coach Core — Hybrid Architecture
 1. Edge processing at 60FPS: MediaPipe + Kalman + local rep counting.
@@ -288,7 +310,7 @@ Two critical corrections to the existing onboarding (Stages 1B/1C), completed **
 8. Form Degradation Curve.
 9. Automatic Progressive Overload engine.
 10. Injury prediction from movement patterns.
-11. **Sport-Specific Rehabilitation tracks [Strategy 2026-09]:**
+11. **Sport-Specific Rehabilitation tracks [Strategy 2026-09]:** *(track selection + prompt TRACK block moved forward and DONE in Stage 2.1; remaining here: a sport-drill library tagged by required limbs)*
     - A new profile field, `trainingTrack`: `rehab_only` | `rehab_sport` | `sport_only`, plus `rehabSport` (the chosen adapted sport). It is selected on the Sport/Goals pages; rehab remains always available.
     - `buildWeekPrompt()` gets a TRACK block: in `rehab_sport` the week mixes rehab exercises with sport drills adapted to the limitations (e.g. rehab + amputee football: crutch-based drills, ball control on the healthy leg, upper-body strength for crutch sprinting).
     - A sport drill library tagged by required limbs, so the Iron Rule filters it the same way it filters sports.
@@ -465,3 +487,4 @@ Two critical corrections to the existing onboarding (Stages 1B/1C), completed **
 - **2026-10-04:** Committed and pushed Stage 1D to `main` (`b9d336f`). Remaining: redeploy the server; decide how to ship the untracked ONNX model files.
 - **2026-10-04:** Pace and sensitivity tuning (owner feedback). Calibration went from about 103 s to about 68 s (get-ready 1.5-4 s, measurement 2.5-6 s). Five causes of missed movements were fixed: detection during get-ready, a relative hand-raise baseline, either-knee bend, the full-body gate bypassed during calibration, and lower thresholds. 7 new tests, including no false positives. Committed and pushed as `769ffba` (client only; no server redeploy needed).
 - **2026-10-04:** Instant results after the last scan step. The vision diagnosis now runs in the background from the `slight_bend` step, and the end-of-scan 2 s stand-still was replaced by the standing-still frames from the first get-ready phase. The last step jumps straight to the results screen. Committed and pushed (client only).
+- **2026-10-04:** Stage 2 started. Owner decisions recorded: no manual disability questions, a track choice (clean rehab / rehab + sport), a warm-up of about 2.5 min, and a non-blocking space scan with an own-responsibility notice. **2.1 done:** the new `RehabSelection` with a read-only `ScanFindings` card and track/sport choice; Profile's manual disability fields replaced; the track is sent to the plan prompt plus a cross-sport filter fix; the scan correction path shows the corrected diagnosis for confirmation; the "Report error" pause bug fixed. Tests: client 383 pass (0 new failures), server 8/8. Committed and pushed (client + server — server redeploy needed).

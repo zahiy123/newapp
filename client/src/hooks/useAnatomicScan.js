@@ -581,13 +581,10 @@ export function useAnatomicScan({ onStatusChange, onInstruction, videoRef, userN
       if (resp.ok) {
         const corrected = await resp.json();
         console.log('[useAnatomicScan] Corrected diagnosis:', corrected);
-        // Feed corrected result to sequencer and confirm
-        const seq = getSequencer();
-        seq.setVisionResult(corrected);
-        const change = seq.confirmDiagnosis();
-        setAwaitingConfirmation(false);
-        setVisionDiagnosis(null);
-        handleStateChange(change);
+        // Show the corrected diagnosis for confirmation — "Confirm" then saves it, exactly like
+        // the normal path. (No continuation into the old guided-diagnostics / manual profile form.)
+        setVisionDiagnosis(corrected);
+        setAwaitingConfirmation(true);
         return;
       }
     } catch (err) {

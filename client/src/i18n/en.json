@@ -114,7 +114,15 @@
     "arms": "Arms",
     "legs": "Legs",
     "functional": "Functional Rehab",
-    "continue": "Continue to Rehab Plan"
+    "continue": "Continue to Rehab Plan",
+    "trackSubtitle": "Your physical profile was detected automatically by the scan. Just choose the track.",
+    "trackQuestion": "Which track fits you?",
+    "track_rehab_only": "Clean rehabilitation",
+    "track_rehab_only_desc": "Focused rehab exercises only, adapted to the limitations found in the scan",
+    "track_rehab_sport": "Rehab combined with a sport",
+    "track_rehab_sport_desc": "Rehab together with drills from an adapted sport — for motivation and a path to sport",
+    "sportQuestion": "Which sport to combine with?",
+    "sportFiltered": "Only sports that fit your scan results are shown"
   },
   "goals": {
     "title": "Goal Selection",

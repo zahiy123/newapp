@@ -4,6 +4,7 @@ import { useAuth } from '../context/AuthContext';
 import { db } from '../services/firebase';
 import { doc, setDoc, getDoc } from 'firebase/firestore';
 import { useNavigate, useSearchParams } from 'react-router-dom';
+import ScanFindings from '../components/ScanFindings';
 
 export default function Profile() {
   const { t } = useTranslation();
@@ -52,7 +53,7 @@ export default function Profile() {
     setSaved(false);
   }
 
-  const showMobilityAid = form.disability !== 'none';
+  const isHe = (userProfile?.language || localStorage.getItem('lang') || 'he') === 'he';
 
   async function handleSubmit(e) {
     e.preventDefault();
@@ -60,7 +61,6 @@ export default function Profile() {
     setError('');
     const ageNum = Number(form.age);
     if (ageNum < 5 || ageNum > 99) {
-      const isHe = (userProfile?.language || 'he') === 'he';
       setError(isHe ? 'האימונים זמינים לגילאי 5 עד 99 בלבד.' : 'Training is available for ages 5 to 99 only.');
       setLoading(false);
       return;
@@ -169,92 +169,8 @@ export default function Profile() {
           </div>
         </div>
 
-        <div>
-          <label className="block text-sm font-medium text-gray-700 mb-1">{t('profile.disability')}</label>
-          <select
-            name="disability"
-            value={form.disability}
-            onChange={handleChange}
-            className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
-          >
-            <option value="none">{t('profile.disabilityNone')}</option>
-            <option value="one_leg">{t('profile.disabilityOneLeg')}</option>
-            <option value="one_arm">{t('profile.disabilityOneArm')}</option>
-            <option value="two_legs">{t('profile.disabilityTwoLegs')}</option>
-            <option value="other">{t('profile.disabilityOther')}</option>
-          </select>
-        </div>
-
-        {form.disability === 'other' && (
-          <div>
-            <input
-              name="disabilityOther"
-              value={form.disabilityOther}
-              onChange={handleChange}
-              placeholder={t('profile.disabilityOther')}
-              className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
-            />
-          </div>
-        )}
-
-        {/* Amputation Side + Level - only for one_leg / one_arm */}
-        {(form.disability === 'one_leg' || form.disability === 'one_arm') && (
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">{t('profile.amputationSide')}</label>
-              <select
-                name="amputationSide"
-                value={form.amputationSide}
-                onChange={handleChange}
-                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
-              >
-                <option value="none">---</option>
-                <option value="left">{t('profile.amputationLeft')}</option>
-                <option value="right">{t('profile.amputationRight')}</option>
-              </select>
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">{t('profile.amputationLevel')}</label>
-              <select
-                name="amputationLevel"
-                value={form.amputationLevel}
-                onChange={handleChange}
-                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
-              >
-                <option value="">---</option>
-                {form.disability === 'one_leg' ? (
-                  <>
-                    <option value="above_knee">{t('profile.aboveKnee')}</option>
-                    <option value="below_knee">{t('profile.belowKnee')}</option>
-                  </>
-                ) : (
-                  <>
-                    <option value="above_elbow">{t('profile.aboveElbow')}</option>
-                    <option value="below_elbow">{t('profile.belowElbow')}</option>
-                  </>
-                )}
-              </select>
-            </div>
-          </div>
-        )}
-
-        {/* Mobility Aid - only shown when disability is set */}
-        {showMobilityAid && (
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">{t('profile.mobilityAid')}</label>
-            <select
-              name="mobilityAid"
-              value={form.mobilityAid}
-              onChange={handleChange}
-              className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
-            >
-              <option value="none">{t('profile.noneAid')}</option>
-              <option value="crutches">{t('profile.crutches')}</option>
-              <option value="prosthesis">{t('profile.prosthesis')}</option>
-              <option value="wheelchair">{t('profile.wheelchair')}</option>
-            </select>
-          </div>
-        )}
+        {/* Disability / amputation / aids — detected by the scan, shown read-only (no manual questionnaire) */}
+        <ScanFindings profile={form} isHe={isHe} />
 
         {/* Skill Level */}
         <div>

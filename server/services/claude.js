@@ -1670,7 +1670,7 @@ const MUSCLE_FOCUS_MAP = {
   shoulders_arms: { label: 'Shoulders & Arms', directive: 'MUSCLE FOCUS: 60% of exercises must target SHOULDERS & ARMS (deltoids, biceps, triceps, forearms, rotator cuff). Remaining 40% can target other groups.' },
 };
 
-function buildWeekPrompt({ profile, sport, goals, daysPerWeek, location, weekNumber, equipment, muscleGroupFocus, scanData }) {
+function buildWeekPrompt({ profile, sport, goals, daysPerWeek, location, weekNumber, equipment, muscleGroupFocus, scanData, trainingTrack, rehabSport }) {
   const skillLevel = profile.skillLevel || 'beginner';
   const mobilityAid = profile.mobilityAid || 'none';
   const topGoals = goals.slice(0, 3).join(', ');
@@ -1870,6 +1870,19 @@ GENERATE rehab-specific seated exercises: shoulder ROM, rotator cuff work, seate
   const isStrengthTrack = Array.isArray(goals) && goals.includes('strength');
   const muscleFocus = (isStrengthTrack && MUSCLE_FOCUS_MAP[muscleGroupFocus]) || MUSCLE_FOCUS_MAP.full_body;
 
+  // ── Training track (rehab only / rehab combined with a sport) ──
+  const comboSport = trainingTrack === 'rehab_sport' && typeof rehabSport === 'string'
+    ? sanitizeInput(rehabSport, 30) : null;
+  let trackBlock = '';
+  if (sport === 'rehab' && trainingTrack === 'rehab_only') {
+    trackBlock = 'TRAINING TRACK: CLEAN REHABILITATION — rehab exercises only (mobility, stability, strength for the limitations). No sport-specific drills.';
+  } else if (sport === 'rehab' && comboSport) {
+    trackBlock = `TRAINING TRACK: REHABILITATION COMBINED WITH ${comboSport.toUpperCase()}.
+- Every day: about 60-70% rehab exercises (mobility, stability, strength for the limitations) + about 30-40% ${comboSport} drills.
+- The ${comboSport} drills must be ADAPTED to the scan limitations (Iron Rule: never load a non-trainable limb) — e.g. for amputee football: crutch-based drills, ball control with the intact leg.
+- Use the real ${comboSport} vocabulary (ball, passes, shots, etc.) for the sport drills.`;
+  }
+
   // ── NEW: Scan Results (always sent — even NATURAL athletes have ROM data) ──
   let scanBlock = '';
   if (scanData && typeof scanData === 'object' && scanData.classification) {
@@ -1952,7 +1965,8 @@ ${ageRule}
 Sport: ${sport}. Goals: ${topGoals}. Days/week: ${daysPerWeek}.
 Equipment available: ${eq === 'none' ? 'NONE — bodyweight only, absolutely no weights or equipment exercises' : eq === 'dumbbells' ? 'Dumbbells' : 'Resistance bands'}.
 
-${muscleFocus.directive}
+${trackBlock ? `${trackBlock}
+` : ''}${muscleFocus.directive}
 ${energyDirective}
 ${trainingMode.directive}
 DAY INTENSITY ROTATION: ${intensityLines}
@@ -2896,7 +2910,10 @@ export async function generateWeek(params) {
       }
     }
   }
-  return filterCrossSportLeakage(parsed, params.sport);
+  // Rehab combined with a sport: filter with the combined sport's rules (rehab's own list bans all ball/sport words)
+  const filterSport = params.sport === 'rehab' && params.trainingTrack === 'rehab_sport' && params.rehabSport
+    ? params.rehabSport : params.sport;
+  return filterCrossSportLeakage(parsed, filterSport);
 }
 
 // Generate tips

@@ -740,7 +740,7 @@ export default function AnatomicScan({ onScanComplete }) {
                 <button onClick={handleConfirmAndFinish} style={styles.visionConfirmBtn}>
                   {isHe ? 'מאשר' : 'Confirm'}
                 </button>
-                <button onClick={() => { pauseScan(); setShowCorrectionPicker(true); }} style={styles.visionRejectBtn}>
+                <button onClick={() => setShowCorrectionPicker(true)} style={styles.visionRejectBtn}>
                   {isHe ? 'דווח על טעות' : 'Report Error'}
                 </button>
               </div>

@@ -1,203 +1,126 @@
+// RehabSelection — choose the rehab TRACK (Stage 2).
+//
+// The physical condition (amputation, side, level, aids) is NOT asked here — it was
+// detected automatically by the kinetic scan and is shown read-only (ScanFindings).
+// The user only chooses:
+//   - rehab_only:  clean rehabilitation
+//   - rehab_sport: rehabilitation combined with an adapted sport (picked from the
+//                  sports the scan allows — Iron Rule filtering)
+
 import { useState, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useAuth } from '../context/AuthContext';
 import { db } from '../services/firebase';
-import { doc, setDoc, getDoc } from 'firebase/firestore';
+import { doc, setDoc } from 'firebase/firestore';
 import { useNavigate } from 'react-router-dom';
+import { getAvailableSports } from '../utils/sportLogic';
+import ScanFindings from '../components/ScanFindings';
 
-const STEPS = { CONDITION: 0, PROSTHESIS: 1, TARGET: 2 };
-
-const CONDITIONS = [
-  { key: 'amputationSingle', icon: '🦿', needsProsthesisQ: true },
-  { key: 'amputationDouble', icon: '🦿🦿', needsProsthesisQ: true },
-  { key: 'wheelchair', icon: '♿', needsProsthesisQ: false },
-  { key: 'injuryRecovery', icon: '🩹', needsProsthesisQ: false },
+const TRACKS = [
+  { key: 'rehab_only', icon: '🏥' },
+  { key: 'rehab_sport', icon: '🏅' },
 ];
 
-// Target areas depend on condition
-function getTargetAreas(condition, hasProsthesis) {
-  if (condition === 'amputationSingle' || condition === 'amputationDouble') {
-    const areas = [
-      { key: 'core', icon: '🎯' },
-      { key: 'back', icon: '🔙' },
-      { key: 'residualLimb', icon: '💪' },
-      { key: 'remainingLimbs', icon: '🦵' },
-    ];
-    if (hasProsthesis) {
-      // Prosthesis users also get balance/gait training
-      areas.push({ key: 'functional', icon: '🚶' });
-    }
-    return areas;
-  }
-  if (condition === 'wheelchair') {
-    return [
-      { key: 'shoulders', icon: '🦴' },
-      { key: 'arms', icon: '💪' },
-      { key: 'core', icon: '🎯' },
-      { key: 'back', icon: '🔙' },
-      { key: 'functional', icon: '♿' },
-    ];
-  }
-  // injuryRecovery
-  return [
-    { key: 'shoulders', icon: '🦴' },
-    { key: 'arms', icon: '💪' },
-    { key: 'back', icon: '🔙' },
-    { key: 'legs', icon: '🦵' },
-    { key: 'functional', icon: '🏥' },
-  ];
-}
+// "Fitness" and "rehab" are not sport branches to combine with
+const NON_SPORT_KEYS = new Set(['rehab', 'fitness']);
 
 export default function RehabSelection() {
   const { t } = useTranslation();
-  const { user, refreshProfile } = useAuth();
+  const { user, userProfile, refreshProfile } = useAuth();
   const navigate = useNavigate();
+  const isHe = (localStorage.getItem('lang') || 'he') === 'he';
 
-  const [step, setStep] = useState(STEPS.CONDITION);
-  const [condition, setCondition] = useState('');
-  const [hasProsthesis, setHasProsthesis] = useState(null);
-  const [targetArea, setTargetArea] = useState('');
-  const [disability, setDisability] = useState('none');
+  const [track, setTrack] = useState('');
+  const [rehabSport, setRehabSport] = useState('');
+  const [saving, setSaving] = useState(false);
 
+  // Restore previous choices
   useEffect(() => {
-    async function load() {
-      if (!user) return;
-      const profileDoc = await getDoc(doc(db, 'users', user.uid));
-      if (profileDoc.exists()) {
-        setDisability(profileDoc.data().disability || 'none');
-      }
+    if (userProfile?.trainingTrack === 'rehab_only' || userProfile?.trainingTrack === 'rehab_sport') {
+      setTrack(userProfile.trainingTrack);
     }
-    load();
-  }, [user]);
+    if (userProfile?.rehabSport) setRehabSport(userProfile.rehabSport);
+  }, [userProfile?.trainingTrack, userProfile?.rehabSport]);
 
-  function handleConditionSelect(cond) {
-    setCondition(cond.key);
-    if (cond.needsProsthesisQ) {
-      setStep(STEPS.PROSTHESIS);
-    } else {
-      setHasProsthesis(false);
-      setStep(STEPS.TARGET);
-    }
-  }
+  const sports = getAvailableSports(userProfile?.disability || 'none', userProfile?.scanData || null)
+    .filter(s => !NON_SPORT_KEYS.has(s.key));
 
-  function handleProsthesisAnswer(answer) {
-    setHasProsthesis(answer);
-    setStep(STEPS.TARGET);
-  }
+  // A previously chosen sport that the scan no longer allows is cleared
+  useEffect(() => {
+    if (rehabSport && !sports.find(s => s.key === rehabSport)) setRehabSport('');
+  }, [rehabSport, sports]);
+
+  const canContinue = track === 'rehab_only' || (track === 'rehab_sport' && !!rehabSport);
 
   async function handleContinue() {
-    if (!targetArea) return;
+    if (!canContinue || saving) return;
+    setSaving(true);
+    const changed = track !== userProfile?.trainingTrack ||
+      (track === 'rehab_sport' && rehabSport !== userProfile?.rehabSport);
     await setDoc(doc(db, 'users', user.uid), {
-      rehabCondition: condition,
-      rehabHasProsthesis: hasProsthesis,
-      rehabTargetArea: targetArea,
-      trainingPlan: null, // Force plan regeneration
+      sport: 'rehab',
+      trainingTrack: track,
+      rehabSport: track === 'rehab_sport' ? rehabSport : null,
+      ...(changed ? { trainingPlan: null } : {}),  // force plan regeneration
     }, { merge: true });
     await refreshProfile();
     navigate('/goals');
   }
 
-  const isHe = (localStorage.getItem('lang') || 'he') === 'he';
-  const targetAreas = getTargetAreas(condition, hasProsthesis);
-
   return (
     <div className="max-w-lg mx-auto" dir={isHe ? 'rtl' : 'ltr'}>
       <h1 className="text-2xl font-bold text-gray-800 mb-1">{t('rehab.title')}</h1>
-      <p className="text-gray-500 mb-6">{t('rehab.subtitle')}</p>
+      <p className="text-gray-500 mb-4">{t('rehab.trackSubtitle')}</p>
 
-      {/* Progress indicator */}
-      <div className="flex gap-2 mb-6">
-        {[0, 1, 2].map(i => (
-          <div key={i} className={`h-1.5 flex-1 rounded-full transition ${i <= step ? 'bg-teal-500' : 'bg-gray-200'}`} />
+      <ScanFindings profile={userProfile} isHe={isHe} />
+
+      <h2 className="text-lg font-semibold text-gray-700 mt-6 mb-3">{t('rehab.trackQuestion')}</h2>
+      <div className="grid grid-cols-1 gap-3">
+        {TRACKS.map(tr => (
+          <button
+            key={tr.key}
+            onClick={() => setTrack(tr.key)}
+            className={`p-4 rounded-xl border-2 text-start transition hover:shadow-lg flex items-center gap-4 ${
+              track === tr.key ? 'border-teal-500 bg-teal-50 shadow-md' : 'border-gray-200 bg-white hover:border-gray-300'
+            }`}
+          >
+            <div className="text-3xl">{tr.icon}</div>
+            <div>
+              <div className="font-semibold text-gray-800">{t(`rehab.track_${tr.key}`)}</div>
+              <div className="text-sm text-gray-500">{t(`rehab.track_${tr.key}_desc`)}</div>
+            </div>
+          </button>
         ))}
       </div>
 
-      {/* Step A: Condition */}
-      {step === STEPS.CONDITION && (
-        <div>
-          <h2 className="text-lg font-semibold text-gray-700 mb-4">{t('rehab.stepCondition')}</h2>
-          <div className="grid grid-cols-2 gap-4">
-            {CONDITIONS.map(cond => (
-              <button
-                key={cond.key}
-                onClick={() => handleConditionSelect(cond)}
-                className={`p-5 rounded-xl border-2 text-center transition hover:shadow-lg ${
-                  condition === cond.key
-                    ? 'border-teal-500 bg-teal-50 shadow-md'
-                    : 'border-gray-200 bg-white hover:border-gray-300'
-                }`}
-              >
-                <div className="text-3xl mb-2">{cond.icon}</div>
-                <div className="font-medium text-gray-800 text-sm">{t(`rehab.${cond.key}`)}</div>
-              </button>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {/* Step B: Prosthesis question */}
-      {step === STEPS.PROSTHESIS && (
-        <div>
-          <h2 className="text-lg font-semibold text-gray-700 mb-4">{t('rehab.hasProsthesis')}</h2>
-          <div className="grid grid-cols-2 gap-4">
-            <button
-              onClick={() => handleProsthesisAnswer(true)}
-              className={`p-6 rounded-xl border-2 text-center transition hover:shadow-lg ${
-                hasProsthesis === true ? 'border-teal-500 bg-teal-50 shadow-md' : 'border-gray-200 bg-white'
-              }`}
-            >
-              <div className="text-3xl mb-2">🦿</div>
-              <div className="font-medium text-gray-800">{t('rehab.yes')}</div>
-            </button>
-            <button
-              onClick={() => handleProsthesisAnswer(false)}
-              className={`p-6 rounded-xl border-2 text-center transition hover:shadow-lg ${
-                hasProsthesis === false ? 'border-teal-500 bg-teal-50 shadow-md' : 'border-gray-200 bg-white'
-              }`}
-            >
-              <div className="text-3xl mb-2">🩼</div>
-              <div className="font-medium text-gray-800">{t('rehab.no')}</div>
-            </button>
-          </div>
-          <button onClick={() => setStep(STEPS.CONDITION)} className="mt-4 text-sm text-gray-500 hover:text-gray-700 underline">
-            {isHe ? 'חזרה' : 'Back'}
-          </button>
-        </div>
-      )}
-
-      {/* Step C: Target area */}
-      {step === STEPS.TARGET && (
-        <div>
-          <h2 className="text-lg font-semibold text-gray-700 mb-4">{t('rehab.selectArea')}</h2>
+      {track === 'rehab_sport' && (
+        <div className="mt-6">
+          <h2 className="text-lg font-semibold text-gray-700 mb-1">{t('rehab.sportQuestion')}</h2>
+          <p className="text-sm text-gray-500 mb-3">{t('rehab.sportFiltered')}</p>
           <div className="grid grid-cols-2 gap-3">
-            {targetAreas.map(area => (
+            {sports.map(sport => (
               <button
-                key={area.key}
-                onClick={() => setTargetArea(area.key)}
+                key={sport.key}
+                onClick={() => setRehabSport(sport.key)}
                 className={`p-4 rounded-xl border-2 text-center transition hover:shadow-lg ${
-                  targetArea === area.key
-                    ? 'border-teal-500 bg-teal-50 shadow-md'
-                    : 'border-gray-200 bg-white hover:border-gray-300'
+                  rehabSport === sport.key ? 'border-teal-500 bg-teal-50 shadow-md' : 'border-gray-200 bg-white hover:border-gray-300'
                 }`}
               >
-                <div className="text-2xl mb-1">{area.icon}</div>
-                <div className="font-medium text-gray-800 text-sm">{t(`rehab.${area.key}`)}</div>
+                <div className="text-3xl mb-1">{sport.icon}</div>
+                <div className="font-medium text-gray-800 text-sm">{t(`sport.${sport.key}`)}</div>
               </button>
             ))}
           </div>
-
-          <button
-            onClick={handleContinue}
-            disabled={!targetArea}
-            className="w-full mt-6 py-3 bg-gradient-to-r from-teal-600 to-cyan-600 text-white rounded-lg font-medium hover:opacity-90 transition disabled:opacity-50"
-          >
-            {t('rehab.continue')}
-          </button>
-          <button onClick={() => setStep(condition.includes('amputation') ? STEPS.PROSTHESIS : STEPS.CONDITION)} className="w-full mt-2 text-sm text-gray-500 hover:text-gray-700 underline">
-            {isHe ? 'חזרה' : 'Back'}
-          </button>
         </div>
       )}
+
+      <button
+        onClick={handleContinue}
+        disabled={!canContinue || saving}
+        className="w-full mt-6 py-3 bg-gradient-to-r from-teal-600 to-cyan-600 text-white rounded-lg font-medium hover:opacity-90 transition disabled:opacity-50"
+      >
+        {saving ? t('app.loading') : t('rehab.continue')}
+      </button>
     </div>
   );
 }
