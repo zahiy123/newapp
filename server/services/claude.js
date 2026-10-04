@@ -105,7 +105,7 @@ export async function callClaudeVision(system, contentBlocks, maxTokens = 4096, 
 
 const HAIKU_VISION_MODEL = 'claude-haiku-4-5-20251001';
 
-async function callClaudeHaiku(system, content, maxTokens = 2048, retries = 2) {
+export async function callClaudeHaiku(system, content, maxTokens = 2048, retries = 2) {
   for (let attempt = 0; attempt <= retries; attempt++) {
     try {
       const message = await client.messages.create({

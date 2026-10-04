@@ -10,6 +10,7 @@ import { useEquipmentDetection } from '../hooks/useEquipmentDetection';
 import { useAICoach } from '../hooks/useAICoach';
 import { useHaikuVision } from '../hooks/useHaikuVision';
 import { useGhostSkeleton } from '../hooks/useGhostSkeleton';
+import { findObstacles, obstacleMessage, LABEL_HE } from '../engine/environmentHazards';
 import { getAnalyzer, getLocationProps, getWarmUpExercises, getDisabilityContext, getCalibrationAngles, checkOrientation, checkPerspective, checkMovementQuality, ORIENTATION } from '../utils/exerciseAnalysis';
 import { LandmarkStabilizer, computeJointAngles, computeSymmetryScore, computeStabilityScore, detectMovementPhase, buildPerformanceReport, evaluateSetPerformance, getSportProfile, runSafetyCheck, generateCoachFeedback } from '../utils/motionEngine';
 
@@ -42,7 +43,7 @@ const PHASE = {
 // Runs once per workout, BEFORE the warm-up. Never blocks: hazards are announced with a
 // suggestion to move them + an own-responsibility notice, then the workout continues.
 const ENV_SCAN_COLLECT_MS = 3000;      // local object detection window
-const ENV_VISION_TIMEOUT_MS = 6000;    // max wait for the AI hazard analysis
+const ENV_VISION_TIMEOUT_MS = 8000;    // max wait for the AI hazard analysis
 const ENV_SAFE_CONTINUE_SEC = 3;       // no hazards → short confirmation, then warm-up
 const ENV_HAZARD_CONTINUE_SEC = 12;    // hazards → time to move the object, then warm-up
 
@@ -109,7 +110,7 @@ export default function Training() {
     amputationLevel: userProfile?.amputationLevel || '',
   }), [userProfile?.disability, userProfile?.amputationSide, userProfile?.amputationLevel]);
   const { videoRef, active: cameraActive, error: cameraError, start: startCamera, stop: stopCamera } = useCamera();
-  const { ready: poseReady, landmarks, startLoop, stopLoop } = usePose(canvasRef, beforeDrawRef, amputationProfile);
+  const { ready: poseReady, landmarks, landmarksRef: poseLandmarksRef, startLoop, stopLoop } = usePose(canvasRef, beforeDrawRef, amputationProfile);
   const { drawGhost, toggle: toggleGhost, isEnabled: ghostEnabled } = useGhostSkeleton();
   const { ready: objReady, detectedObjects, startLoop: startObjLoop, stopLoop: stopObjLoop, hasEquipment, scanEnvironment, captureFrame } = useObjectDetection();
   const { ready: ballReady, getBallData, startLoop: startBallLoop, stopLoop: stopBallLoop } = useBallDetection(userProfile?.sport);
@@ -1276,18 +1277,36 @@ export default function Training() {
       }
       if (cancelled) return;
 
-      // 3. Merge AI hazards + sport-profile safety check
-      const safetyResult = runSafetyCheck(uniqueObjects, getSportProfile(userProfile?.sport), landmarks);
+      // 3. Obstacles in the MOVEMENT ZONE (local geometry: object boxes vs. the body + arm's reach),
+      //    merged with the AI hazards. A seat the trainee sits on gets its own message;
+      //    wheelchair users' seats are not obstacles.
+      const seatedUser = userProfile?.mobilityAid === 'wheelchair' ||
+        /wheelchair/i.test(userProfile?.sport || '') || userProfile?.scanData?.classification === 'WHEELCHAIR';
+      const localObstacles = findObstacles(allDetections, poseLandmarksRef.current || landmarks, {
+        frameW: videoRef.current?.videoWidth,
+        frameH: videoRef.current?.videoHeight,
+        clearanceZone: getSportProfile(userProfile?.sport)?.safetyRequirements?.clearanceZone ?? 1,
+        seatedUser,
+      });
+      // Skip AI hazards about an object the local check already reported (avoid double warnings)
+      const isSameObject = (h, o) => {
+        const name = String(h?.object || '').toLowerCase();
+        return !!name && (name.includes(o.label) || (!!LABEL_HE[o.label] && name.includes(LABEL_HE[o.label])));
+      };
+      const aiHazards = (analysis?.hazards || [])
+        .filter(h => h?.warning && !localObstacles.some(o => isSameObject(h, o)))
+        .map(h => h.warning);
       const hazardWarnings = [...new Set([
-        ...(analysis?.hazards || []).map(h => h?.warning).filter(Boolean),
-        ...(!safetyResult.safe ? safetyResult.issues.map(i => (isHe ? i.message_he : i.message_en)) : []),
+        ...localObstacles.map(o => obstacleMessage(o, isHe)),
+        ...aiHazards,
       ])];
+      console.log('[EnvScan] local obstacles:', localObstacles, '| AI hazards:', analysis?.hazards || '(no AI result)');
       const hasHazards = hazardWarnings.length > 0;
       setEnvironmentScan({
         hazardWarnings,
         equipment: analysis?.equipment || [],
         assistiveDevices: analysis?.assistiveDevices || [],
-        aiChecked: !!analysis,
+        aiChecked: !!analysis && !analysis.aiFailed,
       });
       sessionDataRef.current.environmentScan = { hazards: hazardWarnings, at: new Date().toISOString() };
 
@@ -1297,8 +1316,14 @@ export default function Training() {
           ? `שים לב: ${hazardWarnings.join('. ')}. מומלץ להזיז את זה לפני שמתחילים. אם תבחר להמשיך בלי להזיז, זה על אחריותך בלבד.`
           : `Heads up: ${hazardWarnings.join('. ')}. It's best to move it before we start. If you choose to continue without moving it, it is your own responsibility.`,
           { rate: 1.0 });
-      } else {
+      } else if (analysis && !analysis.aiFailed) {
         speakPriority(isHe ? 'המרחב פנוי ובטוח. עוברים לחימום!' : 'Your space is clear and safe. On to the warm-up!', { rate: 1.0 });
+      } else {
+        // Only the local check ran — don't claim "safe", ask the trainee to make sure
+        speakPriority(isHe
+          ? 'לא זוהו מכשולים בבדיקה המהירה. ודא שהשטח סביבך פנוי, ועוברים לחימום.'
+          : 'No obstacles found in the quick check. Make sure the space around you is clear — on to the warm-up.',
+          { rate: 1.0 });
       }
 
       // 5. Never block: continue automatically after a short countdown
@@ -2372,8 +2397,15 @@ export default function Training() {
                 <>
                   <div className="text-5xl">{'\u2705'}</div>
                   <h3 className="text-lg font-bold text-gray-800">
-                    {isHe ? 'המרחב פנוי ובטוח' : 'Your space is clear'}
+                    {environmentScan.aiChecked
+                      ? (isHe ? 'המרחב פנוי ובטוח' : 'Your space is clear')
+                      : (isHe ? 'לא זוהו מכשולים' : 'No obstacles found')}
                   </h3>
+                  {!environmentScan.aiChecked && (
+                    <p className="text-sm text-gray-600">
+                      {isHe ? 'בדיקה מהירה בלבד — ודא שהשטח סביבך פנוי.' : 'Quick check only — make sure the space around you is clear.'}
+                    </p>
+                  )}
                   {environmentScan.equipment?.length > 0 && (
                     <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 text-sm text-blue-800 text-start">
                       <div className="font-bold mb-1">{isHe ? 'ציוד זמין:' : 'Available equipment:'}</div>

@@ -263,7 +263,7 @@ router.post('/analyze-environment', async (req, res) => {
     res.json(analysis);
   } catch (error) {
     console.error('Environment analysis error:', error.message);
-    res.json({ hazards: [], equipment: [], assistiveDevices: [], overallSafety: 'safe', adaptations: [] });
+    res.json({ hazards: [], equipment: [], assistiveDevices: [], overallSafety: 'unknown', adaptations: [], aiFailed: true });
   }
 });
 
