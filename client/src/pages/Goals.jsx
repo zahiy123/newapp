@@ -63,6 +63,15 @@ export default function Goals() {
   const availableGoals = getAvailableGoals(scanData);
   const availableMuscleGroups = getAvailableMuscleGroups(scanData);
 
+  // Muscle group focus exists only on the strength track — any other choice is full_body
+  const isStrengthTrack = selectedGoals.includes('strength');
+
+  useEffect(() => {
+    if (!isStrengthTrack && muscleGroupFocus !== 'full_body') {
+      setMuscleGroupFocus('full_body');
+    }
+  }, [isStrengthTrack, muscleGroupFocus]);
+
   // If selected muscle group became blocked, reset to full_body
   useEffect(() => {
     const currentGroup = availableMuscleGroups.find(g => g.key === muscleGroupFocus);
@@ -97,7 +106,10 @@ export default function Goals() {
     try {
       const goalsChanged = selectedGoals.length !== storedGoals.length ||
         selectedGoals.some(g => !storedGoals.includes(g));
-      const update = { goals: selectedGoals, muscleGroupFocus };
+      const update = {
+        goals: selectedGoals,
+        muscleGroupFocus: isStrengthTrack ? muscleGroupFocus : 'full_body',
+      };
       if (goalsChanged) {
         update.trainingPlan = null;
       }
@@ -143,6 +155,7 @@ export default function Goals() {
         ))}
       </div>
 
+      {isStrengthTrack && (<>
       <h2 className="text-lg font-bold text-gray-800 mt-8 mb-2">{t('goals.muscleGroupTitle')}</h2>
       <p className="text-gray-500 mb-4 text-sm">{t('goals.muscleGroupSubtitle')}</p>
 
@@ -166,6 +179,7 @@ export default function Goals() {
           </button>
         ))}
       </div>
+      </>)}
 
       <button
         onClick={handleContinue}

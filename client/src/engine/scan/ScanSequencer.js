@@ -47,6 +47,13 @@ import {
 import { analyzePhaseB } from './PhaseBAnalyzer.js';
 import { evaluateCertainty, extractPassportFields } from './CertaintyGate.js';
 import { getMovementQueue, LM } from './movements.js';
+import {
+  ARM_TESTS,
+  isArmPresent,
+  detectArmMovement,
+  analyzeArmMovement,
+  summarizeArmAssessment,
+} from './ArmAssessment.js';
 import { LIMB_STATUS, DETECTION_METHOD } from '../constants.js';
 import { validateTrainingProfile } from '../AnatomyProfile.js';
 import {
@@ -206,10 +213,40 @@ const REPOSITION_CAMERA_INSTRUCTION = 'Please position the camera so your feet a
 const REPOSITION_CAMERA_INSTRUCTION_HE = 'נא למקם את המצלמה כך שניתן יהיה לראות את כפות הרגליים והקרסוליים';
 
 // ---- Motion Calibration ----
+// Every movement runs in two timed phases, synchronized with the spoken instruction:
+//   1. GET READY — the instruction is spoken; nothing is measured. Length scales with the
+//      instruction's word count (MOTION_CAL_PREP_*), so the user hears it in full first.
+//   2. MEASURE   — at least MOTION_CAL_MEASURE_MIN_SEC of measurement. The movement advances
+//      only after that window AND real movement was detected, or after MOTION_CAL_MEASURE_MAX_SEC
+//      (so a limited or paralyzed limb never blocks the scan).
+// Per-arm movements (armSide/armTest) measure each arm SEPARATELY (Stage 1D).
 const MOTION_CAL_MOVEMENTS = [
   { id: 'raise_right_hand',
     instruction: 'Please raise your RIGHT hand above your head',
     instruction_he: 'אנא הרם את יד ימין מעל הראש' },
+  { id: 'raise_left_hand',
+    instruction: 'Please raise your LEFT hand above your head',
+    instruction_he: 'אנא הרם את יד שמאל מעל הראש' },
+  // ── Right arm, separately ──
+  { id: 'right_arm_flexion', armSide: 'right', armTest: ARM_TESTS.FLEXION, windowed: true,
+    instruction: 'Right arm only: raise it forward and up, then lower. Twice.',
+    instruction_he: 'יד ימין בלבד: הרם קדימה ולמעלה, והורד. פעמיים.' },
+  { id: 'right_arm_abduction', armSide: 'right', armTest: ARM_TESTS.ABDUCTION, windowed: true,
+    instruction: 'Right arm only: raise it out to the side, then lower. Twice.',
+    instruction_he: 'יד ימין בלבד: הרם הצידה, והורד. פעמיים.' },
+  { id: 'right_elbow_flex', armSide: 'right', armTest: ARM_TESTS.ELBOW, windowed: true,
+    instruction: 'Right arm only: bend and straighten the elbow. Twice.',
+    instruction_he: 'יד ימין בלבד: כופף ויישר את המרפק. פעמיים.' },
+  // ── Left arm, separately ──
+  { id: 'left_arm_flexion', armSide: 'left', armTest: ARM_TESTS.FLEXION, windowed: true,
+    instruction: 'Left arm only: raise it forward and up, then lower. Twice.',
+    instruction_he: 'יד שמאל בלבד: הרם קדימה ולמעלה, והורד. פעמיים.' },
+  { id: 'left_arm_abduction', armSide: 'left', armTest: ARM_TESTS.ABDUCTION, windowed: true,
+    instruction: 'Left arm only: raise it out to the side, then lower. Twice.',
+    instruction_he: 'יד שמאל בלבד: הרם הצידה, והורד. פעמיים.' },
+  { id: 'left_elbow_flex', armSide: 'left', armTest: ARM_TESTS.ELBOW, windowed: true,
+    instruction: 'Left arm only: bend and straighten the elbow. Twice.',
+    instruction_he: 'יד שמאל בלבד: כופף ויישר את המרפק. פעמיים.' },
   { id: 'slight_bend',
     instruction: 'Please do a slight knee bend',
     instruction_he: 'אנא בצע כפיפת ברכיים קלה' },
@@ -219,12 +256,41 @@ const MOTION_CAL_MOVEMENTS = [
   { id: 'calf_raise',
     instruction: 'Please stand on your tiptoes (calf raise)',
     instruction_he: 'אנא בצע עמידה קלה על קצות האצבעות' },
+  // Walking in place — skipped when a wheelchair is detected
+  { id: 'march_in_place_cal', windowed: true, skipIfWheelchair: true,
+    instruction: 'Please walk in place for a few steps',
+    instruction_he: 'אנא צעד במקום כמה צעדים' },
 ];
-const MOTION_CAL_FRAMES_PER_MOVEMENT = 90; // 3 seconds at 30fps
+// Timing (seconds)
+const MOTION_CAL_PREP_BASE_SEC = 1.0;
+const MOTION_CAL_PREP_PER_WORD_SEC = 0.4;
+const MOTION_CAL_PREP_MIN_SEC = 2.5;
+const MOTION_CAL_PREP_MAX_SEC = 6.5;
+const MOTION_CAL_MEASURE_MIN_SEC = 4;
+const MOTION_CAL_MEASURE_MAX_SEC = 8;
+// Hermetic blocker: a movement without detected motion is REPEATED (with a spoken nudge),
+// never silently skipped. Only after this many attempts is it recorded as not performed
+// (so a paralyzed/absent limb can never trap the user forever).
+const MOTION_CAL_MAX_ATTEMPTS = 3;
+const MOTION_CAL_RETRY_PREFIX = "I didn't detect the movement. Let's try again.";
+const MOTION_CAL_RETRY_PREFIX_HE = 'לא זיהיתי את התנועה. ננסה שוב.';
+const MOTION_CAL_GIVE_UP_PREFIX = 'Moving on to the next movement.';
+const MOTION_CAL_GIVE_UP_PREFIX_HE = 'ממשיכים לתנועה הבאה.';
+// Upper bound of frames one movement can take at 30fps (longest get-ready + max measurement)
+const MOTION_CAL_FRAMES_PER_MOVEMENT = Math.ceil((MOTION_CAL_PREP_MAX_SEC + MOTION_CAL_MEASURE_MAX_SEC) * 30);
+
+/** Get-ready time for a movement: long enough to hear the whole instruction (EN or HE, whichever is longer). */
+function motionCalPrepSec(movement) {
+  const words = (text) => (text ? text.trim().split(/\s+/).length : 0);
+  const maxWords = Math.max(words(movement.instruction), words(movement.instruction_he));
+  const sec = MOTION_CAL_PREP_BASE_SEC + maxWords * MOTION_CAL_PREP_PER_WORD_SEC;
+  return Math.min(MOTION_CAL_PREP_MAX_SEC, Math.max(MOTION_CAL_PREP_MIN_SEC, sec));
+}
 const MOTION_CAL_WRIST_THRESHOLD = 0.12;   // Y decrease for hand raise
 const MOTION_CAL_KNEE_THRESHOLD = 3.0;     // degrees angle change
 const MOTION_CAL_HIP_THRESHOLD = 0.015;    // hip X difference range
 const MOTION_CAL_ANKLE_THRESHOLD = 0.008;  // ankle Y range for calf raise
+const MOTION_CAL_MARCH_LIFT = 0.03;        // ankle Y range (3% of frame height) for walking in place
 
 // ---- Confidence Gate ----
 const CONFIDENCE_THRESHOLD = 0.95;
@@ -1051,6 +1117,25 @@ export class ScanSequencer {
   get phaseBResult()       { return this._phaseBResult; }
   get error()              { return this._error; }
 
+  /** True if the motion calibration found the camera stream mirrored (landmarks are corrected internally). */
+  get mirrored()           { return this._mirrored; }
+
+  /** Per-arm (right / left) measurement from the motion calibration. Available as soon as it ran. */
+  get armAssessment() {
+    return summarizeArmAssessment(this._armTests);
+  }
+
+  /** Results of the motion calibration movements (hand raises, tiptoes, walking in place). */
+  get calibrationResults() {
+    return {
+      handRaise: { ...this._handRaiseResult },
+      calfRaise: this._calfRaiseResult,
+      marchInPlace: this._marchResult,
+      mirrored: this._mirrored,
+      incompleteSteps: [...this._motionCalIncomplete],
+    };
+  }
+
   get currentInstruction() {
     if (this._state === STATE.CALIBRATING) return NOT_DETECTED_INSTRUCTION;
     if (this._state === STATE.PHASE_A) {
@@ -1139,6 +1224,8 @@ export class ScanSequencer {
     if (this._kineticProfile) {
       result.kineticProfile = this._kineticProfile;
     }
+    result.armAssessment = this.armAssessment;
+    result.calibrationResults = this.calibrationResults;
     return result;
   }
 
@@ -1184,6 +1271,9 @@ export class ScanSequencer {
       this._motionCalIndex = 0;
       this._motionCalFrames = [];
       this._motionCalBaseline = null;
+      this._motionCalAttempt = 1;
+      this._motionCalTexts = null;
+      this._motionCalIncomplete = [];
       this._calfRaiseResult = null;
       const first = MOTION_CAL_MOVEMENTS[0];
       return {
@@ -1194,6 +1284,7 @@ export class ScanSequencer {
         subState: 'motionCalibration',
         motionCalStep: 0,
         motionCalTotal: MOTION_CAL_MOVEMENTS.length,
+        motionCalPhase: 'prep',
       };
     }
 
@@ -1411,11 +1502,57 @@ export class ScanSequencer {
   _handleMotionCalibration(landmarks) {
     const movement = MOTION_CAL_MOVEMENTS[this._motionCalIndex];
 
-    // Capture baseline on first frame
+    // First frame of a movement: baseline (rest pose when the instruction starts) + timing
     if (this._motionCalFrames.length === 0) {
       this._motionCalBaseline = landmarks;
+      this._motionCalDetected = false;
+      this._motionCalPrepFrames = Math.ceil(
+        motionCalPrepSec(this._motionCalTexts || movement) * this._sampleRate);
     }
     this._motionCalFrames.push(landmarks);
+
+    // ── Phase 1: GET READY — the instruction is being spoken, nothing is measured ──
+    const prepFrames = this._motionCalPrepFrames;
+    if (this._motionCalFrames.length <= prepFrames) return null;
+
+    // ── Phase 2: MEASURE ──
+    const measured = this._motionCalFrames.length - prepFrames;
+    const minFrames = Math.ceil(MOTION_CAL_MEASURE_MIN_SEC * this._sampleRate);
+    const maxFrames = Math.ceil(MOTION_CAL_MEASURE_MAX_SEC * this._sampleRate);
+    const measureStartChange = measured === 1 ? {
+      state: STATE.PHASE_A,
+      subState: 'motionCalibration',
+      progress: this.progress,
+      motionCalStep: this._motionCalIndex,
+      motionCalTotal: MOTION_CAL_MOVEMENTS.length,
+      motionCalPhase: 'measure',
+      measureStart: true,
+      measureSec: MOTION_CAL_MEASURE_MIN_SEC,
+    } : null;
+
+    // Windowed movements (per-arm tests + walking in place): analyzed over all frames of the
+    // movement, so a peak reached slightly early is still captured.
+    if (movement.windowed) {
+      let moved = false;
+      if (measured >= minFrames) {
+        moved = movement.armTest
+          ? detectArmMovement(this._motionCalFrames, movement.armSide, movement.armTest)
+          : this._hasMarchMovement(this._motionCalFrames);
+      }
+      if (!moved && measured >= maxFrames && this._motionCalAttempt < MOTION_CAL_MAX_ATTEMPTS) {
+        return this._retryMotionCalibration(movement);
+      }
+      if (moved || measured >= maxFrames) {
+        if (movement.armTest) {
+          this._armTests[movement.armSide][movement.armTest] =
+            analyzeArmMovement(this._motionCalFrames, movement.armSide, movement.armTest);
+        } else {
+          this._marchResult = { status: moved ? 'assessed' : 'no_movement', moved };
+        }
+        return this._advanceMotionCalibration(!moved);
+      }
+      return measureStartChange;
+    }
 
     // Check if movement threshold met
     let detected = false;
@@ -1432,8 +1569,21 @@ export class ScanSequencer {
 
       if (rightDelta >= MOTION_CAL_WRIST_THRESHOLD) {
         detected = true;
-      } else if (leftDelta >= MOTION_CAL_WRIST_THRESHOLD && rightDelta < MOTION_CAL_WRIST_THRESHOLD * 0.3) {
+      } else if (!this._motionCalDetected &&
+                 leftDelta >= MOTION_CAL_WRIST_THRESHOLD && rightDelta < MOTION_CAL_WRIST_THRESHOLD * 0.3) {
         // LEFT wrist rose instead of RIGHT → camera is mirrored
+        this._mirrored = true;
+        detected = true;
+      }
+    } else if (movement.id === 'raise_left_hand') {
+      // Frames are already mirror-corrected — LEFT wrist must rise
+      const leftDelta = (this._motionCalBaseline[LM.LEFT_WRIST]?.y || 0) - (landmarks[LM.LEFT_WRIST]?.y || 0);
+      const rightDelta = (this._motionCalBaseline[LM.RIGHT_WRIST]?.y || 0) - (landmarks[LM.RIGHT_WRIST]?.y || 0);
+      if (leftDelta >= MOTION_CAL_WRIST_THRESHOLD) {
+        detected = true;
+      } else if (!this._motionCalDetected && !this._mirrored && !this._handRaiseResult.right?.raised &&
+                 rightDelta >= MOTION_CAL_WRIST_THRESHOLD && leftDelta < MOTION_CAL_WRIST_THRESHOLD * 0.3) {
+        // Right-hand step was not detected and the RIGHT wrist rose now → camera is mirrored
         this._mirrored = true;
         detected = true;
       }
@@ -1476,8 +1626,15 @@ export class ScanSequencer {
       }
     }
 
-    // Timeout: auto-advance after max frames even if not detected
-    if (detected || this._motionCalFrames.length >= MOTION_CAL_FRAMES_PER_MOVEMENT) {
+    if (detected) this._motionCalDetected = true;
+
+    // Advance only after the full measurement window AND real movement.
+    // No movement by the max window → repeat the movement (up to MOTION_CAL_MAX_ATTEMPTS).
+    const performed = this._motionCalDetected && measured >= minFrames;
+    if (!performed && measured >= maxFrames && this._motionCalAttempt < MOTION_CAL_MAX_ATTEMPTS) {
+      return this._retryMotionCalibration(movement);
+    }
+    if (performed || measured >= maxFrames) {
       // Store calf raise result if this was the last movement and not yet stored
       if (movement.id === 'calf_raise' && !this._calfRaiseResult) {
         const leftAnkleY = this._motionCalFrames.map(f => f[LM.LEFT_ANKLE]?.y).filter(v => v != null);
@@ -1492,41 +1649,13 @@ export class ScanSequencer {
         };
       }
 
-      // Advance to next movement or transition to detection
-      this._motionCalIndex++;
-      this._motionCalFrames = [];
-      this._motionCalBaseline = null;
+      if (movement.id === 'raise_right_hand') this._handRaiseResult.right = { raised: this._motionCalDetected };
+      if (movement.id === 'raise_left_hand') this._handRaiseResult.left = { raised: this._motionCalDetected };
 
-      if (this._motionCalIndex >= MOTION_CAL_MOVEMENTS.length) {
-        // All calibration movements done — transition to detection
-        this._phaseASubState = 'detection';
-        this._detectionFrameStart = this._landmarkFrames.length;
-        this._detectionFrameTarget = this._landmarkFrames.length +
-          Math.floor((this._strictMode ? 4 : DETECTION_DURATION_SEC) * this._sampleRate);
-        return {
-          state: STATE.PHASE_A,
-          subState: 'detection',
-          progress: this.progress,
-          instruction: DETECTION_INSTRUCTION,
-          instruction_he: DETECTION_INSTRUCTION_HE,
-          mirrored: this._mirrored,
-          calfRaiseResult: this._calfRaiseResult,
-        };
-      }
-
-      // Next movement
-      const next = MOTION_CAL_MOVEMENTS[this._motionCalIndex];
-      return {
-        state: STATE.PHASE_A,
-        subState: 'motionCalibration',
-        progress: this.progress,
-        instruction: next.instruction,
-        instruction_he: next.instruction_he,
-        motionCalStep: this._motionCalIndex,
-        motionCalTotal: MOTION_CAL_MOVEMENTS.length,
-        mirrored: this._mirrored,
-      };
+      return this._advanceMotionCalibration(!performed);
     }
+
+    if (measureStartChange) return measureStartChange;
 
     // Still collecting — emit ankle status during calf raise for visualization
     if (movement.id === 'calf_raise') {
@@ -1543,6 +1672,119 @@ export class ScanSequencer {
     }
 
     return null; // Still collecting, no state change
+  }
+
+  /**
+   * Advance to the next motion calibration movement, or transition to detection.
+   * Movements that must not be instructed are skipped here, before their
+   * instruction is ever emitted:
+   *   - arm movements for an arm that is not visible (Iron Rule)
+   *   - walking in place when a wheelchair is detected
+   * @private
+   */
+  _advanceMotionCalibration(gaveUp = false) {
+    if (gaveUp) {
+      const current = MOTION_CAL_MOVEMENTS[this._motionCalIndex];
+      if (current && !this._motionCalIncomplete.includes(current.id)) this._motionCalIncomplete.push(current.id);
+    }
+    this._motionCalIndex++;
+    this._motionCalFrames = [];
+    this._motionCalBaseline = null;
+    this._motionCalAttempt = 1;
+    this._motionCalTexts = null;
+
+    while (this._motionCalIndex < MOTION_CAL_MOVEMENTS.length) {
+      const skipReason = this._motionCalSkipReason(MOTION_CAL_MOVEMENTS[this._motionCalIndex]);
+      if (!skipReason) break;
+      const skipped = MOTION_CAL_MOVEMENTS[this._motionCalIndex];
+      if (skipped.armTest) {
+        this._armTests[skipped.armSide][skipped.armTest] = { side: skipped.armSide, test: skipped.armTest, status: skipReason, moved: false };
+      } else {
+        this._marchResult = { status: skipReason, moved: false };
+      }
+      this._motionCalIndex++;
+    }
+
+    if (this._motionCalIndex >= MOTION_CAL_MOVEMENTS.length) {
+      // All calibration movements done — transition to detection
+      this._phaseASubState = 'detection';
+      this._detectionFrameStart = this._landmarkFrames.length;
+      this._detectionFrameTarget = this._landmarkFrames.length +
+        Math.floor((this._strictMode ? 4 : DETECTION_DURATION_SEC) * this._sampleRate);
+      return {
+        state: STATE.PHASE_A,
+        subState: 'detection',
+        progress: this.progress,
+        instruction: DETECTION_INSTRUCTION,
+        instruction_he: DETECTION_INSTRUCTION_HE,
+        mirrored: this._mirrored,
+        calfRaiseResult: this._calfRaiseResult,
+        armAssessment: this.armAssessment,
+        calibrationResults: this.calibrationResults,
+      };
+    }
+
+    // Next movement (announce explicitly if the previous one was not performed)
+    const next = MOTION_CAL_MOVEMENTS[this._motionCalIndex];
+    this._motionCalTexts = gaveUp ? {
+      instruction: `${MOTION_CAL_GIVE_UP_PREFIX} ${next.instruction}`,
+      instruction_he: `${MOTION_CAL_GIVE_UP_PREFIX_HE} ${next.instruction_he}`,
+    } : null;
+    return {
+      state: STATE.PHASE_A,
+      subState: 'motionCalibration',
+      progress: this.progress,
+      instruction: this._motionCalTexts ? this._motionCalTexts.instruction : next.instruction,
+      instruction_he: this._motionCalTexts ? this._motionCalTexts.instruction_he : next.instruction_he,
+      motionCalStep: this._motionCalIndex,
+      motionCalTotal: MOTION_CAL_MOVEMENTS.length,
+      motionCalPhase: 'prep',
+      mirrored: this._mirrored,
+    };
+  }
+
+  /**
+   * Repeat the current movement: no real movement was detected in the measurement window.
+   * The instruction is spoken again (with a nudge) and a fresh get-ready + measurement starts.
+   * @private
+   */
+  _retryMotionCalibration(movement) {
+    this._motionCalAttempt++;
+    this._motionCalFrames = [];
+    this._motionCalBaseline = null;
+    this._motionCalDetected = false;
+    this._motionCalTexts = {
+      instruction: `${MOTION_CAL_RETRY_PREFIX} ${movement.instruction}`,
+      instruction_he: `${MOTION_CAL_RETRY_PREFIX_HE} ${movement.instruction_he}`,
+    };
+    return {
+      state: STATE.PHASE_A,
+      subState: 'motionCalibration',
+      progress: this.progress,
+      instruction: this._motionCalTexts.instruction,
+      instruction_he: this._motionCalTexts.instruction_he,
+      motionCalStep: this._motionCalIndex,
+      motionCalTotal: MOTION_CAL_MOVEMENTS.length,
+      motionCalPhase: 'prep',
+      motionCalAttempt: this._motionCalAttempt,
+      nudge: true,
+    };
+  }
+
+  /**
+   * Why a motion calibration movement must be skipped, or null to run it.
+   * @private
+   */
+  _motionCalSkipReason(movement) {
+    if (movement.armSide && !isArmPresent(this._landmarkFrames.slice(-30), movement.armSide)) {
+      return 'not_visible';
+    }
+    if (movement.skipIfWheelchair) {
+      const wheelchair = this._imageContext?.wheelchair ||
+        (this._objectFrames.length > 0 && analyzeObjectDetections(this._objectFrames).wheelchair.detected);
+      if (wheelchair) return 'skipped_wheelchair';
+    }
+    return null;
   }
 
   /** @private */
@@ -2075,6 +2317,19 @@ export class ScanSequencer {
   }
 
   /**
+   * Walking in place (motion calibration): at least one ankle lifts ≥ MOTION_CAL_MARCH_LIFT.
+   * Range-based (not variance) so a short step or a prosthetic-side step still counts.
+   * @private
+   */
+  _hasMarchMovement(frames) {
+    for (const idx of [LM.LEFT_ANKLE, LM.RIGHT_ANKLE]) {
+      const ys = frames.map(f => f[idx]).filter(a => a && a.visibility > 0.3).map(a => a.y);
+      if (ys.length >= 10 && Math.max(...ys) - Math.min(...ys) >= MOTION_CAL_MARCH_LIFT) return true;
+    }
+    return false;
+  }
+
+  /**
    * Detect stepping motion via ankle Y-variance (for march_in_place segments).
    * @private
    */
@@ -2458,6 +2713,14 @@ export class ScanSequencer {
     this._motionCalBaseline = null;
     this._mirrored = false;
     this._calfRaiseResult = null;
+    this._motionCalDetected = false;
+    this._motionCalPrepFrames = 0;
+    this._motionCalAttempt = 1;
+    this._motionCalTexts = null;
+    this._motionCalIncomplete = [];
+    this._handRaiseResult = { right: null, left: null };
+    this._armTests = { right: {}, left: {} };
+    this._marchResult = null;
     this._strictMode = false;
 
     // Vision diagnosis
@@ -2596,5 +2859,9 @@ export {
   IMAGE_CONTEXT_CONFIDENCE,
   MOTION_CAL_MOVEMENTS,
   MOTION_CAL_FRAMES_PER_MOVEMENT,
+  MOTION_CAL_MEASURE_MIN_SEC,
+  MOTION_CAL_MEASURE_MAX_SEC,
+  MOTION_CAL_MAX_ATTEMPTS,
+  motionCalPrepSec,
   CONFIDENCE_THRESHOLD,
 };

@@ -255,7 +255,10 @@ export default function Dashboard() {
       daysPerWeek: userProfile.trainingDays || 3,
       location: loc || currentLocation,
       equipment: currentEquipment,
-      muscleGroupFocus: userProfile.muscleGroupFocus || 'full_body',
+      // Muscle group focus applies only to the strength track
+      muscleGroupFocus: userProfile.goals?.includes('strength')
+        ? (userProfile.muscleGroupFocus || 'full_body')
+        : 'full_body',
       scanData: userProfile.scanData || null
     };
   }

@@ -118,7 +118,7 @@ export function buildScanData(scanResult, visionDiagnosis) {
   // 10. ROM baseline — timestamped snapshot for progress tracking
   const romBaseline = buildRomBaseline(bodyMap, gateResult, passportFields);
 
-  return {
+  const scanData = {
     classification,
     adaptedTrack,
     prostheticSide,
@@ -130,6 +130,64 @@ export function buildScanData(scanResult, visionDiagnosis) {
     limbStatus,
     romBaseline,
   };
+
+  // 11. Per-arm assessment — right and left arm measured separately (in addition to the fields above)
+  if (scanResult.armAssessment) {
+    attachArmAssessment(scanData, scanResult.armAssessment);
+  }
+
+  return scanData;
+}
+
+/**
+ * Add the per-arm (right / left) measurement to scanData without changing existing fields:
+ *   - scanData.armAssessment — full per-arm summary
+ *   - bodyMap[<side>_shoulder|<side>_elbow].measured — measured angles (degrees)
+ *   - romBaseline.arms — compact measured angles for progress tracking
+ *
+ * @param {Object} scanData - output of buildScanData (mutated)
+ * @param {Object} armAssessment - ScanSequencer.armAssessment
+ * @returns {Object} scanData
+ */
+export function attachArmAssessment(scanData, armAssessment) {
+  if (!scanData || !armAssessment) return scanData;
+  scanData.armAssessment = armAssessment;
+
+  const arms = {};
+  for (const side of ['right', 'left']) {
+    const arm = armAssessment[`${side}_arm`];
+    if (!arm) continue;
+    const measured = {
+      status: arm.status,
+      shoulderFlexionDeg: arm.shoulderFlexionDeg,
+      shoulderAbductionDeg: arm.shoulderAbductionDeg,
+      elbowFlexionMinDeg: arm.elbowFlexionMinDeg,
+      elbowExtensionMaxDeg: arm.elbowExtensionMaxDeg,
+      elbowRangeDeg: arm.elbowRangeDeg,
+      compensations: arm.compensations || [],
+    };
+    arms[`${side}_arm`] = measured;
+
+    const bodyMap = scanData.bodyMap || {};
+    if (bodyMap[`${side}_shoulder`]) {
+      bodyMap[`${side}_shoulder`].measured = {
+        flexionDeg: measured.shoulderFlexionDeg,
+        abductionDeg: measured.shoulderAbductionDeg,
+      };
+    }
+    if (bodyMap[`${side}_elbow`]) {
+      bodyMap[`${side}_elbow`].measured = {
+        minDeg: measured.elbowFlexionMinDeg,
+        maxDeg: measured.elbowExtensionMaxDeg,
+        rangeDeg: measured.elbowRangeDeg,
+      };
+    }
+  }
+
+  if (scanData.romBaseline) {
+    scanData.romBaseline.arms = arms;
+  }
+  return scanData;
 }
 
 

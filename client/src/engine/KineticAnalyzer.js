@@ -39,19 +39,20 @@ const LM = {
 // Each joint is defined by three landmarks: [proximal, joint, distal]
 // The angle is measured at the middle landmark.
 //
-// MIRROR CORRECTION: The front-facing camera feed is mirrored.
-// MediaPipe LEFT_* landmarks appear on screen-right (= person's actual LEFT).
-// MediaPipe RIGHT_* landmarks appear on screen-left (= person's actual RIGHT).
-// We swap LEFT↔RIGHT here so that "left_knee" in our analysis
-// refers to the person's ACTUAL left knee.
+// SIDE CONVENTION (anatomical): MediaPipe LEFT_* = the person's ACTUAL left.
+// MediaPipe runs on the raw (non-mirrored) camera image — the preview is only
+// CSS-mirrored — and the ScanSequencer motion calibration ("raise your RIGHT hand")
+// verifies this and corrects the frames if a device delivers a mirrored stream.
+// So NO left/right swap here: "left_knee" uses the LEFT_* landmarks.
+// (Positions are still raw-image x: the person's left side appears on image-right.)
 
 const JOINT_DEFS = Object.freeze({
-  left_knee:  [LM.RIGHT_HIP,      LM.RIGHT_KNEE,   LM.RIGHT_ANKLE],
-  right_knee: [LM.LEFT_HIP,       LM.LEFT_KNEE,    LM.LEFT_ANKLE],
-  left_elbow: [LM.RIGHT_SHOULDER, LM.RIGHT_ELBOW,  LM.RIGHT_WRIST],
-  right_elbow:[LM.LEFT_SHOULDER,  LM.LEFT_ELBOW,   LM.LEFT_WRIST],
-  left_hip:   [LM.RIGHT_SHOULDER, LM.RIGHT_HIP,    LM.RIGHT_KNEE],
-  right_hip:  [LM.LEFT_SHOULDER,  LM.LEFT_HIP,     LM.LEFT_KNEE],
+  left_knee:  [LM.LEFT_HIP,       LM.LEFT_KNEE,    LM.LEFT_ANKLE],
+  right_knee: [LM.RIGHT_HIP,      LM.RIGHT_KNEE,   LM.RIGHT_ANKLE],
+  left_elbow: [LM.LEFT_SHOULDER,  LM.LEFT_ELBOW,   LM.LEFT_WRIST],
+  right_elbow:[LM.RIGHT_SHOULDER, LM.RIGHT_ELBOW,  LM.RIGHT_WRIST],
+  left_hip:   [LM.LEFT_SHOULDER,  LM.LEFT_HIP,     LM.LEFT_KNEE],
+  right_hip:  [LM.RIGHT_SHOULDER, LM.RIGHT_HIP,    LM.RIGHT_KNEE],
 });
 
 // Maps joint keys to limb keys used elsewhere in the system
@@ -363,12 +364,12 @@ function analyzeGait(frames, sampleRate = 30) {
     return { status: 'insufficient', symmetryRatio: null, stepFrequency: null };
   }
 
-  // Extract ankle Y positions over time (mirror-corrected: person's left = RIGHT landmark)
+  // Extract ankle Y positions over time (anatomical: person's left = LEFT landmark)
   const leftAnkleY = [];
   const rightAnkleY = [];
   for (const frame of frames) {
-    const la = frame[LM.RIGHT_ANKLE];
-    const ra = frame[LM.LEFT_ANKLE];
+    const la = frame[LM.LEFT_ANKLE];
+    const ra = frame[LM.RIGHT_ANKLE];
     leftAnkleY.push(la?.visibility > MIN_VISIBILITY ? la.y : null);
     rightAnkleY.push(ra?.visibility > MIN_VISIBILITY ? ra.y : null);
   }
@@ -475,9 +476,9 @@ const HIP_DEVIATION_THRESHOLD = 0.015;     // ~1.5% frame width — hip center o
  */
 function _addArmAnalysis(result, frames) {
   const armDefs = [
-    // Mirror-corrected: person's left = RIGHT landmark
-    { side: 'left', limbKey: 'left_arm', elbowIdx: LM.RIGHT_ELBOW, wristIdx: LM.RIGHT_WRIST },
-    { side: 'right', limbKey: 'right_arm', elbowIdx: LM.LEFT_ELBOW, wristIdx: LM.LEFT_WRIST },
+    // Anatomical: person's left = LEFT landmark
+    { side: 'left', limbKey: 'left_arm', elbowIdx: LM.LEFT_ELBOW, wristIdx: LM.LEFT_WRIST },
+    { side: 'right', limbKey: 'right_arm', elbowIdx: LM.RIGHT_ELBOW, wristIdx: LM.RIGHT_WRIST },
   ];
   for (const arm of armDefs) {
     let visibleCount = 0;
@@ -498,10 +499,28 @@ function _addArmAnalysis(result, frames) {
 }
 
 /**
- * Compute average hip-center deviation from nose vertical axis.
- * Camera is mirrored, so screen-right = person's LEFT.
- * Positive deviation (hips right of nose on screen) = person leans LEFT → prosthetic is RIGHT.
- * Negative deviation (hips left of nose on screen) = person leans RIGHT → prosthetic is LEFT.
+ * Image-x direction of the person's LEFT side in this frame: +1 if the person's left
+ * appears at larger x (raw camera image of a person facing it), -1 if at smaller x
+ * (mirrored stream), 0 if it cannot be determined (e.g. side view).
+ * Read from the landmarks themselves, so side signals never depend on whether
+ * the video was mirrored.
+ * @private
+ */
+function personLeftSign(frame) {
+  const lh = frame[LM.LEFT_HIP], rh = frame[LM.RIGHT_HIP];
+  const ls = frame[LM.LEFT_SHOULDER], rs = frame[LM.RIGHT_SHOULDER];
+  let width = 0;
+  if (lh && rh) width += lh.x - rh.x;
+  if (ls && rs) width += ls.x - rs.x;
+  if (Math.abs(width) < 0.01) return 0;
+  return width > 0 ? 1 : -1;
+}
+
+/**
+ * Compute average hip-center deviation from nose vertical axis, in the person's frame.
+ * Positive deviation = hips shifted toward the person's RIGHT → weight on the right leg
+ *   → prosthetic is LEFT.
+ * Negative deviation = hips shifted toward the person's LEFT → prosthetic is RIGHT.
  *
  * @param {Object[][]} frames
  * @returns {number|null}
@@ -515,9 +534,11 @@ function computeHipCenterDeviation(frames) {
     if (!nose || nose.visibility < MIN_VISIBILITY) continue;
     if (!lh || lh.visibility < MIN_VISIBILITY) continue;
     if (!rh || rh.visibility < MIN_VISIBILITY) continue;
+    const leftSign = personLeftSign(frame);
+    if (leftSign === 0) continue;
     const hipCenterX = (lh.x + rh.x) / 2;
-    // Negate to correct for mirror: screen-right offset → person's left offset
-    deviations.push(-(hipCenterX - nose.x));
+    // Offset toward the person's left, negated → positive = toward the person's right
+    deviations.push(-(hipCenterX - nose.x) * leftSign);
   }
   if (deviations.length < MIN_SAMPLES_FOR_ANALYSIS) return null;
   return deviations.reduce((s, v) => s + v, 0) / deviations.length;
@@ -543,8 +564,10 @@ function computeCenterOfGravity(frames) {
     const hipMidX = (lh.x + rh.x) / 2;
     const shoulderMidX = (ls.x + rs.x) / 2;
     const cogX = (hipMidX + shoulderMidX) / 2;
-    // Negate to correct for mirror: screen-right = person's left
-    biases.push(-(cogX - 0.5));
+    const leftSign = personLeftSign(frame);
+    if (leftSign === 0) continue;
+    // Offset toward the person's left, negated → positive = toward the person's right
+    biases.push(-(cogX - 0.5) * leftSign);
   }
   if (biases.length < MIN_SAMPLES_FOR_ANALYSIS) return null;
   const meanBias = biases.reduce((s, v) => s + v, 0) / biases.length;
@@ -602,21 +625,21 @@ function profileAnatomy(frames, options = {}) {
   }
 
   // ── Collect variance data for both legs ──
-  // Mirror-corrected: person's left uses RIGHT_ANKLE landmark, and vice versa
+  // Anatomical: person's left uses LEFT_ANKLE landmark
   const legDefs = [
     {
       side: 'left',
       limbKey: 'left_leg',
       hipJoint: JOINT_DEFS.left_hip,
       kneeJoint: JOINT_DEFS.left_knee,
-      ankleIdx: LM.RIGHT_ANKLE,
+      ankleIdx: LM.LEFT_ANKLE,
     },
     {
       side: 'right',
       limbKey: 'right_leg',
       hipJoint: JOINT_DEFS.right_hip,
       kneeJoint: JOINT_DEFS.right_knee,
-      ankleIdx: LM.LEFT_ANKLE,
+      ankleIdx: LM.RIGHT_ANKLE,
     },
   ];
 

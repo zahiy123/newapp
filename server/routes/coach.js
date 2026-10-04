@@ -1,4 +1,5 @@
 import { Router } from 'express';
+import { applySideCorrection } from '../services/anatomyDiagnosis.js';
 import { generateWeek, generateTips, analyzeMovement, generateWorkoutSummary, getLocalFallbackWeek, generateRealtimeFeedback, adaptWorkout, analyzeRepFrames, analyzeAnatomy, verifyScan } from '../services/claude.js';
 import { analyzeGameFrames, analyzeVARFrame } from '../services/gameAnalysis.js';
 import { analyzeEnvironment } from '../services/environmentAnalysis.js';
@@ -343,7 +344,13 @@ router.post('/correct-anatomy', (req, res) => {
     `corrected side="${correctedSide}"`,
     `classification="${originalDiagnosis.classification}"`);
 
-  // Build corrected diagnosis
+  // Per-limb diagnosis → rebuild deterministically with the leg findings on the corrected side
+  const rebuilt = applySideCorrection(originalDiagnosis, correctedSide);
+  if (rebuilt) {
+    return res.json(rebuilt);
+  }
+
+  // Legacy diagnosis without per-limb data
   const corrected = {
     ...originalDiagnosis,
     prostheticSide: correctedSide,

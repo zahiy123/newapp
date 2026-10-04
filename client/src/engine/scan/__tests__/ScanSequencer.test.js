@@ -2395,37 +2395,35 @@ describe('ScanSequencer', () => {
       return lm;
     }
 
+    const calIndex = (id) => MOTION_CAL_MOVEMENTS.findIndex(m => m.id === id);
+
     /**
-     * Helper: advances through all 4 motion calibration movements.
+     * Helper: feeds frames until the calibration reaches the movement with the given id.
+     */
+    function feedUntilCalStep(seq, id, frameFn, maxFrames = 60000) {
+      const target = calIndex(id);
+      for (let i = 0; i < maxFrames && seq._motionCalIndex < target; i++) seq.feedFrame(frameFn());
+    }
+
+    /**
+     * Helper: advances through all motion calibration movements.
+     * Each movement has a get-ready phase and a minimum measurement window, so frames are
+     * fed per current movement until the calibration transitions to detection.
      */
     function passMotionCalibration(seq) {
-      // Movement 1: raise_right_hand
-      for (let i = 0; i < 5; i++) seq.feedFrame(createRightHandRaisedFrame());
-
-      // Movement 2: slight_bend
-      let advanced = false;
-      for (let i = 0; i < MOTION_CAL_FRAMES_PER_MOVEMENT && !advanced; i++) {
-        const change = seq.feedFrame(createKneeBentFrame());
-        if (change && change.motionCalStep === 2) advanced = true;
-      }
-
-      // Movement 3: pelvis_rotation — need range of hip X diffs
-      for (let i = 0; i < 10; i++) seq.feedFrame(createPelvisRotatedFrame(-0.02));
-      for (let i = 0; i < 10; i++) seq.feedFrame(createPelvisRotatedFrame(0.02));
-
-      // Movement 4: calf_raise
-      let transitioned = false;
-      for (let i = 0; i < 20; i++) {
-        const change = seq.feedFrame(createCalfRaisedFrame());
-        if (change && change.subState === 'detection') {
-          transitioned = true;
-          return change;
-        }
-      }
-
-      // If not yet transitioned, feed more frames until timeout
-      for (let i = 0; i < MOTION_CAL_FRAMES_PER_MOVEMENT; i++) {
-        const change = seq.feedFrame(createCalfRaisedFrame());
+      const frameFor = {
+        raise_right_hand: createRightHandRaisedFrame,
+        raise_left_hand: createLeftHandRaisedFrame,
+        slight_bend: createKneeBentFrame,
+        calf_raise: createCalfRaisedFrame,
+      };
+      for (let n = 0; n < 60000; n++) {
+        const movement = MOTION_CAL_MOVEMENTS[seq._motionCalIndex];
+        if (!movement) break;
+        const lm = movement.id === 'pelvis_rotation'
+          ? createPelvisRotatedFrame(n % 20 < 10 ? -0.02 : 0.02)
+          : (frameFor[movement.id] || createHealthyLandmarks)();
+        const change = seq.feedFrame(lm);
         if (change && change.subState === 'detection') return change;
       }
       return null;
@@ -2440,7 +2438,7 @@ describe('ScanSequencer', () => {
       expect(c.instruction).toContain('RIGHT hand');
     });
 
-    it('advances through 4 movements to detection', () => {
+    it('advances through all calibration movements to detection', () => {
       const seq = createFullSeq();
       seq.start();
       passCalibrationFull(seq);
@@ -2490,17 +2488,15 @@ describe('ScanSequencer', () => {
       seq.start();
       passCalibrationFull(seq);
 
-      // Pass first 3 movements quickly (timeout)
-      for (let i = 0; i < MOTION_CAL_FRAMES_PER_MOVEMENT; i++) seq.feedFrame(createRightHandRaisedFrame());
-      for (let i = 0; i < MOTION_CAL_FRAMES_PER_MOVEMENT; i++) seq.feedFrame(createKneeBentFrame());
-      for (let i = 0; i < MOTION_CAL_FRAMES_PER_MOVEMENT; i++) seq.feedFrame(createPelvisRotatedFrame(0));
+      // Pass the movements before calf raise (they time out on still frames)
+      feedUntilCalStep(seq, 'calf_raise', createHealthyLandmarks);
 
       // Calf raise: first frame is baseline (normal ankles at 0.88)
       seq.feedFrame(createStaticLandmarks());
 
-      // Then only right ankle moves up — check for detection transition
+      // Then only right ankle moves up — check for detection transition (after the walking-in-place window)
       let result = null;
-      for (let i = 0; i < MOTION_CAL_FRAMES_PER_MOVEMENT; i++) {
+      for (let i = 0; i < 10 * MOTION_CAL_FRAMES_PER_MOVEMENT; i++) {
         const lm = createStaticLandmarks();
         lm[LM.RIGHT_ANKLE].y = 0.85; // right rises (baseline 0.88 → 0.85 = 0.03 range)
         // left stays at 0.88 (no movement)
@@ -2593,12 +2589,21 @@ describe('ScanSequencer', () => {
       expect(visionTransition.kineticResult).toBeDefined();
     });
 
-    it('MOTION_CAL_MOVEMENTS has 4 movements', () => {
-      expect(MOTION_CAL_MOVEMENTS).toHaveLength(4);
-      expect(MOTION_CAL_MOVEMENTS[0].id).toBe('raise_right_hand');
-      expect(MOTION_CAL_MOVEMENTS[1].id).toBe('slight_bend');
-      expect(MOTION_CAL_MOVEMENTS[2].id).toBe('pelvis_rotation');
-      expect(MOTION_CAL_MOVEMENTS[3].id).toBe('calf_raise');
+    it('MOTION_CAL_MOVEMENTS keeps the original 4 movements in order and adds per-arm + walking', () => {
+      const ids = MOTION_CAL_MOVEMENTS.map(m => m.id);
+      expect(ids).toEqual([
+        'raise_right_hand',
+        'raise_left_hand',
+        'right_arm_flexion', 'right_arm_abduction', 'right_elbow_flex',
+        'left_arm_flexion', 'left_arm_abduction', 'left_elbow_flex',
+        'slight_bend',
+        'pelvis_rotation',
+        'calf_raise',
+        'march_in_place_cal',
+      ]);
+      // Original movements are still present, in their original relative order
+      const original = ['raise_right_hand', 'slight_bend', 'pelvis_rotation', 'calf_raise'];
+      expect(ids.filter(id => original.includes(id))).toEqual(original);
     });
 
     it('CONFIDENCE_THRESHOLD is 0.95', () => {

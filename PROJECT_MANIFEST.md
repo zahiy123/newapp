@@ -1,5 +1,46 @@
 # Project Manifest — AI Kinetic Training Platform
-## Last Updated: 2026-09-19
+## Last Updated: 2026-10-04
+
+---
+
+## Manifest Update Protocol (MANDATORY)
+- This file is the single source of truth for the project's state and plan.
+- **Every task, step, or change** (code, models, decisions, strategy) must be reflected here in the same work session — before the task is reported as done.
+- On each update: bump `Last Updated`, update the Roadmap table status, move items from "Pending" to "Completed", and append a line to the **Change Log** at the bottom.
+- The stage order in the Roadmap is fixed. New features are placed *inside* the existing stages, never by reordering them.
+- No practical work on a new stage starts without the owner's explicit approval.
+
+---
+
+## Strategic Focus — Rehab-Community Track (B2B + B2C)
+*Decided 2026-09-28.*
+
+- **Dropped:** professional sports teams as a target channel.
+- **Focus:** one combined **Rehab-Community** track, built on the existing architecture:
+  - **B2C:** individuals in rehab or with limitations (amputees, wheelchair users, post-injury) who train at home with the camera.
+  - **B2B:** rehab centers, clinics, physiotherapists, disability-sport associations and community organizations that manage groups of trainees.
+- **Sport-Specific Rehabilitation:** a rehab trainee can choose to:
+  1. **Rehab only:** a classic rehab program.
+  2. **Rehab + Sport:** rehab combined with exercises from an adapted sport that fits their limitations (e.g. rehab + amputee football).
+  3. **Sport only:** training dedicated entirely to the selected adapted sport.
+  The purpose is added value, motivation, and a path from rehab into community sport.
+- **Motion Silhouette (Ghost):** a **mandatory requirement**. An animated silhouette on screen that is **built and calibrated precisely from the trainee's onboarding profile scan** (proportions, per-joint ROM, limbStatus, prosthetics) and respects the Iron Rule (no instruction for absent or non-trainable limbs).
+- **Adaptive Coach Styles:** the coach's tone, pace and wording adapt to the trainee and track (e.g. encouraging and calm in rehab, aggressive and high-energy in sport). This replaces the single fixed "aggressive" style.
+
+### Owner Decisions — 2026-09-28
+| Topic | Decision |
+|---|---|
+| Ghost silhouette | Approved. Must be built and fitted **exactly from the onboarding profile scan data** |
+| Adaptive coach styles | Approved. To be developed |
+| Medical sensitivity / regulation | Acknowledged. Kept **for the final stages only** (Stage 7) |
+| Equipment YOLO model | **No new export.** The current deployed model (v1) performs well and stays as-is |
+| Two-way voice | Approved. Free built-in speech recognition first (Web Speech / native mobile APIs). Cloud STT only in the future, if higher accuracy is needed |
+| Coach feedback policy | Approved. Silent on small, harmless errors. **Immediate alert** on dangerous angles or injury-risk errors |
+| Pain Traffic Light Protocol | Approved. 0-3 green (continue), 4-5 yellow (auto load reduction), >5 red (emergency stop + Injury Ledger entry) |
+| Movement analysis baseline | Approved. **No generic symmetry.** The trainee is compared only to their own personal profile and baseline (`ghostProfile`) |
+| Coach Notebook (long-term memory) | Approved. A per-workout summary saved in Firestore. The next workout opens with a personal question |
+
+Where each point sits in the existing stages is listed under the relevant stage below and marked **[Strategy 2026-09]**.
 
 ---
 
@@ -7,9 +48,9 @@
 - **Frontend:** React 19 + Vite + Tailwind CSS
 - **Backend:** Express.js + Claude Haiku API
 - **Database:** Firebase (Auth + Firestore)
-- **Vision:** MediaPipe Pose + YOLOv8s-seg (ONNX, browser-side) + Claude Haiku Vision
+- **Vision:** MediaPipe Pose + YOLOv8s-seg (ONNX, browser-side) + custom YOLOv8n equipment model + Claude Haiku Vision
 - **i18n:** Hebrew (default) + English, RTL support
-- **Sports:** football, footballAmputee, basketball, basketballWheelchair, tennis, tennisWheelchair, fitness, rehab
+- **Sports:** football, footballAmputee, footballAmputeeGK, basketball, basketballWheelchair, tennis, tennisWheelchair, fitness, rehab
 
 ---
 
@@ -19,14 +60,18 @@
 ```
 Details (name, age, gender, height, weight)
   -> Kinetic Scan (camera auto-detects disabilities, ROM, aids)
+       includes a SEPARATE assessment of the RIGHT arm and the LEFT arm
      -> Profile completion (preferences, settings)
         -> Sport Selection (filtered by scan results)
-           -> Goals + Muscle Focus
-              -> Dashboard (ready to train)
+           -> Goals
+              -> [only if the "strength" goal is selected] Muscle Group Focus
+                 -> Dashboard (ready to train)
 ```
 - The kinetic scan is **part of onboarding**, not a separate post-registration step.
-- No manual disability questionnaires — everything auto-detected from movement.
-- Sport list is filtered based on scan results (e.g. amputee -> amputee football).
+- No manual disability questionnaires. Everything is auto-detected from movement.
+- The sport list is filtered by scan results (e.g. amputee -> amputee football).
+- **Each upper limb is assessed separately** (right and left), so limitations, different ROM or specific problems in one arm are detected independently (Stage 1D).
+- **Muscle group selection appears only when the trainee explicitly chooses the strength goal.** Otherwise the focus is `full_body` (Stage 1D).
 
 ### Pre-Workout (lightweight, every session)
 ```
@@ -35,8 +80,8 @@ Readiness Rating (1-5 emoji, 3 seconds)
      -> Start Training
 ```
 - No heavy scans or long processes before workouts.
-- Readiness adjusts volume/rest automatically.
-- Environment scan is fast and non-blocking.
+- Readiness adjusts volume and rest automatically.
+- The environment scan is fast and non-blocking.
 
 ---
 
@@ -49,11 +94,13 @@ Readiness Rating (1-5 emoji, 3 seconds)
 | 1A | Registration + Profile + Onboarding | DONE | 5-step onboarding flow with progress bar |
 | 1B | Kinetic Scan Upgrade (inside onboarding) | DONE | ScanDataBuilder + YOLO equipment detection + hip rotation + scanData→Firestore |
 | 1C | Sport + Goals flow polish | DONE | Iron Rule sport filtering + limb-aware muscle groups + goal blocking |
-| 2 | Pre-Workout: Quick Space Scan + Warm-up | PENDING | Lightweight pre-workout checks only |
-| 3 | Kinetic Coach Core — Hybrid Architecture | PENDING | Blocked by 2 |
-| 4 | Analytics Report + Load Adaptation | PENDING | Blocked by 3 |
-| 5 | Game Mode + Real-Time Refereeing | PENDING | Blocked by 3 |
-| 6 | Social Platform + Battle Arenas | PENDING | Blocked by 4 |
+| 1D | **Onboarding Corrections** | **DONE (code + tests), awaiting a real-camera check** | Separate right/left arm assessment + walking in place in the scan calibration; muscle-group step only for the strength goal |
+| 2 | Pre-Workout: Quick Space Scan + Warm-up | **NEXT, awaiting approval** | Lightweight pre-workout checks + warm-up with basic Ghost |
+| 3 | Kinetic Coach Core — Hybrid Architecture | PENDING | Blocked by 2. Includes the **scan-calibrated Ghost**, **Sport-Specific Rehab tracks**, **Adaptive Coach Styles**, **Two-way voice**, **Critical-only feedback**, **Pain Traffic Light**, **Personal-baseline analysis**, **Coach Notebook** |
+| 4 | Analytics Report + Load Adaptation | PENDING | Blocked by 3. Produces the reports the Physio Portal (4B) displays |
+| 4B | **Physiotherapist Portal (B2B Dashboard)** | PENDING | Blocked by 3, 4. Full permission isolation (Firestore rules), clinical reports, clinician-set limits enforced in real time |
+| 5 | Game Mode + Real-Time Refereeing | PENDING | Blocked by 3. Re-scoped to **community games** (not pro teams) |
+| 6 | Social Platform + Battle Arenas | PENDING | Blocked by 4. Includes **community groups + B2B organization accounts** |
 | 7 | Full Mobile App (PWA / React Native) | PENDING | Blocked by 4, 5 |
 
 ---
@@ -61,129 +108,278 @@ Readiness Rating (1-5 emoji, 3 seconds)
 ## Completed Work — Detailed
 
 ### Stage 0: Infrastructure (DONE)
-- **YOLOv8s-seg Edge Model** — Trained on 44,604 images, 10 classes (prosthetic_leg, prosthetic_arm, crutches, agility_ladder, balance_pad, dumbbell, kettlebell, barbell, bench, ball). Exported to ONNX (45.2MB). Browser inference hook: `client/src/hooks/useSegmentationModel.js`.
-- **YOLOv8s-seg training** — Currently running epoch 73/100 in background (RTX 3050). Best model at epoch 69.
-- **Auth Middleware** — Opt-in Firebase Admin token verification: `server/services/firebaseAdmin.js`. All client API calls use `authFetch()`.
-- **Bug Fixes** — Removed aggressive retry logic, fixed AbortError/429 spam, fixed hardcoded API URLs.
+- **YOLOv8s-seg Edge Model:** trained on 44,604 images, 10 classes (prosthetic_leg, prosthetic_arm, crutches, agility_ladder, balance_pad, dumbbell, kettlebell, barbell, bench, ball). Exported to ONNX (45.2MB, `client/public/models/yolov8s_seg.onnx`, 2026-09-23). Browser inference hook: `client/src/hooks/useSegmentationModel.js` (not yet committed to git).
+- **Auth Middleware:** opt-in Firebase Admin token verification in `server/services/firebaseAdmin.js`. All client API calls use `authFetch()`.
+- **Bug Fixes:** removed aggressive retry logic, fixed AbortError/429 spam, fixed hardcoded API URLs.
 
 ### Stage 0+: Training Engine Overhaul (DONE)
 Six improvements to the AI training plan generator (`server/services/claude.js` -> `buildWeekPrompt()`):
 
-1. **Muscle Group Focus** — User selects focus area in Goals page. AI biases 60% of exercises toward selected group.
-2. **Scan Results Integration** — Anatomic scan passport data fed into training prompt (ROM limits, compensations, risk zones).
-3. **Day-Level Intensity Rotation** — Each day gets HIGH/MEDIUM/LOW following a wave pattern.
-4. **Energy System Specificity** — Sport-specific work:rest ratios for all 8 sports.
-5. **Training Modes** — Weekly rotation: linear -> superset -> circuit -> EMOM.
-6. **Readiness Rating** — Pre-workout 1-5 scale adjusts volume/rest.
+1. **Muscle Group Focus:** the user selects a focus area on the Goals page. The AI biases 60% of exercises toward the selected group.
+2. **Scan Results Integration:** anatomic scan passport data is fed into the training prompt (ROM limits, compensations, risk zones).
+3. **Day-Level Intensity Rotation:** each day gets HIGH/MEDIUM/LOW following a wave pattern.
+4. **Energy System Specificity:** sport-specific work:rest ratios for all sports.
+5. **Training Modes:** weekly rotation of linear -> superset -> circuit -> EMOM.
+6. **Readiness Rating:** a pre-workout 1-5 scale adjusts volume and rest.
 
 ### Stage 1A: Registration + Profile + Onboarding (DONE)
 - **5-step onboarding flow:** Details -> Scan -> Profile -> Sport -> Goals
 - **Shared progress bar:** `client/src/components/OnboardingProgress.jsx`
-- **ProfileGate** validates all 5 fields before advancing
-- **Server-side validation** middleware on `/training-week` and `/training-tips`
-- **No manual disability selection** — detected automatically via kinetic scan only
-- **Disability-aware sport filtering** — `getAvailableSports()` returns only accessible sports
+- **ProfileGate** validates all 5 fields before advancing.
+- **Server-side validation** middleware on `/training-week` and `/training-tips`.
+- **No manual disability selection:** disabilities are detected automatically by the kinetic scan only.
+- **Disability-aware sport filtering:** `getAvailableSports()` returns only accessible sports.
 
 ### Stage 1B: Kinetic Scan Upgrade (DONE)
-- **ScanDataBuilder** — New pure-logic module (`client/src/engine/scan/ScanDataBuilder.js`) assembles unified `scanData` from analyzer outputs: bodyMap (per-joint ROM), compensationMap (hip_drop/trunk_lean/shoulder_elevation), riskZones, limbStatus (Iron Rule enforcement), specialProtocol
-- **YOLO Equipment Detection Integration** — Replaced generic COCO object detection with custom YOLOv8n (16 classes) in AnatomicScan. `detectForScan()` adapter returns PhaseA-compatible format. Labels updated in PhaseAAnalyzer for direct YOLO class matching (`prosthetic_leg`, `prosthetic_arm`)
-- **Hip Rotation Movement** — Added `gamma_hip_rotation` to Track Gamma (full body assessment) with wheelchair override (`gamma_trunk_rotation`)
-- **scanData Pipeline** — Both Firestore save paths in AnatomicScan now include `scanData`, which flows via Dashboard payload → server `buildWeekPrompt()` → AI prompt SCAN RESULTS block
-- **Iron Rule** — `limbStatus` per limb with `canTrain` flag. Absent/above-knee prosthetic limbs marked `canTrain: false`, ROM 0%
+- **ScanDataBuilder:** a pure-logic module (`client/src/engine/scan/ScanDataBuilder.js`) that assembles a unified `scanData` from analyzer outputs: bodyMap (per-joint ROM), compensationMap (hip_drop/trunk_lean/shoulder_elevation), riskZones, limbStatus (Iron Rule enforcement), specialProtocol.
+- **YOLO Equipment Detection Integration:** replaced generic COCO detection with a custom YOLOv8n model (16 classes) in AnatomicScan. The `detectForScan()` adapter returns a PhaseA-compatible format.
+- **Dynamic guided movements:** walking in place, hip rotations, arm movements, squats, with wheelchair overrides (`gamma_trunk_rotation`).
+- **scanData Pipeline:** Firestore save → Dashboard payload → server `buildWeekPrompt()` → SCAN RESULTS block in the AI prompt.
+- **Iron Rule:** `limbStatus` per limb with a `canTrain` flag. Absent or above-knee prosthetic limbs are marked `canTrain: false` with ROM 0%.
 
 ### Stage 1C: Sport + Goals Flow Polish (DONE)
-- **Iron Rule Sport Filtering** — `getAvailableSports(disability, scanData)` uses `SPORT_REQUIREMENTS` per sport (which limbs must be functional). Wheelchair users get wheelchair sports, amputees get amputee sports. fitness/rehab always available. Falls back to legacy disability string if no scanData.
-- **Limb-Aware Muscle Groups** — `getAvailableMuscleGroups(scanData)` blocks muscle group selection when ALL required limbs are non-trainable (e.g. both legs absent → lower_body blocked). One healthy leg still allows lower_body.
-- **Goal Blocking** — `getAvailableGoals(scanData)` blocks 'speed' for wheelchair users or bilateral leg amputees. Other goals always available.
-- **Adapted Sport Notice** — Blue info banner in SportSelection when scanData shows non-NATURAL classification.
-- **Auto-Clear Invalid Selection** — If a previously selected sport/muscle group becomes blocked after scan, it auto-resets.
-- **Seamless Data Flow** — Both SportSelection and Goals pages read `scanData` from Firestore on load, no manual input needed.
+- **Iron Rule Sport Filtering:** `getAvailableSports(disability, scanData)` uses `SPORT_REQUIREMENTS` per sport. fitness and rehab are always available.
+- **Limb-Aware Muscle Groups:** `getAvailableMuscleGroups(scanData)` blocks a group when all of its required limbs are non-trainable.
+- **Goal Blocking:** `getAvailableGoals(scanData)` blocks 'speed' for wheelchair users and bilateral leg amputees.
+- **Adapted Sport Notice** and **Auto-Clear Invalid Selection**.
+- **Seamless Data Flow:** SportSelection and Goals read `scanData` from Firestore on load.
 
 ### Existing Features (Already Built)
-- **Training Plan Generator** — 4-week periodized plans with progressive overload, Universal Exercise Formula, constraint rotation, Hebrew coach style, disability-adapted exercises
-- **Live Training Page** — Full state machine (IDLE -> ENV_SCAN -> WARM_UP -> EXERCISING -> RESTING -> EXERCISE_DONE), camera-based pose tracking, set/rep counting, AI coaching feedback
-- **Haiku Vision** — Per-rep frame analysis via Claude Haiku, form scoring, feedback
-- **Real-Time AI Coaching** — Rate-limited coaching suggestions during workout
-- **Workout Summary** — Post-workout AI summary with tips
-- **Workout Adaptation** — Dynamic mid-workout plan adjustment based on performance
-- **Game Mode** — Video-based game analysis, event detection, VAR frame analysis
-- **Environment Scanning** — Hazard/equipment detection before workout
-- **Anatomic Scan (Phase A+B)** — Camera-based body classification (prosthetics, aids, wheelchair)
-- **Stats Page** — Workout history, charts, personal bests, AI quality tracking
-- **Equipment Detection** — COCO object detection + custom YOLO model
-- **Ghost Skeleton Overlay** — Target pose visualization
-- **Calorie Estimation** — Per-exercise calorie calculation
-- **Workout Persistence** — LocalStorage + Firestore save/resume
+- **Training Plan Generator:** 4-week periodized plans, progressive overload, Universal Exercise Formula, Hebrew coach style, disability-adapted exercises.
+- **Live Training Page:** state machine (IDLE -> ENV_SCAN -> WARM_UP -> EXERCISING -> RESTING -> EXERCISE_DONE), pose tracking, set/rep counting, AI coaching.
+- **Haiku Vision:** per-rep frame analysis, form scoring and feedback.
+- **Real-Time AI Coaching**, **Workout Summary**, **Workout Adaptation**.
+- **Game Mode:** video-based game analysis, event detection, VAR frame analysis.
+- **Environment Scanning**, **Anatomic Scan (Phase A+B)**, **Stats Page**, **Calorie Estimation**, **Workout Persistence**.
+- **Ghost Skeleton Overlay (basic):** `client/src/hooks/useGhostSkeleton.js`. A forward-kinematics target skeleton built from generic `SPORT_PROFILES` angles and torso-relative segment ratios. It is **not yet** personalized to scanned ROM or limbStatus (see Stage 3).
+
+### AI Models Status (verified 2026-09-28)
+| Model | Training run | Status | Deployed file |
+|---|---|---|---|
+| Equipment YOLOv8n v1 | `training/local_pipeline/runs/equipment_yolov8n` | Done (150 epochs, 2026-08-02) | `equipment_yolov8n.onnx` + `_q` (**in use. Owner decision: keep, do not replace**) |
+| Equipment YOLOv8n v2 | `.../equipment_yolov8n_v2` | Done (80 epochs, 2026-08-12) | not exported (not needed) |
+| Equipment YOLOv8n v3 | `.../equipment_yolov8n_v3` | Done (60/60 epochs, 2026-08-17, mAP50 0.728) | not exported (not needed) |
+| YOLOv8s-seg | run folder not found locally | ONNX exported 2026-09-23 | `yolov8s_seg.onnx` |
 
 ---
 
 ## Pending Work — Detailed
 
-### Stage 1B: Kinetic Scan Upgrade (NEXT)
-**Location:** Inside ProfileGate step 2 (AnatomicScan) — part of onboarding, NOT a separate step.
+### Stage 1D: Onboarding Corrections (DONE in code, 2026-10-04; awaiting a real-camera check)
+Two critical corrections to the existing onboarding (Stages 1B/1C), completed **before Stage 2**.
 
-**What to upgrade:**
-1. Define guided movement protocol: walking in place, hip rotations, full arm movements, squats
-2. Upgrade AnatomicScan from static photo to protocol-driven dynamic scan with real-time guidance
-3. Integrate YOLO Edge model for real-time prosthetic/equipment detection during scan
-4. Combined limitation detection (arms+legs, missing limbs, ROM differences)
-5. Build kinetic profile automatically from movement patterns (bodyMap, compensationMap, riskZones)
-6. Save full scan results to Firestore as `scanData` (already wired in Dashboard payload)
-7. Iron Rule enforcement: never instruct a limited/missing limb
+**Key finding during implementation:** in the real app, the **"Confirm"** button after the vision diagnosis (`handleConfirmAndFinish` in `AnatomicScan.jsx`) **ends the scan and saves immediately**. As a result, the guided diagnostic tracks (`DIAG_TRACKS`: squats, march, arms_raise, …) and Phase B **never run** for real users. The movements that actually run are the **motion calibration** (`MOTION_CAL_MOVEMENTS`). The per-arm assessment and walking in place were therefore added **to the motion calibration**, so they really run for every user. `DIAG_TRACKS` was left completely untouched.
 
-**Key constraint:** The scan must feel natural — the user follows simple movement prompts on screen (like "walk in place", "raise both arms"), and the system silently builds the profile in the background.
+**1. Separate assessment of each arm (right and left), purely ADDITIVE (DONE)**
+- **Nothing removed:** the 4 original calibration movements (`raise_right_hand`, `slight_bend`, `pelvis_rotation`, `calf_raise`) and their logic are unchanged and keep their relative order. `DIAG_TRACKS`, Phase B and all analyzers are unchanged.
+- **New motion calibration order (12 movements):**
+  1. `raise_right_hand` (existing)
+  2. `raise_left_hand` (**new**): the left hand is verified independently, and it also detects a mirrored camera if the right-hand step was missed
+  3. `right_arm_flexion` / `right_arm_abduction` / `right_elbow_flex` (**new**): right arm only (forward-overhead raise, side raise, elbow bend-straighten)
+  4. `left_arm_flexion` / `left_arm_abduction` / `left_elbow_flex` (**new**): left arm only
+  5. `slight_bend` (knee bend), `pelvis_rotation`, `calf_raise` (tiptoes) (existing)
+  6. `march_in_place_cal` (**new**): walking in place, **skipped when a wheelchair is detected** (never instructed)
+- **Per-arm windows:** each arm movement collects 2.5-6 seconds and advances on real movement. It **always advances after 6s**, so a limited or paralyzed arm never blocks the scan; it is recorded as `no_movement`, which is itself a finding.
+- **Iron Rule:** an arm whose elbow/wrist is not visible is skipped **before its instruction is emitted** (status `not_visible`).
+- **Measured per arm** (2D frontal-camera estimate): shoulder flexion peak (°), shoulder abduction peak (°), elbow min/max/range (°), smoothness (jitter), and compensations (`trunk_lean`, `shoulder_elevation`).
+- **Code:** a new pure module `client/src/engine/scan/ArmAssessment.js`, plus `ScanSequencer.js` (new movements, `_advanceMotionCalibration()`, `_motionCalSkipReason()`, getters `armAssessment` and `calibrationResults`).
+- **Saved to Firestore, in addition to the existing fields:** `scanData.armAssessment` (full per-arm summary), `bodyMap.<side>_shoulder/elbow.measured` (degrees), and `romBaseline.arms` (for progress tracking). This works in both save paths, including the "Confirm" early finish (`getArmAssessment()` in `useAnatomicScan`).
+- **Training plan:** `buildWeekPrompt()` gets a "Per-arm assessment" line (limited ROM per arm, no movement → do not load, not visible → do not instruct).
+- The scan is about **30-40 seconds longer**.
+- **Tests:** a new `ArmAssessment.test.js` with 13 tests (healthy + limited arm measured separately, a still arm does not block, not-visible arm skipped without instruction, wheelchair → no walking instruction, left-hand mirror detection). In `ScanSequencer.test.js` only the calibration helpers and the "has 4 movements" assertion were updated, because they hardcode the old 4-step sequence. **No new failures.** After the 2026-10-04 fixes, 366 tests pass. The 23 remaining failures were already failing before this work and are unrelated (see Open Technical Debt).
 
-### Stage 1C: Sport + Goals Flow Polish
-1. Ensure `getAvailableSports()` uses scan results (not just manual disability field) to filter sports
-2. Verify scan-to-sport pipeline: scan detects one_leg -> show footballAmputee, basketballWheelchair, etc.
-3. Auto-populate profile disability fields from scan results
-4. Verify muscle group focus and scan data flow through to training plan generation
+**3. Critical fix: left/right side inversion (DONE, 2026-10-04)**
+- *Symptom (owner report):* a LEFT-leg amputee was detected as a RIGHT-leg amputee.
+- *Root cause (two places, same wrong assumption that the image is mirrored):*
+  - `KineticAnalyzer.js` swapped left and right in every landmark mapping (`JOINT_DEFS`, gait, arms, legs): `left_knee` used MediaPipe `RIGHT_*`. But MediaPipe runs on the **raw** camera image (the preview is only CSS-mirrored), and the calibration ("raise your RIGHT hand") verifies that MediaPipe `RIGHT_*` = the person's right. So a frozen LEFT knee was reported as "right". The existing KineticAnalyzer tests had always expected the anatomical convention, which is why 18 of them were failing.
+  - The vision prompt (`buildAnatomyVisionPrompt`) and the verification prompt (`verifyScan`) told Claude that the image is "mirrored (selfie)" and to "trust" the (inverted) kinetic labels.
+- *Fix:*
+  - KineticAnalyzer now uses the **anatomical convention** (MediaPipe `LEFT_*` = person's left), the same as PhaseBAnalyzer and the calibration.
+  - The hip-deviation and center-of-gravity side signals read the body's orientation from the landmarks themselves (`personLeftSign()`), so they are correct whether or not a device delivers a mirrored stream.
+  - The vision and verification prompts now say the images are the **raw, non-mirrored** camera view (person's left = image right, apply the mapping once). Kinetic hints are supporting evidence only.
+  - If the calibration detects a mirrored stream, the frames sent to vision and verification are flipped back to the raw view (`captureMultipleFrames` / `captureSnapshot`).
+- *Result:* 22 previously failing tests now pass (all 18 KineticAnalyzer tests). **Needs a real-camera confirmation by the owner** (left-leg amputee).
 
-### Stage 2: Pre-Workout — Quick Space Scan + Warm-up
+**4. Critical fix: scan pace and synchronization (DONE, 2026-10-04)**
+- *Symptom (owner report):* the scan said "raise your right/left hand" and immediately jumped ahead, with no real time to perform the movement.
+- *Root cause:* each calibration movement advanced on the **first frame** in which movement was detected (often while the instruction was still being spoken).
+- *Fix:* every calibration movement now has two timed phases:
+  1. **Get ready** (2.5-6.5 s, scaled to the instruction's word count): the instruction is spoken and nothing is measured. The UI shows "Listen and get ready…".
+  2. **Measure** (at least **4 s**, up to 8 s): the UI shows "Measuring now — do the movement" with a countdown bar, plus a short **ding** at the start. A sound is used rather than speech, so it never cuts off the instruction. The movement advances only after the full 4 s window **and** detected movement, or at 8 s with "no movement" recorded.
+- The per-arm instructions were shortened so they are quick to hear.
+- Speech-end events are **not** used for timing, because `onend` is unreliable on Windows Chrome (see `SPEECH_FIX_STATUS.md`). The timing is deterministic in the sequencer.
+- **Total calibration time: about 1.7-2.5 minutes** (12 movements). It can be tuned via the `MOTION_CAL_PREP_*` / `MOTION_CAL_MEASURE_*` constants in `ScanSequencer.js`.
+- *Tests:* 5 new timing tests (no advance before get-ready + 4 s, measureStart cue timing, movement during get-ready alone does not count, max-window timeout, get-ready bounds).
+
+**5. Critical fix: the scan skipped steps and jumped to results (DONE, 2026-10-04)**
+- *Symptom (owner report):* only the right and left hand raises were noticeable. Knees, pelvis, tiptoes and walking were effectively skipped, and the scan jumped to results.
+- *Root cause:* `AnatomicScan.jsx` fed the sequencer on **every `requestAnimationFrame` tick**, i.e. at the screen refresh rate (60 / 120 / 144 Hz), often repeating the same landmarks. All sequencer windows are counted in frames at 30 fps, so on a 144 Hz screen everything ran about 5× too fast. The full calibration took **about 23 s instead of about 2 min**, each new instruction cut off the previous one, and the steps flashed by unnoticed. This was also the real cause of the original "too fast" report.
+- *Fix:* `useAnatomicScan.feedFrame()` throttles to exactly `SCAN_SAMPLE_RATE` (30) frames per second of real time, using the new pure module `engine/scan/frameThrottle.js`. Object detections that arrive on skipped ticks are kept for the next fed frame. The console now logs every calibration step and phase (`[useAnatomicScan] Calibration N/12 — prep|measure`).
+- *Tests:* `frameThrottle.test.js` covers about 30 fps on 60/75/120/144/165 Hz screens, plus an **end-to-end 144 Hz run of the real sequencer**: all 12 steps run in order with no skips, each with its measurement window, and the total real time is between 78 s and 176 s. Verified that this test fails without the throttle (23 s).
+
+**6. Hermetic lock: no step is ever skipped silently (DONE, 2026-10-04)**
+- *Owner requirement:* the scan must go through every step in order (arms → knees → pelvis → tiptoes → walking), with a real time window. No jumps, and no move to results before every step was actually performed.
+- *Fix:* a movement without detected motion by the end of its measurement window is **repeated**, never advanced. The coach says "I didn't detect the movement. Let's try again." plus the instruction, then runs a fresh get-ready + measurement window, and the UI shows "attempt 2 of 3".
+  - Only after `MOTION_CAL_MAX_ATTEMPTS` (3) failed attempts is the step recorded as **not performed** (`calibrationResults.incompleteSteps`), and the user is told explicitly ("Moving on to the next movement."). The limit exists so a paralyzed or absent limb can never trap the user. The constant can be changed in `ScanSequencer.js`.
+  - Results (detection → vision → "Is this diagnosis accurate?") come only after the last step.
+- Walking-in-place detection in calibration is now range-based (one ankle lifts ≥ 3% of frame height, `_hasMarchMovement`). The old variance threshold was borderline for real (and prosthetic-side) steps.
+- *Tests:* repeat-with-nudge on the same step, "not performed" only after 3 attempts with an explicit announcement, and "a retry that succeeds counts as performed". The 144 Hz end-to-end test confirms all 12 steps run in order with no repeats when the movements are performed.
+
+**7. Accurate diagnosis report — no invented limbs, no side confusion (DONE, 2026-10-04)**
+- *Symptom (owner report):* the "Is this diagnosis accurate?" summary listed prostheses/amputations on both sides in a confused way. The owner has a LEFT below-knee amputation only.
+- *Root causes:* (a) the side inversion (#3); (b) the vision prompt actively pushed the model to find prostheses ("Only report NATURAL if you can CLEARLY see all limbs are intact", "partial analysis is better than no analysis", "trust these [kinetic] labels"); (c) classification, side and summary came from the model's free text, so they could contradict each other.
+- *Fix (server):*
+  - A new prompt asks for **each of the 4 limbs independently**: `intact | prosthetic | absent | unclear`, plus level and the **visual evidence** seen. Strict rules: no evidence → not affected; never infer from posture or asymmetry; one limb says nothing about another; hidden → `unclear`. Kinetic hints are weak supporting evidence only.
+  - The new pure module `server/services/anatomyDiagnosis.js` (`normalizeAnatomyDiagnosis`) **derives classification, side and the Hebrew/English summary deterministically** from the per-limb data. A limb marked affected without real evidence is downgraded to `unclear`. Example output: "רגל שמאל: קטיעה מתחת לברך עם פרוטזה. תקינות: רגל ימין, יד שמאל, יד ימין."
+  - "Report error → left/right leg" (`/correct-anatomy`) rebuilds the diagnosis from the per-limb data (`applySideCorrection`) instead of swapping words in the text.
+- *Tests:* `server/services/__tests__/anatomyDiagnosis.test.js` with 8 tests (`npm test` in `server/`), including the owner's exact case and "evidence-less amputation is not reported".
+
+**2. Muscle group selection only for the strength track (DONE)**
+- `Goals.jsx`: the muscle group section is **not rendered at all** unless the `strength` goal is selected. For any other goal set, the focus is automatically `full_body`, and deselecting strength resets it immediately.
+- Defensive layers: `Dashboard.jsx` sends `full_body` unless the goals include `strength` (this covers existing users with an old stored focus), and `buildWeekPrompt()` applies the muscle-group bias only when `strength` is in the goals.
+
+### Stage 2: Pre-Workout — Quick Space Scan + Warm-up (awaiting approval, after 1D)
 **Design principle: lightweight and fast. No heavy processes before workouts.**
 
-1. Quick space safety scan (~10 seconds): camera checks for obstacles, lighting, floor space
-2. Show brief safety summary (safe/caution) — non-blocking
-3. 5-minute sport-specific warm-up with guidance (already partially built)
-4. Warm-up adapted to workout type and physical limitations (warm-up rules already in claude.js)
+1. Quick space safety scan (~10 seconds): camera checks for obstacles, lighting, floor space.
+2. Brief safety summary (safe/caution), non-blocking.
+3. 5-minute sport-specific warm-up with guidance (partially built already).
+4. Warm-up adapted to workout type and physical limitations (warm-up rules already in claude.js).
+5. **[Strategy 2026-09] Rehab-aware warm-up:** the warm-up follows the trainee's track (rehab only / rehab + sport / sport only). In a rehab + sport session, it mixes rehab mobilization with sport-specific activation.
+6. **[Strategy 2026-09] Ghost, first use:** the warm-up movements are demonstrated with the existing basic Ghost Skeleton, which must respect `limbStatus` (never draw or instruct a non-trainable limb) and clamp its angles to the ROM in `scanData.bodyMap`. The full scan-calibrated silhouette comes in Stage 3.
 
 ### Stage 3: Kinetic Coach Core — Hybrid Architecture
-1. Edge processing 60FPS: MediaPipe + Kalman + local rep counting
-2. Peak Event Triggering: send single frame + JSON at peak moment
-3. Sub-second voice feedback from Claude
-4. Neural Emergency Brake (stop on dangerous movement)
-5. Real-time fatigue adaptation
-6. Injury Ledger (persistent injury tracking)
-7. Ghost Overlay (target skeleton)
-8. Form Degradation Curve
-9. Automatic Progressive Overload engine
-10. Injury Prediction from movement patterns
+1. Edge processing at 60FPS: MediaPipe + Kalman + local rep counting.
+2. Peak Event Triggering: send a single frame + JSON at the peak moment.
+3. Sub-second voice feedback from Claude.
+4. Neural Emergency Brake (stop on dangerous movement).
+5. Real-time fatigue adaptation.
+6. Injury Ledger (persistent injury tracking).
+7. **Motion Silhouette / Ghost (MANDATORY) [Strategy 2026-09, approved 2026-09-28]:**
+   - **Built from the profile scan:** a `ghostProfile` is generated **once, at the end of the onboarding Kinetic Scan** (and regenerated on every rescan), and saved in Firestore next to `scanData`. It contains:
+     - **Body proportions:** the trainee's own segment lengths (upper arm, forearm, thigh, shin, torso) measured from scan landmarks. This replaces the generic `SEG` ratios in `useGhostSkeleton.js`.
+     - **Per-joint ROM limits** from `scanData.bodyMap`.
+     - **limbStatus + prosthetics:** absent or non-trainable limbs are not animated (Iron Rule). Prosthetic limbs are drawn by their actual function.
+     - **Compensations** from `compensationMap`, so the ghost demonstrates the *corrected* pattern.
+   - **Gap to close:** `scanData` does not store body proportions today. The existing onboarding scan gets a small output extension (a `buildGhostProfile()` step next to `ScanDataBuilder`) with **no new user-facing step** in onboarding.
+   - An animated silhouette (smooth body shape, not just a stick skeleton) that shows the target movement.
+   - **Progression:** target angles start inside the scanned ROM and move gradually toward the healthy range as the trainee improves (updated by rescans / Stage 4 ROM tracking).
+   - **Sync:** the silhouette's tempo follows the prescribed rep tempo. Deviation between the trainee and the silhouette feeds the form score.
+   - Upgrades `useGhostSkeleton.js` instead of replacing it.
+8. Form Degradation Curve.
+9. Automatic Progressive Overload engine.
+10. Injury prediction from movement patterns.
+11. **Sport-Specific Rehabilitation tracks [Strategy 2026-09]:**
+    - A new profile field, `trainingTrack`: `rehab_only` | `rehab_sport` | `sport_only`, plus `rehabSport` (the chosen adapted sport). It is selected on the Sport/Goals pages; rehab remains always available.
+    - `buildWeekPrompt()` gets a TRACK block: in `rehab_sport` the week mixes rehab exercises with sport drills adapted to the limitations (e.g. rehab + amputee football: crutch-based drills, ball control on the healthy leg, upper-body strength for crutch sprinting).
+    - A sport drill library tagged by required limbs, so the Iron Rule filters it the same way it filters sports.
+    - The trainee can switch tracks at any time without losing history.
+12. **Adaptive Coach Styles [approved 2026-09-28]:**
+    - A `coachStyle` profile setting with defined personas, for example:
+      - **Encouraging:** calm, patient, positive, slower speech (default for `rehab_only`).
+      - **Balanced:** supportive but demanding (default for `rehab_sport`).
+      - **Aggressive:** high-energy prodding, fast speech (current style, rate 1.35; default for `sport_only`).
+    - The default follows `trainingTrack`, and the trainee can change it in settings.
+    - The style controls: TTS rate and pitch in `useSpeech.js`, the phrase bank (Hebrew + English), feedback frequency, and the tone instructions in the Claude prompts (`claude.js`, real-time coaching, workout summary).
+    - **Automatic softening:** in any style, the coach switches to a calm tone on pain reports, a readiness score of 1-2, or an Emergency Brake event.
+13. **Two-Way Voice Conversation [approved 2026-09-28]:**
+    - **Phase 1 (free):** browser `SpeechRecognition` / `webkitSpeechRecognition` (`he-IL` + `en-US`) on web, and native speech APIs (iOS Speech / Android SpeechRecognizer) in Stage 7.
+    - Short command intents: "pain in [body part]", "one more", "change exercise", "I need a break", "stop", "repeat". Commands are parsed locally by keyword; free speech goes to Claude.
+    - **Echo guard:** pause recognition while the coach's TTS is speaking, so the coach does not hear itself.
+    - Graceful fallback: if recognition isn't supported (e.g. Firefox), large on-screen buttons provide the same commands.
+    - Known limitation: Chrome's Web Speech recognition sends audio to Google's servers and needs an internet connection.
+    - *Future note:* consider cloud STT (e.g. Whisper / Google Cloud STT / Azure) only if exceptional accuracy is needed.
+14. **Feedback Policy — Critical-Only Interruption [approved 2026-09-28]:**
+    - Errors are classified into two levels:
+      - **Minor / harmless:** the coach stays **silent** during the rep. At most, it notes the error between sets if it repeats.
+      - **Critical:** a dangerous angle or injury-risk error (e.g. knee valgus under load, lumbar hyperextension, exceeding the scanned ROM, loading a non-trainable limb). The coach reacts **immediately** with a short, sharp alert, and on repetition triggers the Emergency Brake (#4).
+    - Danger thresholds are **personal**: derived from `ghostProfile` ROM limits and `riskZones`, not generic values.
+    - **Design for Stage 4B:** thresholds are computed by a single `getEffectiveLimits()` function, so clinician-set limits (4B) can later be merged in as the strictest layer without rewriting the coach.
+    - Critical alerts use a local, pre-generated phrase (zero latency) and never wait for Claude.
+15. **Pain Traffic Light Protocol [approved 2026-09-28]:**
+    - Pain is reported by voice (#13), by tapping a body map on screen, or when the coach asks after a suspicious movement.
+    - 🟢 **0-3 Green:** continue as planned.
+    - 🟡 **4-5 Yellow:** automatic load reduction (fewer reps, less range, longer rest, or a regression exercise), a calm tone, and a re-check after the set.
+    - 🔴 **>5 Red:** emergency stop of the exercise (Emergency Brake #4), a calm safety message, and an **Injury Ledger entry** (#6: body part, score, exercise, movement context, date).
+    - **Recurrence prevention:** the Injury Ledger feeds `buildWeekPrompt()` and the next workouts, so exercises that provoked red pain are avoided or regressed. The coach checks that area at the start of the next workout.
+16. **Personal-Baseline Movement Analysis [approved 2026-09-28]:**
+    - **No generic left/right symmetry** metrics (they are meaningless for amputees and complex disabilities).
+    - Every metric (ROM, depth, speed, smoothness, compensations) is compared **only to the trainee's own `ghostProfile` / baseline** from the profile scan and their own history.
+    - Feedback is phrased relative to the trainee ("deeper than your baseline", "your hip drop is back to your normal level").
+17. **Coach Notebook — Long-Term Memory [approved 2026-09-28]:**
+    - After each workout, Claude writes a short structured summary (performance, pain reports, what motivated the trainee, notable events, a follow-up question) and saves it to Firestore (e.g. `users/{uid}/coachNotebook/{workoutId}`).
+    - At the start of the next workout, the latest entries are loaded into the coaching prompt, and the coach **opens with a personal question** that fits the trainee's state (e.g. "Last time your left knee hurt at level 4. How is it today?").
+    - The notebook is compact: recent summaries are kept in full and older ones are condensed, to keep prompts short.
 
 ### Stage 4: Analytics + Load Adaptation
-1. Detailed per-workout report (form scores, reps, fatigue curve)
-2. Progress charts over time (Chart.js)
-3. Load adaptation: 2-3 declining workouts -> auto-reduce
-4. Detect excessive ease -> auto-increase
-5. Recovery scoring between workouts
-6. History persistence in Firestore
+1. Detailed per-workout report (form scores, reps, fatigue curve).
+2. Progress charts over time.
+3. Load adaptation: 2-3 declining workouts -> auto-reduce.
+4. Detect excessive ease -> auto-increase.
+5. Recovery scoring between workouts.
+6. History persistence in Firestore.
+7. **[Strategy 2026-09] ROM progress reports:** per-joint ROM over time compared with the trainee's own initial scan / `ghostProfile` baseline (no generic symmetry metrics). This is the core value metric for rehab.
+8. **[Strategy 2026-09] B2B clinician view:** moved to the dedicated **Stage 4B: Physiotherapist Portal**. Stage 4 builds the report data and components that 4B reuses.
+9. **[Strategy 2026-09] Ghost adherence metric:** how closely the trainee matched the silhouette, per exercise and over time.
+10. **Pain + Injury history view:** Pain Traffic Light reports and Injury Ledger entries over time, with the exercises that triggered them.
+
+### Stage 4B: Physiotherapist Portal — B2B Dashboard [approved 2026-09-28]
+**Timing:** right after the training and exercise stages (3) and the analytics data layer (4). It is a separate area in the web app for clinicians only.
+
+**1. Security & Isolation (hard requirement)**
+- **Clinician role:** a Firebase Auth custom claim (`role: 'clinician'`) set only on the server through `firebaseAdmin.js`. A user can never grant it to themselves.
+- **Assignment model:** `clinicianAssignments/{clinicianId}_{traineeId}` with `status: pending | active | revoked`. The trainee accepts the link through an invite code or link from the clinician, and the trainee can revoke it at any time.
+- **Firestore Security Rules:** a clinician can read a trainee's data (`users/{traineeId}/**`) **only if** an `active` assignment document exists for that exact pair. There is no list or query access to other users. Trainees never see other trainees or clinician-private notes.
+- **Server-side enforcement too:** any Express endpoint that uses the Admin SDK (which bypasses the rules) must verify the assignment explicitly before returning data.
+- **Rules as code:** add `firestore.rules` to the repo (it does not exist today), plus automated rules tests with the Firebase Emulator (e.g. "clinician A cannot read trainee of clinician B").
+- **Audit log:** every clinician read or write of trainee data is logged (`auditLog`: who, what, when).
+
+**2. Clinical Reports & Monitoring**
+- A patient list showing each trainee's status (last workout, adherence, pain alerts).
+- A full per-trainee report, reusing the Stage 4 components:
+  - ROM over time vs the personal baseline (`ghostProfile`), with no generic symmetry.
+  - Exercise quality (form scores, Ghost adherence), reps, sets, fatigue curve.
+  - Pain Traffic Light history and Injury Ledger entries, with the triggering exercises.
+  - Coach Notebook summaries (read-only).
+- **Red-flag alerts:** a red pain event, repeated yellow events, or ROM regression highlight the trainee in the list.
+
+**3. Clinical Limits ("Boundaries") — enforced in real time**
+- The clinician defines per-trainee limits in `users/{traineeId}/clinicalConstraints/{id}`:
+  - Max or forbidden ROM per joint (e.g. "knee flexion ≤ 90°").
+  - Forbidden movements or exercises (e.g. "no jumping", "no deep squat").
+  - Load limits and an optional expiry date (e.g. "until 2026-11-01").
+- **Write access:** only the assigned clinician can write. The trainee can only read.
+- **Enforcement:** `getEffectiveLimits()` (Stage 3 #14) merges three layers and always takes the **strictest** value: clinician limits, then scanned ROM (`ghostProfile`), then general safety rules.
+  - The **Ghost** never demonstrates beyond the effective limit.
+  - The **coach** gives an immediate critical alert when the limit is crossed, and repeated crossing triggers the Emergency Brake.
+  - The **plan generator** (`buildWeekPrompt()`) gets a CLINICAL CONSTRAINTS block, so forbidden exercises are never planned.
+- Every violation is recorded and shown to the clinician in the report.
 
 ### Stage 5: Game Mode + Real-Time Refereeing
-1. Full computerized refereeing
-2. Player detection + ball tracking
-3. Goal, foul, penalty, out-of-bounds detection
-4. Automatic event management
-5. VAR review with confidence scores
+**[Strategy 2026-09] Re-scoped:** targets community games and adapted-sport clubs (e.g. amputee football community matches), not professional teams.
+1. Computerized refereeing for community games.
+2. Player detection + ball tracking.
+3. Goal, foul, penalty and out-of-bounds detection.
+4. Automatic event management.
+5. VAR review with confidence scores.
 
 ### Stage 6: Social Platform + Battle Arenas
-1. Multiplayer battle system
-2. Global competitions between athletes
-3. Leaderboard, challenges, achievements
-4. Public profiles
+1. Multiplayer battle system.
+2. Competitions between athletes (community-level).
+3. Leaderboards, challenges, achievements. **[Strategy 2026-09]** Fairness by classification (compare trainees with similar limitations, or compare each trainee with their own baseline).
+4. Public profiles (opt-in, with medical data never public).
+5. **[Strategy 2026-09] Community groups:** rehab-center groups and adapted-sport clubs with a group feed and shared challenges.
+6. **[Strategy 2026-09] B2B organization accounts:** an organization admin manages staff and trainees, assigns programs, and sees aggregated (anonymized) group progress. Built on top of the Stage 4B clinician role and assignment model.
 
 ### Stage 7: Full Mobile App
-1. Convert to React Native / PWA
-2. Mobile optimization (GPU, battery)
-3. Publish to App Store + Google Play
+1. Convert to React Native / PWA.
+2. Mobile optimization (GPU, battery).
+3. Publish to the App Store and Google Play.
+4. Native speech recognition (iOS Speech / Android SpeechRecognizer) for two-way voice (see Stage 3 #13).
+5. **Medical sensitivity + regulation [owner decision 2026-09-28: final stage only]:**
+   - Health-data privacy compliance (medical data, B2B data processing agreements).
+   - Trainee consent flow for sharing data with clinicians/organizations.
+   - Product wording as "adapted training", not "medical treatment", to avoid medical-device classification.
 
 ---
 
@@ -199,22 +395,50 @@ Six improvements to the AI training plan generator (`server/services/claude.js` 
 | `client/src/pages/Goals.jsx` | Goal + muscle group focus selection |
 | `client/src/pages/ProfileGate.jsx` | 5-step onboarding orchestrator |
 | `client/src/pages/AnatomicScan.jsx` | Body scan (Phase A + B) with YOLO equipment detection + scanData save |
-| `client/src/engine/scan/ScanDataBuilder.js` | Assembles scanData (bodyMap, compensationMap, riskZones, limbStatus) from scan outputs |
+| `client/src/engine/scan/ScanDataBuilder.js` | Assembles scanData (bodyMap, compensationMap, riskZones, limbStatus) |
+| `client/src/engine/scan/frameThrottle.js` | Feeds the ScanSequencer at exactly 30 fps of real time, independent of screen refresh rate |
+| `client/src/engine/scan/ArmAssessment.js` | Per-arm (right/left) measurement: shoulder flexion/abduction, elbow range, compensations (Stage 1D) |
 | `client/src/engine/scan/ScanSequencer.js` | Scan pipeline state machine (pure logic) |
 | `client/src/engine/scan/movements.js` | Guided movement definitions per track + wheelchair overrides |
+| `client/src/hooks/useGhostSkeleton.js` | Ghost skeleton (basic). Upgraded to the ROM-personalized silhouette in Stage 3 |
 | `client/src/hooks/useSegmentationModel.js` | YOLOv8s-seg browser inference |
 | `client/src/hooks/useEquipmentDetection.js` | YOLOv8n equipment detection (16 classes) with detectForScan() adapter |
 | `client/src/hooks/useAnatomicScan.js` | Scan logic hook |
 | `client/src/hooks/useHaikuVision.js` | Per-rep Claude Haiku vision analysis |
 | `client/src/hooks/useAICoach.js` | Real-time AI coaching feedback |
 | `client/src/utils/sportLogic.js` | Sport definitions, disability filtering, goals |
-| `client/src/utils/motionEngine.js` | Kalman filter, joint angles, safety checks |
+| `client/src/utils/motionEngine.js` | Kalman filter, joint angles, safety checks, SPORT_PROFILES |
 | `client/src/utils/exerciseAnalysis.js` | Exercise analyzers, orientation/perspective checks |
 | `client/src/components/OnboardingProgress.jsx` | 5-step shared progress bar |
-| `client/src/i18n/he.json` | Hebrew translations |
-| `client/src/i18n/en.json` | English translations |
+| `client/src/i18n/he.json` / `en.json` | Translations |
 
 ---
 
 ## Background Processes
-- **YOLOv8s-seg training** — Epoch 73/100, running on RTX 3050 GPU, best model at epoch 69. Model: 11.8M params, 10 classes, 44,604 training images.
+- **None running** (verified 2026-09-28). A stuck `resume_training.py` process (resuming the already-finished equipment v3 run, running since 2026-09-19 with no progress) was stopped.
+
+---
+
+## Open Technical Debt
+- **Nothing from 2026-09-28 onward is committed or deployed (found 2026-10-04).** The owner tests on the deployed site, which still runs commit `2d69f93` (2026-09-24), so none of the Stage 1D fixes are live. The client (Vercel) and the server (the vision prompt and diagnosis logic live in `server/`) must both be committed and deployed, or run locally (`npm run dev` in `client/` and `server/`), before testing.
+- **Guided diagnostic tracks never run (found 2026-10-04):** the "Confirm" button after the vision diagnosis (`handleConfirmAndFinish`) ends the scan, so `DIAG_TRACKS` (squats, march, both arms, wrists…) and Phase B are skipped for real users. `ScanSequencer.confirmDiagnosis()` exists but the UI does not call it. Owner decision needed: keep the short scan, or continue into the diagnostic tracks after "Confirm".
+- ~~Left/right convention conflict~~: **fixed 2026-10-04** (Stage 1D #3). A real-camera confirmation is still pending.
+- **Arm amputees cannot pass the scan gates:** calibration requires all 33 landmarks to be visible, and the full-body gate requires both wrists. A missing arm will halt the scan before the per-arm skip logic can help.
+- **23 pre-existing failing tests** (down from 45: the side fix repaired 22). They are stale expectations from before earlier scan upgrades (e.g. `DIAG_TRACKS.NORMAL` expected length 3, actual 10; movements.js track lengths). None were caused by Stage 1D.
+- Commit untracked files: `useSegmentationModel.js`, new `.onnx` models (consider Git LFS for large files), `training/` scripts.
+- Clean up stray temp files in the repo root (`C:UserszahiyOneDriveDesktoptemp_*.js*`, `.png`, `.pt`).
+
+---
+
+## Change Log
+- **2026-09-19:** Stages 1B + 1C completed.
+- **2026-09-28:** Stopped the stuck training process. Verified model status. Added the strategic direction (Rehab-Community B2B+B2C, Sport-Specific Rehabilitation, mandatory ROM-personalized Motion Silhouette) inside existing stages 2-7 without reordering. Added the Manifest Update Protocol. Fixed stale sections (1B/1C "NEXT", Background Processes).
+- **2026-09-28:** Owner decisions recorded: the Ghost is built from the onboarding profile scan (`ghostProfile`, Stage 3 #7, basic ROM clamp in Stage 2 #6); Adaptive Coach Styles added (Stage 3 #12); regulation and consent moved entirely to Stage 7; the equipment YOLO v1 model is kept and the v3 export was dropped from technical debt.
+- **2026-09-28:** Final coach-intelligence decisions added to Stage 3 (#13-17): two-way voice (free Web Speech / native first, cloud STT as a future option), a critical-only feedback policy, the Pain Traffic Light Protocol with an Injury Ledger link, personal-baseline analysis (no generic symmetry), and the Coach Notebook in Firestore. Stage 4 (#7, #10) and Stage 7 (#4) updated to match.
+- **2026-09-28:** Added the dedicated **Stage 4B: Physiotherapist Portal (B2B Dashboard)** after Stages 3 and 4: security isolation (custom claim role, assignment model, Firestore rules + emulator tests, server checks, audit log), clinical reports, and clinician limits enforced in real time via `getEffectiveLimits()` (hook added to Stage 3 #14). The Stage 4 #8 clinician view moved to 4B. Stage 6 B2B organization accounts are built on 4B.
+- **2026-10-04:** Added **Stage 1D: Onboarding Corrections** before Stage 2: separate right/left arm assessment in the scan (today only `raise_right_hand` exists; bodyMap ROM is per-limb, not measured per joint), and the muscle group step shown only when the `strength` goal is selected. The UX onboarding flow was updated. Stage 2 is now blocked by 1D.
+- **2026-10-04:** 1D plan refined per owner: (1) the arm fix is strictly **additive**. No existing scan movement is removed, each arm (shoulder + elbow) is assessed separately, and knee bend, pelvis rotation, tiptoes and walking in place are guaranteed for every non-wheelchair trainee. A gap was noted: the ARM_AMPUTEE track does not assess the remaining arm. (2) The muscle group section is fully hidden for any non-strength choice, with an automatic `full_body` focus.
+- **2026-10-04:** **Stage 1D implemented.** (1) Per-arm assessment: `raise_left_hand` plus 3 movements per arm (flexion, abduction, elbow) and walking in place (skipped for wheelchair users) were added to the motion calibration. They went there because the diagnostic tracks never run (the "Confirm" button ends the scan). Measurements are saved in `scanData.armAssessment`, `bodyMap.*.measured` and `romBaseline.arms`, and fed into `buildWeekPrompt()`. Nothing existing was removed. (2) The muscle group section is shown only for the strength goal (Goals, Dashboard and server). 13 new tests, no new failures (339 pass; 45 failures pre-existing). Technical debt recorded: diagnostics skipped by "Confirm", a left/right convention conflict, and arm amputees blocked by the visibility gates.
+- **2026-10-04:** **Two critical fixes (owner report).** (1) Side inversion: a left-leg amputee was detected as right. KineticAnalyzer swapped left and right on a raw (non-mirrored) feed, and the vision and verification prompts claimed the image was mirrored. Both were fixed to the anatomical convention, the hip and CoG signals became orientation-independent, and vision frames are unmirrored if the stream is mirrored. 22 previously failing tests now pass. (2) Scan pace: every calibration movement now has a get-ready phase (2.5-6.5 s) and a measurement window of at least 4 s (max 8 s), with an on-screen phase indicator, a countdown bar and a ding cue. Calibration takes about 1.7-2.5 min. Tests: 366 pass, 0 new failures, 23 pre-existing. Awaiting the owner's real-camera check.
+- **2026-10-04:** **Critical fix: the scan skipped steps (owner report).** Root cause: the scan loop fed the sequencer at the screen refresh rate (up to 144 Hz) while all windows assume 30 fps, so calibration ran about 5× too fast (about 23 s instead of about 2 min). Fixed with a real-time 30 fps throttle in `useAnatomicScan.feedFrame` (`frameThrottle.js`) and step logging. A new end-to-end 144 Hz test confirms all 12 steps run in order with full windows. Tests: 374 pass, 0 new failures, 23 pre-existing.
+- **2026-10-04:** **Owner report: the scan still jumped to results and the report confused the sides.** Found that the owner tested the deployed site (commit `2d69f93`), which has none of the session's fixes. Also added: (1) a hermetic step lock: no movement → the step is repeated with a spoken nudge (up to 3 attempts, then explicitly recorded as not performed), plus range-based walking detection; (2) an accurate per-limb diagnosis: an evidence-based vision prompt, with deterministic classification/side/summary in `server/services/anatomyDiagnosis.js`, plus a per-limb side correction. Tests: client 376 pass (0 new failures, 23 pre-existing); server 8/8.

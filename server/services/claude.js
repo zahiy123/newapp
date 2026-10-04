@@ -3,6 +3,7 @@ import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import dotenv from 'dotenv';
+import { normalizeAnatomyDiagnosis } from './anatomyDiagnosis.js';
 
 // Load .env from the server directory (works regardless of cwd)
 const __filename_claude = fileURLToPath(import.meta.url);
@@ -1865,7 +1866,9 @@ GENERATE rehab-specific seated exercises: shoulder ROM, rotator cuff work, seate
   const intensityLines = pattern.map((level, i) => `Day ${i + 1}=${level} (${INTENSITY_RULES[level]})`).join(', ');
 
   // ── NEW: Muscle Group Focus ──
-  const muscleFocus = MUSCLE_FOCUS_MAP[muscleGroupFocus] || MUSCLE_FOCUS_MAP.full_body;
+  // Applies only to the strength track — any other goal set trains full body
+  const isStrengthTrack = Array.isArray(goals) && goals.includes('strength');
+  const muscleFocus = (isStrengthTrack && MUSCLE_FOCUS_MAP[muscleGroupFocus]) || MUSCLE_FOCUS_MAP.full_body;
 
   // ── NEW: Scan Results (always sent — even NATURAL athletes have ROM data) ──
   let scanBlock = '';
@@ -1890,6 +1893,28 @@ GENERATE rehab-specific seated exercises: shoulder ROM, rotator cuff work, seate
       parts.push(`Risk zones: ${scanData.riskZones.join(', ')}. Reduce load and add stability work for these areas.`);
     }
     if (scanData.specialProtocol) parts.push(`Special protocol: ${scanData.specialProtocol}.`);
+
+    // Per-arm assessment — right and left arm measured separately (2D camera estimate, degrees)
+    if (scanData.armAssessment && typeof scanData.armAssessment === 'object') {
+      const armLines = [];
+      for (const side of ['right', 'left']) {
+        const arm = scanData.armAssessment[`${side}_arm`];
+        if (!arm) continue;
+        if (arm.status === 'no_movement') {
+          armLines.push(`${side} arm: NO active movement detected — do NOT load this arm, assisted mobility only.`);
+        } else if (arm.status === 'not_visible') {
+          armLines.push(`${side} arm: not visible in scan (may be absent) — do NOT instruct this arm.`);
+        } else if (arm.status === 'assessed') {
+          const limits = [];
+          if (typeof arm.shoulderFlexionDeg === 'number' && arm.shoulderFlexionDeg < 140) limits.push(`shoulder flexion only ${arm.shoulderFlexionDeg}°`);
+          if (typeof arm.shoulderAbductionDeg === 'number' && arm.shoulderAbductionDeg < 140) limits.push(`shoulder abduction only ${arm.shoulderAbductionDeg}°`);
+          if (typeof arm.elbowRangeDeg === 'number' && arm.elbowRangeDeg < 100) limits.push(`elbow range only ${arm.elbowRangeDeg}°`);
+          if (Array.isArray(arm.compensations) && arm.compensations.length > 0) limits.push(`compensates with ${arm.compensations.join(', ')}`);
+          if (limits.length > 0) armLines.push(`${side} arm: LIMITED — ${limits.join(', ')}. Keep overhead/loaded work within this range for this arm.`);
+        }
+      }
+      if (armLines.length > 0) parts.push(`Per-arm assessment: ${armLines.join(' ')}`);
+    }
 
     // ROM progress tracking — compare current vs previous baselines
     if (scanData.romBaseline && scanData.previousBaselines && Array.isArray(scanData.previousBaselines) && scanData.previousBaselines.length > 0) {
@@ -3028,75 +3053,49 @@ Skill level: ${data.skillLevel || 'intermediate'}${biomechanics ? `\n\nBIOMECHAN
 function buildAnatomyVisionPrompt(kineticHints) {
   let kinetic = '';
   if (kineticHints) {
-    kinetic = `\n\nMovement-analysis results (already corrected for mirror — these use the person's actual body sides):
-- Affected limbs: ${JSON.stringify(kineticHints.frozenJoints || [])}
-- Affected side: ${kineticHints.affectedSide || 'none'}
-- Hip deviation: ${kineticHints.hipDeviation || 'none'}
-- Center of gravity bias: ${JSON.stringify(kineticHints.cogBias || 'none')}
-IMPORTANT: The limb names above (e.g. "left_leg") refer to the person's ACTUAL left leg. Trust these labels.`;
+    kinetic = `
+
+MOVEMENT-ANALYSIS HINTS (weak supporting evidence only — never a reason by itself to mark a limb):
+- Limbs that moved little: ${JSON.stringify(kineticHints.frozenJoints || [])}
+- Suggested side: ${kineticHints.affectedSide || 'none'}
+Limb names are the person's own anatomical sides. If the images do not clearly show it, ignore the hint.`;
   }
 
-  return `You are an anatomical diagnostic AI for an adaptive sports training app.
+  return `You are assessing photos of a person for an adaptive training app. Accuracy matters more than finding something: a false amputation or a wrong side is a serious error.
 
-CRITICAL MIRROR RULE: The camera feed is mirrored (selfie mode). The image you see is horizontally flipped.
-- A limb on the RIGHT side of the screen is the person's LEFT limb.
-- A limb on the LEFT side of the screen is the person's RIGHT limb.
-You MUST report all sides from the PERSON'S real-body perspective. If you see a prosthetic on the right side of the image, report it as LEFT.
+SIDE RULE: These images are the RAW camera view — NOT mirrored. The person faces the camera, like a photo taken by someone standing in front of them.
+- The person's LEFT limbs appear on the RIGHT side of the image.
+- The person's RIGHT limbs appear on the LEFT side of the image.
+Report sides from the PERSON'S own body. Example: a prosthetic leg on the right side of the image is the person's LEFT leg. Apply this mapping exactly once.
 
-Analyze the person in these images and determine their physical profile.
+ASSESS EACH OF THE 4 LIMBS INDEPENDENTLY (left_leg, right_leg, left_arm, right_arm):
+- "intact": a normal biological limb is visible.
+- "prosthetic": you can SEE a prosthesis (socket, pylon, metal/carbon parts, mechanical knee, blade) or a clear artificial limb.
+- "absent": the limb is clearly missing and no prosthesis is worn.
+- "unclear": the limb is out of frame, hidden, blurry, or you are not sure.
+For "prosthetic"/"absent" also give "level" (legs: "below_knee" | "above_knee"; arms: "below_elbow" | "above_elbow") if visible, and in "evidence" describe exactly what you see that proves it.
 
-DETECT AND REPORT:
-1. Missing/prosthetic limbs — describe in detail: prosthetic type, mechanical components visible (knee axis, pylon, socket, blade runner, cosmetic cover), amputation level (above-knee, below-knee, above-elbow, below-elbow)
-2. Which side is affected (left/right/bilateral)
-3. Mobility aids — ONLY if explicitly and clearly visible in the frame (a cane, crutches, walker physically held by the person). Do NOT infer aids from posture, background objects, or gait patterns.
-4. Structural asymmetry (uneven shoulders, hip tilt, limb length difference)
-5. Signs of paralysis or limited mobility (dropped foot, arm held rigid)
-6. If MULTIPLE limbs are affected, report ALL of them — do not report only the most obvious one
-
-CLASSIFICATION (pick ONE):
-- NATURAL: No visible disability or prosthetics
-- TRANSFEMORAL_AMPUTEE: Above-knee amputation (one leg)
-- TRANSTIBIAL_AMPUTEE: Below-knee amputation (one leg)
-- BILATERAL_AMPUTEE: Both legs affected
-- ARM_AMPUTEE: Arm/hand prosthesis or amputation
-- WHEELCHAIR: Person in wheelchair
-- MEDICAL: Other mobility limitation (paralysis, cerebral palsy, etc.)
-${kinetic}
-
-CRITICAL RULES:
-- Even if the view is challenging, provide a structural analysis of the visible anatomy and movement patterns, focusing on identifying prosthetic components.
-- If the image is unclear, analyze whatever you CAN see — partial analysis is better than no analysis.
-- If you see a prosthetic leg, blade, or artificial limb — report the correct amputation type.
-- Look carefully for: metallic/carbon-fiber prosthetic blades, socket joints, skin-tone mismatch between limbs, asymmetric limb thickness, mechanical knee joints, pylons.
-- Only report "NATURAL" if you can CLEARLY see all limbs are intact biological limbs.
-- MOBILITY AIDS: Report aids ONLY if you can see the physical object (cane, crutch, walker) clearly held or used by the person. If unsure, set mobilityAid to "none" and aids to []. Do NOT hallucinate aids based on posture or limb angle.
+STRICT RULES:
+- Mark a limb "prosthetic" or "absent" ONLY with direct visual evidence that you describe. No evidence → "intact" if it looks normal, otherwise "unclear".
+- Never infer an amputation from posture, stance, asymmetry, clothing, or movement.
+- A prosthesis on one limb says nothing about any other limb — judge each limb on its own.
+- Loose trousers or shoes hiding a leg → "unclear", not "prosthetic".
+- Mobility aids (crutches, cane, walker, wheelchair) only if the object is clearly visible being used.
+- "medicalLimitation": only a clearly visible non-amputation limitation (e.g. visible brace with paralysis); otherwise null.${kinetic}
 
 Respond ONLY with valid JSON (no markdown, no code fences):
 {
-  "classification": "NATURAL",
-  "adaptedTrack": "NORMAL",
-  "prostheticSide": null,
+  "limbs": {
+    "left_leg":  { "status": "intact", "level": null, "evidence": "" },
+    "right_leg": { "status": "intact", "level": null, "evidence": "" },
+    "left_arm":  { "status": "intact", "level": null, "evidence": "" },
+    "right_arm": { "status": "intact", "level": null, "evidence": "" }
+  },
+  "wheelchair": false,
   "aids": [],
-  "mobilityAid": "none",
-  "confidence": 0.95,
-  "description": "Detailed English description including prosthetic components, mechanical parts, and structural observations",
-  "description_he": "תיאור מפורט בעברית כולל רכיבים מכניים, ציר ברך, פיילון, שוקת ותצפיות מבניות",
-  "specialProtocol": null
-}
-
-mobilityAid values: "none", "cane", "crutches", "walker", "wheelchair" — use "none" unless a physical aid object is clearly visible.
-
-Classification → adaptedTrack mapping:
-- NATURAL → "NORMAL"
-- TRANSFEMORAL_AMPUTEE → "TRANSFEMORAL_AMPUTEE"
-- TRANSTIBIAL_AMPUTEE → "TRANSTIBIAL_AMPUTEE"
-- BILATERAL_AMPUTEE → "BILATERAL_AMPUTEE"
-- ARM_AMPUTEE → "ARM_AMPUTEE"
-- WHEELCHAIR → "WHEELCHAIR"
-- MEDICAL → "MEDICAL"
-
-specialProtocol values: null, "bilateral", "wheelchair", "paralysis"
-prostheticSide values: "left", "right", "bilateral", null`;
+  "medicalLimitation": null,
+  "confidence": 0.9
+}`;
 }
 
 export async function analyzeAnatomy(frames, kineticHints = null) {
@@ -3136,9 +3135,12 @@ export async function analyzeAnatomy(frames, kineticHints = null) {
     2
   );
   const parsed = extractJSON(responseText);
+  console.log('[analyzeAnatomy] Raw per-limb result:', JSON.stringify(parsed));
 
-  console.log('[analyzeAnatomy] Result:', JSON.stringify(parsed));
-  return parsed;
+  // Classification, side and summary are derived deterministically from the per-limb data
+  const diagnosis = normalizeAnatomyDiagnosis(parsed);
+  console.log('[analyzeAnatomy] Diagnosis:', diagnosis.classification, diagnosis.prostheticSide, '|', diagnosis.description);
+  return diagnosis;
 }
 
 /**
@@ -3177,7 +3179,7 @@ export async function verifyScan(snapshot, scanData) {
 
   contentBlocks.push({
     type: 'text',
-    text: `Verify kinetic scan vs image. MIRROR RULE: image is mirrored (selfie). RIGHT in image = person's LEFT.
+    text: `Verify kinetic scan vs image. SIDE RULE: the image is the RAW camera view (NOT mirrored); the person faces the camera, so RIGHT side of the image = the person's LEFT. Scan data sides are the person's own anatomical sides. Apply this mapping once — do not flip again.
 
 SCAN DATA:
 ${scanSummary}

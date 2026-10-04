@@ -20,6 +20,7 @@
 
 import { useRef, useState, useCallback, useEffect } from 'react';
 import { ScanSequencer } from '../engine/scan/ScanSequencer.js';
+import { createFrameThrottle } from '../engine/scan/frameThrottle.js';
 import { apiUrl, authFetch } from '../utils/api.js';
 
 
@@ -43,6 +44,11 @@ const STATUS_MAP = {
 // Throttle interval for progress state updates (ms)
 const PROGRESS_THROTTLE_MS = 100;
 
+// Frames per second fed to the ScanSequencer. All sequencer time windows (get-ready,
+// measurement, timeouts) are counted in frames at this rate, so frames MUST arrive at
+// this real-time rate — not at the screen refresh rate of the rAF loop (60-144 Hz).
+const SCAN_SAMPLE_RATE = 30;
+
 // Vision frame capture settings
 const VISION_FRAME_COUNT = 3;
 const VISION_FRAME_DELAY_MS = 500;
@@ -58,7 +64,7 @@ const SNAPSHOT_JPEG_QUALITY = 0.6;
 // Helper: Capture multiple frames from a video element
 // ============================================================
 
-async function captureMultipleFrames(videoEl, count = VISION_FRAME_COUNT) {
+async function captureMultipleFrames(videoEl, count = VISION_FRAME_COUNT, unmirror = false) {
   if (!videoEl || videoEl.readyState < 2) return [];
   const frames = [];
   const canvas = document.createElement('canvas');
@@ -66,6 +72,12 @@ async function captureMultipleFrames(videoEl, count = VISION_FRAME_COUNT) {
   canvas.width = Math.round(videoEl.videoWidth * scale);
   canvas.height = Math.round(videoEl.videoHeight * scale);
   const ctx = canvas.getContext('2d');
+  // Vision always receives the RAW camera view (person's left on image-right).
+  // If the motion calibration detected a mirrored stream, flip it back.
+  if (unmirror) {
+    ctx.translate(canvas.width, 0);
+    ctx.scale(-1, 1);
+  }
 
   for (let i = 0; i < count; i++) {
     ctx.drawImage(videoEl, 0, 0, canvas.width, canvas.height);
@@ -84,13 +96,18 @@ async function captureMultipleFrames(videoEl, count = VISION_FRAME_COUNT) {
 // Helper: Capture a single snapshot frame from video
 // ============================================================
 
-function captureSnapshot(videoEl) {
+function captureSnapshot(videoEl, unmirror = false) {
   if (!videoEl || videoEl.readyState < 2) return null;
   const canvas = document.createElement('canvas');
   const scale = Math.min(SNAPSHOT_MAX_WIDTH / videoEl.videoWidth, 1);
   canvas.width = Math.round(videoEl.videoWidth * scale);
   canvas.height = Math.round(videoEl.videoHeight * scale);
   const ctx = canvas.getContext('2d');
+  // Same as captureMultipleFrames: always send the raw camera view
+  if (unmirror) {
+    ctx.translate(canvas.width, 0);
+    ctx.scale(-1, 1);
+  }
   ctx.drawImage(videoEl, 0, 0, canvas.width, canvas.height);
   const dataUrl = canvas.toDataURL('image/jpeg', SNAPSHOT_JPEG_QUALITY);
   return dataUrl.split(',')[1]; // base64 only
@@ -175,6 +192,8 @@ export function useAnatomicScan({ onStatusChange, onInstruction, videoRef, userN
   const [fullBodyWarning, setFullBodyWarning] = useState(false);
   const [missingBodyParts, setMissingBodyParts] = useState(null);
   const [calibrationInfo, setCalibrationInfo] = useState(null);
+  // Motion calibration timing: { phase: 'prep'|'measure', step, total, measureSec, startedAt }
+  const [motionCalPhase, setMotionCalPhase] = useState(null);
   const [anatomyProfile, setAnatomyProfileState] = useState(null);
   const [missingFields, setMissingFields] = useState(null);
   const [kineticProfile, setKineticProfileState] = useState(null);
@@ -196,11 +215,21 @@ export function useAnatomicScan({ onStatusChange, onInstruction, videoRef, userN
   const getSequencer = useCallback(() => {
     if (!sequencerRef.current) {
       sequencerRef.current = new ScanSequencer({
-        sampleRate: 30,
+        sampleRate: SCAN_SAMPLE_RATE,
         phaseADurationSec: 15,
       });
     }
     return sequencerRef.current;
+  }, []);
+
+
+  /**
+   * Per-arm (right / left) measurement from the motion calibration.
+   * Available even when the scan is finished early from the vision confirmation
+   * (where `result` is still null).
+   */
+  const getArmAssessment = useCallback(() => {
+    return sequencerRef.current?.armAssessment ?? null;
   }, []);
 
 
@@ -213,7 +242,7 @@ export function useAnatomicScan({ onStatusChange, onInstruction, videoRef, userN
 
     try {
       const videoEl = videoRefInternal.current?.current || videoRefInternal.current;
-      const frames = await captureMultipleFrames(videoEl);
+      const frames = await captureMultipleFrames(videoEl, VISION_FRAME_COUNT, !!sequencerRef.current?.mirrored);
 
       if (frames.length === 0) {
         // No frames captured — set a fallback result, continue normally
@@ -286,6 +315,21 @@ export function useAnatomicScan({ onStatusChange, onInstruction, videoRef, userN
 
     if (change.calibrationInfo) {
       setCalibrationInfo(change.calibrationInfo);
+    }
+
+    // Motion calibration timing (get ready → measure)
+    if (change.motionCalPhase) {
+      console.log(`[useAnatomicScan] Calibration ${(change.motionCalStep ?? 0) + 1}/${change.motionCalTotal ?? '?'} — ${change.motionCalPhase}`);
+      setMotionCalPhase(prev => ({
+        phase: change.motionCalPhase,
+        step: change.motionCalStep ?? prev?.step ?? 0,
+        total: change.motionCalTotal ?? prev?.total ?? 0,
+        measureSec: change.measureSec ?? null,
+        attempt: change.motionCalAttempt ?? (change.motionCalPhase === 'prep' ? 1 : prev?.attempt ?? 1),
+        startedAt: Date.now(),
+      }));
+    } else if (change.subState && change.subState !== 'motionCalibration') {
+      setMotionCalPhase(null);
     }
 
     // Quality guard events
@@ -364,9 +408,19 @@ export function useAnatomicScan({ onStatusChange, onInstruction, videoRef, userN
 
   // ---- Public API ----
 
+  // Real-time throttle: the caller's rAF loop may tick at 60-144 Hz
+  const shouldFeedRef = useRef(createFrameThrottle(SCAN_SAMPLE_RATE));
+  const pendingObjDetsRef = useRef(null);
+
   const feedFrame = useCallback((landmarks, objectDetections = null) => {
+    // Keep object detections that arrive on a skipped tick for the next fed frame
+    if (objectDetections) pendingObjDetsRef.current = objectDetections;
+    if (!shouldFeedRef.current(performance.now())) return;
+
+    const dets = pendingObjDetsRef.current;
+    pendingObjDetsRef.current = null;
     const seq = getSequencer();
-    const change = seq.feedFrame(landmarks, objectDetections);
+    const change = seq.feedFrame(landmarks, dets);
     handleStateChange(change);
   }, [getSequencer, handleStateChange]);
 
@@ -388,6 +442,7 @@ export function useAnatomicScan({ onStatusChange, onInstruction, videoRef, userN
     setAwaitingVision(false);
     setAwaitingConfirmation(false);
     setVisionDiagnosis(null);
+    setMotionCalPhase(null);
   }, [getSequencer]);
 
   const reset = useCallback(() => {
@@ -410,6 +465,7 @@ export function useAnatomicScan({ onStatusChange, onInstruction, videoRef, userN
     setAwaitingVision(false);
     setAwaitingConfirmation(false);
     setVisionDiagnosis(null);
+    setMotionCalPhase(null);
   }, [getSequencer]);
 
   const submitUserAnswer = useCallback((limbKey, answer) => {
@@ -504,7 +560,7 @@ export function useAnatomicScan({ onStatusChange, onInstruction, videoRef, userN
    */
   const captureAndVerify = useCallback(async (scanResult, visionDiag) => {
     const videoEl = videoRefInternal.current?.current || videoRefInternal.current;
-    const snap = captureSnapshot(videoEl);
+    const snap = captureSnapshot(videoEl, !!sequencerRef.current?.mirrored);
     if (snap) {
       setSnapshot(snap);
     }
@@ -577,6 +633,7 @@ export function useAnatomicScan({ onStatusChange, onInstruction, videoRef, userN
     pauseScan,
     resumeScan,
     captureAndVerify,
+    getArmAssessment,
     // State
     scanStatus,
     progress,
@@ -589,6 +646,7 @@ export function useAnatomicScan({ onStatusChange, onInstruction, videoRef, userN
     fullBodyWarning,
     missingBodyParts,
     calibrationInfo,
+    motionCalPhase,
     anatomyProfile,
     missingFields,
     kineticProfile,

@@ -22,7 +22,7 @@ import { useTranslation } from 'react-i18next';
 import { useCamera } from '../hooks/useCamera';
 import { usePose } from '../hooks/usePose';
 import { useEquipmentDetection } from '../hooks/useEquipmentDetection';
-import { buildScanData } from '../engine/scan/ScanDataBuilder';
+import { buildScanData, attachArmAssessment } from '../engine/scan/ScanDataBuilder';
 import { useAnatomicScan } from '../hooks/useAnatomicScan';
 import { useSpeech } from '../hooks/useSpeech';
 import { useLanguage } from '../context/LanguageContext';
@@ -99,6 +99,7 @@ export default function AnatomicScan({ onScanComplete }) {
     fullBodyWarning,
     missingBodyParts,
     calibrationInfo,
+    motionCalPhase,
     setAnatomyProfile,
     confirmProfile,
     confirmDiagnosis,
@@ -107,6 +108,7 @@ export default function AnatomicScan({ onScanComplete }) {
     pauseScan,
     resumeScan,
     captureAndVerify,
+    getArmAssessment,
     snapshot,
     verifying,
     verificationResult,
@@ -259,6 +261,14 @@ export default function AnatomicScan({ onScanComplete }) {
     }
   }, [fullBodyWarning, isFailed, speakPriority, isHe]);
 
+  // ---- Motion calibration: sound cue when the measurement window starts ----
+  // A short ding (not speech) so it never cuts off the spoken instruction.
+  useEffect(() => {
+    if (motionCalPhase?.phase === 'measure' && !isFailed) {
+      playAchievementDing();
+    }
+  }, [motionCalPhase?.phase, motionCalPhase?.step, motionCalPhase?.startedAt, isFailed, playAchievementDing]);
+
   // ---- Snapshot + Verify + Save on completion ----
   const savedRef = useRef(false);
   useEffect(() => {
@@ -274,6 +284,11 @@ export default function AnatomicScan({ onScanComplete }) {
 
         // 2. Use verified scanData (with corrections applied) or fallback to local
         const verifiedScanData = verification?.scanData || buildScanData(result, visionDiagnosis);
+
+        // 2a. Per-arm assessment — re-attach in case server verification returned scanData without it
+        if (!verifiedScanData.armAssessment) {
+          attachArmAssessment(verifiedScanData, result.armAssessment || getArmAssessment());
+        }
 
         // 2b. Preserve ROM history — carry forward previous baselines
         const existingBaselines = userProfile?.scanData?.previousBaselines || [];
@@ -413,6 +428,11 @@ export default function AnatomicScan({ onScanComplete }) {
           }
         }
 
+        // Per-arm assessment from the motion calibration (result is null when finishing from the vision confirmation)
+        if (!verifiedScanData.armAssessment) {
+          attachArmAssessment(verifiedScanData, getArmAssessment());
+        }
+
         // Preserve ROM history — carry forward previous baselines
         const existingBaselines = userProfile?.scanData?.previousBaselines || [];
         const existingRom = userProfile?.scanData?.romBaseline || null;
@@ -462,7 +482,7 @@ export default function AnatomicScan({ onScanComplete }) {
 
     // 3. Navigate to profile
     setTimeout(() => navigate('/profile'), 1500);
-  }, [stopScan, stopPoseLoop, stopSpeech, user, result, visionDiagnosis, captureAndVerify, refreshProfile, navigate]);
+  }, [stopScan, stopPoseLoop, stopSpeech, user, result, visionDiagnosis, captureAndVerify, getArmAssessment, refreshProfile, navigate]);
 
   const handleRetryCamera = useCallback(() => {
     startCamera();
@@ -628,6 +648,40 @@ export default function AnatomicScan({ onScanComplete }) {
       {scanStatus === 'scanning' && !awaitingVision && !awaitingConfirmation && (
         <div style={styles.center}>
           <p style={styles.instruction}>{displayInstruction}</p>
+          {motionCalPhase && (
+            <div style={styles.calPhaseBox}>
+              <p style={styles.calPhaseStep}>
+                {isHe
+                  ? `תנועה ${motionCalPhase.step + 1} מתוך ${motionCalPhase.total}`
+                  : `Movement ${motionCalPhase.step + 1} of ${motionCalPhase.total}`}
+                {motionCalPhase.attempt > 1 && (isHe
+                  ? ` · ניסיון ${motionCalPhase.attempt} מתוך 3`
+                  : ` · attempt ${motionCalPhase.attempt} of 3`)}
+              </p>
+              {motionCalPhase.phase === 'prep' ? (
+                <p style={{ ...styles.calPhaseLabel, color: '#ff9800' }}>
+                  {isHe ? 'הקשב להוראה והתכונן…' : 'Listen and get ready…'}
+                </p>
+              ) : (
+                <>
+                  <p style={{ ...styles.calPhaseLabel, color: '#4caf50' }}>
+                    {isHe ? 'מודד עכשיו — בצע את התנועה' : 'Measuring now — do the movement'}
+                  </p>
+                  <div style={styles.calibrationBar}>
+                    <div
+                      key={motionCalPhase.startedAt}
+                      style={{
+                        ...styles.calibrationBarFill,
+                        backgroundColor: '#4caf50',
+                        animation: `calMeasureFill ${motionCalPhase.measureSec || 4}s linear forwards`,
+                      }}
+                    />
+                  </div>
+                  <style>{'@keyframes calMeasureFill { from { width: 0%; } to { width: 100%; } }'}</style>
+                </>
+              )}
+            </div>
+          )}
           <div style={styles.progressBar}>
             <div
               style={{ ...styles.progressFill, width: `${progressPercent}%` }}
@@ -938,6 +992,20 @@ const styles = {
     height: '100%',
     pointerEvents: 'none',
     transform: 'scaleX(-1)',
+  },
+  calPhaseBox: {
+    width: '100%',
+    margin: '0 0 16px',
+  },
+  calPhaseStep: {
+    fontSize: 13,
+    color: '#888',
+    margin: '0 0 4px',
+  },
+  calPhaseLabel: {
+    fontSize: 16,
+    fontWeight: 700,
+    margin: '0 0 8px',
   },
   instruction: {
     fontSize: 20,
