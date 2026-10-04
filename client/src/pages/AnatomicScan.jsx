@@ -460,6 +460,8 @@ export default function AnatomicScan({ onScanComplete }) {
             description: visionDiagnosis.description,
             description_he: visionDiagnosis.description_he,
             specialProtocol: visionDiagnosis.specialProtocol,
+            // Per-limb result (status + level + evidence) — used by the warm-up planner (limbProfile)
+            ...(visionDiagnosis.limbs ? { limbs: visionDiagnosis.limbs } : {}),
           },
           scanData: verifiedScanData,
           scanVerification: {

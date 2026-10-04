@@ -1563,6 +1563,12 @@ const WARM_UP_SINGLE_ARM_ROTATION = {
 };
 
 // Warm-up exercise definitions
+// Exported for the scan-driven warm-up planner (engine/warmupPlanner.js)
+export {
+  WARM_UP_ARM_PUNCHES, WARM_UP_CORE_TWISTS, WARM_UP_SINGLE_LEG_HIGH_KNEE,
+  WARM_UP_FORWARD_KICKS, WARM_UP_BALANCE_HOPS, WARM_UP_SINGLE_ARM_ROTATION,
+};
+
 export const WARM_UP_EXERCISES = [
   {
     id: 'arm_circles',

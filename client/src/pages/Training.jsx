@@ -11,6 +11,9 @@ import { useAICoach } from '../hooks/useAICoach';
 import { useHaikuVision } from '../hooks/useHaikuVision';
 import { useGhostSkeleton } from '../hooks/useGhostSkeleton';
 import { findObstacles, obstacleMessage, LABEL_HE } from '../engine/environmentHazards';
+import { planWarmUp, needsBallQuestion } from '../engine/warmupPlanner';
+import { getLimbProfile } from '../engine/limbProfile';
+import { drawWarmupGhost } from '../engine/warmupGhost';
 import { getAnalyzer, getLocationProps, getWarmUpExercises, getDisabilityContext, getCalibrationAngles, checkOrientation, checkPerspective, checkMovementQuality, ORIENTATION } from '../utils/exerciseAnalysis';
 import { LandmarkStabilizer, computeJointAngles, computeSymmetryScore, computeStabilityScore, detectMovementPhase, buildPerformanceReport, evaluateSetPerformance, getSportProfile, runSafetyCheck, generateCoachFeedback } from '../utils/motionEngine';
 
@@ -367,7 +370,16 @@ export default function Training() {
   const lastWarmUpCorrectionRef = useRef(0);
 
   // Adaptive warm-up list based on profile limitations
-  const warmUpExercises = useMemo(() => getWarmUpExercises(userProfile), [userProfile]);
+  // Warm-up (Stage 2.3): planned from the scan's per-limb profile + track + ball availability
+  const [ballAnswer, setBallAnswer] = useState(null);          // null = not asked, true/false = answer
+  const [showBallQuestion, setShowBallQuestion] = useState(false);
+  const [warmUpGhostOn, setWarmUpGhostOn] = useState(true);    // ghost shown by default in the warm-up
+  const limbProfile = useMemo(() => getLimbProfile(userProfile), [userProfile]);
+  const warmUpExercises = useMemo(() => planWarmUp(userProfile, { hasBall: ballAnswer === true }), [userProfile, ballAnswer]);
+  // Name + steps of a warm-up exercise: the planner's own (scan-adapted) text first, then the static map
+  const warmUpInfo = (ex) => (ex?.spokenSteps
+    ? { name: isHe ? ex.name.he : ex.name.en, steps: isHe ? ex.spokenSteps.he : ex.spokenSteps.en }
+    : getWarmUpInstruction(ex?.id));
   const disabilityCtx = useMemo(() => getDisabilityContext(userProfile), [userProfile]);
 
   // Warm-up pause state
@@ -570,10 +582,14 @@ export default function Training() {
         if (ghostEnabled) drawGhost(ctx, sportKey, cueKey, lm, w, h);
         drawFormCorrection(ctx, lm, w, h, cueKey);
       };
+    } else if (phase === PHASE.WARM_UP && warmUpGhostOn && warmUpExercises[warmUpIdx]?.ghost) {
+      // Warm-up ghost (Stage 2.3): demo of the movement, no absent/non-trainable limbs, capped to the scanned range
+      const spec = warmUpExercises[warmUpIdx].ghost;
+      beforeDrawRef.current = (ctx, lm, w, h) => drawWarmupGhost(ctx, spec, limbProfile, performance.now(), w, h);
     } else {
       beforeDrawRef.current = null;
     }
-  }, [phase, ghostEnabled, drawGhost, userProfile?.sport]);
+  }, [phase, ghostEnabled, drawGhost, userProfile?.sport, warmUpGhostOn, warmUpExercises, warmUpIdx, limbProfile]);
 
   // === CALIBRATION PHASE — 5-second ROM measurement ===
   const calibrationIntervalRef = useRef(null);
@@ -1215,6 +1231,16 @@ export default function Training() {
       continuedWithHazards: !!continuedWithHazards,
     };
     setEnvCountdown(null);
+    // Rehab + sport track: a short "do you have a ball?" question before the warm-up
+    if (!warmUpDone && currentIdx === 0 && ballAnswer === null && needsBallQuestion(userProfile)) {
+      setShowBallQuestion(true);
+      speakPriority(isHe ? 'יש לך כדור זמין עכשיו?' : 'Do you have a ball available right now?', { rate: 1.0 });
+      return;
+    }
+    startWarmUpOrBriefing();
+  }
+
+  function startWarmUpOrBriefing() {
     if (!warmUpDone && currentIdx === 0 && warmUpExercises.length > 0) {
       setWarmUpIdx(0);
       speakWarmUpIntro(playerName);
@@ -1224,6 +1250,21 @@ export default function Training() {
       doBriefingSpeech(currentExercise);
     }
   }
+
+  // Ball answer → warm-up (with ball drills, or air drills without a ball)
+  function answerBall(hasBall) {
+    setBallAnswer(hasBall);
+    setShowBallQuestion(false);
+    sessionDataRef.current.ballAvailable = hasBall;
+    startWarmUpOrBriefing();
+  }
+
+  // No answer within 10 s → no ball (air drills); never blocks
+  useEffect(() => {
+    if (!showBallQuestion) return;
+    const t = setTimeout(() => answerBall(false), 10000);
+    return () => clearTimeout(t);
+  }, [showBallQuestion]);
 
   // Environment scan effect (Stage 2.2) — short, never blocking
   useEffect(() => {
@@ -1411,7 +1452,7 @@ export default function Training() {
     }
 
     // 1) Audible Instructions: use deterministic Hebrew instructions from map, fallback to voicePrompt/description
-    const wuInstr = getWarmUpInstruction(currentWarmUp.id);
+    const wuInstr = warmUpInfo(currentWarmUp);
     const exName = wuInstr?.name || (isHe ? currentWarmUp.name.he : currentWarmUp.name.en);
     const exDesc = wuInstr
       ? wuInstr.steps.join('. ')
@@ -1526,6 +1567,8 @@ export default function Training() {
         // 'notMoving' is handled by the timer loop (4s nudge / 15s re-explain) — skip here
         if (fb.text === 'notMoving') {
           // No-op: timer loop handles inactivity nudges
+        } else if (currentWarmUp.suppressCorrections?.includes(fb.text)) {
+          // Iron Rule: limited range from the scan — no "bigger / higher" push for this exercise
         } else if (now - lastWarmUpCorrectionRef.current > 8000) {
           // Specific correction (kneesHigher, armCirclesSmall, widerSteps)
           lastWarmUpCorrectionRef.current = now;
@@ -2336,7 +2379,28 @@ export default function Training() {
         })()}
 
         {/* Environment scan overlay (Stage 2.2) — bottom sheet on mobile, never blocking */}
-        {phase === PHASE.ENVIRONMENT_SCAN && (
+        {/* Ball question (rehab + sport track) — before the warm-up, never blocking */}
+        {phase === PHASE.ENVIRONMENT_SCAN && showBallQuestion && (
+          <div className="absolute inset-x-0 bottom-0 sm:inset-0 sm:flex sm:items-center sm:justify-center sm:bg-black/50 z-20">
+            <div className="bg-white/95 backdrop-blur-sm rounded-t-2xl sm:rounded-2xl p-5 max-w-sm w-full text-center space-y-3 shadow-2xl" dir={isHe ? 'rtl' : 'ltr'}>
+              <div className="text-5xl">{'\u26BD'}</div>
+              <h3 className="text-lg font-bold text-gray-800">{isHe ? 'יש לך כדור זמין עכשיו?' : 'Do you have a ball available?'}</h3>
+              <p className="text-sm text-gray-500">
+                {isHe ? 'בלי כדור — נחמם עם תנועות באוויר.' : 'No ball — we will warm up with air movements.'}
+              </p>
+              <div className="flex gap-2">
+                <button onClick={() => answerBall(true)} className="flex-1 py-2 rounded-lg bg-green-600 text-white font-medium hover:bg-green-700">
+                  {isHe ? 'יש כדור' : 'Yes'}
+                </button>
+                <button onClick={() => answerBall(false)} className="flex-1 py-2 rounded-lg bg-gray-200 text-gray-800 font-medium hover:bg-gray-300">
+                  {isHe ? 'אין כדור' : 'No ball'}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {phase === PHASE.ENVIRONMENT_SCAN && !showBallQuestion && (
           <div className="absolute inset-x-0 bottom-0 sm:inset-0 sm:flex sm:items-center sm:justify-center sm:bg-black/50 z-20">
             <div className="bg-white/95 backdrop-blur-sm rounded-t-2xl sm:rounded-2xl p-4 sm:p-6 max-w-md w-full text-center space-y-3 max-h-[55vh] sm:max-h-[85vh] overflow-y-auto shadow-2xl" dir={isHe ? 'rtl' : 'ltr'}>
               {!environmentScan ? (
@@ -2627,12 +2691,12 @@ export default function Training() {
           </div>
         )}
 
-        {/* Ghost skeleton toggle */}
-        {phase === PHASE.EXERCISING && (
+        {/* Ghost skeleton toggle (exercises) / warm-up ghost toggle (on by default) */}
+        {(phase === PHASE.EXERCISING || phase === PHASE.WARM_UP) && (
           <button
-            onClick={toggleGhost}
+            onClick={phase === PHASE.WARM_UP ? () => setWarmUpGhostOn(v => !v) : toggleGhost}
             className={`absolute top-14 left-4 px-3 py-2 rounded-xl text-sm font-bold z-10 transition ${
-              ghostEnabled ? 'bg-blue-500/90 text-white' : 'bg-black/50 text-white/70'
+              (phase === PHASE.WARM_UP ? warmUpGhostOn : ghostEnabled) ? 'bg-blue-500/90 text-white' : 'bg-black/50 text-white/70'
             }`}
             title={isHe ? 'הצג/הסתר שלד מנחה' : 'Toggle ghost guide'}
           >
@@ -2844,11 +2908,11 @@ export default function Training() {
                     </span>
                     <span className="text-xs text-white/50">{currentWarmUp.duration}{isHe ? ' שניות' : 's'}</span>
                   </div>
-                  <h2 className="text-lg font-bold text-white">{(() => { const wi = getWarmUpInstruction(currentWarmUp.id); return wi?.name || (isHe ? currentWarmUp.name.he : currentWarmUp.name.en); })()}</h2>
+                  <h2 className="text-lg font-bold text-white">{(() => { const wi = warmUpInfo(currentWarmUp); return wi?.name || (isHe ? currentWarmUp.name.he : currentWarmUp.name.en); })()}</h2>
 
                   {/* Warmup instructions — deterministic from map */}
                   {(() => {
-                    const wi = getWarmUpInstruction(currentWarmUp.id);
+                    const wi = warmUpInfo(currentWarmUp);
                     const steps = wi?.steps || (currentWarmUp.instructions ? (isHe ? currentWarmUp.instructions.he : currentWarmUp.instructions.en) : null);
                     if (!steps) return null;
                     return (
@@ -2986,9 +3050,9 @@ export default function Training() {
                     </span>
                     <span className="text-xs text-gray-400">{currentWarmUp.duration}{isHe ? ' שניות' : 's'}</span>
                   </div>
-                  <h2 className="text-lg font-bold text-gray-800">{(() => { const wi = getWarmUpInstruction(currentWarmUp.id); return wi?.name || (isHe ? currentWarmUp.name.he : currentWarmUp.name.en); })()}</h2>
+                  <h2 className="text-lg font-bold text-gray-800">{(() => { const wi = warmUpInfo(currentWarmUp); return wi?.name || (isHe ? currentWarmUp.name.he : currentWarmUp.name.en); })()}</h2>
                   {(() => {
-                    const wi = getWarmUpInstruction(currentWarmUp.id);
+                    const wi = warmUpInfo(currentWarmUp);
                     const steps = wi?.steps || (currentWarmUp.instructions ? (isHe ? currentWarmUp.instructions.he : currentWarmUp.instructions.en) : null);
                     if (!steps) return <p className="text-sm text-gray-500">{isHe ? currentWarmUp.description.he : currentWarmUp.description.en}</p>;
                     return (
