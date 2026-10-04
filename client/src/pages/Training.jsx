@@ -38,6 +38,14 @@ const PHASE = {
   CALIBRATING: 'calibrating',
 };
 
+// ── Pre-workout environment scan (Stage 2.2) ──
+// Runs once per workout, BEFORE the warm-up. Never blocks: hazards are announced with a
+// suggestion to move them + an own-responsibility notice, then the workout continues.
+const ENV_SCAN_COLLECT_MS = 3000;      // local object detection window
+const ENV_VISION_TIMEOUT_MS = 6000;    // max wait for the AI hazard analysis
+const ENV_SAFE_CONTINUE_SEC = 3;       // no hazards → short confirmation, then warm-up
+const ENV_HAZARD_CONTINUE_SEC = 12;    // hazards → time to move the object, then warm-up
+
 const OPTIMIZATION_TIPS = {
   he: {
     squat: 'לרדת עמוק יותר ולהחזיק שנייה למטה',
@@ -288,6 +296,8 @@ export default function Training() {
 
   // Environment scan state
   const [environmentScan, setEnvironmentScan] = useState(null);
+  const [envScanRun, setEnvScanRun] = useState(0);         // bump to re-run the scan ("I moved it")
+  const [envCountdown, setEnvCountdown] = useState(null);  // seconds until the warm-up starts
   const environmentScannedRef = useRef(false);
   const poseLoopStartedRef = useRef(false);
 
@@ -1196,60 +1206,61 @@ export default function Training() {
     return () => { stopEquipLoop(); stopBallLoop(); stopAICoaching(); stopVision(); };
   }, [phase]);
 
-  // Environment scan effect
+  // After the environment scan → warm-up (or briefing if there is no warm-up)
+  function proceedAfterEnvScan(continuedWithHazards) {
+    environmentScannedRef.current = true;
+    sessionDataRef.current.environmentScan = {
+      ...(sessionDataRef.current.environmentScan || {}),
+      continuedWithHazards: !!continuedWithHazards,
+    };
+    setEnvCountdown(null);
+    if (!warmUpDone && currentIdx === 0 && warmUpExercises.length > 0) {
+      setWarmUpIdx(0);
+      speakWarmUpIntro(playerName);
+      setPhase(PHASE.WARM_UP);
+    } else {
+      setPhase(PHASE.BRIEFING);
+      doBriefingSpeech(currentExercise);
+    }
+  }
+
+  // Environment scan effect (Stage 2.2) — short, never blocking
   useEffect(() => {
     if (phase !== PHASE.ENVIRONMENT_SCAN) return;
 
     let cancelled = false;
-    let autoAdvanceTimer;
+    let collectLoop;
+    let countdownTimer;
+    setEnvironmentScan(null);
+    setEnvCountdown(null);
 
     async function runScan() {
-      if (!videoRef.current || !objReady) {
-        // Skip scan if camera/detector not ready — go to warmup or briefing
-        if (!warmUpDone && currentIdx === 0 && warmUpExercises.length > 0) {
-          setWarmUpIdx(0);
-          speakWarmUpIntro(playerName);
-          setPhase(PHASE.WARM_UP);
-        } else {
-          setPhase(PHASE.BRIEFING);
-          doBriefingSpeech(currentExercise);
-        }
-        return;
-      }
-
-      // Collect detections for 3 seconds
+      // 1. Local object detection (only if the detector is loaded — the scan runs either way)
       const allDetections = [];
-      const scanStart = Date.now();
+      if (objReady && videoRef.current) {
+        await new Promise((resolve) => {
+          const scanStart = Date.now();
+          collectLoop = setInterval(() => {
+            if (cancelled) { clearInterval(collectLoop); resolve(); return; }
+            allDetections.push(...scanEnvironment(videoRef.current));
+            if (Date.now() - scanStart >= ENV_SCAN_COLLECT_MS) { clearInterval(collectLoop); resolve(); }
+          }, 200);
+        });
+      }
+      if (cancelled) return;
 
-      const collectLoop = setInterval(() => {
-        if (cancelled) { clearInterval(collectLoop); return; }
-        const objects = scanEnvironment(videoRef.current);
-        allDetections.push(...objects);
+      const seen = new Map();
+      for (const obj of allDetections) {
+        if (!seen.has(obj.label) || seen.get(obj.label).score < obj.score) seen.set(obj.label, obj);
+      }
+      const uniqueObjects = [...seen.values()];
 
-        if (Date.now() - scanStart > 3000) {
-          clearInterval(collectLoop);
-          processResults();
-        }
-      }, 200);
-
-      async function processResults() {
-        if (cancelled) return;
-
-        // Deduplicate by label (keep highest confidence)
-        const seen = new Map();
-        for (const obj of allDetections) {
-          if (!seen.has(obj.label) || seen.get(obj.label).score < obj.score) {
-            seen.set(obj.label, obj);
-          }
-        }
-        const uniqueObjects = [...seen.values()];
-
-        // Capture camera frame for Claude Vision
-        const frame = captureFrame(videoRef.current);
-
-        // Send to server for Claude Vision analysis
+      // 2. AI hazard analysis of one camera frame — bounded wait, the scan never hangs on it
+      let analysis = null;
+      const frame = videoRef.current ? captureFrame(videoRef.current) : null;
+      if (frame) {
         try {
-          const resp = await authFetch(apiUrl('/api/coach/analyze-environment'), {
+          const resp = await fetchWithTimeout(apiUrl('/api/coach/analyze-environment'), {
             method: 'POST',
             body: JSON.stringify({
               frame,
@@ -1257,48 +1268,57 @@ export default function Training() {
               profile: { name: userProfile?.name, age: userProfile?.age, disability: userProfile?.disability, mobilityAid: userProfile?.mobilityAid, sport: userProfile?.sport },
               location: currentLocation,
             }),
-          });
-          if (resp.ok && !cancelled) {
-            const analysis = await resp.json();
-            setEnvironmentScan(analysis);
-            speakEnvironmentScan(analysis);
-          }
+          }, ENV_VISION_TIMEOUT_MS);
+          if (resp.ok) analysis = await resp.json();
         } catch (err) {
-          console.warn('[EnvScan] Failed:', err.message);
-        }
-
-        // Run sport-profile safety check on scan results
-        const sportProfile = getSportProfile(userProfile?.sport);
-        const safetyResult = runSafetyCheck(uniqueObjects, sportProfile, landmarks);
-        if (!safetyResult.safe) {
-          for (const issue of safetyResult.issues) {
-            speakPriority(isHe ? issue.message_he : issue.message_en);
-          }
-        }
-
-        environmentScannedRef.current = true;
-
-        // Auto-advance after 4s — warmup first if needed
-        if (!cancelled) {
-          autoAdvanceTimer = setTimeout(() => {
-            if (!cancelled) {
-              if (!warmUpDone && currentIdx === 0 && warmUpExercises.length > 0) {
-                setWarmUpIdx(0);
-                speakWarmUpIntro(playerName);
-                setPhase(PHASE.WARM_UP);
-              } else {
-                setPhase(PHASE.BRIEFING);
-                doBriefingSpeech(currentExercise);
-              }
-            }
-          }, 4000);
+          console.warn('[EnvScan] AI analysis skipped:', err.name === 'AbortError' ? 'timeout' : err.message);
         }
       }
+      if (cancelled) return;
+
+      // 3. Merge AI hazards + sport-profile safety check
+      const safetyResult = runSafetyCheck(uniqueObjects, getSportProfile(userProfile?.sport), landmarks);
+      const hazardWarnings = [...new Set([
+        ...(analysis?.hazards || []).map(h => h?.warning).filter(Boolean),
+        ...(!safetyResult.safe ? safetyResult.issues.map(i => (isHe ? i.message_he : i.message_en)) : []),
+      ])];
+      const hasHazards = hazardWarnings.length > 0;
+      setEnvironmentScan({
+        hazardWarnings,
+        equipment: analysis?.equipment || [],
+        assistiveDevices: analysis?.assistiveDevices || [],
+        aiChecked: !!analysis,
+      });
+      sessionDataRef.current.environmentScan = { hazards: hazardWarnings, at: new Date().toISOString() };
+
+      // 4. Announce: hazards → suggest moving + own responsibility; otherwise a short OK
+      if (hasHazards) {
+        speakPriority(isHe
+          ? `שים לב: ${hazardWarnings.join('. ')}. מומלץ להזיז את זה לפני שמתחילים. אם תבחר להמשיך בלי להזיז, זה על אחריותך בלבד.`
+          : `Heads up: ${hazardWarnings.join('. ')}. It's best to move it before we start. If you choose to continue without moving it, it is your own responsibility.`,
+          { rate: 1.0 });
+      } else {
+        speakPriority(isHe ? 'המרחב פנוי ובטוח. עוברים לחימום!' : 'Your space is clear and safe. On to the warm-up!', { rate: 1.0 });
+      }
+
+      // 5. Never block: continue automatically after a short countdown
+      let remaining = hasHazards ? ENV_HAZARD_CONTINUE_SEC : ENV_SAFE_CONTINUE_SEC;
+      setEnvCountdown(remaining);
+      countdownTimer = setInterval(() => {
+        if (cancelled) { clearInterval(countdownTimer); return; }
+        remaining -= 1;
+        if (remaining <= 0) {
+          clearInterval(countdownTimer);
+          proceedAfterEnvScan(hasHazards);
+        } else {
+          setEnvCountdown(remaining);
+        }
+      }, 1000);
     }
 
     runScan();
-    return () => { cancelled = true; clearTimeout(autoAdvanceTimer); };
-  }, [phase]);
+    return () => { cancelled = true; clearInterval(collectLoop); clearInterval(countdownTimer); };
+  }, [phase, envScanRun]);
 
   // Equipment detection during CHECKING_EQUIPMENT phase
   useEffect(() => {
@@ -1808,19 +1828,20 @@ export default function Training() {
 
     console.log('[handleStartBriefing] currentIdx:', currentIdx, 'warmUpDone:', warmUpDone, 'warmUpExercises.length:', warmUpExercises.length, 'objReady:', objReady, 'envScanned:', environmentScannedRef.current);
 
-    // WARMUP CHECK FIRST — before env scan or briefing
+    // 1. Environment scan FIRST — once per workout, before the warm-up (Stage 2.2).
+    //    Runs even if the object detector isn't loaded (the AI frame check still runs).
+    if (currentIdx === 0 && !environmentScannedRef.current) {
+      console.log('[handleStartBriefing] → ENVIRONMENT_SCAN phase');
+      setPhase(PHASE.ENVIRONMENT_SCAN);
+      return;
+    }
+
+    // 2. Warm-up
     if (!warmUpDone && currentIdx === 0 && warmUpExercises.length > 0) {
       console.log('[handleStartBriefing] → WARM_UP phase');
       setWarmUpIdx(0);
       speakWarmUpIntro(playerName);
       setPhase(PHASE.WARM_UP);
-      return;
-    }
-
-    // Environment scan (only after warmup is done or skipped)
-    if (currentIdx === 0 && !environmentScannedRef.current && objReady) {
-      console.log('[handleStartBriefing] → ENVIRONMENT_SCAN phase');
-      setPhase(PHASE.ENVIRONMENT_SCAN);
       return;
     }
 
@@ -2289,7 +2310,7 @@ export default function Training() {
           );
         })()}
 
-        {/* Environment scan overlay — bottom sheet on mobile */}
+        {/* Environment scan overlay (Stage 2.2) — bottom sheet on mobile, never blocking */}
         {phase === PHASE.ENVIRONMENT_SCAN && (
           <div className="absolute inset-x-0 bottom-0 sm:inset-0 sm:flex sm:items-center sm:justify-center sm:bg-black/50 z-20">
             <div className="bg-white/95 backdrop-blur-sm rounded-t-2xl sm:rounded-2xl p-4 sm:p-6 max-w-md w-full text-center space-y-3 max-h-[55vh] sm:max-h-[85vh] overflow-y-auto shadow-2xl" dir={isHe ? 'rtl' : 'ltr'}>
@@ -2297,50 +2318,73 @@ export default function Training() {
                 <>
                   <div className="text-5xl animate-pulse">{'\uD83D\uDD0D'}</div>
                   <h3 className="text-lg font-bold text-gray-800">
-                    {isHe ? 'סורק את הסביבה...' : 'Scanning environment...'}
+                    {isHe ? 'בודק את המרחב...' : 'Checking your space...'}
                   </h3>
                   <p className="text-sm text-gray-500">
-                    {isHe ? 'מחפש ציוד, מזהה סכנות ומתאים את התוכנית' : 'Looking for equipment, identifying hazards and adapting the plan'}
+                    {isHe ? 'מחפש מכשולים וסכנות סביבך — כמה שניות' : 'Looking for obstacles and hazards around you — a few seconds'}
                   </p>
                   <div className="inline-block w-8 h-8 border-4 border-blue-500 border-t-transparent rounded-full animate-spin"></div>
                   <button
-                    onClick={() => { environmentScannedRef.current = true; setPhase(PHASE.BRIEFING); doBriefingSpeech(currentExercise); }}
-                    className="text-xs text-gray-400 hover:text-gray-600 underline"
+                    onClick={() => proceedAfterEnvScan(false)}
+                    className="block mx-auto text-xs text-gray-400 hover:text-gray-600 underline"
                   >
                     {isHe ? 'דלג' : 'Skip'}
                   </button>
                 </>
+              ) : environmentScan.hazardWarnings.length > 0 ? (
+                <>
+                  <div className="text-5xl">{'\u26A0\uFE0F'}</div>
+                  <h3 className="text-lg font-bold text-gray-800">
+                    {isHe ? 'זוהה מכשול במרחב' : 'Obstacle detected'}
+                  </h3>
+                  <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 text-sm text-amber-900 text-start">
+                    {environmentScan.hazardWarnings.map((w, i) => <div key={i}>{'• '}{w}</div>)}
+                  </div>
+                  <p className="text-sm text-gray-700">
+                    {isHe ? 'מומלץ להזיז אותו לפני שמתחילים.' : "It's best to move it before you start."}
+                  </p>
+                  <p className="text-xs text-gray-500">
+                    {isHe
+                      ? 'אם תבחר להמשיך בלי להזיז — זה על אחריותך בלבד.'
+                      : 'If you choose to continue without moving it, it is your own responsibility.'}
+                  </p>
+                  <div className="flex gap-2">
+                    <button
+                      onClick={() => setEnvScanRun(n => n + 1)}
+                      className="flex-1 py-2 rounded-lg bg-blue-600 text-white text-sm font-medium hover:bg-blue-700"
+                    >
+                      {isHe ? 'הזזתי — בדוק שוב' : 'I moved it — check again'}
+                    </button>
+                    <button
+                      onClick={() => proceedAfterEnvScan(true)}
+                      className="flex-1 py-2 rounded-lg bg-gray-200 text-gray-800 text-sm font-medium hover:bg-gray-300"
+                    >
+                      {isHe ? 'המשך על אחריותי' : 'Continue at my own risk'}
+                    </button>
+                  </div>
+                  {envCountdown !== null && (
+                    <p className="text-xs text-gray-400">
+                      {isHe ? `ממשיכים לחימום בעוד ${envCountdown} שניות` : `Warm-up starts in ${envCountdown}s`}
+                    </p>
+                  )}
+                </>
               ) : (
                 <>
-                  <div className="text-5xl">
-                    {environmentScan.overallSafety === 'safe' ? '\u2705' : environmentScan.overallSafety === 'caution' ? '\u26A0\uFE0F' : '\u274C'}
-                  </div>
+                  <div className="text-5xl">{'\u2705'}</div>
                   <h3 className="text-lg font-bold text-gray-800">
-                    {isHe ? 'סריקת סביבה הושלמה' : 'Environment scan complete'}
+                    {isHe ? 'המרחב פנוי ובטוח' : 'Your space is clear'}
                   </h3>
-
-                  {environmentScan.hazards?.length > 0 && (
-                    <div className="bg-red-50 border border-red-200 rounded-lg p-3 text-sm text-red-800">
-                      <div className="font-bold mb-1">{isHe ? 'אזהרות:' : 'Warnings:'}</div>
-                      {environmentScan.hazards.map((h, i) => <div key={i}>{'• '}{h.warning}</div>)}
-                    </div>
-                  )}
-
                   {environmentScan.equipment?.length > 0 && (
-                    <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 text-sm text-blue-800">
+                    <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 text-sm text-blue-800 text-start">
                       <div className="font-bold mb-1">{isHe ? 'ציוד זמין:' : 'Available equipment:'}</div>
                       {environmentScan.equipment.map((eq, i) => <div key={i}>{'• '}{eq.suggestion}</div>)}
                     </div>
                   )}
-
-                  {environmentScan.assistiveDevices?.length > 0 && (
-                    <div className="bg-purple-50 border border-purple-200 rounded-lg p-3 text-sm text-purple-800">
-                      <div className="font-bold mb-1">{isHe ? 'עזרי נגישות:' : 'Assistive devices:'}</div>
-                      {environmentScan.assistiveDevices.map((d, i) => <div key={i}>{'• '}{d}</div>)}
-                    </div>
+                  {envCountdown !== null && (
+                    <p className="text-xs text-gray-400">
+                      {isHe ? `עוברים לחימום בעוד ${envCountdown} שניות` : `Warm-up starts in ${envCountdown}s`}
+                    </p>
                   )}
-
-                  <p className="text-xs text-gray-400">{isHe ? 'ממשיך לתדריך...' : 'Continuing to briefing...'}</p>
                 </>
               )}
             </div>

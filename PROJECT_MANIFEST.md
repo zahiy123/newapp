@@ -95,7 +95,7 @@ Readiness Rating (1-5 emoji, 3 seconds)
 | 1B | Kinetic Scan Upgrade (inside onboarding) | DONE | ScanDataBuilder + YOLO equipment detection + hip rotation + scanData→Firestore |
 | 1C | Sport + Goals flow polish | DONE | Iron Rule sport filtering + limb-aware muscle groups + goal blocking |
 | 1D | **Onboarding Corrections** | **DONE (code + tests), awaiting a real-camera check** | Separate right/left arm assessment + walking in place in the scan calibration; muscle-group step only for the strength goal |
-| 2 | Pre-Workout: Track Selection + Quick Space Scan + Warm-up | **IN PROGRESS** | 2.1 track selection DONE; 2.2 non-blocking space scan NEXT; 2.3 scan-connected 2.5-min warm-up with basic Ghost |
+| 2 | Pre-Workout: Track Selection + Quick Space Scan + Warm-up | **IN PROGRESS** | 2.1 track selection DONE; 2.2 space scan before warm-up DONE (device check pending); 2.3 scan-connected 2.5-min warm-up with basic Ghost NEXT |
 | 3 | Kinetic Coach Core — Hybrid Architecture | PENDING | Blocked by 2. Includes the **scan-calibrated Ghost**, **Sport-Specific Rehab tracks**, **Adaptive Coach Styles**, **Two-way voice**, **Critical-only feedback**, **Pain Traffic Light**, **Personal-baseline analysis**, **Coach Notebook** |
 | 4 | Analytics Report + Load Adaptation | PENDING | Blocked by 3. Produces the reports the Physio Portal (4B) displays |
 | 4B | **Physiotherapist Portal (B2B Dashboard)** | PENDING | Blocked by 3, 4. Full permission isolation (Firestore rules), clinical reports, clinician-set limits enforced in real time |
@@ -277,10 +277,17 @@ Two critical corrections to the existing onboarding (Stages 1B/1C), completed **
 - Plan generation: `Dashboard` sends `trainingTrack` + `rehabSport`. `buildWeekPrompt()` adds a TRAINING TRACK block (clean rehab = no sport drills; combined = about 60-70% rehab + 30-40% adapted sport drills, Iron Rule). The cross-sport filter uses the combined sport's rules (rehab's own list bans every ball/sport word and would have deleted all sport drills).
 - Scan "Report error → side": now shows the corrected diagnosis for confirmation (then saves like "Confirm"). Previously it continued into the old diagnostic tracks and the manual `AnatomyProfileForm`. Also fixed: "Report error" paused the scan, which hid the side picker.
 
-**2.2 Quick space safety scan (NEXT)**
-1. About 10 s, **non-blocking**: the existing `ENVIRONMENT_SCAN` phase waits for a Claude Vision reply before continuing. Make it run in the background (same approach as the scan results).
-2. Brief safety summary (safe / caution).
-3. Obstacle found → announce + suggest moving it + "continuing without moving it is your own responsibility" → continue (never block).
+**2.2 Quick space safety scan — before the warm-up, never blocking (DONE in code, 2026-10-04; awaiting a real-device check)**
+- *Bug found (owner report: "the system skips the environment scan and starts the warm-up"):* `Training.jsx` `handleStartBriefing` deliberately ran the **warm-up first** ("WARMUP CHECK FIRST — before env scan"). The environment scan only ran afterwards, and **only if the object detector was loaded** (`objReady`), so in practice it was skipped. It also waited with no time limit for the Claude Vision reply.
+- *New flow, once per workout:* **Start → environment scan → warm-up → briefing → exercises.**
+  1. About 3 s of local object detection (only if the detector is loaded; the scan runs either way).
+  2. AI hazard analysis of one camera frame (`/api/coach/analyze-environment`) with a **6 s limit** (`fetchWithTimeout`). On timeout or error, it continues with the local results.
+  3. AI hazards and the sport-profile safety check (`runSafetyCheck`) are merged.
+  4. **No hazards:** "Your space is clear and safe. On to the warm-up!" (voice + screen), then the warm-up after 3 s.
+  5. **Hazards:** announced by voice and on screen with a suggestion to move them, plus **"If you choose to continue without moving it — it is your own responsibility."** Buttons: **"I moved it — check again"** (re-runs the scan) and **"Continue at my own risk"**. **Never blocks:** a 12 s countdown, then the warm-up.
+  6. `sessionData.environmentScan` records the hazards found and whether the trainee continued with hazards (for the trainee's record and future clinician reports).
+- Constants: `ENV_SCAN_COLLECT_MS`, `ENV_VISION_TIMEOUT_MS`, `ENV_SAFE_CONTINUE_SEC`, `ENV_HAZARD_CONTINUE_SEC` in `Training.jsx`.
+- *Verification:* client build passes. `Training.jsx` has no component-test setup (camera + MediaPipe), so the flow needs the owner's real-device check.
 
 **2.3 Warm-up (about 2.5 min), connected to the scan**
 4. Today: 3 × 45 s exercises chosen by the legacy `disability` field (`getWarmUpExercises`). Choose them by the scan's per-limb data instead (`limbStatus`, per-arm assessment, ROM).
@@ -488,3 +495,4 @@ Two critical corrections to the existing onboarding (Stages 1B/1C), completed **
 - **2026-10-04:** Pace and sensitivity tuning (owner feedback). Calibration went from about 103 s to about 68 s (get-ready 1.5-4 s, measurement 2.5-6 s). Five causes of missed movements were fixed: detection during get-ready, a relative hand-raise baseline, either-knee bend, the full-body gate bypassed during calibration, and lower thresholds. 7 new tests, including no false positives. Committed and pushed as `769ffba` (client only; no server redeploy needed).
 - **2026-10-04:** Instant results after the last scan step. The vision diagnosis now runs in the background from the `slight_bend` step, and the end-of-scan 2 s stand-still was replaced by the standing-still frames from the first get-ready phase. The last step jumps straight to the results screen. Committed and pushed (client only).
 - **2026-10-04:** Stage 2 started. Owner decisions recorded: no manual disability questions, a track choice (clean rehab / rehab + sport), a warm-up of about 2.5 min, and a non-blocking space scan with an own-responsibility notice. **2.1 done:** the new `RehabSelection` with a read-only `ScanFindings` card and track/sport choice; Profile's manual disability fields replaced; the track is sent to the plan prompt plus a cross-sport filter fix; the scan correction path shows the corrected diagnosis for confirmation; the "Report error" pause bug fixed. Tests: client 383 pass (0 new failures), server 8/8. Committed and pushed (client + server — server redeploy needed).
+- **2026-10-04:** **Stage 2.2 implemented (owner report: the environment scan was skipped).** Root cause: the warm-up was deliberately run before the scan, and the scan required the object detector. New flow: scan → warm-up. A 6 s bounded AI check, never blocking; hazards are announced with a "move it" suggestion and an own-responsibility notice, with re-check / continue buttons and an auto-continue after 12 s. Build passes; awaiting a real-device check. Committed and pushed (client only).
