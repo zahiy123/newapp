@@ -115,3 +115,79 @@ describe('Ghost demonstrates the target range', () => {
     expect(peak).toBeLessThan(127);
   });
 });
+
+// ============================================================
+// Device-test regressions (owner report 2026-10-05)
+// ============================================================
+import { defaultPlacement } from '../ghostOverlay.js';
+import { detectActivity, motionPointsFor } from '../warmupActivity.js';
+
+describe('regression: arm circles at shoulder height count EVERY cycle', () => {
+  it('one peak per circle while the arm never returns to rest', () => {
+    let tr = createPeakTracker(); const peaks = [];
+    for (let i = 0; i < 200; i++) {                       // 5 circles, 40 samples each
+      const angle = 90 + 18 * Math.sin((2 * Math.PI * i) / 40);
+      const r = trackPeak(tr, angle); tr = r.tracker; if (r.peak) peaks.push(Math.round(r.peak));
+    }
+    expect(peaks.length).toBeGreaterThanOrEqual(4);
+    expect(peaks.every(p => p >= 105 && p <= 108)).toBe(true);
+  });
+
+  it('3 circles reaching the target → the target (and the Ghost) widen by 5°', () => {
+    let tr = createPeakTracker();
+    let ch = createRangeChallenge({});                    // default start 110
+    const events = [];
+    for (let i = 0; i < 160; i++) {
+      const angle = 95 + 18 * Math.sin((2 * Math.PI * i) / 40);   // peaks ≈ 113 ≥ 95% of 110
+      const r = trackPeak(tr, angle); tr = r.tracker;
+      if (r.peak) { const u = updateRangeChallenge(ch, r.peak); ch = u.state; if (u.event) events.push(u.event); }
+    }
+    expect(events[0]).toBe('expanded');
+    expect(ch.target).toBe(115);
+  });
+});
+
+describe('regression: the big Ghost always shows', () => {
+  const shouldersOnly = () => {
+    const lm = Array.from({ length: 33 }, () => ({ x: 0.5, y: 0.5, visibility: 0.1 }));
+    lm[11] = { x: 0.6, y: 0.4, visibility: 0.9 }; lm[12] = { x: 0.4, y: 0.4, visibility: 0.9 };
+    return lm;
+  };
+  it('seated close to the camera (hips not visible): anchored from the shoulders', () => {
+    const a = bodyAnchor(shouldersOnly());
+    expect(a).not.toBeNull();
+    expect(a.hipX).toBeCloseTo(0.5);
+    expect(a.hipY).toBeGreaterThan(0.4);
+    expect(a.torso).toBeGreaterThan(0.2);
+  });
+  it('no body yet: centered default placement at full height', () => {
+    const d = defaultPlacement(400, 800);
+    expect(d.origin.x).toBe(200);
+    expect(d.scale * 4.4).toBeGreaterThan(600);           // figure ≈ 4.4 body units tall
+  });
+});
+
+describe('regression: direct activity detection (raw landmarks)', () => {
+  let seed = 3; const rnd = () => { seed = (seed * 16807) % 2147483647; return seed / 2147483647; };
+  const base = () => Array.from({ length: 33 }, () => ({ x: 0.5 + (rnd() - 0.5) * 0.006, y: 0.5 + (rnd() - 0.5) * 0.006, visibility: 0.9 }));
+
+  it('watches the right body parts per move', () => {
+    expect(motionPointsFor('arm_circles')).toContain(15);
+    expect(motionPointsFor('twist')).toEqual([11, 12]);
+    expect(motionPointsFor('single_knee')).toContain(25);
+  });
+
+  it('seated small arm circles → moving; sitting still with jitter → not moving', () => {
+    let st = {}; let moving = 0;
+    for (let i = 0; i < 80; i++) {
+      const lm = base(); const a = (2 * Math.PI * i) / 20;   // 1 circle/s at 20 Hz, r = 4%
+      lm[15] = { x: 0.66 + 0.04 * Math.cos(a), y: 0.32 + 0.04 * Math.sin(a), visibility: 0.9 };
+      const r = detectActivity(st, lm, 'arm_circles'); st = r.state; if (i >= 20 && r.moving) moving++;
+    }
+    expect(moving / 60).toBeGreaterThan(0.9);
+
+    st = {}; moving = 0;
+    for (let i = 0; i < 80; i++) { const r = detectActivity(st, base(), 'arm_circles'); st = r.state; if (i >= 20 && r.moving) moving++; }
+    expect(moving / 60).toBeLessThan(0.1);
+  });
+});

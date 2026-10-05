@@ -8,7 +8,7 @@
 
 import { useEffect, useRef } from 'react';
 import { drawGhostOverlay } from '../engine/warmupGhost';
-import { bodyAnchor, overlayPlacement } from '../engine/ghostOverlay';
+import { bodyAnchor, overlayPlacement, defaultPlacement } from '../engine/ghostOverlay';
 
 export default function GhostOverlay({ spec, limbProfile, landmarksRef, videoRef, onError }) {
   const canvasRef = useRef(null);
@@ -29,11 +29,13 @@ export default function GhostOverlay({ spec, limbProfile, landmarksRef, videoRef
           if (c.width !== w || c.height !== h) { c.width = w; c.height = h; }
           const ctx = c.getContext('2d');
           ctx.clearRect(0, 0, w, h);
-          anchorRef.current = bodyAnchor(landmarksRef?.current, anchorRef.current);
-          if (anchorRef.current) {
-            const { origin, scale } = overlayPlacement(anchorRef.current, v.videoWidth, v.videoHeight, w, h);
-            drawGhostOverlay(ctx, spec, limbProfile, performance.now(), origin, scale);
-          }
+          anchorRef.current = bodyAnchor(landmarksRef?.current, anchorRef.current, 0.25, v.videoWidth / v.videoHeight);
+          // On the trainee's body when seen (hips, or estimated from the shoulders when seated);
+          // centered at full height before a body has been seen — the big Ghost is always visible
+          const { origin, scale } = anchorRef.current
+            ? overlayPlacement(anchorRef.current, v.videoWidth, v.videoHeight, w, h)
+            : defaultPlacement(w, h);
+          drawGhostOverlay(ctx, spec, limbProfile, performance.now(), origin, scale);
         }
       } catch (err) {
         stopped = true;

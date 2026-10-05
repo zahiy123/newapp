@@ -26,24 +26,45 @@ export function coverTransform(videoW, videoH, viewW, viewH) {
   return map;
 }
 
+// Ghost shoulders are 0.84 body units wide vs. a 1.4-unit torso
+const TORSO_PER_SHOULDER_WIDTH = 1.4 / 0.84;
+
 /**
  * Hip center + torso length from landmarks (normalized), smoothed with the previous anchor.
+ * If the hips are not visible (seated close to the camera), they are estimated from the
+ * shoulders (torso ≈ 1.67 × shoulder width). Keeps the previous anchor if the body is lost.
+ * @param {number} [aspect=4/3] - video width / height (normalized x and y have different px scales)
  * @returns {{ hipX, hipY, torso } | null}
  */
-export function bodyAnchor(landmarks, prev = null, alpha = 0.25) {
+export function bodyAnchor(landmarks, prev = null, alpha = 0.25, aspect = 4 / 3) {
   const ok = (p) => p && (p.visibility ?? 1) >= 0.5;
   const ls = landmarks?.[11], rs = landmarks?.[12], lh = landmarks?.[23], rh = landmarks?.[24];
-  if (!ok(ls) || !ok(rs) || !ok(lh) || !ok(rh)) return prev;
-  const hipX = (lh.x + rh.x) / 2;
-  const hipY = (lh.y + rh.y) / 2;
-  const torso = Math.hypot((ls.x + rs.x) / 2 - hipX, (ls.y + rs.y) / 2 - hipY);
-  if (torso < 0.03) return prev;
+  if (!ok(ls) || !ok(rs)) return prev;
+  const shX = (ls.x + rs.x) / 2;
+  const shY = (ls.y + rs.y) / 2;
+  let hipX, hipY, torso;
+  if (ok(lh) && ok(rh)) {
+    hipX = (lh.x + rh.x) / 2;
+    hipY = (lh.y + rh.y) / 2;
+    torso = Math.hypot(shX - hipX, shY - hipY);
+  } else {
+    const widthInY = Math.abs(ls.x - rs.x) * aspect;      // shoulder width in y-normalized units
+    torso = widthInY * TORSO_PER_SHOULDER_WIDTH;
+    hipX = shX;
+    hipY = shY + torso;
+  }
+  if (!(torso > 0.03)) return prev;
   if (!prev) return { hipX, hipY, torso };
   return {
     hipX: prev.hipX + alpha * (hipX - prev.hipX),
     hipY: prev.hipY + alpha * (hipY - prev.hipY),
     torso: prev.torso + alpha * (torso - prev.torso),
   };
+}
+
+/** Placement when no body has been seen yet: centered, full height of the view. */
+export function defaultPlacement(viewW, viewH) {
+  return { origin: { x: viewW / 2, y: viewH * 0.55 }, scale: viewH / 5.2 };
 }
 
 /**

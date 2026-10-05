@@ -17,7 +17,7 @@ import { computeAngle } from './KineticAnalyzer.js';
 export const RANGE_STEP_DEG = 5;
 export const RANGE_MAX_ABOVE_SCAN_DEG = 20;
 export const RANGE_ABSOLUTE_MAX_DEG = 170;
-export const RANGE_DEFAULT_START_DEG = 120;   // no scan measurement → a comfortable start
+export const RANGE_DEFAULT_START_DEG = 110;   // no scan measurement → a comfortable start (circles just above the shoulder)
 const RANGE_UNMEASURED_CEILING_DEG = 150;      // base for the max when the scan has no value
 const HITS_TO_EXPAND = 3;
 const HIT_RATIO = 0.95;
@@ -62,32 +62,36 @@ export function updateRangeChallenge(state, repPeakDeg) {
 }
 
 // ---- Rep peak detection from a stream of angles ----
-const PEAK_MIN_DEG = 35;      // an arm hanging is ~5-20°; a rep must rise above this
-const PEAK_DROP_DEG = 25;     // the rep ends when the angle falls this far below its peak
+// Cycle-based with hysteresis: a rep = the angle rises ≥ PEAK_SWING_DEG from a local low,
+// peaks, and falls ≥ PEAK_SWING_DEG. The arm does NOT need to return to rest, so arm
+// circles at shoulder height count every cycle. A peak must be above PEAK_MIN_DEG (arm raised).
+const PEAK_SWING_DEG = 15;
+const PEAK_MIN_DEG = 35;
 
 export function createPeakTracker() {
-  return { up: false, peak: 0, rearm: false };
+  return { phase: 'idle', min: null, max: null };
 }
 
 /** @returns {{ tracker: Object, peak: number|null }} - peak is set when a rep completes */
 export function trackPeak(tracker, angleDeg) {
   if (typeof angleDeg !== 'number' || Number.isNaN(angleDeg)) return { tracker, peak: null };
   const t = { ...tracker };
-  // After a rep, the arm must come back near rest before the next rep can start
-  // (otherwise the descent of the same rep is counted as a second, smaller rep)
-  if (t.rearm) {
-    if (angleDeg < PEAK_MIN_DEG) t.rearm = false;
+  if (t.phase === 'idle') {
+    t.min = t.min === null ? angleDeg : Math.min(t.min, angleDeg);
+    if (angleDeg > t.min + PEAK_SWING_DEG) { t.phase = 'rising'; t.max = angleDeg; }
     return { tracker: t, peak: null };
   }
-  if (!t.up) {
-    if (angleDeg > PEAK_MIN_DEG) { t.up = true; t.peak = angleDeg; }
+  if (t.phase === 'rising') {
+    if (angleDeg > t.max) { t.max = angleDeg; return { tracker: t, peak: null }; }
+    if (angleDeg < t.max - PEAK_SWING_DEG) {
+      const peak = t.max > PEAK_MIN_DEG ? t.max : null;
+      return { tracker: { phase: 'falling', min: angleDeg, max: null }, peak };
+    }
     return { tracker: t, peak: null };
   }
-  if (angleDeg > t.peak) { t.peak = angleDeg; return { tracker: t, peak: null }; }
-  if (angleDeg < t.peak - PEAK_DROP_DEG) {
-    const peak = t.peak;
-    return { tracker: { up: false, peak: 0, rearm: true }, peak };
-  }
+  // falling
+  if (angleDeg < t.min) t.min = angleDeg;
+  else if (angleDeg > t.min + PEAK_SWING_DEG) { t.phase = 'rising'; t.max = angleDeg; }
   return { tracker: t, peak: null };
 }
 
