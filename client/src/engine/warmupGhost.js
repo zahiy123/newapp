@@ -13,6 +13,9 @@
 // Animation is time-based (ms), so the speed is the same on every screen.
 // ============================================================
 
+import { GHOST_BODY } from './ghostBody.js';
+import { profileGhostPose } from './exercise/profileGhost.js';
+
 const PERIOD_MS = 1600;
 // Elbow flex range during arm circles (makes the hand path elliptical → direction visible)
 const CIRCLE_BEND_DEG = 30;
@@ -20,23 +23,24 @@ const CIRCLE_BEND_DEG = 30;
 const TRAIL_MS = 420;
 const TRAIL_STEPS = 7;
 
+/** Animation period: an exercise profile sets its own tempo. */
+function periodOf(spec) {
+  return spec?.profile?.ghost?.periodMs || PERIOD_MS;
+}
+
 /** Directional moves animate in reverse when spec.direction === 'backward'. */
 export function directionSign(spec) {
   return spec?.direction === 'backward' ? -1 : 1;
 }
 
 /** Animation phase 0..1 for an animation time in ms (may be negative when running backward). */
-function phaseOf(animMs) {
-  const t = (animMs % PERIOD_MS) / PERIOD_MS;
+function phaseOf(animMs, period = PERIOD_MS) {
+  const t = (animMs % period) / period;
   return t < 0 ? t + 1 : t;
 }
 
-// Body model in "body units" (hip center = origin, y grows downward)
-const B = {
-  shoulderY: -1.4, shoulderX: 0.42, hipX: 0.21, waistY: -0.55, waistX: 0.27,
-  upperArm: 0.6, forearm: 0.55, thigh: 0.9, shin: 0.88,
-  headY: -1.8, headR: 0.22,
-};
+// Body model in "body units" (hip center = origin, y grows downward) — shared with the profile Ghost
+const B = GHOST_BODY;
 
 const deg = (d) => (d * Math.PI) / 180;
 
@@ -58,6 +62,11 @@ function canDraw(limb) {
  * @returns {{ segments: Array<{ from, to, dashed?: boolean, limb: string }>, head: { x, y, r } }}
  */
 export function ghostPose(spec, t, lp = {}) {
+  // Stage 3.1: an exercise Ghost is generated from its Expert Execution Profile
+  if (spec?.profile?.ghost) {
+    const pp = profileGhostPose(spec.profile, t, lp);
+    if (pp) return pp;
+  }
   const wave = Math.sin(2 * Math.PI * t);          // -1..1
   const up = (1 - Math.cos(2 * Math.PI * t)) / 2;  // 0..1..0
   const cap = typeof spec?.romCapDeg === 'number' ? spec.romCapDeg : 180;
@@ -183,7 +192,7 @@ function drawFigure(ctx, pose, P, scale, { floorShadow = true, glow = true } = {
   ctx.save();
 
   if (floorShadow) {
-    const feet = P({ x: 0, y: B.thigh + B.shin + 0.05 });
+    const feet = P({ x: 0, y: pose.floorY ?? B.thigh + B.shin + 0.05 });
     ctx.fillStyle = 'rgba(0, 0, 0, 0.28)';
     ctx.beginPath();
     ctx.ellipse(feet.x, feet.y, 0.55 * scale, 0.09 * scale, 0, 0, Math.PI * 2);
@@ -341,7 +350,7 @@ function drawMotionTrail(ctx, spec, lp, nowMs, P, scale) {
  */
 export function drawWarmupGhost(ctx, spec, lp, nowMs, w, h, opts = {}) {
   if (!spec) return;
-  const t = phaseOf(nowMs);
+  const t = phaseOf(nowMs, periodOf(spec));
   const pose = ghostPose(spec, t, lp);
 
   const panelH = opts.fill ? h : h * 0.42;
@@ -381,7 +390,7 @@ export function drawWarmupGhost(ctx, spec, lp, nowMs, w, h, opts = {}) {
  */
 export function drawGhostOverlay(ctx, spec, lp, nowMs, origin, scale, alpha = 0.42) {
   if (!spec || !origin || !(scale > 0)) return;
-  const t = phaseOf(nowMs);
+  const t = phaseOf(nowMs, periodOf(spec));
   const pose = ghostPose(spec, t, lp);
   const P = (p) => ({ x: origin.x + p.x * scale, y: origin.y + p.y * scale });
   ctx.save();

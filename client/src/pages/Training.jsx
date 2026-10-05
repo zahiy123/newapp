@@ -15,6 +15,10 @@ import { planWarmUp, needsBallQuestion } from '../engine/warmupPlanner';
 import { getLimbProfile } from '../engine/limbProfile';
 import WarmupGhostPanel from '../components/WarmupGhostPanel';
 import GhostOverlay from '../components/GhostOverlay';
+import ExecutionHud from '../components/ExecutionHud';
+import { viewPromptText } from '../engine/training/viewPrompts';
+import { useExpertExecution } from '../hooks/training/useExpertExecution';
+import { sportContextsFor } from '../engine/sports/sportLibrary';
 import { FEATURES } from '../config/features';
 import { CHALLENGE_MOVES, createRangeChallenge, updateRangeChallenge, createPeakTracker, trackPeak, shoulderAngle } from '../engine/rangeProgression';
 import { detectActivity, requiredPointsFor } from '../engine/warmupActivity';
@@ -52,13 +56,6 @@ const PHASE = {
 // suggestion to move them + an own-responsibility notice, then the workout continues.
 // Warm-up timer resolution: counts real moving time in 200 ms steps (reacts within a fraction of a second)
 const WARM_UP_TICK_MS = 200;
-
-// "Step into the frame" prompt for the body part the exercise needs
-function viewPromptText(part, isHe) {
-  if (part === 'legs') return isHe ? 'לא רואים את הרגליים — אנא היכנס למסגרת' : "I can't see your legs — please step into the frame";
-  if (part === 'upper') return isHe ? 'לא רואים את הכתפיים — אנא היכנס למסגרת' : "I can't see your shoulders — please step into the frame";
-  return isHe ? 'לא רואים את הידיים — אנא היכנס למסגרת' : "I can't see your arms — please step into the frame";
-}
 
 const ENV_SCAN_COLLECT_MS = 3000;      // local object detection window
 const ENV_VISION_TIMEOUT_MS = 8000;    // max wait for the AI hazard analysis
@@ -614,6 +611,31 @@ export default function Training() {
   const currentExercise = exercises[currentIdx];
   currentExerciseRef.current = currentExercise;
 
+  // Stage 3.1 — Expert Execution Profile of the current exercise (isolated module, behind a flag):
+  // required limbs in the frame, kinematic errors / danger, accuracy, and the Ghost of the same profile
+  const exerciseCueKey = useMemo(
+    () => (currentExercise ? getAnalyzer(currentExercise.name).cueKey : null),
+    [currentExercise?.name],
+  );
+  // Sport contexts (rehab / rehab + sport / sport) layer sport-specific technique on every profile
+  const sportContexts = useMemo(
+    () => sportContextsFor(userProfile),
+    [userProfile?.sport, userProfile?.trainingTrack, userProfile?.rehabSport],
+  );
+  const execution = useExpertExecution({
+    enabled: FEATURES.EXPERT_PROFILE && phase === PHASE.EXERCISING,
+    cueKey: exerciseCueKey,
+    exerciseName: currentExercise?.name,
+    sportContexts,
+    limbProfile,
+    landmarksRef: poseLandmarksRef,
+    isHe,
+    speakPriority,
+  });
+  const executionInViewRef = execution.inViewRef;
+  const expertGhostRef = useRef(null);
+  expertGhostRef.current = execution.ghostSpec;
+
   // Set up analyzer when exercise changes
   useEffect(() => {
     if (currentExercise) {
@@ -641,7 +663,8 @@ export default function Training() {
       const cueKey = analyzerRef.current.cueKey;
       const sportKey = userProfile?.sport || 'fitness';
       beforeDrawRef.current = (ctx, lm, w, h) => {
-        if (ghostEnabled) drawGhost(ctx, sportKey, cueKey, lm, w, h);
+        // An exercise with an expert profile has its own Ghost (panel / overlay) — not the old skeleton
+        if (ghostEnabled && !expertGhostRef.current) drawGhost(ctx, sportKey, cueKey, lm, w, h);
         drawFormCorrection(ctx, lm, w, h, cueKey);
       };
     } else {
@@ -759,6 +782,14 @@ export default function Training() {
     // Smooth raw MediaPipe landmarks before any analysis
     const stableLandmarks = stabilizerRef.current.stabilize(landmarks);
     if (!stableLandmarks) return;
+
+    // === EXPERT EXECUTION GATE (Stage 3.1) — the exercise's own limbs must be in the frame ===
+    // Nothing counts (no reps, no technique cues) while they are out of view; the Expert
+    // Execution module shows and speaks exactly which body part to bring into the frame.
+    if (!executionInViewRef.current) {
+      prevLandmarksRef.current = stableLandmarks;
+      return;
+    }
 
     // === CONFIDENCE + MOVEMENT GATE ===
     // Skip all analysis/speech/server calls unless pose is trustworthy and athlete is moving
@@ -1141,6 +1172,8 @@ export default function Training() {
     reExplainedRef.current = false;
 
     const inactivityCheck = setInterval(() => {
+      // Required limbs out of the frame → the Expert Execution prompt handles it (no "start moving" nags)
+      if (!executionInViewRef.current) return;
       const now = Date.now();
       const elapsed = (now - lastActivityRef.current) / 1000;
       const state = exerciseStateRef.current;
@@ -2501,6 +2534,16 @@ export default function Training() {
             {'\uD83C\uDFAF'} {isHe ? `יעד טווח: ${rangeTarget}°` : `Range target: ${rangeTarget}°`}{rangeFlash ? ' (+5°)' : ''}
           </div>
         )}
+        {/* Exercise Ghost generated from the Expert Execution Profile (Stage 3.1) — panel, or the full
+            overlay for standing exercises (floor exercises always use the panel) */}
+        {phase === PHASE.EXERCISING && ghostEnabled && execution.ghostSpec && !(overlayActive && execution.profile.posture === 'standing') && (
+          <WarmupGhostPanel spec={execution.ghostSpec} limbProfile={limbProfile} isHe={isHe} />
+        )}
+        {phase === PHASE.EXERCISING && ghostEnabled && execution.ghostSpec && overlayActive && execution.profile.posture === 'standing' && (
+          <GhostOverlay spec={execution.ghostSpec} limbProfile={limbProfile} landmarksRef={poseLandmarksRef} videoRef={videoRef} onError={handleOverlayError} />
+        )}
+        {phase === PHASE.EXERCISING && <ExecutionHud execution={execution} isHe={isHe} />}
+
         {/* Required limbs not in view → the timer is frozen; tell the trainee exactly what to do */}
         {phase === PHASE.WARM_UP && missingPart && (
           <div className="absolute top-24 left-1/2 -translate-x-1/2 z-[16] pointer-events-none bg-amber-500 text-white rounded-2xl px-4 py-2 text-sm sm:text-base font-bold shadow-lg text-center max-w-[90%]">
@@ -2997,7 +3040,8 @@ export default function Training() {
             {'\uD83D\uDC7B'}
           </button>
         )}
-        {FEATURES.GHOST_OVERLAY && phase === PHASE.WARM_UP && warmUpGhostOn && (
+        {FEATURES.GHOST_OVERLAY && ((phase === PHASE.WARM_UP && warmUpGhostOn) ||
+          (phase === PHASE.EXERCISING && ghostEnabled && execution.profile?.posture === 'standing' && execution.ghostSpec)) && (
           <button
             onClick={() => setGhostModeSaved(overlayActive ? 'panel' : 'overlay')}
             className={`absolute top-28 left-4 px-3 py-2 rounded-xl text-xs font-bold z-10 transition ${

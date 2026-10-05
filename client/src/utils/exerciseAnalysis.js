@@ -4333,6 +4333,11 @@ const ANALYZER_MAP = [
 ];
 
 // Get the right analyzer based on exercise type
+/** Every cueKey the analyzer map can produce (Stage 3.1: each must have an execution profile). */
+export function listAnalyzerCueKeys() {
+  return [...new Set(ANALYZER_MAP.map(e => e.cueKey))];
+}
+
 export function getAnalyzer(exerciseName) {
   const name = (exerciseName || '').toLowerCase();
   for (const entry of ANALYZER_MAP) {

@@ -9,4 +9,8 @@ export const FEATURES = Object.freeze({
   // Full-size transparent Ghost overlay aligned to the trainee's body + progressive range
   // challenge in the warm-up. Off → only the stable Ghost demo panel (checkpoint-stage2-stable).
   GHOST_OVERLAY: true,
+  // Stage 3.1 — Expert Execution Profile per exercise: required limbs in the frame before anything
+  // counts, kinematic error / danger rules, execution accuracy and a Ghost generated from the same
+  // profile. Off → the exercise phase runs exactly as at checkpoint-stage2-final.
+  EXPERT_PROFILE: true,
 });
