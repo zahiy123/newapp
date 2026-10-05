@@ -18,6 +18,7 @@ import GhostOverlay from '../components/GhostOverlay';
 import { FEATURES } from '../config/features';
 import { CHALLENGE_MOVES, createRangeChallenge, updateRangeChallenge, createPeakTracker, trackPeak, shoulderAngle } from '../engine/rangeProgression';
 import { detectActivity } from '../engine/warmupActivity';
+import { createAccuracyTracker, retargetAccuracyTracker, updateAccuracy, accuracyLevel } from '../engine/movementAccuracy';
 import { getAnalyzer, getLocationProps, getWarmUpExercises, getDisabilityContext, getCalibrationAngles, checkOrientation, checkPerspective, checkMovementQuality, ORIENTATION, WARMUP_STABILIZER_CONFIG } from '../utils/exerciseAnalysis';
 import { LandmarkStabilizer, computeJointAngles, computeSymmetryScore, computeStabilityScore, detectMovementPhase, buildPerformanceReport, evaluateSetPerformance, getSportProfile, runSafetyCheck, generateCoachFeedback } from '../utils/motionEngine';
 
@@ -393,6 +394,10 @@ export default function Training() {
   const [rangeFlash, setRangeFlash] = useState(false);       // brief green flash when the target widens
   const [liveMoving, setLiveMoving] = useState(false);       // on-screen "movement detected" indicator
   const activityStateRef = useRef({});
+  // Real-time accuracy vs. the Ghost (range + position overlap), shown next to the movement indicator
+  const [accuracy, setAccuracy] = useState(null);           // 0-100 or null
+  const accuracyRef = useRef(null);                         // tracker
+  const accuracyShownRef = useRef({ value: null, at: 0, ema: null });
   const rangeRef = useRef(null);                            // range challenge state for this exercise
   const peakRef = useRef(createPeakTracker());
   const rangeFailedRef = useRef(false);                     // challenge disabled after a runtime error
@@ -1696,19 +1701,63 @@ export default function Training() {
   useEffect(() => {
     if (phase !== PHASE.WARM_UP || !currentWarmUp?.ghost) { setLiveMoving(false); return; }
     activityStateRef.current = {};
+    accuracyShownRef.current = { value: null, at: 0, ema: null };
+    setAccuracy(null);
     let last = false;
+    let accuracyOff = false;
     const id = setInterval(() => {
+      const lm = poseLandmarksRef.current;
       try {
-        const r = detectActivity(activityStateRef.current, poseLandmarksRef.current, currentWarmUp.ghost.move);
+        const r = detectActivity(activityStateRef.current, lm, currentWarmUp.ghost.move);
         activityStateRef.current = r.state;
         if (r.moving) lastActivityRef.current = Date.now();
         if (r.moving !== last) { last = r.moving; setLiveMoving(r.moving); }
       } catch (err) {
         console.error('[WarmupActivity] error:', err);
       }
+      // Accuracy vs. the Ghost — isolated: an error turns only the accuracy display off
+      if (accuracyOff || !accuracyRef.current) return;
+      try {
+        const a = updateAccuracy(accuracyRef.current, lm);
+        accuracyRef.current = a.tracker;
+        const shown = accuracyShownRef.current;
+        const now = Date.now();
+        if (a.accuracy === null) {
+          if (shown.value !== null && now - shown.at > 1500) { shown.value = null; shown.ema = null; shown.at = now; setAccuracy(null); }
+        } else {
+          shown.ema = shown.ema === null ? a.accuracy : shown.ema + 0.35 * (a.accuracy - shown.ema);   // steady number
+          const v = Math.round(shown.ema);
+          if (now - shown.at >= 250 && v !== shown.value) { shown.value = v; shown.at = now; setAccuracy(v); }
+        }
+      } catch (err) {
+        accuracyOff = true;
+        setAccuracy(null);
+        console.error('[MovementAccuracy] disabled after a runtime error:', err);
+      }
     }, 50);
     return () => clearInterval(id);
   }, [phase, warmUpIdx, currentWarmUp]);
+
+  // Accuracy tracker follows the Ghost that is shown (incl. a widened range target)
+  useEffect(() => {
+    if (phase !== PHASE.WARM_UP || !ghostSpec) { accuracyRef.current = null; return; }
+    try {
+      const sameMove = accuracyRef.current?.sig && accuracyRef.current.move === ghostSpec.move && accuracyRef.current.idx === warmUpIdx;
+      const tr = sameMove ? retargetAccuracyTracker(accuracyRef.current, ghostSpec, limbProfile) : createAccuracyTracker(ghostSpec, limbProfile);
+      accuracyRef.current = tr ? { ...tr, move: ghostSpec.move, idx: warmUpIdx } : null;
+    } catch (err) {
+      accuracyRef.current = null;
+      console.error('[MovementAccuracy] setup failed:', err);
+    }
+  }, [phase, warmUpIdx, ghostSpec, limbProfile]);
+
+  // Keep a per-exercise accuracy summary for the session record
+  useEffect(() => {
+    if (phase !== PHASE.WARM_UP || accuracy === null || !currentWarmUp) return;
+    const rec = sessionDataRef.current.warmUpAccuracy || (sessionDataRef.current.warmUpAccuracy = {});
+    const e = rec[currentWarmUp.id] || (rec[currentWarmUp.id] = { sum: 0, n: 0, best: 0 });
+    e.sum += accuracy; e.n += 1; e.best = Math.max(e.best, accuracy); e.avg = Math.round(e.sum / e.n);
+  }, [accuracy]);
 
   // Range challenge setup for each warm-up exercise (overlay mode, arm-range moves only)
   useEffect(() => {
@@ -2382,6 +2431,12 @@ export default function Training() {
           <div className={`absolute left-3 top-[62%] z-[15] pointer-events-none rounded-full px-3 py-1 text-xs font-bold ${
             liveMoving ? 'bg-green-500/90 text-white' : 'bg-black/55 text-white/80'}`}>
             {liveMoving ? (isHe ? '🟢 מזהה תנועה' : '🟢 Movement detected') : (isHe ? '⚪ ממתין לתנועה' : '⚪ Waiting for movement')}
+            {accuracy !== null && (
+              <span className={`mx-1 px-2 py-0.5 rounded-full text-white ${
+                accuracyLevel(accuracy) === 'good' ? 'bg-green-600' : accuracyLevel(accuracy) === 'mid' ? 'bg-yellow-500' : 'bg-red-600'}`}>
+                {isHe ? `${accuracy}% דיוק` : `${accuracy}% accuracy`}
+              </span>
+            )}
           </div>
         )}
 
