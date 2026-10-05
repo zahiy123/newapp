@@ -85,6 +85,17 @@ Readiness Rating (1-5 emoji, 3 seconds)
 
 ---
 
+## Stable Checkpoints (safe restore points)
+| Tag | Commit | Date | What it contains |
+|---|---|---|---|
+| `checkpoint-stage2-stable` | (this commit, see `git show checkpoint-stage2-stable`) | 2026-10-05 | Stages 0-2 complete and verified on device: scan (per-arm, side fix, pacing, lock, accurate diagnosis), track selection, environment scan + obstacles, scan-adapted warm-up with ball question, seated tracking, Ghost demo panel |
+
+**How to return to a checkpoint:**
+- Look at it without changing anything: `git checkout checkpoint-stage2-stable` (then `git checkout main` to come back).
+- Undo later work on `main` safely (keeps history): `git revert <commits after the checkpoint>`, then push → Vercel redeploys.
+- Redeploy the checkpoint in Vercel without code changes: Vercel → Deployments → the deployment of the checkpoint commit → "Promote to Production" (instant rollback).
+- New risky features are built on a **feature branch** first (Vercel gives the branch its own preview URL) and are merged into `main` only after the owner approves.
+
 ## Development Roadmap — Status Overview
 
 | # | Stage | Status | Notes |
@@ -95,7 +106,7 @@ Readiness Rating (1-5 emoji, 3 seconds)
 | 1B | Kinetic Scan Upgrade (inside onboarding) | DONE | ScanDataBuilder + YOLO equipment detection + hip rotation + scanData→Firestore |
 | 1C | Sport + Goals flow polish | DONE | Iron Rule sport filtering + limb-aware muscle groups + goal blocking |
 | 1D | **Onboarding Corrections** | **DONE (code + tests), awaiting a real-camera check** | Separate right/left arm assessment + walking in place in the scan calibration; muscle-group step only for the strength goal |
-| 2 | Pre-Workout: Track Selection + Quick Space Scan + Warm-up | **DONE in code — device check pending** | 2.1 track selection; 2.2 + 2.2b space scan before warm-up with movement-zone obstacles; 2.3 scan + track adapted 2.5-min warm-up with ball question and default-on Ghost |
+| 2 | Pre-Workout: Track Selection + Quick Space Scan + Warm-up | **DONE ✅ — verified by the owner on device (2026-10-05)** | Stable checkpoint `checkpoint-stage2-stable`. 2.1 track selection; 2.2/2.2b environment scan + movement-zone obstacles; 2.3 scan + track adapted warm-up, ball question; 2.4/2.5 seated tracking + Ghost panel |
 | 3 | Kinetic Coach Core — Hybrid Architecture | PENDING | Blocked by 2. Includes the **scan-calibrated Ghost**, **Sport-Specific Rehab tracks**, **Adaptive Coach Styles**, **Two-way voice**, **Critical-only feedback**, **Pain Traffic Light**, **Personal-baseline analysis**, **Coach Notebook** |
 | 4 | Analytics Report + Load Adaptation | PENDING | Blocked by 3. Produces the reports the Physio Portal (4B) displays |
 | 4B | **Physiotherapist Portal (B2B Dashboard)** | PENDING | Blocked by 3, 4. Full permission isolation (Firestore rules), clinical reports, clinician-set limits enforced in real time |
@@ -321,7 +332,7 @@ Two critical corrections to the existing onboarding (Stages 1B/1C), completed **
 - **Ghost look:** `drawWarmupGhost` was redrawn as a soft, filled silhouette: natural limb thickness, a torso tapered from the shoulders to the waist to the hips, head and neck, hands and feet, a light-to-sky gradient with a soft glow, a floor shadow and a rounded panel. A below-knee prosthesis is drawn as a grey socket + pylon + foot. Kicks are visually distinct from knee raises. No text on the canvas (it is mirrored). Verified by rendering preview images.
 - *Tests:* 6 new seated tests (`warmupSeated.test.js`; the fixture is confirmed as `sitting`; 4 of them fail on the previous code). Client: 418 pass, 0 new failures.
 
-**2.5 Second device-test round (DONE in code, 2026-10-05)**
+**2.5 Second device-test round (DONE ✅, verified by the owner 2026-10-05)**
 - *Owner report:* "Seated arm circles are still not read; the Ghost still looks like the old thin lines."
 - *Deployment verified first:* the commit was built and served by Vercel (GitHub status `success`; the production bundle at `newapp-ruddy.vercel.app` contains the new code). So these were real bugs, not a stale deploy. Note: `newapp.vercel.app` is someone else's site; ours is **`newapp-ruddy.vercel.app`**.
 - **Seated tracking, real root cause:** (1) the exercise `LandmarkStabilizer` (Kalman `measurementNoise` 0.12 + EMA) shrinks a 1 Hz arm circle to about ¼ of its size; (2) `detectMovement` averages motion over 7 points (nose, shoulders, hips, wrists), so two moving wrists on a still seated body fall under the threshold. The previous synthetic tests bypassed the stabilizer, which is why they passed.
@@ -538,3 +549,4 @@ Two critical corrections to the existing onboarding (Stages 1B/1C), completed **
 - **2026-10-04:** **Stage 2.3 implemented.** New `limbProfile` / `warmupPlanner` / `warmupGhost` modules (19 tests): a 3 × 45 s warm-up from the scan's per-limb data + aid + track + sport, its own instructions per exercise (no crutch text for prosthesis users), suppressed range-pushing corrections for limited arms, the ball question for rehab + sport, and a default-on warm-up Ghost that hides non-trainable limbs and caps arm angles at the scanned ROM. The scan now saves `visionDiagnosis.limbs`. Stage 2 is code-complete. Committed and pushed (client only).
 - **2026-10-05:** Stage 2 device-test fixes. Seated warm-up movement is recognized (the posture gate was removed from the 4 upper-body analyzers; twists use the shoulders only); the timer counts movement within 1.5 s (no skipped seconds or flicker); the re-explain uses scan-adapted text; the Ghost was redrawn as a soft silhouette with a prosthetic socket + pylon. 6 new tests. Committed and pushed (client only).
 - **2026-10-05:** Second device round. Verified the deploy was live (real bugs). Seated tracking: a light warm-up stabilizer + path-based motion detection (`recentMotion`), realistic stabilizer + noise tests, and a friendly "try standing, I'm still tracking" suggestion. Ghost: moved to its own unstretched panel (`WarmupGhostPanel`) mid-left, no longer hidden under the feedback banner. Committed and pushed (client only).
+- **2026-10-05:** **Stage 2 closed and verified on device by the owner** (environment scan, warm-up adaptation, seated tracking, Ghost panel). Stable restore point tagged `checkpoint-stage2-stable` (git tag, pushed). Added the "Stable Checkpoints" section with restore instructions. Next: Ghost Overlay & Progressive Range Challenge, built on the branch `feature/ghost-overlay` behind a feature flag.
