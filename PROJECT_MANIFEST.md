@@ -347,7 +347,7 @@ Two critical corrections to the existing onboarding (Stages 1B/1C), completed **
 
 ### Stage 3: Kinetic Coach Core — Hybrid Architecture
 
-**3.0 (early) — Ghost Overlay & Progressive Range Challenge (IN REVIEW on branch `feature/ghost-overlay`, 2026-10-05)**
+**3.0 (early) — Ghost Overlay & Progressive Range Challenge (MERGED to `main` + production 2026-10-05 at owner's request — the Vercel preview required login; owner device test pending on the production URL)**
 *Owner request:* the Ghost can appear as a full-size transparent layer on the trainee's body (sized to their distance from the camera), working at the optimal range from the scan, and gradually challenging the trainee to widen the range when they reach the goals safely. It must be isolated and easy to roll back.
 - **Safety mechanism (built first):**
   1. Stable restore point: tag `checkpoint-stage2-stable` (see "Stable Checkpoints").
@@ -567,3 +567,4 @@ Two critical corrections to the existing onboarding (Stages 1B/1C), completed **
 - **2026-10-05:** Second device round. Verified the deploy was live (real bugs). Seated tracking: a light warm-up stabilizer + path-based motion detection (`recentMotion`), realistic stabilizer + noise tests, and a friendly "try standing, I'm still tracking" suggestion. Ghost: moved to its own unstretched panel (`WarmupGhostPanel`) mid-left, no longer hidden under the feedback banner. Committed and pushed (client only).
 - **2026-10-05:** **Stage 2 closed and verified on device by the owner** (environment scan, warm-up adaptation, seated tracking, Ghost panel). Stable restore point tagged `checkpoint-stage2-stable` (git tag, pushed). Added the "Stable Checkpoints" section with restore instructions. Next: Ghost Overlay & Progressive Range Challenge, built on the branch `feature/ghost-overlay` behind a feature flag.
 - **2026-10-05:** Stage 3.0 (early) Ghost Overlay & Progressive Range Challenge built on the branch `feature/ghost-overlay` (not on main): feature flag, opt-in toggle (panel stays default), automatic fallback to the panel on any overlay error, and a challenge that disables itself on error without affecting the warm-up. New modules `ghostOverlay` / `rangeProgression` + a shared Ghost figure (11 tests). Awaiting the owner's test on the Vercel preview URL before merging.
+- **2026-10-05:** Merged `feature/ghost-overlay` into `main` (fast-forward) at the owner's request (the Vercel preview URL needed a login) and deployed to production. Build passes; client 437 / server 8 tests pass, 0 new failures. Rollback if needed: Vercel "Promote to Production" on the `checkpoint-stage2-stable` deployment, or set `FEATURES.GHOST_OVERLAY = false`.
