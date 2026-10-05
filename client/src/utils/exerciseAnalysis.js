@@ -415,7 +415,7 @@ export const WARMUP_STABILIZER_CONFIG = Object.freeze({ processNoise: 0.01, meas
  * still-camera jitter (which jumps back and forth in place) does not.
  * @returns {{ moving: boolean, trail: number[][][] }} - store `trail` back in the state under `key`
  */
-export function recentMotion(prevState, key, points, { window = 10, minPath = 0.05, minSpan = 0.025 } = {}) {
+export function recentMotion(prevState, key, points, { window = 10, minPath = 0.05, minSpan = 0.025, burst = null } = {}) {
   const trail = (prevState?.[key] || []).map(h => h.slice());
   let moving = false;
   points.forEach((pt, i) => {
@@ -431,6 +431,17 @@ export function recentMotion(prevState, key, points, { window = 10, minPath = 0.
       minY = Math.min(minY, y); maxY = Math.max(maxY, y);
     }
     if (path >= minPath && Math.max(maxX - minX, maxY - minY) >= minSpan) moving = true;
+    // Fast start: a short burst over the last few samples (~200 ms) also counts
+    if (!moving && burst && h.length >= burst.window) {
+      const b = h.slice(-burst.window);
+      let bp = 0, bx0 = 1, bx1 = 0, by0 = 1, by1 = 0;
+      for (let k = 0; k < b.length; k++) {
+        if (k > 0) bp += Math.hypot(b[k][0] - b[k - 1][0], b[k][1] - b[k - 1][1]);
+        bx0 = Math.min(bx0, b[k][0]); bx1 = Math.max(bx1, b[k][0]);
+        by0 = Math.min(by0, b[k][1]); by1 = Math.max(by1, b[k][1]);
+      }
+      if (bp >= burst.minPath && Math.max(bx1 - bx0, by1 - by0) >= burst.minSpan) moving = true;
+    }
   });
   return { moving, trail };
 }

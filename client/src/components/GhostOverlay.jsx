@@ -13,6 +13,8 @@ import { bodyAnchor, overlayPlacement, defaultPlacement } from '../engine/ghostO
 export default function GhostOverlay({ spec, limbProfile, landmarksRef, videoRef, onError }) {
   const canvasRef = useRef(null);
   const anchorRef = useRef(null);
+  // Animation clock that runs backward for a "backward" direction — continuous, no jump on the switch
+  const clockRef = useRef({ last: null, ms: 0 });
 
   useEffect(() => {
     let raf;
@@ -35,7 +37,11 @@ export default function GhostOverlay({ spec, limbProfile, landmarksRef, videoRef
           const { origin, scale } = anchorRef.current
             ? overlayPlacement(anchorRef.current, v.videoWidth, v.videoHeight, w, h)
             : defaultPlacement(w, h);
-          drawGhostOverlay(ctx, spec, limbProfile, performance.now(), origin, scale);
+          const now = performance.now();
+          const clk = clockRef.current;
+          if (clk.last !== null) clk.ms += (now - clk.last) * (spec?.direction === 'backward' ? -1 : 1);
+          clk.last = now;
+          drawGhostOverlay(ctx, spec, limbProfile, clk.ms, origin, scale);
         }
       } catch (err) {
         stopped = true;

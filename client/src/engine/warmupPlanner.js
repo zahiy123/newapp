@@ -73,9 +73,9 @@ function armMobility(lp) {
   if (arms.length === 2) {
     const limited = arms.some(k => lp[k].state === 'limited');
     return make(ARM_CIRCLES, {
-      stepsHe: ['עמוד יציב, רגליים ברוחב הכתפיים', 'פרוש את שתי הידיים לצדדים', limited ? `סובב במעגלים ${RANGE_NOTE_HE}` : 'סובב במעגלים קדימה, ואחרי חצי זמן אחורה'],
-      stepsEn: ['Stand stable, feet shoulder-width apart', 'Spread both arms to the sides', limited ? `Make circles ${RANGE_NOTE_EN}` : 'Circle forward, then backward halfway through'],
-      ghost: { move: 'arm_circles', romCapDeg: capOf(lp, arms) },
+      stepsHe: ['עמוד יציב, רגליים ברוחב הכתפיים', 'פרוש את שתי הידיים לצדדים', limited ? `סובב במעגלים קדימה ${RANGE_NOTE_HE}; באמצע נחליף כיוון` : 'סובב במעגלים קדימה, ואחרי חצי זמן אחורה'],
+      stepsEn: ['Stand stable, feet shoulder-width apart', 'Spread both arms to the sides', limited ? `Circle forward ${RANGE_NOTE_EN}; we switch direction halfway` : 'Circle forward, then backward halfway through'],
+      ghost: { move: 'arm_circles', romCapDeg: capOf(lp, arms), directional: true },
       suppressCorrections: limited ? ['armCirclesSmall'] : [],
     });
   }
@@ -84,9 +84,9 @@ function armMobility(lp) {
     const limited = lp[arms[0]].state === 'limited';
     return make(WARM_UP_SINGLE_ARM_ROTATION, {
       nameHe: `סיבובי יד ${SIDE_HE[side]}`, nameEn: `${side === 'left' ? 'Left' : 'Right'} Arm Circles`,
-      stepsHe: ['עמוד או שב יציב', `הרם את יד ${SIDE_HE[side]} לצד`, limited ? `סובב במעגלים ${RANGE_NOTE_HE}` : 'סובב במעגלים רחבים, ואחרי חצי זמן החלף כיוון'],
-      stepsEn: ['Stand or sit stable', `Raise your ${side} arm to the side`, limited ? `Make circles ${RANGE_NOTE_EN}` : 'Make wide circles, switch direction halfway through'],
-      ghost: { move: 'single_arm_circle', side, romCapDeg: capOf(lp, arms) },
+      stepsHe: ['עמוד או שב יציב', `הרם את יד ${SIDE_HE[side]} לצד`, limited ? `סובב במעגלים ${RANGE_NOTE_HE}; באמצע נחליף כיוון` : 'סובב במעגלים רחבים, ואחרי חצי זמן החלף כיוון'],
+      stepsEn: ['Stand or sit stable', `Raise your ${side} arm to the side`, limited ? `Make circles ${RANGE_NOTE_EN}; we switch direction halfway` : 'Make wide circles, switch direction halfway through'],
+      ghost: { move: 'single_arm_circle', side, romCapDeg: capOf(lp, arms), directional: true },
       suppressCorrections: limited ? ['singleArmSmall'] : [],
     });
   }

@@ -83,6 +83,18 @@ export function usePose(canvasRef, beforeDrawRef, amputationProfile, enabled = t
         minTrackingConfidence: 0.2
       });
       if (cancelled) return;
+      // Warm-up inference: the first detectForVideo compiles the GPU shaders (can take 1-3 s on a
+      // phone). Doing it now on a blank frame makes the first REAL frame fast (no cold start).
+      try {
+        const warm = document.createElement('canvas');
+        warm.width = 256; warm.height = 256;
+        warm.getContext('2d').fillRect(0, 0, 256, 256);
+        const ts = performance.now();
+        landmarker.detectForVideo(warm, ts);
+        lastTimestampRef.current = ts;
+      } catch (err) {
+        console.warn('[usePose] warm-up inference skipped:', err?.message);
+      }
       landmarkerRef.current = landmarker;
       setReady(true);
     }

@@ -10,6 +10,8 @@ import { drawWarmupGhost } from '../engine/warmupGhost';
 
 export default function WarmupGhostPanel({ spec, limbProfile, isHe }) {
   const canvasRef = useRef(null);
+  // Animation clock that runs backward for a "backward" direction — continuous, no jump on the switch
+  const clockRef = useRef({ last: null, ms: 0 });
 
   useEffect(() => {
     let raf;
@@ -22,7 +24,11 @@ export default function WarmupGhostPanel({ spec, limbProfile, isHe }) {
         if (c.width !== w || c.height !== h) { c.width = w; c.height = h; }
         const ctx = c.getContext('2d');
         ctx.clearRect(0, 0, w, h);
-        drawWarmupGhost(ctx, spec, limbProfile, performance.now(), w, h, { fill: true });
+        const now = performance.now();
+        const clk = clockRef.current;
+        if (clk.last !== null) clk.ms += (now - clk.last) * (spec?.direction === 'backward' ? -1 : 1);
+        clk.last = now;
+        drawWarmupGhost(ctx, spec, limbProfile, clk.ms, w, h, { fill: true });
       }
       raf = requestAnimationFrame(draw);
     };

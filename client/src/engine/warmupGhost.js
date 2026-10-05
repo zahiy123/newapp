@@ -14,6 +14,22 @@
 // ============================================================
 
 const PERIOD_MS = 1600;
+// Elbow flex range during arm circles (makes the hand path elliptical → direction visible)
+const CIRCLE_BEND_DEG = 30;
+// Motion trail: how far back (ms of animation time) the faded hand trail reaches
+const TRAIL_MS = 420;
+const TRAIL_STEPS = 7;
+
+/** Directional moves animate in reverse when spec.direction === 'backward'. */
+export function directionSign(spec) {
+  return spec?.direction === 'backward' ? -1 : 1;
+}
+
+/** Animation phase 0..1 for an animation time in ms (may be negative when running backward). */
+function phaseOf(animMs) {
+  const t = (animMs % PERIOD_MS) / PERIOD_MS;
+  return t < 0 ? t + 1 : t;
+}
 
 // Body model in "body units" (hip center = origin, y grows downward)
 const B = {
@@ -64,12 +80,16 @@ export function ghostPose(spec, t, lp = {}) {
       arm.left.a = arm.right.a = typeof spec.targetDeg === 'number'
         ? clampArm(spec.targetDeg - 25 + 25 * wave)   // range challenge: peak exactly at the target
         : clampArm(85 + 25 * wave);
+      // The elbow flexes a little out of phase → the hand traces an ELLIPSE, so the rotation
+      // direction is visible (time running backward = the opposite rotation)
+      arm.left.bend = arm.right.bend = CIRCLE_BEND_DEG * (1 + Math.cos(2 * Math.PI * t)) / 2;
       break;
     case 'single_arm_circle': {
       const s = spec.side || 'right';
       arm[s].a = typeof spec.targetDeg === 'number'
         ? clampArm(spec.targetDeg - 45 + 45 * wave)
         : clampArm(80 + 45 * wave);
+      arm[s].bend = CIRCLE_BEND_DEG * (1 + Math.cos(2 * Math.PI * t)) / 2;
       break;
     }
     case 'punches':
@@ -260,6 +280,56 @@ function drawFigure(ctx, pose, P, scale, { floorShadow = true, glow = true } = {
 }
 
 /**
+ * Hand positions over the last TRAIL_MS of animation time (oldest → newest), per moving arm.
+ * Exported for tests: the trail shows which way the hand is travelling.
+ */
+export function handTrail(spec, lp, nowMs) {
+  const sign = directionSign(spec);
+  const trails = {};
+  for (let k = TRAIL_STEPS; k >= 0; k--) {
+    const ms = nowMs - sign * (k * TRAIL_MS) / TRAIL_STEPS;   // "the past" in animation time
+    const pose = ghostPose(spec, phaseOf(ms), lp);
+    for (const seg of pose.segments) {
+      if (seg.part !== 'forearm') continue;
+      (trails[seg.limb] || (trails[seg.limb] = [])).push(seg.to);
+    }
+  }
+  return trails;
+}
+
+/** Faded trail + arrowhead at the hand: shows the circle's direction (forward / backward). */
+function drawMotionTrail(ctx, spec, lp, nowMs, P, scale) {
+  const trails = handTrail(spec, lp, nowMs);
+  ctx.save();
+  ctx.lineCap = 'round';
+  ctx.lineJoin = 'round';
+  for (const pts of Object.values(trails)) {
+    if (pts.length < 3) continue;
+    const q = pts.map(P);
+    for (let i = 1; i < q.length; i++) {
+      ctx.strokeStyle = `rgba(250, 204, 21, ${(0.15 + 0.75 * i / (q.length - 1)).toFixed(2)})`;   // amber, fading
+      ctx.lineWidth = Math.max(2, scale * 0.06);
+      ctx.beginPath();
+      ctx.moveTo(q[i - 1].x, q[i - 1].y);
+      ctx.lineTo(q[i].x, q[i].y);
+      ctx.stroke();
+    }
+    // Arrowhead at the newest point, pointing along the motion
+    const a = q[q.length - 2], b = q[q.length - 1];
+    const ang = Math.atan2(b.y - a.y, b.x - a.x);
+    const L = Math.max(8, scale * 0.16);
+    ctx.fillStyle = 'rgba(250, 204, 21, 0.95)';
+    ctx.beginPath();
+    ctx.moveTo(b.x + Math.cos(ang) * L, b.y + Math.sin(ang) * L);
+    ctx.lineTo(b.x + Math.cos(ang + 2.5) * L, b.y + Math.sin(ang + 2.5) * L);
+    ctx.lineTo(b.x + Math.cos(ang - 2.5) * L, b.y + Math.sin(ang - 2.5) * L);
+    ctx.closePath();
+    ctx.fill();
+  }
+  ctx.restore();
+}
+
+/**
  * Draw the Ghost as a soft, filled silhouette in a panel
  * (raw coordinates; the canvas is mirrored on screen, so no text is drawn here).
  * @param {CanvasRenderingContext2D} ctx
@@ -271,7 +341,7 @@ function drawFigure(ctx, pose, P, scale, { floorShadow = true, glow = true } = {
  */
 export function drawWarmupGhost(ctx, spec, lp, nowMs, w, h, opts = {}) {
   if (!spec) return;
-  const t = (nowMs % PERIOD_MS) / PERIOD_MS;
+  const t = phaseOf(nowMs);
   const pose = ghostPose(spec, t, lp);
 
   const panelH = opts.fill ? h : h * 0.42;
@@ -300,6 +370,7 @@ export function drawWarmupGhost(ctx, spec, lp, nowMs, w, h, opts = {}) {
   ctx.restore();
 
   drawFigure(ctx, pose, P, scale);
+  if (spec.directional) drawMotionTrail(ctx, spec, lp, nowMs, P, scale);
 }
 
 /**
@@ -310,11 +381,17 @@ export function drawWarmupGhost(ctx, spec, lp, nowMs, w, h, opts = {}) {
  */
 export function drawGhostOverlay(ctx, spec, lp, nowMs, origin, scale, alpha = 0.42) {
   if (!spec || !origin || !(scale > 0)) return;
-  const t = (nowMs % PERIOD_MS) / PERIOD_MS;
+  const t = phaseOf(nowMs);
   const pose = ghostPose(spec, t, lp);
   const P = (p) => ({ x: origin.x + p.x * scale, y: origin.y + p.y * scale });
   ctx.save();
   ctx.globalAlpha = alpha;
   drawFigure(ctx, pose, P, scale, { floorShadow: false, glow: true });
   ctx.restore();
+  if (spec.directional) {
+    ctx.save();
+    ctx.globalAlpha = Math.min(1, alpha + 0.35);
+    drawMotionTrail(ctx, spec, lp, nowMs, P, scale);
+    ctx.restore();
+  }
 }

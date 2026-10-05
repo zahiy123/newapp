@@ -17,7 +17,7 @@ import WarmupGhostPanel from '../components/WarmupGhostPanel';
 import GhostOverlay from '../components/GhostOverlay';
 import { FEATURES } from '../config/features';
 import { CHALLENGE_MOVES, createRangeChallenge, updateRangeChallenge, createPeakTracker, trackPeak, shoulderAngle } from '../engine/rangeProgression';
-import { detectActivity } from '../engine/warmupActivity';
+import { detectActivity, requiredPointsFor } from '../engine/warmupActivity';
 import { createAccuracyTracker, retargetAccuracyTracker, updateAccuracy, accuracyLevel } from '../engine/movementAccuracy';
 import { getAnalyzer, getLocationProps, getWarmUpExercises, getDisabilityContext, getCalibrationAngles, checkOrientation, checkPerspective, checkMovementQuality, ORIENTATION, WARMUP_STABILIZER_CONFIG } from '../utils/exerciseAnalysis';
 import { LandmarkStabilizer, computeJointAngles, computeSymmetryScore, computeStabilityScore, detectMovementPhase, buildPerformanceReport, evaluateSetPerformance, getSportProfile, runSafetyCheck, generateCoachFeedback } from '../utils/motionEngine';
@@ -50,6 +50,16 @@ const PHASE = {
 // ── Pre-workout environment scan (Stage 2.2) ──
 // Runs once per workout, BEFORE the warm-up. Never blocks: hazards are announced with a
 // suggestion to move them + an own-responsibility notice, then the workout continues.
+// Warm-up timer resolution: counts real moving time in 200 ms steps (reacts within a fraction of a second)
+const WARM_UP_TICK_MS = 200;
+
+// "Step into the frame" prompt for the body part the exercise needs
+function viewPromptText(part, isHe) {
+  if (part === 'legs') return isHe ? 'לא רואים את הרגליים — אנא היכנס למסגרת' : "I can't see your legs — please step into the frame";
+  if (part === 'upper') return isHe ? 'לא רואים את הכתפיים — אנא היכנס למסגרת' : "I can't see your shoulders — please step into the frame";
+  return isHe ? 'לא רואים את הידיים — אנא היכנס למסגרת' : "I can't see your arms — please step into the frame";
+}
+
 const ENV_SCAN_COLLECT_MS = 3000;      // local object detection window
 const ENV_VISION_TIMEOUT_MS = 8000;    // max wait for the AI hazard analysis
 const ENV_SAFE_CONTINUE_SEC = 3;       // no hazards → short confirmation, then warm-up
@@ -391,9 +401,17 @@ export default function Training() {
   });
   const overlayActive = FEATURES.GHOST_OVERLAY && ghostMode === 'overlay';
   const [rangeTarget, setRangeTarget] = useState(null);     // current challenge target (deg) or null
+  // Direction of two-way moves (arm circles): forward for the first half, backward for the second
+  const [ghostDirection, setGhostDirection] = useState('forward');
+  const directionSwitchedRef = useRef(false);
   const [rangeFlash, setRangeFlash] = useState(false);       // brief green flash when the target widens
   const [liveMoving, setLiveMoving] = useState(false);       // on-screen "movement detected" indicator
   const activityStateRef = useRef({});
+  // Required limbs (arms / upper body / working leg) must be IN VIEW before anything counts
+  const limbsInViewRef = useRef(false);
+  const [missingPart, setMissingPart] = useState(null);     // 'legs' | 'arms' | 'upper' | null
+  const lastViewPromptRef = useRef(0);
+  const warmUpMovingMsRef = useRef(0);                      // accumulated moving time toward the next second
   // Real-time accuracy vs. the Ghost (range + position overlap), shown next to the movement indicator
   const [accuracy, setAccuracy] = useState(null);           // 0-100 or null
   const accuracyRef = useRef(null);                         // tracker
@@ -414,8 +432,9 @@ export default function Training() {
   const ghostSpec = useMemo(() => {
     const g = warmUpExercises[warmUpIdx]?.ghost;
     if (!g) return null;
-    return rangeTarget ? { ...g, targetDeg: rangeTarget, romCapDeg: rangeTarget } : g;
-  }, [warmUpExercises, warmUpIdx, rangeTarget]);
+    const withTarget = rangeTarget ? { ...g, targetDeg: rangeTarget, romCapDeg: rangeTarget } : g;
+    return g.directional ? { ...withTarget, direction: ghostDirection } : withTarget;
+  }, [warmUpExercises, warmUpIdx, rangeTarget, ghostDirection]);
   // Name + steps of a warm-up exercise: the planner's own (scan-adapted) text first, then the static map
   const warmUpInfo = (ex) => (ex?.spokenSteps
     ? { name: isHe ? ex.name.he : ex.name.en, steps: isHe ? ex.spokenSteps.he : ex.spokenSteps.en }
@@ -1485,7 +1504,9 @@ export default function Training() {
     warmUpReExplainedRef.current = false;
     standSuggestedRef.current = false;
     warmUpInactivityStartRef.current = Date.now();
-    lastActivityRef.current = Date.now();
+    lastActivityRef.current = 0;          // no movement yet — the timer waits for real, in-view movement
+    warmUpMovingMsRef.current = 0;
+    lastViewPromptRef.current = 0;
 
     // Server wake-up: send first frame on first warm-up exercise to eliminate cold-start
     if (warmUpIdx === 0 && captureFrame && videoRef.current) {
@@ -1516,14 +1537,27 @@ export default function Training() {
     warmUpTimerRef.current = setInterval(() => {
       const now = Date.now();
       const state = warmUpStateRef.current;
-      // Moving = moving now OR within the last 1.5 s (a circle/punch has short still moments at its ends —
-      // checking one instant per second skipped seconds and made the "paused" state flicker)
-      const isMoving = !!state.moving || (now - lastActivityRef.current) < 1500;
+      // Counts only real, in-view movement read in the last 0.8 s (activity is refreshed every 50 ms
+      // while moving, and the rolling window bridges the short still ends of a circle/punch)
+      const inView = limbsInViewRef.current;
+      const isMoving = inView && (now - lastActivityRef.current) < 800;
+
+      // 0) Required limbs not in view → frozen, clear prompt (no generic "start moving" nudges)
+      if (!inView) {
+        if (!warmUpPausedRef.current) { warmUpPausedRef.current = true; setWarmUpPaused(true); }
+        const sinceStart = now - warmUpInactivityStartRef.current;
+        if (sinceStart > 1500 && now - lastViewPromptRef.current > 10000) {
+          lastViewPromptRef.current = now;
+          const part = requiredPointsFor(currentWarmUp.ghost, limbProfile).part;
+          speakPriority(viewPromptText(part, isHe), { rate: 1.0 });
+        }
+        return;
+      }
 
       // 3) Movement Lock: timer ONLY counts down when moving
       if (!isMoving) {
-        // Track continuous inactivity duration
-        const inactiveSeconds = (now - lastActivityRef.current) / 1000;
+        // Track continuous inactivity duration (from the exercise start or the last movement)
+        const inactiveSeconds = (now - Math.max(lastActivityRef.current, warmUpInactivityStartRef.current)) / 1000;
 
         if (!warmUpPausedRef.current) {
           warmUpPausedRef.current = true;
@@ -1583,6 +1617,10 @@ export default function Training() {
         setWarmUpPaused(false);
       }
 
+      warmUpMovingMsRef.current += WARM_UP_TICK_MS;
+      if (warmUpMovingMsRef.current < 1000) return;
+      warmUpMovingMsRef.current -= 1000;
+
       setWarmUpTimer(prev => {
         if (prev <= 1) {
           clearInterval(warmUpTimerRef.current);
@@ -1596,7 +1634,7 @@ export default function Training() {
         }
         return prev - 1;
       });
-    }, 1000);
+    }, WARM_UP_TICK_MS);
 
     return () => clearInterval(warmUpTimerRef.current);
   }, [phase, warmUpIdx]);
@@ -1611,8 +1649,9 @@ export default function Training() {
     const prevState = warmUpStateRef.current;
     const newState = analyze(stableLm, prevState);
 
-    // Update activity tracking
-    if (newState.moving) {
+    // Update activity tracking (only when the exercise's limbs are actually in view —
+    // MediaPipe "guesses" out-of-frame legs, which must never start the timer)
+    if (newState.moving && limbsInViewRef.current) {
       lastActivityRef.current = Date.now();
     }
 
@@ -1701,15 +1740,20 @@ export default function Training() {
   useEffect(() => {
     if (phase !== PHASE.WARM_UP || !currentWarmUp?.ghost) { setLiveMoving(false); return; }
     activityStateRef.current = {};
+    limbsInViewRef.current = false;
     accuracyShownRef.current = { value: null, at: 0, ema: null };
     setAccuracy(null);
     let last = false;
+    let lastMissing = undefined;
     let accuracyOff = false;
     const id = setInterval(() => {
       const lm = poseLandmarksRef.current;
       try {
-        const r = detectActivity(activityStateRef.current, lm, currentWarmUp.ghost.move);
+        const r = detectActivity(activityStateRef.current, lm, currentWarmUp.ghost, limbProfile);
         activityStateRef.current = r.state;
+        limbsInViewRef.current = r.inView;
+        const missing = r.inView ? null : r.part;
+        if (missing !== lastMissing) { lastMissing = missing; setMissingPart(missing); }
         if (r.moving) lastActivityRef.current = Date.now();
         if (r.moving !== last) { last = r.moving; setLiveMoving(r.moving); }
       } catch (err) {
@@ -1759,6 +1803,27 @@ export default function Training() {
     e.sum += accuracy; e.n += 1; e.best = Math.max(e.best, accuracy); e.avg = Math.round(e.sum / e.n);
   }, [accuracy]);
 
+  // Two-way moves: start forward on every exercise
+  useEffect(() => {
+    setGhostDirection('forward');
+    directionSwitchedRef.current = false;
+  }, [phase, warmUpIdx]);
+
+  // Halfway through a two-way move: announce + flip the Ghost's direction at the same moment.
+  // (The accuracy measure compares ranges, which are the same both ways, and keeps its samples.)
+  useEffect(() => {
+    if (phase !== PHASE.WARM_UP || !currentWarmUp?.ghost?.directional || directionSwitchedRef.current) return;
+    const half = Math.floor(currentWarmUp.duration / 2);
+    if (warmUpTimer > 0 && warmUpTimer <= half) {
+      directionSwitchedRef.current = true;
+      setGhostDirection('backward');
+      speakPriority(isHe ? 'עכשיו נחליף כיוון — ממשיכים לאחורה' : "Now we switch direction — continue backward", { rate: 1.05 });
+      setFeedback({ type: 'info', text: isHe ? '🔄 מחליפים כיוון — עכשיו אחורה' : '🔄 Switch direction — now backward' });
+      const rec = sessionDataRef.current.directionSwitches || (sessionDataRef.current.directionSwitches = []);
+      rec.push({ exercise: currentWarmUp.id, at: new Date().toISOString() });
+    }
+  }, [warmUpTimer, phase, currentWarmUp]);
+
   // Range challenge setup for each warm-up exercise (overlay mode, arm-range moves only)
   useEffect(() => {
     const g = currentWarmUp?.ghost;
@@ -1786,6 +1851,16 @@ export default function Training() {
       sessionSavedRef.current = false;
     }
   }, [startCamera, videoRef, unlockAudio]);
+
+  // Start skeleton detection as soon as the camera and the model are ready (not only on "Start"),
+  // so the skeleton is already tracked when the first exercise begins — no cold start.
+  useEffect(() => {
+    if (cameraActive && poseReady && videoRef.current && !poseLoopStartedRef.current) {
+      console.log('[Training] Starting pose detection loop early (camera + model ready)');
+      startLoop(videoRef.current);
+      poseLoopStartedRef.current = true;
+    }
+  }, [cameraActive, poseReady, startLoop]);
 
   const handleStopCamera = useCallback(() => {
     stopLoop(); stopObjLoop(); stopEquipLoop(); stopBallLoop(); stopCamera(); stopSpeech(); stopAICoaching(); stopVision();
@@ -2426,6 +2501,24 @@ export default function Training() {
             {'\uD83C\uDFAF'} {isHe ? `יעד טווח: ${rangeTarget}°` : `Range target: ${rangeTarget}°`}{rangeFlash ? ' (+5°)' : ''}
           </div>
         )}
+        {/* Required limbs not in view → the timer is frozen; tell the trainee exactly what to do */}
+        {phase === PHASE.WARM_UP && missingPart && (
+          <div className="absolute top-24 left-1/2 -translate-x-1/2 z-[16] pointer-events-none bg-amber-500 text-white rounded-2xl px-4 py-2 text-sm sm:text-base font-bold shadow-lg text-center max-w-[90%]">
+            {'⚠️'} {viewPromptText(missingPart, isHe)}
+            <div className="text-xs font-medium opacity-90">{isHe ? 'הספירה תתחיל כשנראה אותך' : 'The count starts when I can see you'}</div>
+          </div>
+        )}
+
+        {/* Direction of a two-way move (matches the Ghost's rotation) */}
+        {phase === PHASE.WARM_UP && warmUpExercises[warmUpIdx]?.ghost?.directional && (
+          <div className={`absolute left-3 top-[55%] z-[15] pointer-events-none rounded-full px-3 py-1 text-xs font-bold text-white ${
+            ghostDirection === 'backward' ? 'bg-orange-500/90' : 'bg-sky-600/90'}`}>
+            {ghostDirection === 'backward'
+              ? (isHe ? 'כיוון: אחורה ⟲' : 'Direction: backward ⟲')
+              : (isHe ? 'כיוון: קדימה ⟳' : 'Direction: forward ⟳')}
+          </div>
+        )}
+
         {/* Live tracking indicator — shows whether the movement is being read right now */}
         {phase === PHASE.WARM_UP && (
           <div className={`absolute left-3 top-[62%] z-[15] pointer-events-none rounded-full px-3 py-1 text-xs font-bold ${
