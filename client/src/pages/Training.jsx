@@ -13,8 +13,8 @@ import { useGhostSkeleton } from '../hooks/useGhostSkeleton';
 import { findObstacles, obstacleMessage, LABEL_HE } from '../engine/environmentHazards';
 import { planWarmUp, needsBallQuestion } from '../engine/warmupPlanner';
 import { getLimbProfile } from '../engine/limbProfile';
-import { drawWarmupGhost } from '../engine/warmupGhost';
-import { getAnalyzer, getLocationProps, getWarmUpExercises, getDisabilityContext, getCalibrationAngles, checkOrientation, checkPerspective, checkMovementQuality, ORIENTATION } from '../utils/exerciseAnalysis';
+import WarmupGhostPanel from '../components/WarmupGhostPanel';
+import { getAnalyzer, getLocationProps, getWarmUpExercises, getDisabilityContext, getCalibrationAngles, checkOrientation, checkPerspective, checkMovementQuality, ORIENTATION, WARMUP_STABILIZER_CONFIG } from '../utils/exerciseAnalysis';
 import { LandmarkStabilizer, computeJointAngles, computeSymmetryScore, computeStabilityScore, detectMovementPhase, buildPerformanceReport, evaluateSetPerformance, getSportProfile, runSafetyCheck, generateCoachFeedback } from '../utils/motionEngine';
 
 import { estimateCalories } from '../utils/calorieEstimator';
@@ -427,6 +427,9 @@ export default function Training() {
 
   // Kalman Filter landmark stabilizer
   const stabilizerRef = useRef(new LandmarkStabilizer());
+  // Warm-up: light smoothing — the heavy exercise smoothing hid small (seated) movements
+  const warmUpStabilizerRef = useRef(new LandmarkStabilizer(WARMUP_STABILIZER_CONFIG));
+  const standSuggestedRef = useRef(false);  // "let's try standing" offered once per exercise
   const prevLandmarksRef = useRef(null);       // Previous frame landmarks for movement gate
   const movementSufficientRef = useRef(false); // Movement >= 15% body height (gates server calls)
   const anglesHistoryRef = useRef([]);
@@ -582,14 +585,11 @@ export default function Training() {
         if (ghostEnabled) drawGhost(ctx, sportKey, cueKey, lm, w, h);
         drawFormCorrection(ctx, lm, w, h, cueKey);
       };
-    } else if (phase === PHASE.WARM_UP && warmUpGhostOn && warmUpExercises[warmUpIdx]?.ghost) {
-      // Warm-up ghost (Stage 2.3): demo of the movement, no absent/non-trainable limbs, capped to the scanned range
-      const spec = warmUpExercises[warmUpIdx].ghost;
-      beforeDrawRef.current = (ctx, lm, w, h) => drawWarmupGhost(ctx, spec, limbProfile, performance.now(), w, h);
     } else {
+      // (The warm-up ghost has its own panel — WarmupGhostPanel — not the pose canvas)
       beforeDrawRef.current = null;
     }
-  }, [phase, ghostEnabled, drawGhost, userProfile?.sport, warmUpGhostOn, warmUpExercises, warmUpIdx, limbProfile]);
+  }, [phase, ghostEnabled, drawGhost, userProfile?.sport]);
 
   // === CALIBRATION PHASE — 5-second ROM measurement ===
   const calibrationIntervalRef = useRef(null);
@@ -1443,6 +1443,7 @@ export default function Training() {
     lastWarmUpNudgeRef.current = 0;
     lastWarmUpCorrectionRef.current = 0;
     warmUpReExplainedRef.current = false;
+    standSuggestedRef.current = false;
     warmUpInactivityStartRef.current = Date.now();
     lastActivityRef.current = Date.now();
 
@@ -1487,6 +1488,24 @@ export default function Training() {
         if (!warmUpPausedRef.current) {
           warmUpPausedRef.current = true;
           setWarmUpPaused(true);
+        }
+
+        // 1b) Seated + no movement read for a while: friendly suggestion to try standing (once per exercise,
+        //     not for wheelchair users / legs that can't stand). Tracking keeps running while seated.
+        const seatedNow = state.posture === 'sitting';
+        const canStand = !limbProfile.wheelchair && limbProfile.affectedLegs.length < 2;
+        if (seatedNow && canStand && inactiveSeconds >= 10 && !standSuggestedRef.current) {
+          standSuggestedRef.current = true;
+          lastWarmUpNudgeRef.current = now;
+          speakPriority(isHe
+            ? 'כל הכבוד שהתחלת לזוז! אם מתאפשר לך, בוא ננסה רגע בעמידה. אם נוח לך יותר לשבת, תמשיך — אני ממשיך לעקוב.'
+            : "Great job getting moving! If you can, let's try it standing for a moment. If sitting is more comfortable, keep going — I'm still tracking.",
+            { rate: 1.0 });
+          setFeedback({
+            type: 'info',
+            text: isHe ? 'אם מתאפשר — נסה בעמידה. אפשר גם להמשיך בישיבה.' : 'If you can — try standing. You can also keep going seated.',
+          });
+          return; // timer stays frozen until movement is read
         }
 
         // 2) Gentle nudge: 8s of no movement (forgiving timing)
@@ -1546,7 +1565,7 @@ export default function Training() {
   useEffect(() => {
     if (phase !== PHASE.WARM_UP || !landmarks || !currentWarmUp) return;
 
-    const stableLm = stabilizerRef.current.stabilize(landmarks);
+    const stableLm = warmUpStabilizerRef.current.stabilize(landmarks);
     if (!stableLm) return;
     const analyze = currentWarmUp.analyze;
     const prevState = warmUpStateRef.current;
@@ -2242,6 +2261,11 @@ export default function Training() {
         style={isFullscreen ? undefined : isMobile ? { height: '40vh' } : { aspectRatio: '4/3' }}>
         <video ref={videoRef} className="w-full h-full object-cover" playsInline muted style={{ transform: 'scaleX(-1)' }} />
         <canvas ref={canvasRef} className="absolute inset-0 w-full h-full" style={{ transform: 'scaleX(-1)' }} />
+
+        {/* Warm-up demo figure (Ghost): own canvas, always visible, not stretched, not covered by the banner */}
+        {phase === PHASE.WARM_UP && warmUpGhostOn && warmUpExercises[warmUpIdx]?.ghost && (
+          <WarmupGhostPanel spec={warmUpExercises[warmUpIdx].ghost} limbProfile={limbProfile} isHe={isHe} />
+        )}
 
         {/* Fullscreen toggle button */}
         {cameraActive && (

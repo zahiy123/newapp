@@ -158,18 +158,19 @@ const THICK = { upperArm: 0.19, forearm: 0.15, thigh: 0.27, shin: 0.2, spine: 0,
  * @param {Object} lp - limbProfile
  * @param {number} nowMs - performance.now()
  * @param {number} w / h - canvas size
+ * @param {{ fill?: boolean }} [opts] - fill: the panel fills the whole canvas (dedicated ghost canvas)
  */
-export function drawWarmupGhost(ctx, spec, lp, nowMs, w, h) {
+export function drawWarmupGhost(ctx, spec, lp, nowMs, w, h, opts = {}) {
   if (!spec) return;
   const t = (nowMs % PERIOD_MS) / PERIOD_MS;
   const pose = ghostPose(spec, t, lp);
 
-  const panelH = h * 0.42;
-  const panelW = panelH * 0.72;
-  const margin = h * 0.03;
+  const panelH = opts.fill ? h : h * 0.42;
+  const panelW = opts.fill ? w : panelH * 0.72;
+  const margin = opts.fill ? 0 : h * 0.03;
   const px = margin;                // raw top-left → appears top-right on the mirrored screen
   const py = margin;
-  const scale = panelH / 4.4;
+  const scale = Math.min(panelH / 4.5, panelW / 3.7);
   const ox = px + panelW / 2;
   const oy = py + panelH * 0.5;
   const P = (p) => ({ x: ox + p.x * scale, y: oy + p.y * scale });
@@ -184,7 +185,8 @@ export function drawWarmupGhost(ctx, spec, lp, nowMs, w, h) {
   ctx.strokeStyle = 'rgba(125, 211, 252, 0.35)';
   ctx.lineWidth = 1.5;
   ctx.beginPath();
-  if (ctx.roundRect) ctx.roundRect(px, py, panelW, panelH, 16); else ctx.rect(px, py, panelW, panelH);
+  const radius = Math.min(16, panelW * 0.12);
+  if (ctx.roundRect) ctx.roundRect(px + 1, py + 1, panelW - 2, panelH - 2, radius); else ctx.rect(px, py, panelW, panelH);
   ctx.fill();
   ctx.stroke();
 
@@ -201,7 +203,7 @@ export function drawWarmupGhost(ctx, spec, lp, nowMs, w, h) {
   body.addColorStop(0, '#f0f9ff');
   body.addColorStop(1, '#38bdf8');
   ctx.shadowColor = 'rgba(56, 189, 248, 0.55)';
-  ctx.shadowBlur = 12;
+  ctx.shadowBlur = Math.max(6, scale * 0.25);
   ctx.lineCap = 'round';
   ctx.lineJoin = 'round';
 

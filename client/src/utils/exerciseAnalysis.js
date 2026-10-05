@@ -405,6 +405,36 @@ function getStandingLeg(landmarks) {
 
 // Rolling movement detection with smoothing — forgiving, human-like detection.
 // Uses a 10-frame history buffer to avoid false "not moving" on small pauses.
+// Light smoothing for the WARM-UP (Training.jsx): the exercise stabilizer's heavy Kalman
+// smoothing shrinks a 1 Hz arm circle to ~1/4 of its size, which hid small seated movements.
+export const WARMUP_STABILIZER_CONFIG = Object.freeze({ processNoise: 0.01, measurementNoise: 0.02, emaAlpha: 0.7 });
+
+/**
+ * Did any of these points really move recently? Uses the PATH length and the spatial SPAN of
+ * each point over a short window (~0.5 s at 20 fps), so small seated movements count while
+ * still-camera jitter (which jumps back and forth in place) does not.
+ * @returns {{ moving: boolean, trail: number[][][] }} - store `trail` back in the state under `key`
+ */
+export function recentMotion(prevState, key, points, { window = 10, minPath = 0.05, minSpan = 0.025 } = {}) {
+  const trail = (prevState?.[key] || []).map(h => h.slice());
+  let moving = false;
+  points.forEach((pt, i) => {
+    const h = trail[i] || (trail[i] = []);
+    if (pt && (pt.visibility ?? 1) > 0.3) h.push([pt.x, pt.y]);
+    while (h.length > window) h.shift();
+    if (h.length < 4) return;
+    let path = 0, minX = 1, maxX = 0, minY = 1, maxY = 0;
+    for (let k = 0; k < h.length; k++) {
+      const [x, y] = h[k];
+      if (k > 0) path += Math.hypot(x - h[k - 1][0], y - h[k - 1][1]);
+      minX = Math.min(minX, x); maxX = Math.max(maxX, x);
+      minY = Math.min(minY, y); maxY = Math.max(maxY, y);
+    }
+    if (path >= minPath && Math.max(maxX - minX, maxY - minY) >= minSpan) moving = true;
+  });
+  return { moving, trail };
+}
+
 function detectMovement(landmarks, prevLandmarks, prevState) {
   if (!prevLandmarks) return false;
   const trackPoints = [LM.NOSE, LM.LEFT_SHOULDER, LM.RIGHT_SHOULDER, LM.LEFT_HIP, LM.RIGHT_HIP,
@@ -1018,7 +1048,8 @@ export function analyzeArmCircles(landmarks, prevState = {}) {
   }
 
   // moving = body movement OR wrist movement (arm circles don't move the torso)
-  const moving = bodyMoving || wristMoving;
+  const wristTrail = recentMotion(prevState, '_wristTrail', [lWrist, rWrist]);
+  const moving = bodyMoving || wristMoving || wristTrail.moving;
 
   if (moving && amplitude > 0.12) {
     feedback = { type: 'good', text: null }; // good movement, no text needed
@@ -1038,6 +1069,7 @@ export function analyzeArmCircles(landmarks, prevState = {}) {
     _prevWristY: wristY,
     _prevWristX: wristX,
     lastRepTime: moving ? Date.now() : prevState.lastRepTime,
+    _wristTrail: wristTrail.trail,
     _prevLandmarks: landmarks
   };
 }
@@ -1368,7 +1400,8 @@ export function analyzeSingleArmRotation(landmarks, prevState = {}) {
   if (prevState._prevWristY !== undefined) {
     wristMoving = Math.abs(wrist.y - prevState._prevWristY) + Math.abs(wrist.x - (prevState._prevWristX || wrist.x)) > 0.005;
   }
-  const moving = bodyMoving || wristMoving;
+  const wristTrail = recentMotion(prevState, '_wristTrail', [lWrist, rWrist]);
+  const moving = bodyMoving || wristMoving || wristTrail.moving;
 
   if (moving && amplitude > 0.12) {
     feedback = { type: 'good', text: null };
@@ -1384,6 +1417,7 @@ export function analyzeSingleArmRotation(landmarks, prevState = {}) {
     _prevWristY: wrist.y,
     _prevWristX: wrist.x,
     lastRepTime: moving ? Date.now() : prevState.lastRepTime,
+    _wristTrail: wristTrail.trail,
     _prevLandmarks: landmarks
   };
 }
@@ -1427,7 +1461,8 @@ export function analyzeArmPunches(landmarks, prevState = {}) {
   if (prevState._prevPunchX !== undefined) {
     wristMoving = Math.abs(wristX - prevState._prevPunchX) + Math.abs(wristY - (prevState._prevPunchY || wristY)) > 0.005;
   }
-  const moving = bodyMoving || wristMoving;
+  const wristTrail = recentMotion(prevState, '_wristTrail', [lWrist, rWrist]);
+  const moving = bodyMoving || wristMoving || wristTrail.moving;
 
   if (moving && amplitude > 0.10) {
     feedback = { type: 'good', text: null };
@@ -1446,6 +1481,7 @@ export function analyzeArmPunches(landmarks, prevState = {}) {
     _prevPunchX: wristX,
     _prevPunchY: wristY,
     lastRepTime: moving ? Date.now() : prevState.lastRepTime,
+    _wristTrail: wristTrail.trail,
     _prevLandmarks: landmarks
   };
 }
@@ -1477,7 +1513,8 @@ export function analyzeCoreTwists(landmarks, prevState = {}) {
   // A trunk twist changes the apparent shoulder width even when the body does not travel
   const twistMoving = prevState._prevShoulderDiffX !== undefined &&
     Math.abs(shoulderDiffX - prevState._prevShoulderDiffX) > 0.004;
-  const isMoving = moving || twistMoving;
+  const shoulderTrail = recentMotion(prevState, '_shoulderTrail', [lShoulder, rShoulder], { window: 20, minPath: 0.025, minSpan: 0.01 });
+  const isMoving = moving || twistMoving || shoulderTrail.moving;
   if (history.length > 30) history.shift();
 
   let feedback = null;
@@ -1501,6 +1538,7 @@ export function analyzeCoreTwists(landmarks, prevState = {}) {
     _shoulderXHistory: history,
     _prevShoulderDiffX: shoulderDiffX,
     lastRepTime: isMoving ? Date.now() : prevState.lastRepTime,
+    _shoulderTrail: shoulderTrail.trail,
     _prevLandmarks: landmarks
   };
 }

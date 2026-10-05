@@ -200,3 +200,39 @@ describe('warmupGhost', () => {
     expect(rightArm.to.x).toBeLessThan(0);
   });
 });
+
+// ============================================================
+describe('warmupGhost drawing (dedicated panel)', () => {
+  /** Minimal canvas mock that records every point drawn. */
+  function mockCtx() {
+    const pts = [];
+    const ops = { fill: 0, stroke: 0 };
+    const g = { addColorStop() {} };
+    return {
+      pts, ops,
+      save() {}, restore() {}, setLineDash() {}, beginPath() {}, closePath() {},
+      createLinearGradient: () => g,
+      moveTo: (x, y) => pts.push([x, y]), lineTo: (x, y) => pts.push([x, y]),
+      arc: (x, y, r) => { pts.push([x - r, y - r], [x + r, y + r]); },
+      ellipse: (x, y, rx, ry) => { pts.push([x - rx, y - ry], [x + rx, y + ry]); },
+      roundRect: (x, y, w, h) => { pts.push([x, y], [x + w, y + h]); }, rect() {},
+      fill: () => { ops.fill++; }, stroke: () => { ops.stroke++; },
+    };
+  }
+
+  it('fills its own canvas and stays inside it for every move', async () => {
+    const { drawWarmupGhost } = await import('../warmupGhost.js');
+    const lp = getLimbProfile(leftBelowKnee());
+    for (const move of ['arm_circles', 'single_arm_circle', 'punches', 'chest_pass', 'twist', 'high_knees', 'single_knee', 'side_steps', 'kick']) {
+      for (const t of [0, 0.25, 0.5, 0.75]) {
+        const ctx = mockCtx();
+        drawWarmupGhost(ctx, { move, side: 'right' }, lp, t * 1600, 224, 320, { fill: true });
+        expect(ctx.ops.fill).toBeGreaterThan(3);          // panel, shadow, torso, head, hands/feet…
+        for (const [x, y] of ctx.pts) {
+          expect(x).toBeGreaterThanOrEqual(-1); expect(x).toBeLessThanOrEqual(225);
+          expect(y).toBeGreaterThanOrEqual(-1); expect(y).toBeLessThanOrEqual(321);
+        }
+      }
+    }
+  });
+});
