@@ -88,7 +88,8 @@ Readiness Rating (1-5 emoji, 3 seconds)
 ## Stable Checkpoints (safe restore points)
 | Tag | Commit | Date | What it contains |
 |---|---|---|---|
-| `checkpoint-stage2-stable` | (this commit, see `git show checkpoint-stage2-stable`) | 2026-10-05 | Stages 0-2 complete and verified on device: scan (per-arm, side fix, pacing, lock, accurate diagnosis), track selection, environment scan + obstacles, scan-adapted warm-up with ball question, seated tracking, Ghost demo panel |
+| `checkpoint-stage2-stable` | (see `git show checkpoint-stage2-stable`) | 2026-10-05 | Stages 0-2 complete and verified on device: scan (per-arm, side fix, pacing, lock, accurate diagnosis), track selection, environment scan + obstacles, scan-adapted warm-up with ball question, seated tracking, Ghost demo panel |
+| `checkpoint-stage2-final` | (see `git show checkpoint-stage2-final`) | 2026-10-05 | Everything above + the full-body Ghost overlay, progressive range challenge, real-time accuracy %, required-limbs-in-view gate, instant start, synchronized direction swapping — all verified on device. **Restore point before Stage 3.** |
 
 **How to return to a checkpoint:**
 - Look at it without changing anything: `git checkout checkpoint-stage2-stable` (then `git checkout main` to come back).
@@ -347,7 +348,7 @@ Two critical corrections to the existing onboarding (Stages 1B/1C), completed **
 
 ### Stage 3: Kinetic Coach Core — Hybrid Architecture
 
-**3.0 (early) — Ghost Overlay & Progressive Range Challenge (MERGED to `main` + production 2026-10-05 at owner's request — the Vercel preview required login; owner device test pending on the production URL)**
+**3.0 (early) — Ghost Overlay & Progressive Range Challenge (DONE ✅ — verified by the owner on device 2026-10-05: full overlay, accuracy %, required-limbs gate, synchronized direction swap)**
 *Owner request:* the Ghost can appear as a full-size transparent layer on the trainee's body (sized to their distance from the camera), working at the optimal range from the scan, and gradually challenging the trainee to widen the range when they reach the goals safely. It must be isolated and easy to roll back.
 - **Safety mechanism (built first):**
   1. Stable restore point: tag `checkpoint-stage2-stable` (see "Stable Checkpoints").
@@ -603,3 +604,4 @@ Two critical corrections to the existing onboarding (Stages 1B/1C), completed **
 - **2026-10-05:** Real-time accuracy % vs. the Ghost (range + position overlap) next to the movement indicator, colour-coded green/yellow/red, light and isolated. 10 tests; 453 pass. Committed and pushed to main (client only).
 - **2026-10-05:** Warm-up cold start + required-limbs gate: no free first seconds, the required limbs (working leg / arms / shoulders) must be in view or the timer freezes with an amber "step into the frame" prompt, 200 ms burst detection + 200 ms timer ticks, a GPU warm-up inference, and the pose loop starts as soon as the camera is ready. 7 tests; 460 pass. Committed together with the direction swapping.
 - **2026-10-05:** Direction swapping for arm circles: a voice + banner announcement halfway, the Ghost reverses continuously (direction-aware animation clock), an elliptical hand path + amber trail with arrows + a direction chip, and accuracy stable across the switch. 6 tests; client 466 pass. Committed and pushed together with the cold-start / required-limbs fixes.
+- **2026-10-05:** The owner verified on device the full Ghost overlay, accuracy %, required-limbs gate and direction swap → Stage 3.0 marked DONE. New restore point `checkpoint-stage2-final` before starting Stage 3.
