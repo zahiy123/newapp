@@ -1,0 +1,117 @@
+import { describe, it, expect } from 'vitest';
+import {
+  createRangeChallenge, updateRangeChallenge, createPeakTracker, trackPeak, shoulderAngle,
+  RANGE_STEP_DEG, RANGE_MAX_ABOVE_SCAN_DEG, RANGE_ABSOLUTE_MAX_DEG, RANGE_DEFAULT_START_DEG,
+} from '../rangeProgression.js';
+import { coverTransform, bodyAnchor, overlayPlacement } from '../ghostOverlay.js';
+import { ghostPose } from '../warmupGhost.js';
+
+const reps = (state, peaks) => {
+  let s = state; const events = [];
+  for (const p of peaks) { const r = updateRangeChallenge(s, p); s = r.state; if (r.event) events.push(r.event); }
+  return { s, events };
+};
+
+describe('Progressive Range Challenge', () => {
+  it('starts at the scanned range', () => {
+    expect(createRangeChallenge({ scanCapDeg: 112 }).target).toBe(112);
+    expect(createRangeChallenge({}).target).toBe(RANGE_DEFAULT_START_DEG);
+  });
+
+  it('expands by one step after 3 consecutive reps that reach the target', () => {
+    const { s, events } = reps(createRangeChallenge({ scanCapDeg: 100 }), [99, 101, 100]);
+    expect(events).toEqual(['expanded']);
+    expect(s.target).toBe(100 + RANGE_STEP_DEG);
+  });
+
+  it('a missed rep in between resets the streak (needs 3 in a row)', () => {
+    const { s, events } = reps(createRangeChallenge({ scanCapDeg: 100 }), [100, 100, 60, 100, 100]);
+    expect(events).toEqual([]);
+    expect(s.target).toBe(100);
+  });
+
+  it('never exceeds the scanned range + 20° in a session, nor 170°', () => {
+    const { s } = reps(createRangeChallenge({ scanCapDeg: 100 }), Array(60).fill(180));
+    expect(s.target).toBe(100 + RANGE_MAX_ABOVE_SCAN_DEG);
+    const high = reps(createRangeChallenge({ scanCapDeg: 160 }), Array(60).fill(180)).s;
+    expect(high.target).toBe(RANGE_ABSOLUTE_MAX_DEG);
+  });
+
+  it('eases back one step after 3 reps far below the target, but never below the start', () => {
+    let { s } = reps(createRangeChallenge({ scanCapDeg: 100 }), [100, 100, 100]);   // → 105
+    ({ s } = reps(s, [50, 50, 50]));
+    expect(s.target).toBe(100);
+    ({ s } = reps(s, [40, 40, 40, 40, 40, 40]));
+    expect(s.target).toBe(100);
+  });
+});
+
+describe('rep peak tracker', () => {
+  it('emits one peak per up-and-down arm cycle', () => {
+    let tr = createPeakTracker(); const peaks = [];
+    const series = [10, 30, 60, 90, 110, 118, 115, 100, 80, 60, 30, 15, 40, 80, 120, 125, 110, 90, 20];
+    for (const a of series) { const r = trackPeak(tr, a); tr = r.tracker; if (r.peak) peaks.push(r.peak); }
+    expect(peaks).toEqual([118, 125]);
+  });
+});
+
+describe('shoulderAngle', () => {
+  it('measures the arm angle from the trunk (anatomical sides)', () => {
+    const lm = Array.from({ length: 33 }, () => ({ x: 0.5, y: 0.5, visibility: 0.9 }));
+    lm[23] = { x: 0.55, y: 0.6, visibility: 0.9 }; lm[11] = { x: 0.55, y: 0.3, visibility: 0.9 };
+    lm[13] = { x: 0.75, y: 0.3, visibility: 0.9 };                 // left arm horizontal → 90°
+    lm[24] = { x: 0.45, y: 0.6, visibility: 0.9 }; lm[12] = { x: 0.45, y: 0.3, visibility: 0.9 };
+    lm[14] = { x: 0.45, y: 0.5, visibility: 0.9 };                 // right arm hanging → 0°
+    expect(shoulderAngle(lm, 'left')).toBeCloseTo(90, 0);
+    expect(shoulderAngle(lm, 'right')).toBeCloseTo(0, 0);
+  });
+});
+
+describe('Ghost overlay placement', () => {
+  it('maps camera coords through object-fit: cover (portrait phone, 4:3 camera)', () => {
+    // 640x480 camera shown in a 400x800 portrait view → scale 800/480, cropped left/right
+    const map = coverTransform(640, 480, 400, 800);
+    const c = map(0.5, 0.5);
+    expect(c.x).toBeCloseTo(200); expect(c.y).toBeCloseTo(400);
+    const top = map(0.5, 0);
+    expect(top.y).toBeCloseTo(0);
+  });
+
+  it('anchors at the hips and scales with the torso (closer to the camera → bigger ghost)', () => {
+    const body = (torso) => {
+      const lm = Array.from({ length: 33 }, () => ({ x: 0.5, y: 0.5, visibility: 0.9 }));
+      lm[23] = { x: 0.55, y: 0.6, visibility: 0.9 }; lm[24] = { x: 0.45, y: 0.6, visibility: 0.9 };
+      lm[11] = { x: 0.56, y: 0.6 - torso, visibility: 0.9 }; lm[12] = { x: 0.44, y: 0.6 - torso, visibility: 0.9 };
+      return lm;
+    };
+    const far = overlayPlacement(bodyAnchor(body(0.15)), 640, 480, 640, 480);
+    const near = overlayPlacement(bodyAnchor(body(0.3)), 640, 480, 640, 480);
+    expect(near.scale).toBeCloseTo(far.scale * 2, 1);
+    expect(far.origin.x).toBeCloseTo(320); expect(far.origin.y).toBeCloseTo(288);
+  });
+
+  it('keeps the previous anchor when the body is not visible, and smooths movement', () => {
+    const prev = { hipX: 0.5, hipY: 0.6, torso: 0.2 };
+    expect(bodyAnchor(null, prev)).toBe(prev);
+    const lm = Array.from({ length: 33 }, () => ({ x: 0.5, y: 0.5, visibility: 0.9 }));
+    lm[23] = { x: 0.75, y: 0.6, visibility: 0.9 }; lm[24] = { x: 0.65, y: 0.6, visibility: 0.9 };
+    lm[11] = { x: 0.75, y: 0.4, visibility: 0.9 }; lm[12] = { x: 0.65, y: 0.4, visibility: 0.9 };
+    const next = bodyAnchor(lm, prev, 0.25);
+    expect(next.hipX).toBeGreaterThan(0.5);
+    expect(next.hipX).toBeLessThan(0.7);            // moves toward the body, not jumping
+  });
+});
+
+describe('Ghost demonstrates the target range', () => {
+  it('arm circles peak at the challenge target', () => {
+    const lp = { left_arm: { state: 'ok', trainable: true }, right_arm: { state: 'ok', trainable: true } };
+    let peak = 0;
+    for (let i = 0; i <= 40; i++) {
+      const seg = ghostPose({ move: 'arm_circles', targetDeg: 125 }, i / 40, lp).segments.find(s => s.limb === 'left_arm');
+      const ang = Math.atan2(Math.abs(seg.to.x - seg.from.x), seg.to.y - seg.from.y) * 180 / Math.PI;
+      peak = Math.max(peak, ang);
+    }
+    expect(peak).toBeGreaterThan(123);
+    expect(peak).toBeLessThan(127);
+  });
+});

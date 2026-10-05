@@ -14,6 +14,9 @@ import { findObstacles, obstacleMessage, LABEL_HE } from '../engine/environmentH
 import { planWarmUp, needsBallQuestion } from '../engine/warmupPlanner';
 import { getLimbProfile } from '../engine/limbProfile';
 import WarmupGhostPanel from '../components/WarmupGhostPanel';
+import GhostOverlay from '../components/GhostOverlay';
+import { FEATURES } from '../config/features';
+import { CHALLENGE_MOVES, createRangeChallenge, updateRangeChallenge, createPeakTracker, trackPeak, shoulderAngle } from '../engine/rangeProgression';
 import { getAnalyzer, getLocationProps, getWarmUpExercises, getDisabilityContext, getCalibrationAngles, checkOrientation, checkPerspective, checkMovementQuality, ORIENTATION, WARMUP_STABILIZER_CONFIG } from '../utils/exerciseAnalysis';
 import { LandmarkStabilizer, computeJointAngles, computeSymmetryScore, computeStabilityScore, detectMovementPhase, buildPerformanceReport, evaluateSetPerformance, getSportProfile, runSafetyCheck, generateCoachFeedback } from '../utils/motionEngine';
 
@@ -376,6 +379,33 @@ export default function Training() {
   const [warmUpGhostOn, setWarmUpGhostOn] = useState(true);    // ghost shown by default in the warm-up
   const limbProfile = useMemo(() => getLimbProfile(userProfile), [userProfile]);
   const warmUpExercises = useMemo(() => planWarmUp(userProfile, { hasBall: ballAnswer === true }), [userProfile, ballAnswer]);
+
+  // Ghost Overlay & Progressive Range Challenge (opt-in, behind FEATURES.GHOST_OVERLAY).
+  // 'panel' = the stable demo panel (checkpoint-stage2-stable) and the default; 'overlay' = full-size on the body.
+  const [ghostMode, setGhostMode] = useState(() => {
+    try { return FEATURES.GHOST_OVERLAY && localStorage.getItem('ghostMode') === 'overlay' ? 'overlay' : 'panel'; }
+    catch { return 'panel'; }
+  });
+  const overlayActive = FEATURES.GHOST_OVERLAY && ghostMode === 'overlay';
+  const [rangeTarget, setRangeTarget] = useState(null);     // current challenge target (deg) or null
+  const rangeRef = useRef(null);                            // range challenge state for this exercise
+  const peakRef = useRef(createPeakTracker());
+  const rangeFailedRef = useRef(false);                     // challenge disabled after a runtime error
+  const setGhostModeSaved = useCallback((mode) => {
+    setGhostMode(mode);
+    try { localStorage.setItem('ghostMode', mode); } catch { /* storage unavailable */ }
+  }, []);
+  // SAFETY: an overlay runtime error → back to the stable panel (and remembered)
+  const handleOverlayError = useCallback(() => {
+    setGhostModeSaved('panel');
+    setFeedback({ type: 'info', text: isHe ? 'שכבת הצללית כובתה — חוזרים לתצוגה הרגילה' : 'Ghost overlay turned off — back to the regular view' });
+  }, [setGhostModeSaved, isHe]);
+  // Ghost spec with the current challenge target (the Ghost peaks at the target)
+  const ghostSpec = useMemo(() => {
+    const g = warmUpExercises[warmUpIdx]?.ghost;
+    if (!g) return null;
+    return rangeTarget ? { ...g, targetDeg: rangeTarget, romCapDeg: rangeTarget } : g;
+  }, [warmUpExercises, warmUpIdx, rangeTarget]);
   // Name + steps of a warm-up exercise: the planner's own (scan-adapted) text first, then the static map
   const warmUpInfo = (ex) => (ex?.spokenSteps
     ? { name: isHe ? ex.name.he : ex.name.en, steps: isHe ? ex.spokenSteps.he : ex.spokenSteps.en }
@@ -1619,8 +1649,53 @@ export default function Training() {
       }
     }
 
+    // Progressive Range Challenge (overlay mode): measure the real shoulder range per rep
+    if (rangeRef.current && !rangeFailedRef.current) {
+      try {
+        const g = currentWarmUp.ghost;
+        const side = g.move === 'single_arm_circle' ? g.side
+          : limbProfile.left_arm.state === 'limited' ? 'left'
+          : limbProfile.right_arm.state === 'limited' ? 'right' : 'both';
+        const r = trackPeak(peakRef.current, shoulderAngle(landmarks, side));
+        peakRef.current = r.tracker;
+        if (r.peak) {
+          const u = updateRangeChallenge(rangeRef.current, r.peak);
+          rangeRef.current = u.state;
+          if (u.event === 'expanded') {
+            setRangeTarget(u.state.target);
+            speakPriority(isHe ? 'מעולה! מרחיבים קצת את הטווח' : "Great! Let's widen the range a little", { rate: 1.1 });
+          } else if (u.event === 'eased') {
+            setRangeTarget(u.state.target);
+            speakPriority(isHe ? 'בנוח — חוזרים לטווח הקודם' : 'Easy — back to the previous range', { rate: 1.0 });
+          }
+          sessionDataRef.current.rangeChallenge = {
+            ...(sessionDataRef.current.rangeChallenge || {}),
+            [currentWarmUp.id]: { start: u.state.start, target: u.state.target, max: u.state.max, reps: u.state.reps },
+          };
+        }
+      } catch (err) {
+        rangeFailedRef.current = true;
+        rangeRef.current = null;
+        setRangeTarget(null);
+        console.error('[RangeChallenge] disabled after a runtime error:', err);
+      }
+    }
+
     warmUpStateRef.current = newState;
   }, [landmarks, phase, warmUpIdx]);
+
+  // Range challenge setup for each warm-up exercise (overlay mode, arm-range moves only)
+  useEffect(() => {
+    const g = currentWarmUp?.ghost;
+    if (phase === PHASE.WARM_UP && overlayActive && !rangeFailedRef.current && g && CHALLENGE_MOVES.has(g.move)) {
+      rangeRef.current = createRangeChallenge({ scanCapDeg: g.romCapDeg });
+      peakRef.current = createPeakTracker();
+      setRangeTarget(rangeRef.current.target);
+    } else {
+      rangeRef.current = null;
+      setRangeTarget(null);
+    }
+  }, [phase, warmUpIdx, overlayActive, currentWarmUp]);
 
   const handleStartCamera = useCallback(async () => {
     unlockAudio(); // Unlock mobile audio on camera permission tap — this IS the user gesture
@@ -2263,8 +2338,17 @@ export default function Training() {
         <canvas ref={canvasRef} className="absolute inset-0 w-full h-full" style={{ transform: 'scaleX(-1)' }} />
 
         {/* Warm-up demo figure (Ghost): own canvas, always visible, not stretched, not covered by the banner */}
-        {phase === PHASE.WARM_UP && warmUpGhostOn && warmUpExercises[warmUpIdx]?.ghost && (
-          <WarmupGhostPanel spec={warmUpExercises[warmUpIdx].ghost} limbProfile={limbProfile} isHe={isHe} />
+        {phase === PHASE.WARM_UP && warmUpGhostOn && ghostSpec && !overlayActive && (
+          <WarmupGhostPanel spec={ghostSpec} limbProfile={limbProfile} isHe={isHe} />
+        )}
+        {/* Full-size Ghost overlay on the body (opt-in; falls back to the panel on any error) */}
+        {phase === PHASE.WARM_UP && warmUpGhostOn && ghostSpec && overlayActive && (
+          <GhostOverlay spec={ghostSpec} limbProfile={limbProfile} landmarksRef={poseLandmarksRef} videoRef={videoRef} onError={handleOverlayError} />
+        )}
+        {phase === PHASE.WARM_UP && warmUpGhostOn && overlayActive && rangeTarget && (
+          <div className="absolute left-3 top-1/2 -translate-y-1/2 z-[15] pointer-events-none bg-black/60 text-white rounded-xl px-3 py-2 text-sm font-bold">
+            {'\uD83C\uDFAF'} {isHe ? `יעד טווח: ${rangeTarget}°` : `Range target: ${rangeTarget}°`}
+          </div>
         )}
 
         {/* Fullscreen toggle button */}
@@ -2729,6 +2813,17 @@ export default function Training() {
             title={isHe ? 'הצג/הסתר שלד מנחה' : 'Toggle ghost guide'}
           >
             {'\uD83D\uDC7B'}
+          </button>
+        )}
+        {FEATURES.GHOST_OVERLAY && phase === PHASE.WARM_UP && warmUpGhostOn && (
+          <button
+            onClick={() => setGhostModeSaved(overlayActive ? 'panel' : 'overlay')}
+            className={`absolute top-28 left-4 px-3 py-2 rounded-xl text-xs font-bold z-10 transition ${
+              overlayActive ? 'bg-purple-600/90 text-white' : 'bg-black/50 text-white/80'
+            }`}
+            title={isHe ? 'צללית מלאה על הגוף / פאנל הדגמה' : 'Full-body ghost / demo panel'}
+          >
+            {overlayActive ? (isHe ? 'צללית: מלאה' : 'Ghost: full') : (isHe ? 'צללית: פאנל' : 'Ghost: panel')}
           </button>
         )}
 

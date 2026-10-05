@@ -61,11 +61,15 @@ export function ghostPose(spec, t, lp = {}) {
   const arm = { left: { a: 8, bend: 0 }, right: { a: 8, bend: 0 } };
   switch (spec?.move) {
     case 'arm_circles':
-      arm.left.a = arm.right.a = clampArm(85 + 25 * wave);
+      arm.left.a = arm.right.a = typeof spec.targetDeg === 'number'
+        ? clampArm(spec.targetDeg - 25 + 25 * wave)   // range challenge: peak exactly at the target
+        : clampArm(85 + 25 * wave);
       break;
     case 'single_arm_circle': {
       const s = spec.side || 'right';
-      arm[s].a = clampArm(80 + 45 * wave);
+      arm[s].a = typeof spec.targetDeg === 'number'
+        ? clampArm(spec.targetDeg - 45 + 45 * wave)
+        : clampArm(80 + 45 * wave);
       break;
     }
     case 'punches':
@@ -151,59 +155,31 @@ export function ghostPose(spec, t, lp = {}) {
 const THICK = { upperArm: 0.19, forearm: 0.15, thigh: 0.27, shin: 0.2, spine: 0, shoulders: 0, hips: 0 };
 
 /**
- * Draw the ghost as a soft, filled silhouette in a corner panel of the pose canvas
- * (raw coordinates; the canvas is mirrored on screen, so no text is drawn here).
- * @param {CanvasRenderingContext2D} ctx
- * @param {Object} spec - exercise.ghost
- * @param {Object} lp - limbProfile
- * @param {number} nowMs - performance.now()
- * @param {number} w / h - canvas size
- * @param {{ fill?: boolean }} [opts] - fill: the panel fills the whole canvas (dedicated ghost canvas)
+ * Draw the Ghost figure (soft filled silhouette) with a mapping P(bodyPoint) → canvas point.
+ * Shared by the demo panel and the full-size overlay.
+ * @private
  */
-export function drawWarmupGhost(ctx, spec, lp, nowMs, w, h, opts = {}) {
-  if (!spec) return;
-  const t = (nowMs % PERIOD_MS) / PERIOD_MS;
-  const pose = ghostPose(spec, t, lp);
-
-  const panelH = opts.fill ? h : h * 0.42;
-  const panelW = opts.fill ? w : panelH * 0.72;
-  const margin = opts.fill ? 0 : h * 0.03;
-  const px = margin;                // raw top-left → appears top-right on the mirrored screen
-  const py = margin;
-  const scale = Math.min(panelH / 4.5, panelW / 3.7);
-  const ox = px + panelW / 2;
-  const oy = py + panelH * 0.5;
-  const P = (p) => ({ x: ox + p.x * scale, y: oy + p.y * scale });
-
+function drawFigure(ctx, pose, P, scale, { floorShadow = true, glow = true } = {}) {
   ctx.save();
 
-  // Panel: rounded, soft dark gradient with a light border
-  const bg = ctx.createLinearGradient(px, py, px, py + panelH);
-  bg.addColorStop(0, 'rgba(15, 23, 42, 0.62)');
-  bg.addColorStop(1, 'rgba(30, 41, 59, 0.48)');
-  ctx.fillStyle = bg;
-  ctx.strokeStyle = 'rgba(125, 211, 252, 0.35)';
-  ctx.lineWidth = 1.5;
-  ctx.beginPath();
-  const radius = Math.min(16, panelW * 0.12);
-  if (ctx.roundRect) ctx.roundRect(px + 1, py + 1, panelW - 2, panelH - 2, radius); else ctx.rect(px, py, panelW, panelH);
-  ctx.fill();
-  ctx.stroke();
-
-  // Floor shadow under the feet
-  ctx.fillStyle = 'rgba(0, 0, 0, 0.28)';
-  ctx.beginPath();
-  ctx.ellipse(ox, oy + (B.thigh + B.shin + 0.05) * scale, 0.55 * scale, 0.09 * scale, 0, 0, Math.PI * 2);
-  ctx.fill();
+  if (floorShadow) {
+    const feet = P({ x: 0, y: B.thigh + B.shin + 0.05 });
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.28)';
+    ctx.beginPath();
+    ctx.ellipse(feet.x, feet.y, 0.55 * scale, 0.09 * scale, 0, 0, Math.PI * 2);
+    ctx.fill();
+  }
 
   // Body colour: light-to-sky gradient + soft glow
-  const top = oy + (B.headY - B.headR) * scale;
-  const bottom = oy + (B.thigh + B.shin) * scale;
+  const top = P({ x: 0, y: B.headY - B.headR }).y;
+  const bottom = P({ x: 0, y: B.thigh + B.shin }).y;
   const body = ctx.createLinearGradient(0, top, 0, bottom);
   body.addColorStop(0, '#f0f9ff');
   body.addColorStop(1, '#38bdf8');
-  ctx.shadowColor = 'rgba(56, 189, 248, 0.55)';
-  ctx.shadowBlur = Math.max(6, scale * 0.25);
+  if (glow) {
+    ctx.shadowColor = 'rgba(56, 189, 248, 0.55)';
+    ctx.shadowBlur = Math.max(6, scale * 0.25);
+  }
   ctx.lineCap = 'round';
   ctx.lineJoin = 'round';
 
@@ -253,9 +229,9 @@ export function drawWarmupGhost(ctx, spec, lp, nowMs, w, h, opts = {}) {
     }
   }
 
-  // 2. Torso: filled, slightly tapered shape from the shoulders to the hips
+  // 2. Torso: filled, tapered from the shoulders to the waist to the hips
   const { ls, rs, lh, rh, lw, rw } = pose.torso;
-  const T = [P(ls), P(rs), P(rw), P(rh), P(lh), P(lw)];   // shoulders → waist → hips
+  const T = [P(ls), P(rs), P(rw), P(rh), P(lh), P(lw)];
   ctx.fillStyle = body;
   ctx.strokeStyle = body;
   ctx.lineWidth = 0.16 * scale;     // rounds the corners
@@ -280,5 +256,65 @@ export function drawWarmupGhost(ctx, spec, lp, nowMs, w, h, opts = {}) {
   capsule({ from: pose.neck, to: { x: pose.head.x, y: pose.head.y + pose.head.r * 0.8 } });
   dot(pose.head, pose.head.r * 1.05, '#f0f9ff');
 
+  ctx.restore();
+}
+
+/**
+ * Draw the Ghost as a soft, filled silhouette in a panel
+ * (raw coordinates; the canvas is mirrored on screen, so no text is drawn here).
+ * @param {CanvasRenderingContext2D} ctx
+ * @param {Object} spec - exercise.ghost (+ optional targetDeg for the range challenge)
+ * @param {Object} lp - limbProfile
+ * @param {number} nowMs - performance.now()
+ * @param {number} w / h - canvas size
+ * @param {{ fill?: boolean }} [opts] - fill: the panel fills the whole canvas (dedicated ghost canvas)
+ */
+export function drawWarmupGhost(ctx, spec, lp, nowMs, w, h, opts = {}) {
+  if (!spec) return;
+  const t = (nowMs % PERIOD_MS) / PERIOD_MS;
+  const pose = ghostPose(spec, t, lp);
+
+  const panelH = opts.fill ? h : h * 0.42;
+  const panelW = opts.fill ? w : panelH * 0.72;
+  const margin = opts.fill ? 0 : h * 0.03;
+  const px = margin;                // raw top-left → appears top-right on the mirrored screen
+  const py = margin;
+  const scale = Math.min(panelH / 4.5, panelW / 3.7);
+  const ox = px + panelW / 2;
+  const oy = py + panelH * 0.5;
+  const P = (p) => ({ x: ox + p.x * scale, y: oy + p.y * scale });
+
+  ctx.save();
+  // Panel: rounded, soft dark gradient with a light border
+  const bg = ctx.createLinearGradient(px, py, px, py + panelH);
+  bg.addColorStop(0, 'rgba(15, 23, 42, 0.62)');
+  bg.addColorStop(1, 'rgba(30, 41, 59, 0.48)');
+  ctx.fillStyle = bg;
+  ctx.strokeStyle = 'rgba(125, 211, 252, 0.35)';
+  ctx.lineWidth = 1.5;
+  ctx.beginPath();
+  const radius = Math.min(16, panelW * 0.12);
+  if (ctx.roundRect) ctx.roundRect(px + 1, py + 1, panelW - 2, panelH - 2, radius); else ctx.rect(px, py, panelW, panelH);
+  ctx.fill();
+  ctx.stroke();
+  ctx.restore();
+
+  drawFigure(ctx, pose, P, scale);
+}
+
+/**
+ * Draw the Ghost FULL-SIZE and semi-transparent on the trainee's body (overlay canvas).
+ * @param {{x,y}} origin - canvas point of the trainee's hip center
+ * @param {number} scale - canvas px per Ghost body unit (from the trainee's torso length)
+ * @param {number} [alpha=0.42] - transparency so the trainee stays visible through the Ghost
+ */
+export function drawGhostOverlay(ctx, spec, lp, nowMs, origin, scale, alpha = 0.42) {
+  if (!spec || !origin || !(scale > 0)) return;
+  const t = (nowMs % PERIOD_MS) / PERIOD_MS;
+  const pose = ghostPose(spec, t, lp);
+  const P = (p) => ({ x: origin.x + p.x * scale, y: origin.y + p.y * scale });
+  ctx.save();
+  ctx.globalAlpha = alpha;
+  drawFigure(ctx, pose, P, scale, { floorShadow: false, glow: true });
   ctx.restore();
 }

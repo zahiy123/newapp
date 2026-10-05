@@ -346,6 +346,22 @@ Two critical corrections to the existing onboarding (Stages 1B/1C), completed **
 - Client: 426 tests pass, 0 new failures.
 
 ### Stage 3: Kinetic Coach Core — Hybrid Architecture
+
+**3.0 (early) — Ghost Overlay & Progressive Range Challenge (IN REVIEW on branch `feature/ghost-overlay`, 2026-10-05)**
+*Owner request:* the Ghost can appear as a full-size transparent layer on the trainee's body (sized to their distance from the camera), working at the optimal range from the scan, and gradually challenging the trainee to widen the range when they reach the goals safely. It must be isolated and easy to roll back.
+- **Safety mechanism (built first):**
+  1. Stable restore point: tag `checkpoint-stage2-stable` (see "Stable Checkpoints").
+  2. Developed on the branch **`feature/ghost-overlay`**. `main` / production stay on the checkpoint, and Vercel gives the branch its own **preview URL** for testing. It is merged only after the owner approves.
+  3. **Feature flag** `client/src/config/features.js` → `FEATURES.GHOST_OVERLAY`. Setting it to `false` removes the option completely.
+  4. **Opt-in:** the default stays the stable demo panel. The full overlay is turned on with a "Ghost: panel / full" button and remembered per device.
+  5. **Automatic fallback:** any runtime error in the overlay → it stops, the app returns to the panel (and remembers it), and the trainee sees a short notice. Any error in the range challenge → only the challenge turns off; the warm-up and its tracking keep running.
+  6. Existing tracking/analyzers were not changed. All new logic lives in new modules.
+- **New modules (11 tests, `engine/__tests__/ghostOverlay.test.js`):**
+  - `engine/ghostOverlay.js`: `coverTransform` (normalized camera coords → displayed `object-fit: cover` coords), `bodyAnchor` (hip center + torso length, smoothed, keeps the last anchor when the body is not visible), `overlayPlacement` (Ghost origin at the hips, scale from the torso → bigger when closer).
+  - `engine/rangeProgression.js`: the challenge starts at the scanned range (or 120° if not measured); **+5° after 3 consecutive reps that reach the target**; −5° after 3 reps far below it; never above the scanned range + 20° in a session or 170°, never below the start. Rep peaks come from the real shoulder angle (`shoulderAngle`, anatomical sides), with a re-arm so one rep is never counted twice (a bug the tests caught). Applies to the arm-range moves (arm circles, single-arm circles).
+  - `warmupGhost.js`: the figure drawing is shared (`drawFigure`) by the panel and the new `drawGhostOverlay` (42% transparent, full size). The Ghost's arm circles **peak exactly at the challenge target** (`targetDeg`).
+- **UI:** `components/GhostOverlay.jsx` (own canvas over the camera, mirrored + cover-mapped like the video). A "🎯 Range target: N°" chip. Voice: "Great! Let's widen the range a little" / "Easy — back to the previous range". Per-exercise results go to `sessionData.rangeChallenge` (start / target / max / reps).
+- *Verification:* client build passes; 437 tests pass, 0 new failures; rendered previews of the overlay on a portrait phone view. Owner device test on the branch preview URL pending → then merge to `main`.
 1. Edge processing at 60FPS: MediaPipe + Kalman + local rep counting.
 2. Peak Event Triggering: send a single frame + JSON at the peak moment.
 3. Sub-second voice feedback from Claude.
@@ -550,3 +566,4 @@ Two critical corrections to the existing onboarding (Stages 1B/1C), completed **
 - **2026-10-05:** Stage 2 device-test fixes. Seated warm-up movement is recognized (the posture gate was removed from the 4 upper-body analyzers; twists use the shoulders only); the timer counts movement within 1.5 s (no skipped seconds or flicker); the re-explain uses scan-adapted text; the Ghost was redrawn as a soft silhouette with a prosthetic socket + pylon. 6 new tests. Committed and pushed (client only).
 - **2026-10-05:** Second device round. Verified the deploy was live (real bugs). Seated tracking: a light warm-up stabilizer + path-based motion detection (`recentMotion`), realistic stabilizer + noise tests, and a friendly "try standing, I'm still tracking" suggestion. Ghost: moved to its own unstretched panel (`WarmupGhostPanel`) mid-left, no longer hidden under the feedback banner. Committed and pushed (client only).
 - **2026-10-05:** **Stage 2 closed and verified on device by the owner** (environment scan, warm-up adaptation, seated tracking, Ghost panel). Stable restore point tagged `checkpoint-stage2-stable` (git tag, pushed). Added the "Stable Checkpoints" section with restore instructions. Next: Ghost Overlay & Progressive Range Challenge, built on the branch `feature/ghost-overlay` behind a feature flag.
+- **2026-10-05:** Stage 3.0 (early) Ghost Overlay & Progressive Range Challenge built on the branch `feature/ghost-overlay` (not on main): feature flag, opt-in toggle (panel stays default), automatic fallback to the panel on any overlay error, and a challenge that disables itself on error without affecting the warm-up. New modules `ghostOverlay` / `rangeProgression` + a shared Ghost figure (11 tests). Awaiting the owner's test on the Vercel preview URL before merging.
