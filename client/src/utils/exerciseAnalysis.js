@@ -977,9 +977,8 @@ export function analyzeArmCircles(landmarks, prevState = {}) {
   const bodyMoving = detectMovement(landmarks, prevState._prevLandmarks, prevState);
   const posture = detectPosture(landmarks);
 
-  if (posture === 'sitting' || posture === 'unknown') {
-    return { ...prevState, feedback: null, posture, moving: false, _prevLandmarks: landmarks };
-  }
+  // Upper-body movement: works standing OR seated (wheelchair / chair). No posture gate —
+  // seated trainees doing arm work were ignored and nudged as "not moving".
 
   const lShoulder = landmarks[LM.LEFT_SHOULDER];
   const rShoulder = landmarks[LM.RIGHT_SHOULDER];
@@ -1345,9 +1344,8 @@ export function analyzeSingleArmRotation(landmarks, prevState = {}) {
   const bodyMoving = detectMovement(landmarks, prevState._prevLandmarks, prevState);
   const posture = detectPosture(landmarks);
 
-  if (posture === 'sitting' || posture === 'unknown') {
-    return { ...prevState, feedback: null, posture, moving: false, _prevLandmarks: landmarks };
-  }
+  // Upper-body movement: works standing OR seated (wheelchair / chair). No posture gate —
+  // seated trainees doing arm work were ignored and nudged as "not moving".
 
   const lWrist = landmarks[LM.LEFT_WRIST];
   const rWrist = landmarks[LM.RIGHT_WRIST];
@@ -1402,9 +1400,8 @@ export function analyzeArmPunches(landmarks, prevState = {}) {
   const bodyMoving = detectMovement(landmarks, prevState._prevLandmarks, prevState);
   const posture = detectPosture(landmarks);
 
-  if (posture === 'sitting' || posture === 'unknown') {
-    return { ...prevState, feedback: null, posture, moving: false, _prevLandmarks: landmarks };
-  }
+  // Upper-body movement: works standing OR seated (wheelchair / chair). No posture gate —
+  // seated trainees doing arm work were ignored and nudged as "not moving".
 
   const lWrist = landmarks[LM.LEFT_WRIST];
   const rWrist = landmarks[LM.RIGHT_WRIST];
@@ -1457,7 +1454,7 @@ export function analyzeArmPunches(landmarks, prevState = {}) {
 export function analyzeCoreTwists(landmarks, prevState = {}) {
   if (!landmarks) return { ...prevState, feedback: null };
 
-  const vis = validateLandmarks(landmarks, ['shoulders', 'hips']);
+  const vis = validateLandmarks(landmarks, ['shoulders']);
   if (!vis.valid) {
     return { ...prevState, feedback: { type: 'visibility', missingParts: vis.missingParts, direction: vis.direction }, posture: prevState.posture || 'unknown', _prevLandmarks: landmarks };
   }
@@ -1465,9 +1462,8 @@ export function analyzeCoreTwists(landmarks, prevState = {}) {
   const moving = detectMovement(landmarks, prevState._prevLandmarks, prevState);
   const posture = detectPosture(landmarks);
 
-  if (posture === 'sitting' || posture === 'unknown') {
-    return { ...prevState, feedback: null, posture, moving: false, _prevLandmarks: landmarks };
-  }
+  // Upper-body movement: works standing OR seated (wheelchair / chair). No posture gate —
+  // seated trainees doing arm work were ignored and nudged as "not moving".
 
   const lShoulder = landmarks[LM.LEFT_SHOULDER];
   const rShoulder = landmarks[LM.RIGHT_SHOULDER];
@@ -1478,6 +1474,10 @@ export function analyzeCoreTwists(landmarks, prevState = {}) {
   const history = prevState._shoulderXHistory || [];
   const shoulderDiffX = Math.abs(lShoulder.x - rShoulder.x);
   history.push(shoulderDiffX);
+  // A trunk twist changes the apparent shoulder width even when the body does not travel
+  const twistMoving = prevState._prevShoulderDiffX !== undefined &&
+    Math.abs(shoulderDiffX - prevState._prevShoulderDiffX) > 0.004;
+  const isMoving = moving || twistMoving;
   if (history.length > 30) history.shift();
 
   let feedback = null;
@@ -1485,11 +1485,11 @@ export function analyzeCoreTwists(landmarks, prevState = {}) {
     ? Math.max(...history) - Math.min(...history)
     : 0;
 
-  if (moving && amplitude > 0.06) {
+  if (isMoving && amplitude > 0.06) {
     feedback = { type: 'good', text: null };
-  } else if (moving && amplitude > 0.02 && amplitude <= 0.06) {
+  } else if (isMoving && amplitude > 0.02 && amplitude <= 0.06) {
     feedback = { type: 'warning', text: 'twistMore' };
-  } else if (!moving && history.length > 20) {
+  } else if (!isMoving && history.length > 20) {
     feedback = { type: 'warning', text: 'notMoving' };
   }
 
@@ -1497,9 +1497,10 @@ export function analyzeCoreTwists(landmarks, prevState = {}) {
     ...prevState,
     feedback,
     posture,
-    moving,
+    moving: isMoving,
     _shoulderXHistory: history,
-    lastRepTime: moving ? Date.now() : prevState.lastRepTime,
+    _prevShoulderDiffX: shoulderDiffX,
+    lastRepTime: isMoving ? Date.now() : prevState.lastRepTime,
     _prevLandmarks: landmarks
   };
 }

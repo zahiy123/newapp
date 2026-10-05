@@ -1475,7 +1475,9 @@ export default function Training() {
     warmUpTimerRef.current = setInterval(() => {
       const now = Date.now();
       const state = warmUpStateRef.current;
-      const isMoving = state.moving || false;
+      // Moving = moving now OR within the last 1.5 s (a circle/punch has short still moments at its ends —
+      // checking one instant per second skipped seconds and made the "paused" state flicker)
+      const isMoving = !!state.moving || (now - lastActivityRef.current) < 1500;
 
       // 3) Movement Lock: timer ONLY counts down when moving
       if (!isMoving) {
@@ -1494,8 +1496,10 @@ export default function Training() {
           // Re-explain at 20s (once per exercise)
           if (inactiveSeconds >= 20 && !warmUpReExplainedRef.current) {
             warmUpReExplainedRef.current = true;
-            const eName = isHe ? currentWarmUp.name.he : currentWarmUp.name.en;
-            const eDesc = isHe ? currentWarmUp.description.he : currentWarmUp.description.en;
+            // Re-explain with this exercise's own (scan-adapted) instructions
+            const info = warmUpInfo(currentWarmUp);
+            const eName = info?.name || (isHe ? currentWarmUp.name.he : currentWarmUp.name.en);
+            const eDesc = info?.steps?.join('. ') || (isHe ? currentWarmUp.description.he : currentWarmUp.description.en);
             speakWarmUpReExplain(eName, eDesc, playerName);
             setFeedback({
               type: 'info',

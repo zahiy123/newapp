@@ -17,9 +17,9 @@ const PERIOD_MS = 1600;
 
 // Body model in "body units" (hip center = origin, y grows downward)
 const B = {
-  shoulderY: -1.4, shoulderX: 0.34, hipX: 0.17,
+  shoulderY: -1.4, shoulderX: 0.42, hipX: 0.21, waistY: -0.55, waistX: 0.27,
   upperArm: 0.6, forearm: 0.55, thigh: 0.9, shin: 0.88,
-  headY: -1.78, headR: 0.2,
+  headY: -1.8, headR: 0.22,
 };
 
 const deg = (d) => (d * Math.PI) / 180;
@@ -96,13 +96,13 @@ export function ghostPose(spec, t, lp = {}) {
   if (spec?.move === 'side_steps') { lift.left = 0.15 * Math.max(0, wave); lift.right = 0.15 * Math.max(0, -wave); }
 
   const segments = [];
-  const add = (from, to, limb, dashed = false) => segments.push({ from, to, limb, dashed });
+  const add = (from, to, limb, dashed = false, part = null) => segments.push({ from, to, limb, dashed, part });
 
   // Torso + head (always)
   const hipMid = { x: shiftX, y: 0 };
-  add(neck, hipMid, 'torso');
-  add(L.shoulder, R.shoulder, 'torso');
-  add(L.hip, R.hip, 'torso');
+  add(neck, hipMid, 'torso', false, 'spine');
+  add(L.shoulder, R.shoulder, 'torso', false, 'shoulders');
+  add(L.hip, R.hip, 'torso', false, 'hips');
 
   // Arms
   for (const side of ['left', 'right']) {
@@ -112,8 +112,8 @@ export function ghostPose(spec, t, lp = {}) {
     const out = side === 'left' ? 1 : -1;
     const elbow = limbPoint(S.shoulder, arm[side].a, B.upperArm, out);
     const wrist = limbPoint(elbow, arm[side].a + arm[side].bend, B.forearm, out);
-    add(S.shoulder, elbow, key);
-    add(elbow, wrist, key);
+    add(S.shoulder, elbow, key, false, 'upperArm');
+    add(elbow, wrist, key, false, 'forearm');
   }
 
   // Legs
@@ -125,17 +125,34 @@ export function ghostPose(spec, t, lp = {}) {
     const isProsthetic = limb.state === 'prosthetic';
     const l = isProsthetic ? 0 : lift[side];       // the prosthetic side is the stable support
     // Knee raise: thigh rotates forward → in a frontal view the knee rises
-    const knee = { x: S.hip.x, y: S.hip.y + B.thigh * Math.cos(deg(85 * l)) };
-    const ankle = { x: S.hip.x, y: knee.y + B.shin * (1 - 0.55 * l) };
-    add(S.hip, knee, key);
-    add(knee, ankle, key, isProsthetic);           // prosthetic shank: dashed, not animated
+    const out = side === 'left' ? 1 : -1;
+    const kicking = spec?.move === 'kick';
+    const knee = { x: S.hip.x + (kicking ? out * 0.04 * l : 0), y: S.hip.y + B.thigh * Math.cos(deg((kicking ? 55 : 85) * l)) };
+    const ankle = kicking
+      ? { x: knee.x + out * 0.1 * l, y: knee.y + B.shin * (1 - 0.85 * l) }   // shin swings forward (foreshortened)
+      : { x: S.hip.x, y: knee.y + B.shin * (1 - 0.55 * l) };
+    add(S.hip, knee, key, false, 'thigh');
+    add(knee, ankle, key, isProsthetic, 'shin');   // prosthetic shank: drawn as a pylon, not animated
   }
 
-  return { segments, head: { x: neck.x, y: B.headY, r: B.headR } };
+  return {
+    segments,
+    head: { x: neck.x, y: B.headY, r: B.headR },
+    neck,
+    torso: {
+      ls: L.shoulder, rs: R.shoulder, lh: L.hip, rh: R.hip,
+      lw: { x: shiftX + B.waistX * (1 - 0.2 * Math.abs(twist)) + 0.05 * twist, y: B.waistY },
+      rw: { x: shiftX - B.waistX * (1 - 0.2 * Math.abs(twist)) + 0.05 * twist, y: B.waistY },
+    },
+  };
 }
 
+// Limb thickness in body units (natural proportions)
+const THICK = { upperArm: 0.19, forearm: 0.15, thigh: 0.27, shin: 0.2, spine: 0, shoulders: 0, hips: 0 };
+
 /**
- * Draw the ghost in a corner panel of the pose canvas (raw coordinates; the canvas is mirrored on screen).
+ * Draw the ghost as a soft, filled silhouette in a corner panel of the pose canvas
+ * (raw coordinates; the canvas is mirrored on screen, so no text is drawn here).
  * @param {CanvasRenderingContext2D} ctx
  * @param {Object} spec - exercise.ghost
  * @param {Object} lp - limbProfile
@@ -148,39 +165,118 @@ export function drawWarmupGhost(ctx, spec, lp, nowMs, w, h) {
   const pose = ghostPose(spec, t, lp);
 
   const panelH = h * 0.42;
-  const panelW = panelH * 0.7;
+  const panelW = panelH * 0.72;
   const margin = h * 0.03;
   const px = margin;                // raw top-left → appears top-right on the mirrored screen
   const py = margin;
-  const scale = panelH / 4.2;
+  const scale = panelH / 4.4;
   const ox = px + panelW / 2;
-  const oy = py + panelH * 0.52;
+  const oy = py + panelH * 0.5;
   const P = (p) => ({ x: ox + p.x * scale, y: oy + p.y * scale });
 
   ctx.save();
-  ctx.globalAlpha = 0.85;
-  ctx.fillStyle = 'rgba(15, 23, 42, 0.55)';
+
+  // Panel: rounded, soft dark gradient with a light border
+  const bg = ctx.createLinearGradient(px, py, px, py + panelH);
+  bg.addColorStop(0, 'rgba(15, 23, 42, 0.62)');
+  bg.addColorStop(1, 'rgba(30, 41, 59, 0.48)');
+  ctx.fillStyle = bg;
+  ctx.strokeStyle = 'rgba(125, 211, 252, 0.35)';
+  ctx.lineWidth = 1.5;
   ctx.beginPath();
-  if (ctx.roundRect) ctx.roundRect(px, py, panelW, panelH, 12); else ctx.rect(px, py, panelW, panelH);
+  if (ctx.roundRect) ctx.roundRect(px, py, panelW, panelH, 16); else ctx.rect(px, py, panelW, panelH);
   ctx.fill();
-
-  ctx.strokeStyle = '#7dd3fc';
-  ctx.lineWidth = Math.max(3, scale * 0.12);
-  ctx.lineCap = 'round';
-
-  const head = P(pose.head);
-  ctx.beginPath();
-  ctx.arc(head.x, head.y, pose.head.r * scale, 0, Math.PI * 2);
   ctx.stroke();
 
-  for (const seg of pose.segments) {
+  // Floor shadow under the feet
+  ctx.fillStyle = 'rgba(0, 0, 0, 0.28)';
+  ctx.beginPath();
+  ctx.ellipse(ox, oy + (B.thigh + B.shin + 0.05) * scale, 0.55 * scale, 0.09 * scale, 0, 0, Math.PI * 2);
+  ctx.fill();
+
+  // Body colour: light-to-sky gradient + soft glow
+  const top = oy + (B.headY - B.headR) * scale;
+  const bottom = oy + (B.thigh + B.shin) * scale;
+  const body = ctx.createLinearGradient(0, top, 0, bottom);
+  body.addColorStop(0, '#f0f9ff');
+  body.addColorStop(1, '#38bdf8');
+  ctx.shadowColor = 'rgba(56, 189, 248, 0.55)';
+  ctx.shadowBlur = 12;
+  ctx.lineCap = 'round';
+  ctx.lineJoin = 'round';
+
+  const capsule = (seg) => {
     const a = P(seg.from);
     const b = P(seg.to);
-    ctx.setLineDash(seg.dashed ? [6, 6] : []);
     ctx.beginPath();
     ctx.moveTo(a.x, a.y);
     ctx.lineTo(b.x, b.y);
     ctx.stroke();
+  };
+  const dot = (p, r, color) => {
+    const q = P(p);
+    ctx.fillStyle = color;
+    ctx.beginPath();
+    ctx.arc(q.x, q.y, r * scale, 0, Math.PI * 2);
+    ctx.fill();
+  };
+
+  // 1. Legs (behind the torso)
+  for (const seg of pose.segments.filter(sg => sg.part === 'thigh' || sg.part === 'shin')) {
+    if (seg.dashed) {
+      // Below-knee prosthesis: socket under the knee + slim grey pylon + foot, static
+      ctx.strokeStyle = '#cbd5e1';
+      ctx.lineWidth = 0.07 * scale;
+      capsule(seg);
+      const socketEnd = { x: seg.from.x + (seg.to.x - seg.from.x) * 0.3, y: seg.from.y + (seg.to.y - seg.from.y) * 0.3 };
+      ctx.strokeStyle = '#94a3b8';
+      ctx.lineWidth = 0.2 * scale;
+      capsule({ from: seg.from, to: socketEnd });
+      const foot = P(seg.to);
+      ctx.fillStyle = '#cbd5e1';
+      ctx.beginPath();
+      ctx.ellipse(foot.x, foot.y, 0.13 * scale, 0.05 * scale, 0, 0, Math.PI * 2);
+      ctx.fill();
+    } else {
+      ctx.strokeStyle = body;
+      ctx.lineWidth = THICK[seg.part] * scale;
+      capsule(seg);
+      if (seg.part === 'shin') {
+        const foot = P(seg.to);
+        ctx.fillStyle = body;
+        ctx.beginPath();
+        ctx.ellipse(foot.x, foot.y, 0.14 * scale, 0.06 * scale, 0, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    }
   }
+
+  // 2. Torso: filled, slightly tapered shape from the shoulders to the hips
+  const { ls, rs, lh, rh, lw, rw } = pose.torso;
+  const T = [P(ls), P(rs), P(rw), P(rh), P(lh), P(lw)];   // shoulders → waist → hips
+  ctx.fillStyle = body;
+  ctx.strokeStyle = body;
+  ctx.lineWidth = 0.16 * scale;     // rounds the corners
+  ctx.beginPath();
+  ctx.moveTo(T[0].x, T[0].y);
+  for (let i = 1; i < T.length; i++) ctx.lineTo(T[i].x, T[i].y);
+  ctx.closePath();
+  ctx.fill();
+  ctx.stroke();
+
+  // 3. Arms + hands
+  for (const seg of pose.segments.filter(sg => sg.part === 'upperArm' || sg.part === 'forearm')) {
+    ctx.strokeStyle = body;
+    ctx.lineWidth = THICK[seg.part] * scale;
+    capsule(seg);
+    if (seg.part === 'forearm') dot(seg.to, 0.09, '#e0f2fe');
+  }
+
+  // 4. Neck + head
+  ctx.strokeStyle = body;
+  ctx.lineWidth = 0.12 * scale;
+  capsule({ from: pose.neck, to: { x: pose.head.x, y: pose.head.y + pose.head.r * 0.8 } });
+  dot(pose.head, pose.head.r * 1.05, '#f0f9ff');
+
   ctx.restore();
 }
