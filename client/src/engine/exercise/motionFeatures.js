@@ -6,7 +6,7 @@
 // that profiles and the sport library judge:
 //
 //   rep      — a full rest → peak → rest cycle of the primary joint:
-//              toPeakMs / peakHoldMs / returnMs (tempo), pelvisDropMax (hip stability),
+//              toPeakMs / peakHoldMs / returnMs (tempo), primaryPeak (depth reached), pelvisDropMax (hip stability),
 //              swayRatio (center-of-mass wobble), trunkRange (trunk control)
 //   landing  — a foot contact (running, jumps): absorptionDeg = knee flexion right after
 //              contact (shock absorption), side, cadence (steps/min so far)
@@ -105,7 +105,7 @@ export function updateMotion(ms, landmarks, metrics, t) {
   const com = centerOfMass(landmarks);
   const pd = pelvisDrop(landmarks);
 
-  const frame = { t, com, pelvis: pd, lean: trunkLean(landmarks), ankles: {}, knee: {}, chain: {} };
+  const frame = { t, com, pelvis: pd, lean: trunkLean(landmarks), primary: metrics?.[ms.profile?.primary], ankles: {}, knee: {}, chain: {} };
   for (const s of SIDES) {
     const a = landmarks[ANKLE[s]];
     frame.ankles[s] = a && (a.visibility ?? 1) >= 0.5 && sideUsable('leg', s, ms.lp) ? a : null;
@@ -133,6 +133,9 @@ export function updateMotion(ms, landmarks, metrics, t) {
       const during = ms.hist.filter(f => f.t >= r.leaveAt);
       const drops = during.map(f => f.pelvis).filter(v => typeof v === 'number');
       const leans = during.map(f => f.lean).filter(v => typeof v === 'number');
+      const prims = during.map(f => f.primary).filter(v => typeof v === 'number');
+      const j = ms.profile.joints[ms.profile.primary];
+      const towardPeakIsDown = (j.peak[0] + j.peak[1]) < (j.rest[0] + j.rest[1]);
       events.push({
         type: 'rep',
         toPeakMs: r.arriveAt - r.leaveAt,
@@ -141,6 +144,8 @@ export function updateMotion(ms, landmarks, metrics, t) {
         pelvisDropMax: drops.length ? Math.max(...drops) : null,
         swayRatio: std(during.map(f => f.com?.x).filter(v => typeof v === 'number')) / scale,
         trunkRange: leans.length ? Math.max(...leans) - Math.min(...leans) : null,
+        // the deepest point of the rep toward the peak (e.g. the highest knee drive)
+        primaryPeak: prims.length ? (towardPeakIsDown ? Math.min(...prims) : Math.max(...prims)) : null,
       });
       r.stage = 'rest';
     }

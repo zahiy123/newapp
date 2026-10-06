@@ -1965,6 +1965,7 @@ Level: ${skillLevel} — ${levelDirective}
 ${ageRule}
 Sport: ${sport}. Goals: ${topGoals}. Days/week: ${daysPerWeek}.
 Equipment available: ${eq === 'none' ? 'NONE — bodyweight only, absolutely no weights or equipment exercises' : eq === 'dumbbells' ? 'Dumbbells' : 'Resistance bands'}.
+SESSION GOAL (mandatory): every day has ONE clear goal, written at the start of its "focus" with one of these words: מהירות / זריזות / כוח מתפרץ / כוח / סיבולת / טכניקה / ניידות / שיקום. Every exercise of the day serves that goal (prepare → main goal work → support → cooldown). Rehab tracks: the goal is שיקום first.
 ${hasBall === false ? 'BALL: the athlete has NO ball. ABSOLUTELY NO exercise that uses a ball (no dribbling, passing, kicking a ball, ball stops, juggling, shooting, headers, wall-ball drills). Train the same skills as SHADOW / no-ball movement drills (e.g. shadow kick, footwork, shadow shooting motion).' : hasBall === true ? 'BALL: the athlete HAS a ball — ball drills are allowed.' : ''}
 
 ${trackBlock ? `${trackBlock}

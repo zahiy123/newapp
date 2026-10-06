@@ -78,7 +78,11 @@ export function ghostAnglesAt(ghost, t) {
   const rest = ghost.rest || {};
   const peak = ghost.peak;
   if (!peak) return { ...rest };
-  const u = (1 - Math.cos(2 * Math.PI * t)) / 2;
+  // toPeakShare: the share of the cycle spent going rest → peak (0.5 = symmetric). An explosive
+  // variation keeps the controlled phase and makes the other one fast.
+  const s = ghost.toPeakShare ?? 0.5;
+  const tc = ((t % 1) + 1) % 1;
+  const u = tc < s ? (1 - Math.cos(Math.PI * tc / s)) / 2 : (1 + Math.cos(Math.PI * (tc - s) / (1 - s))) / 2;
   const out = {};
   for (const k of new Set([...Object.keys(rest), ...Object.keys(peak)])) {
     const a = rest[k] ?? peak[k];
@@ -259,6 +263,27 @@ function armDrawable(limb) {
  * @returns {{ segments, torso, neck, head, landmarks: Object[], floorY: number } | null}
  */
 export function profileGhostPose(profile, t, lp = {}) {
+  const pose = buildPose(profile, t, lp);
+  if (!pose) return null;
+  // Flight (jumps): the whole body rises by `rise` body units — the feet leave the floor
+  const rise = ghostAnglesAt(profile.ghost, t).rise || 0;
+  return rise > 0 ? shiftPose(pose, -rise) : pose;
+}
+
+/** Copy of a pose moved vertically by dy (every point, landmarks included). */
+function shiftPose(pose, dy) {
+  const mv = (p) => (p && typeof p.y === 'number' ? { ...p, y: p.y + dy } : p);
+  return {
+    ...pose,
+    segments: pose.segments.map(sg => ({ ...sg, from: mv(sg.from), to: mv(sg.to) })),
+    landmarks: pose.landmarks.map(l => (l.visibility ? mv(l) : l)),
+    neck: mv(pose.neck),
+    head: mv(pose.head),
+    torso: Object.fromEntries(Object.entries(pose.torso).map(([k, v]) => [k, mv(v)])),
+  };
+}
+
+function buildPose(profile, t, lp = {}) {
   const ghost = profile?.ghost;
   if (!ghost) return null;
   const a = ghostAnglesAt(ghost, t);
@@ -318,6 +343,13 @@ export function profileGhostPose(profile, t, lp = {}) {
     // working leg); alternating ghosts (running) swap A/B every half cycle
     let sideA = affectedLeft || lp.right_leg?.state === 'prosthetic' || lp.right_leg?.state === 'absent'
       ? (affectedLeft ? 'left' : 'right') : 'left';
+    // A variation may name the working (moving) leg; the support leg is the other one —
+    // unless that would put the trainee on an absent / above-knee leg (Iron Rule wins)
+    if (ghost.workingSide === 'left' || ghost.workingSide === 'right') {
+      const support = ghost.workingSide === 'left' ? 'right' : 'left';
+      const st = lp[`${support}_leg`];
+      if (!(st?.state === 'absent' || (st?.state === 'prosthetic' && st?.level !== 'below_knee'))) sideA = support;
+    }
     if (ghost.alternate && (((t % 1) + 1) % 1) >= 0.5) sideA = sideA === 'left' ? 'right' : 'left';
     const sideB = sideA === 'left' ? 'right' : 'left';
     legPairs = [[sideA, k.legs.A], [sideB, k.legs.B]];

@@ -19,6 +19,9 @@ import { viewPromptText } from '../engine/training/viewPrompts';
 import { useExpertExecution, buildExecutionProfile } from '../hooks/training/useExpertExecution';
 import { showsRangeGauge } from '../engine/training/rangeGauge';
 import { demoGhostFor } from '../engine/training/demoGhost';
+import { makeTimedAnalyzer } from '../engine/training/timedAnalyzer';
+import { catalogGhostSpec } from '../engine/catalog/catalog';
+import { rebuildPlanFromCatalog, planContext } from '../engine/catalog/planBuilder';
 import { availableEquipment, fitExercises, needsBall } from '../engine/exercise/equipmentFit';
 import { sportContextsFor } from '../engine/sports/sportLibrary';
 import ValidationPanel from '../components/ValidationPanel';
@@ -535,8 +538,22 @@ export default function Training() {
 
       // Sanitize exercises in-place before displaying (last-mile defense)
       const sport = data.sport || plan.sport || 'fitness';
-      const sanitized = sanitizePlan({ weeks: [{ days: [{ exercises: week.days[dayIdx].exercises || [] }] }] }, sport, data.age || userProfile?.age);
-      const loadedExercises = sanitized.weeks[0].days[0].exercises || [];
+      let loadedExercises;
+      if (FEATURES.CATALOG_PLANS) {
+        // Coherent catalog session for this day (same builder + seed as the dashboard)
+        try {
+          const built = rebuildPlanFromCatalog(plan, planContext(data, getLimbProfile(data), user.uid), (data.language || 'he') === 'he');
+          loadedExercises = built.weeks[weekIdx]?.days?.[dayIdx]?.exercises || [];
+          sessionDataRef.current.sessionGoal = built.weeks[weekIdx]?.days?.[dayIdx]?.goal || null;
+        } catch (err) {
+          console.error('[Catalog] session build failed — using the AI exercises:', err);
+          loadedExercises = null;
+        }
+      }
+      if (!loadedExercises?.length) {
+        const sanitized = sanitizePlan({ weeks: [{ days: [{ exercises: week.days[dayIdx].exercises || [] }] }] }, sport, data.age || userProfile?.age);
+        loadedExercises = sanitized.weeks[0].days[0].exercises || [];
+      }
       // HARD equipment fit: never offer an exercise the trainee can't do (e.g. a ball drill without a ball)
       rawExercisesRef.current = loadedExercises;
       setExercises(fitExercises(loadedExercises, availableEquipment(data)).exercises);
@@ -643,6 +660,7 @@ export default function Training() {
     enabled: FEATURES.EXPERT_PROFILE && phase === PHASE.EXERCISING,
     cueKey: exerciseCueKey,
     exerciseName: currentExercise?.name,
+    catalogId: currentExercise?.catalogId || null,
     sportContexts,
     limbProfile,
     landmarksRef: poseLandmarksRef,
@@ -667,18 +685,24 @@ export default function Training() {
     || phase === PHASE.CALIBRATING || phase === PHASE.EXERCISING || phase === PHASE.RESTING;
   const demoProfile = useMemo(
     () => (FEATURES.EXPERT_PROFILE && demoGhostPhase
-      ? (execution.profile || buildExecutionProfile(exerciseCueKey, currentExercise?.name, limbProfile, sportContexts))
+      ? (execution.profile || buildExecutionProfile(exerciseCueKey, currentExercise?.name, limbProfile, sportContexts, currentExercise?.catalogId || null))
       : null),
     [demoGhostPhase, execution.profile, exerciseCueKey, currentExercise?.name, limbProfile, sportContexts],
   );
   // The profile's Ghost, or the matching animated movement for exercises without an expert model yet
-  const demoGhostSpec = useMemo(() => (demoGhostPhase ? demoGhostFor(demoProfile, exerciseCueKey) : null), [demoGhostPhase, demoProfile, exerciseCueKey]);
+  const demoGhostSpec = useMemo(() => {
+    if (!demoGhostPhase) return null;
+    // A catalog exercise always has its Ghost (its pattern × variation)
+    const cid = currentExercise?.catalogId;
+    if (cid) return catalogGhostSpec(cid, demoProfile?.catalogId === cid ? demoProfile : null);
+    return demoGhostFor(demoProfile, exerciseCueKey);
+  }, [demoGhostPhase, demoProfile, exerciseCueKey, currentExercise?.catalogId]);
   const showDemoGhost = exerciseGhostOn && !!demoGhostSpec;
   // ROM gauge only for dynamic range-of-motion exercises (never static holds / ball drills / kicks / running)
   const showRomGauge = useMemo(() => {
     if (!currentExercise) return false;
     const a = getAnalyzer(currentExercise.name);
-    const kind = buildExecutionProfile(a.cueKey, currentExercise.name, limbProfile, sportContexts)?.kind;
+    const kind = buildExecutionProfile(a.cueKey, currentExercise.name, limbProfile, sportContexts, currentExercise.catalogId || null)?.kind;
     return showsRangeGauge({ analyzerType: a.type, profileKind: kind, exerciseName: currentExercise.name });
   }, [currentExercise?.name, limbProfile, sportContexts]);
   const demoOnBody = overlayActive && (demoProfile?.posture === 'standing' || !!demoGhostSpec?.move)
@@ -691,7 +715,10 @@ export default function Training() {
   useEffect(() => {
     if (currentExercise) {
       const { analyze, type, cueKey, ballAware } = getAnalyzer(currentExercise.name);
-      analyzerRef.current = { analyze, type, cueKey, ballAware };
+      // Timed catalog exercises (intervals / holds): the target is seconds of work, not reps
+      analyzerRef.current = currentExercise.timed
+        ? { analyze: makeTimedAnalyzer(analyze), type: 'hold', cueKey, ballAware }
+        : { analyze, type, cueKey, ballAware };
       exerciseStateRef.current = { _userProfile: userProfile };
       setDisplayReps(0);
       setFeedback(null);
@@ -2502,7 +2529,9 @@ export default function Training() {
           });
           if (resp.ok) {
             const result = await resp.json();
-            if (result.adapted && result.plan?.length > 0) {
+            if (result.adapted && result.plan?.length > 0 && FEATURES.CATALOG_PLANS) {
+              console.info('[Adaptation] catalog sessions are active — free AI exercises are not inserted');
+            } else if (result.adapted && result.plan?.length > 0) {
               const sport = userProfile?.sport || 'fitness';
               const sanitizedAdapt = sanitizePlan({ weeks: [{ days: [{ exercises: result.plan }] }] }, sport, userProfile?.age);
               const cleanPlan = fitExercises(sanitizedAdapt.weeks[0].days[0].exercises || [],

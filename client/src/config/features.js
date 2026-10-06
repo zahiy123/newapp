@@ -13,4 +13,8 @@ export const FEATURES = Object.freeze({
   // counts, kinematic error / danger rules, execution accuracy and a Ghost generated from the same
   // profile. Off → the exercise phase runs exactly as at checkpoint-stage2-final.
   EXPERT_PROFILE: true,
+  // Stage 3.1 — exercise catalog (movement pattern × variation, every exercise with a Ghost) and
+  // coherent goal-based sessions: the AI decides the week's structure / day focus, each day is
+  // filled from the catalog. Off → the AI exercises as before (equipment-fitted).
+  CATALOG_PLANS: true,
 });

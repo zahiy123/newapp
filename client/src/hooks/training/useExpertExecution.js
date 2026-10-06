@@ -23,6 +23,7 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { getExerciseProfile, personalizeProfile } from '../../engine/exercise/exerciseProfiles';
+import { variationProfile } from '../../engine/catalog/catalog';
 import { applySportContext } from '../../engine/sports/sportLibrary';
 import { createExecutionTracker, updateExecution } from '../../engine/exercise/profileEvaluator';
 import { READY } from '../../engine/exercise/setupCoach';
@@ -43,18 +44,20 @@ const UNSURE_NOTICE_MS = 2000;             // low confidence this long → show 
  * (scanned ranges) → layered with the sport contexts. Shared by the live evaluation and the
  * demo Ghost shown before the exercise, so both are exactly the same profile.
  */
-export function buildExecutionProfile(cueKey, exerciseName, limbProfile, sportContexts) {
-  if (!cueKey) return null;
+export function buildExecutionProfile(cueKey, exerciseName, limbProfile, sportContexts, catalogId = null) {
+  if (!cueKey && !catalogId) return null;
   const ctx = sportContexts?.length ? sportContexts : ['fitness'];
-  return applySportContext(personalizeProfile(getExerciseProfile(cueKey, exerciseName), limbProfile || {}), ctx);
+  // A catalog exercise carries its exact pattern + variation profile (tempo / range / side)
+  const base = (catalogId && variationProfile(catalogId)) || getExerciseProfile(cueKey, exerciseName);
+  return applySportContext(personalizeProfile(base, limbProfile || {}), ctx);
 }
 
-export function useExpertExecution({ enabled, cueKey, exerciseName, sportContexts, limbProfile, landmarksRef, isHe, speakPriority, recordClips = false, onClips }) {
+export function useExpertExecution({ enabled, cueKey, exerciseName, catalogId = null, sportContexts, limbProfile, landmarksRef, isHe, speakPriority, recordClips = false, onClips }) {
   const [failed, setFailed] = useState(false);
   const contextsKey = (sportContexts || []).join('+');
   const profile = useMemo(
-    () => (enabled ? buildExecutionProfile(cueKey, exerciseName, limbProfile, contextsKey ? contextsKey.split('+') : null) : null),
-    [enabled, cueKey, exerciseName, contextsKey, limbProfile],
+    () => (enabled ? buildExecutionProfile(cueKey, exerciseName, limbProfile, contextsKey ? contextsKey.split('+') : null, catalogId) : null),
+    [enabled, cueKey, exerciseName, catalogId, contextsKey, limbProfile],
   );
   const active = !!profile && !failed;
 

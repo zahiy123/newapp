@@ -1,0 +1,186 @@
+// ============================================================
+// sessionPlanner — COHERENT daily sessions from the catalog (Stage 3.1)
+//
+// The owner's principle: a session serves ONE goal. A football speed session is (almost)
+// entirely speed — activation, accelerations, explosive footwork; a rehab + sport session
+// serves the rehab need first (chain strengthening, protecting the injured area) and uses the
+// sport's tools in a safe way. Every exercise prepares for or supports that goal — nothing
+// "thrown in" from another track.
+//
+// A session = goal TEMPLATE of blocks:
+//   prep      prepares the body for the goal (activation / mobility / coordination)
+//   main      the goal itself — every exercise trains the goal's qualities
+//   support   supports the goal (stability / strength / core that the goal relies on)
+//   cooldown  brings the body down (mobility)
+// Exercises come from the catalog (pattern × variation → always a Ghost), filtered by the
+// trainee's body (limbProfile) and sport family, chosen with a seeded RNG (variety across days
+// and weeks, stable for the same day), never the same movement pattern twice in a session.
+// coherenceReport() measures it: share of main + support exercises on goal.
+// ============================================================
+
+import { buildCatalog } from './catalog.js';
+import { PATTERNS } from './patterns.js';
+import { SPORT_LIBRARY } from '../sports/sportLibrary.js';
+
+const t = (he, en) => ({ he, en });
+
+export const GOALS = Object.freeze({
+  speed: { name: t('מהירות', 'Speed'), main: ['speed', 'acceleration'], support: ['power', 'plyometric', 'balance', 'stability', 'coordination'] },
+  agility: { name: t('זריזות ושינויי כיוון', 'Agility'), main: ['agility', 'speed', 'coordination'], support: ['balance', 'power', 'stability', 'plyometric'] },
+  power: { name: t('כוח מתפרץ', 'Power'), main: ['power', 'plyometric'], support: ['strength', 'balance', 'stability', 'acceleration'] },
+  strength: { name: t('כוח', 'Strength'), main: ['strength'], support: ['core', 'stability', 'balance', 'posteriorChain'] },
+  endurance: { name: t('סיבולת', 'Endurance'), main: ['endurance', 'conditioning'], support: ['core', 'strength', 'stability'] },
+  technique: { name: t('טכניקה וענף', 'Sport technique'), main: ['technique', 'sportSkill'], support: ['balance', 'power', 'coordination', 'agility', 'core'] },
+  mobility: { name: t('ניידות והתאוששות', 'Mobility & recovery'), main: ['mobility', 'stability'], support: ['core', 'balance', 'activation'] },
+  rehab: { name: t('שיקום', 'Rehab'), main: ['rehab', 'stability'], support: ['core', 'balance', 'mobility', 'activation'] },
+  rehabSport: { name: t('שיקום משולב ענף', 'Rehab + sport'), main: ['rehab', 'stability'], support: ['technique', 'sportSkill', 'balance', 'core'] },
+});
+
+// Block sizes and the qualities each block looks for (in order of preference)
+const TEMPLATE = (goal) => {
+  const g = GOALS[goal];
+  const prep = goal === 'rehab' || goal === 'rehabSport' || goal === 'mobility'
+    ? ['mobility', 'activation'] : ['activation', 'coordination', 'mobility'];
+  return [
+    { role: 'prep', n: 2, want: prep },
+    { role: 'main', n: goal === 'speed' || goal === 'power' ? 4 : 3, want: g.main },
+    { role: 'support', n: 2, want: g.support },
+    { role: 'cooldown', n: 1, want: ['mobility'] },
+  ];
+};
+
+// Doses per block role (the main block uses the goal-fitting dose)
+const PREP_DOSES = new Set(['s2r15', 'i20', 'i30', 'h20', 'k10']);
+const COOL_DOSES = new Set(['i30', 'i45', 'h30', 's2r15']);
+const SAFE_GOALS = new Set(['rehab', 'rehabSport', 'mobility']);
+const RISKY = new Set(['plyometric']);
+
+function hashSeed(str) {
+  let h = 2166136261;
+  for (let i = 0; i < str.length; i++) { h ^= str.charCodeAt(i); h = Math.imul(h, 16777619); }
+  return h >>> 0;
+}
+function rng(seed) {
+  let a = hashSeed(String(seed)) || 1;
+  return () => {
+    a = (a + 0x6D2B79F5) | 0;
+    let x = Math.imul(a ^ (a >>> 15), 1 | a);
+    x = (x + Math.imul(x ^ (x >>> 7), 61 | x)) ^ x;
+    return ((x ^ (x >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+/** Sport family of a context id (rehab / fitness → their own families). */
+export function familyOf(sportId) {
+  return SPORT_LIBRARY[sportId]?.family || 'strength';
+}
+
+function allowedInGoal(item, goal) {
+  if (SAFE_GOALS.has(goal)) {
+    if (item.qualities.some(q => RISKY.has(q))) return false;            // no plyometrics in rehab / recovery
+    if (item.variation.tempo === 'explosive') return false;
+  }
+  return true;
+}
+
+function pick(candidates, want, rand, usedPatterns, avoid) {
+  // preference: earlier `want` quality first; then not used this week; then random
+  const score = (it) => {
+    const idx = want.findIndex(q => it.qualities.includes(q));
+    return (idx < 0 ? 99 : idx) * 10 + (avoid.has(it.id) ? 5 : 0) + rand();
+  };
+  const matching = candidates.filter(it => !usedPatterns.has(it.patternId) && want.some(q => it.qualities.includes(q)));
+  // never repeat an exercise of this week when there is any alternative
+  const fresh = matching.filter(it => !avoid.has(it.id));
+  const pool = fresh.length ? fresh : matching;
+  if (!pool.length) return null;
+  // sample among the best few (variety without losing the priority order)
+  const ranked = pool.map(it => [score(it), it]).sort((a, b) => a[0] - b[0]);
+  const top = ranked.filter(([s]) => s < ranked[0][0] + 10).slice(0, 40);
+  return top[Math.floor(rand() * top.length)][1];
+}
+
+/**
+ * Build one coherent session.
+ * @param {{ goal: string, family: string, sportFamily?: string, lp?: Object, seed: string, avoid?: Set<string> }} p
+ *   family: the catalog family for the main work (the sport); sportFamily: rehab + sport's sport family
+ * @returns {{ goal, items: Array<{ item, role }>, coherence: Object }}
+ */
+export function buildSession({ goal, family, sportFamily = null, lp = {}, seed, avoid = new Set() }) {
+  const g = GOALS[goal] ? goal : 'strength';
+  const rand = rng(`${seed}|${g}`);
+  const fam = g === 'rehabSport' ? (sportFamily || family) : family;
+  const catalog = buildCatalog(fam, lp).filter(it => allowedInGoal(it, g));
+  const usedPatterns = new Set();
+  const items = [];
+  for (const block of TEMPLATE(g)) {
+    const doseOk = (it) => (block.role === 'prep' ? PREP_DOSES.has(it.variation.dose)
+      : block.role === 'cooldown' ? COOL_DOSES.has(it.variation.dose)
+        : it.doseFit.some(q => block.want.includes(q) || GOALS[g].main.includes(q)));
+    let cands = catalog.filter(doseOk);
+    // rehab + sport: the support block uses the SPORT's technique patterns, gently (no explosive)
+    if (g === 'rehabSport' && block.role === 'support') cands = cands.filter(it => it.variation.tempo !== 'explosive');
+    for (let k = 0; k < block.n; k++) {
+      const it = pick(cands, block.want, rand, usedPatterns, avoid);
+      if (!it) break;
+      usedPatterns.add(it.patternId);
+      items.push({ item: it, role: block.role });
+    }
+  }
+  return { goal: g, items, coherence: coherenceReport(items, g) };
+}
+
+/** Share of main + support exercises that serve the goal (100 = fully coherent). */
+export function coherenceReport(items, goal) {
+  const g = GOALS[goal];
+  const core = items.filter(x => x.role === 'main' || x.role === 'support');
+  const onGoal = core.filter(x => {
+    const want = x.role === 'main' ? g.main : [...g.main, ...g.support];
+    return x.item.qualities.some(q => want.includes(q));
+  });
+  const offGoal = core.filter(x => !onGoal.includes(x)).map(x => x.item.id);
+  const mainOnGoal = items.filter(x => x.role === 'main').every(x => x.item.qualities.some(q => g.main.includes(q)));
+  return { pct: core.length ? Math.round((100 * onGoal.length) / core.length) : 100, mainOnGoal, offGoal };
+}
+
+// ---- Day goal from the plan's day (AI focus text) + the track ----
+const GOAL_WORDS = [
+  ['rehabSport', ['שיקום משולב', 'rehab + sport', 'rehab and sport']],
+  ['rehab', ['שיקום', 'rehab', 'מניעת פציעות', 'injury prevention', 'פיזיותרפ']],
+  ['speed', ['מהירות', 'ספרינט', 'האצה', 'speed', 'sprint', 'acceleration']],
+  ['agility', ['זריזות', 'שינויי כיוון', 'agility', 'change of direction', 'קואורדינציה', 'coordination']],
+  ['power', ['כוח מתפרץ', 'פליאומטר', 'קפיצ', 'power', 'plyo', 'explosive', 'נפיצות']],
+  ['endurance', ['סיבולת', 'אירובי', 'endurance', 'aerobic', 'conditioning', 'כושר גופני', 'אינטרוול']],
+  ['mobility', ['גמישות', 'מוביליטי', 'ניידות', 'mobility', 'flexibility', 'התאוששות', 'recovery']],
+  ['technique', ['טכניקה', 'מיומנות', 'technique', 'skill', 'בעיט', 'מסיר', 'כדור', 'דריבל', 'זריקה', 'מכות']],
+  ['strength', ['כוח', 'חיזוק', 'strength', 'שריר']],
+];
+
+/**
+ * @param {Object} day - plan day ({ focus, name, theme, ... })
+ * @param {{ track: string, sportFamily: string, dayIndex: number }} ctx
+ */
+export function inferGoal(day, { track, sportFamily, dayIndex = 0 } = {}) {
+  const text = [day?.focus, day?.name, day?.title, day?.theme].filter(Boolean).join(' ').toLowerCase();
+  let goal = GOAL_WORDS.find(([, words]) => words.some(w => text.includes(w)))?.[0] || null;
+  if (track === 'rehab_only') {
+    // Rehab only: rehab / mobility sessions only
+    return goal === 'mobility' ? 'mobility' : 'rehab';
+  }
+  if (track === 'rehab_sport') {
+    // Rehab first: every session is rehab + sport (or pure rehab / mobility), never a hard sport session
+    if (goal === 'rehab' || goal === 'mobility') return goal;
+    return 'rehabSport';
+  }
+  if (goal === 'rehabSport') goal = 'rehab';
+  if (goal === 'technique' && !['field', 'court', 'racket', 'combat', 'seated'].includes(sportFamily)) goal = null;
+  if (goal) return goal;
+  const rotation = sportFamily === 'strength' ? ['strength', 'endurance', 'power', 'strength', 'mobility']
+    : sportFamily === 'endurance' ? ['endurance', 'speed', 'strength', 'endurance', 'mobility']
+      : sportFamily === 'seated' ? ['technique', 'strength', 'endurance', 'mobility']
+        : ['technique', 'speed', 'strength', 'agility', 'endurance', 'power'];
+  return rotation[dayIndex % rotation.length];
+}
+
+/** Pattern name for reports. */
+export const patternName = (id, lang = 'he') => PATTERNS[id]?.name[lang] || id;

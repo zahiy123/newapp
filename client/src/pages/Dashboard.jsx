@@ -13,6 +13,9 @@ import {
 } from '../utils/workoutStorage';
 import { loadWeeklyProgress, checkWeeklyReminder } from '../utils/weeklyGoals';
 import { availableEquipment, fitPlan } from '../engine/exercise/equipmentFit';
+import { FEATURES } from '../config/features';
+import { rebuildPlanFromCatalog, planContext } from '../engine/catalog/planBuilder';
+import { getLimbProfile } from '../engine/limbProfile';
 
 
 const LOCATIONS = [
@@ -420,10 +423,18 @@ export default function Dashboard() {
   }
 
   // Hard equipment fit of the plan shown (no ball → no ball drills; no weights → bodyweight versions)
-  const fittedPlan = useMemo(
-    () => fitPlan(trainingPlan, availableEquipment({ ...userProfile, equipment: currentEquipment, hasBall })),
-    [trainingPlan, userProfile, currentEquipment, hasBall],
-  );
+  const fittedPlan = useMemo(() => {
+    let plan = trainingPlan;
+    if (FEATURES.CATALOG_PLANS && plan?.weeks && userProfile) {
+      // Coherent catalog sessions: every exercise has a Ghost and serves the day's goal
+      try {
+        plan = rebuildPlanFromCatalog(plan, planContext(userProfile, getLimbProfile(userProfile), user?.uid), (userProfile.language || 'he') === 'he');
+      } catch (err) {
+        console.error('[Catalog] plan build failed — showing the AI plan:', err);
+      }
+    }
+    return fitPlan(plan, availableEquipment({ ...userProfile, equipment: currentEquipment, hasBall }));
+  }, [trainingPlan, userProfile, currentEquipment, hasBall, user?.uid]);
   const weeks = fittedPlan?.weeks || [];
   const currentWeek = weeks[activeWeek];
   const allComplete = trainingPlan && areAllWeeksComplete(trainingPlan);
@@ -757,6 +768,11 @@ export default function Dashboard() {
                   <span className="text-sm text-gray-500">{day.durationMinutes} {t('dashboard.minutes')}</span>
                 </div>
                 <p className="text-sm text-purple-600 font-medium">{day.focus}</p>
+                {day.goalName && (
+                  <p className="text-xs text-gray-500">
+                    {'🎯'} {isHe ? `מטרת האימון: ${day.goalName.he}` : `Session goal: ${day.goalName.en}`}
+                  </p>
+                )}
                 {day.workout_title && (
                   <p className="text-base font-bold text-gray-900">{day.workout_title}</p>
                 )}

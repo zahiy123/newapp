@@ -385,6 +385,130 @@ const RAW_EXPERT = {
   },
 };
 
+// ---------------- Speed / power / balance patterns (Stage 3.1 catalog) ----------------
+const STRIDE_ARMS = { armA: 5, armB: 5, elbow: 90, trunk: 5 };
+
+RAW_EXPERT.buttKicks = {
+  id: 'buttKicks', name: msg('בעיטות ישבן', 'Butt kicks'), precision: 'expert', kind: 'cyclic',
+  posture: 'standing', cameraView: 'side', require: ['legs', 'torso'], primary: 'knee',
+  joints: { knee: { rest: [150, 180], peak: [30, 75] } },
+  rules: [
+    { id: 'heel_low', metric: 'knee', op: '>', value: 95, severity: 'error', when: 'peak',
+      msg: msg('עקב לכיוון הישבן — כופף את הברך עד הסוף', 'Heel to the glutes — bend the knee fully'),
+      why: msg('כפיפת ברך מלאה מקצרת את מנוף הרגל ומאיצה את חזרתה קדימה בריצה', 'A full knee bend shortens the leg lever and speeds its recovery in running') },
+  ],
+  dynamics: [
+    { id: 'soft_landing', on: 'landing', feature: 'absorptionDeg', op: '<', value: 6, severity: 'error',
+      msg: msg('נחיתה רכה על כריות כף הרגל', 'Land softly on the balls of the feet'),
+      why: msg('נחיתה רכה מגינה על הברך ומאפשרת קצב מהיר', 'A soft landing protects the knee and allows a fast rhythm') },
+  ],
+  ghost: {
+    view: 'side', base: 'stride', alternate: true, periodMs: 700, restT: 0, peakT: 0.125,
+    keyframes: [
+      { t: 0, a: { 'A.knee': 168, 'B.thigh': 0, 'B.knee': 165, ...STRIDE_ARMS } },
+      { t: 0.25, a: { 'A.knee': 152, 'B.thigh': -8, 'B.knee': 45, ...STRIDE_ARMS, armA: 30, armB: -20 } },
+      { t: 0.6, a: { 'A.knee': 162, 'B.thigh': -2, 'B.knee': 90, ...STRIDE_ARMS, armA: 15, armB: -10 } },
+      { t: 0.95, a: { 'A.knee': 170, 'B.thigh': 0, 'B.knee': 165, ...STRIDE_ARMS } },
+    ],
+  },
+};
+
+RAW_EXPERT.aSkip = {
+  ...RAW_EXPERT.runInPlace,
+  id: 'aSkip', name: msg('צעדי A (A-skip)', 'A-skip'),
+  joints: { ...RAW_EXPERT.runInPlace.joints, hip: { rest: [158, 180], peak: [80, 110] } },
+  dynamics: [...RAW_EXPERT.runInPlace.dynamics.filter(d => d.id !== 'cadence'),
+    // judged on the deepest point of every stride (temporal), not on a single frame
+    { id: 'knee_drive', on: 'rep', feature: 'primaryPeak', op: '>', value: 112, severity: 'error',
+      msg: msg('ברך למעלה עד גובה הירך, כף רגל מכוונת למעלה', 'Knee up to hip height, toes pulled up'),
+      why: msg('צעד A מלמד את תנועת הברך והדריכה של ריצה מהירה', 'The A-skip teaches the knee drive and foot strike of fast running') }],
+  ghost: {
+    ...RAW_EXPERT.runInPlace.ghost, periodMs: 1000,
+    keyframes: [
+      // contact → absorb on the support knee → small hop at the knee drive → land
+      { t: 0, a: { 'A.knee': 168, 'B.thigh': 5, 'B.knee': 168, trunk: 4, armA: 5, armB: 5, elbow: 90, rise: 0 } },
+      { t: 0.2, a: { 'A.knee': 145, 'B.thigh': 55, 'B.knee': 95, trunk: 4, armA: 30, armB: -20, elbow: 90, rise: 0 } },
+      { t: 0.35, a: { 'A.knee': 172, 'B.thigh': 85, 'B.knee': 85, trunk: 4, armA: 45, armB: -30, elbow: 90, rise: 0.06 } },
+      { t: 0.6, a: { 'A.knee': 166, 'B.thigh': 35, 'B.knee': 140, trunk: 4, armA: 20, armB: -15, elbow: 90, rise: 0 } },
+      { t: 0.75, a: { 'A.knee': 168, 'B.thigh': 15, 'B.knee': 162, trunk: 4, armA: 10, armB: -5, elbow: 90, rise: 0 } },
+      { t: 0.95, a: { 'A.knee': 170, 'B.thigh': 5, 'B.knee': 168, trunk: 4, armA: 5, armB: 5, elbow: 90, rise: 0 } },
+    ],
+  },
+};
+
+RAW_EXPERT.accelMarch = {
+  id: 'accelMarch', name: msg('האצה בהטיה — צעדת קיר', 'Acceleration lean — wall march'), precision: 'expert', kind: 'cyclic',
+  posture: 'standing', cameraView: 'side', require: ['legs', 'torso'], primary: 'hip',
+  joints: { hip: { rest: [150, 180], peak: [75, 115] } },
+  rules: [
+    { id: 'lean_more', metric: 'trunkLean', op: '<', value: 25, severity: 'error', when: 'any',
+      msg: msg('הטה את כל הגוף קדימה מהקרסוליים — קו ישר מהראש לעקב', 'Lean the whole body forward from the ankles — a straight line head to heel'),
+      why: msg('בהאצה הגוף נוטה קדימה כדי לדחוף את הקרקע אחורה — עמידה זקופה בולמת את ההאצה', 'Accelerating, the body leans forward to push the ground back — standing tall brakes the acceleration') },
+    { id: 'lean_too_much', metric: 'trunkLean', op: '>', value: 65, severity: 'error', when: 'any',
+      msg: msg('אל תתקפל במותניים — הגוף נוטה כקו אחד', "Don't fold at the waist — the body leans as one line"),
+      why: msg('קיפול במותן מנתק את הכוח מהרגליים', 'Folding at the waist disconnects the force from the legs') },
+  ],
+  dynamics: [],
+  ghost: {
+    view: 'side', base: 'stride', alternate: true, periodMs: 900, restT: 0, peakT: 0.175,
+    keyframes: [
+      // B.thigh is from vertical: with a 45° body lean, −35 = in line with the body, 50 = ~90° to the trunk
+      { t: 0, a: { 'A.knee': 172, 'A.shank': 40, 'B.thigh': -35, 'B.knee': 160, trunk: 45, armA: 0, armB: 20, elbow: 90 } },
+      { t: 0.35, a: { 'A.knee': 170, 'A.shank': 42, 'B.thigh': 50, 'B.knee': 75, trunk: 45, armA: 60, armB: -10, elbow: 90 } },
+      { t: 0.7, a: { 'A.knee': 172, 'A.shank': 40, 'B.thigh': 10, 'B.knee': 110, trunk: 45, armA: 30, armB: 5, elbow: 90 } },
+      { t: 0.95, a: { 'A.knee': 172, 'A.shank': 40, 'B.thigh': -35, 'B.knee': 160, trunk: 45, armA: 0, armB: 20, elbow: 90 } },
+    ],
+  },
+};
+
+RAW_EXPERT.kneeUpBalance = {
+  id: 'kneeUpBalance', name: msg('עמידה על רגל אחת — ברך למעלה', 'Single-leg balance — knee up'), precision: 'expert', kind: 'hold',
+  posture: 'standing', cameraView: 'side', require: ['legs', 'torso'], primary: 'hip',
+  joints: { hip: { rest: [75, 115] } },
+  rules: [
+    { id: 'knee_drop', metric: 'hip', op: '>', value: 130, severity: 'error', when: 'any',
+      msg: msg('ברך למעלה — ירך מקבילה לרצפה', 'Knee up — thigh parallel to the floor'),
+      why: msg('ההחזקה בגובה מפעילה את מייצבי האגן של רגל התמיכה', 'Holding it high works the pelvic stabilizers of the support leg') },
+    { id: 'trunk_lean', metric: 'trunkLean', op: '>', value: 15, severity: 'error', when: 'any',
+      msg: msg('גו זקוף — דחוף את הראש לתקרה', 'Stand tall — push the top of your head to the ceiling'),
+      why: msg('גו זקוף משאיר את מרכז הכובד מעל רגל התמיכה', 'A tall trunk keeps the center of mass over the support foot') },
+  ],
+  dynamics: [
+    { id: 'hold_steady', on: 'window', feature: 'swayRatio', op: '>', value: 0.1, severity: 'error',
+      msg: msg('יציב — מבט לנקודה קבועה', 'Steady — fix your eyes on one point'),
+      why: msg('שליטה בהתנדנדות היא האימון של הקרסול והאגן', 'Controlling the sway is what trains the ankle and the hip') },
+  ],
+  ghost: {
+    view: 'side', base: 'stride', periodMs: 4000, restT: 0,
+    keyframes: [{ t: 0, a: { 'A.knee': 172, 'B.thigh': 80, 'B.knee': 90, trunk: 2, armA: 20, armB: 20, elbow: 160 } }],
+  },
+};
+
+RAW_EXPERT.jumpSquat = {
+  id: 'jumpSquat', name: msg('קפיצת סקוואט', 'Squat jump'), precision: 'expert', kind: 'reps',
+  posture: 'standing', cameraView: 'side', require: ['legs', 'torso'], primary: 'knee',
+  joints: { knee: { rest: [165, 180], peak: [80, 115] } },   // rest includes the full extension of the take-off / flight
+  rules: [
+    UPRIGHT_TORSO(60),
+  ],
+  dynamics: [
+    { id: 'soft_landing', on: 'landing', feature: 'absorptionDeg', op: '<', value: 15, severity: 'error',
+      msg: msg('נחיתה רכה — ברכיים מתכופפות בנחיתה', 'Land soft — knees bend as you land'),
+      why: msg('בנחיתה הרגליים הן בולם הזעזועים — נחיתה נוקשה מעמיסה על הברכיים והגב', 'On landing the legs are the shock absorbers — a stiff landing loads the knees and back') },
+  ],
+  ghost: {
+    view: 'side', base: 'stand', periodMs: 2000, restT: 0, peakT: 0.3,
+    keyframes: [
+      { t: 0, a: { knee: 172, hip: 170, shoulder: 15, elbow: 165, rise: 0 } },
+      { t: 0.3, a: { knee: 95, hip: 90, shoulder: -30, elbow: 165, rise: 0 } },
+      { t: 0.42, a: { knee: 178, hip: 176, shoulder: 150, elbow: 165, rise: 0.25 } },
+      { t: 0.5, a: { knee: 176, hip: 174, shoulder: 160, elbow: 165, rise: 0.38 } },
+      { t: 0.62, a: { knee: 160, hip: 160, shoulder: 60, elbow: 165, rise: 0 } },
+      { t: 0.72, a: { knee: 128, hip: 125, shoulder: 40, elbow: 165, rise: 0 } },
+    ],
+  },
+};
+
 // Movement-pattern tags (matched by the sport library)
 const TAGS = {
   squat: ['strength', 'lowerBody', 'bilateral', 'squatPattern'],
@@ -403,6 +527,11 @@ const TAGS = {
   rehabElbowFlex: ['strength', 'upperBody', 'arm', 'rehab'],
   runInPlace: ['gait', 'cyclic', 'landing', 'conditioning'],
   footballKick: ['strike', 'chain', 'singleLegStance', 'ballSkill'],
+  buttKicks: ['gait', 'cyclic', 'landing', 'conditioning'],
+  aSkip: ['cyclic', 'landing', 'coordination', 'drill'],
+  accelMarch: ['cyclic', 'acceleration'],
+  kneeUpBalance: ['hold', 'isometric', 'balance', 'singleLegStance', 'lowerBody'],
+  jumpSquat: ['plyometric', 'landing', 'lowerBody', 'bilateral'],
 };
 
 // High knees = running in place with a higher knee drive
@@ -451,8 +580,8 @@ const CUE_TO_PROFILE = {
   shoulder: 'shoulderPress', lateral: 'lateralRaise', frontRaise: 'frontRaise', rehabFrontRaise: 'rehabFrontRaise',
   bicep: 'bicepCurl', rehabElbowFlex: 'rehabElbowFlex',
   // legs (standing)
-  running: 'runInPlace', highKnees: 'highKnees', kick: 'footballKick',
-  calfRaise: 'legsStanding', buttKicks: 'legsStanding',
+  running: 'runInPlace', highKnees: 'highKnees', kick: 'footballKick', buttKicks: 'buttKicks',
+  calfRaise: 'legsStanding',
   amputeeKick: 'legsStanding', pass: 'legsStanding', firstTouch: 'legsStanding', juggle: 'legsStanding',
   dribbling: 'legsStanding', footwork: 'legsStanding', splitStep: 'legsStanding', coneDrill: 'legsStanding',
   quickTurns: 'legsStanding', shieldBall: 'legsStanding', crossover: 'legsStanding', defensiveSlide: 'legsStanding',

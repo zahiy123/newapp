@@ -548,6 +548,62 @@ Two critical corrections to the existing onboarding (Stages 1B/1C), completed **
     - Client 573 pass, 0 new failures.
   - *Server redeploy needed* for the server-side ball guard. The client already enforces the rule on its own.
   - *Found (pre-existing debt):* in the analyzer map the generic keyword "זריקה" comes before the wheelchair entries, so "זריקה כיסא גלגלים" is analysed as standing shooting. The keyword order must be fixed in the special sport libraries step.
+- **Exercise catalog + coherent sessions (owner requirement, 2026-10-06; backup tag `backup-2026-10-06-pre-catalog` = `90e4dc3`):**
+  - *Owner requirement:*
+    1. About 300+ varied exercises per sport, with no boring repeats.
+    2. **Every exercise has a live, matching Ghost.**
+    3. **Absolute session coherence:** a football speed session is (almost) entirely speed, accelerations and explosive footwork; a rehab + sport session serves the rehab need first, with the sport's tools; every exercise prepares for or supports the session goal, with nothing thrown in from another track.
+  - **Architecture: exercise = MOVEMENT PATTERN × VARIATION.**
+    - Hand-writing hundreds of exercises, or letting the AI invent free names, cannot guarantee a Ghost. So the catalog is generated from patterns that have a verified Ghost, and **an exercise without a Ghost cannot exist.**
+    - `engine/catalog/patterns.js`: 30 patterns.
+      - 22 measured expert patterns: the 17 existing ones + 5 new speed / power / balance patterns with Ghosts — **butt kicks, A-skip, acceleration lean (wall march, 45° body lean), single-leg knee-up balance, squat jump** (the Ghost really leaves the floor and lands, which the landing / shock-absorption engine measures).
+      - Plus Ghost-move patterns: side steps, knee-lift march, arm circles, trunk rotations, shadow chest pass, shadow forehand, shadow punches, front kick.
+      - Each pattern has qualities (speed / acceleration / agility / power / plyometric / strength / endurance / core / stability / balance / mobility / technique / rehab…), sport families, body needs (standing / two legs / floor / arms → the limbProfile and wheelchair filter) and an external-focus coaching cue ("push the floor away", "drop straight down like an elevator").
+    - `engine/catalog/catalog.js`: the variations change the exercise AND its Ghost / profile:
+      - **Tempo:** standard / controlled 3-1-1 (Ghost ×1.6) / **explosive = fast drive with a controlled lowering**. The Ghost is asymmetric (`toPeakShare`): squat / push / hinge get a fast return; press / raise / bridge get a fast push.
+      - **Partial range (rehab):** the Ghost's peak is halfway, and the measured targets move with it.
+      - **Side** (left / right / alternating): the Ghost works that leg.
+      - **Dose:** the prescription per goal.
+      - Ids are `pattern|tempo|range|side|dose`.
+    - **Catalog size per sport family: field 357, court 355, racket 355, combat 367, endurance 351, rehab 351, strength 351, seated 359** (25-27 distinct patterns per family). An above-knee amputee or a wheelchair user gets their own subset (no two-leg jumps / nothing standing).
+    - *Honest note:* the 300+ come from about 26 distinct movements × variations. Real breadth grows with every new pattern; each new Ghost pattern adds about 12-54 exercises to every family it belongs to.
+  - **Coherent sessions** `engine/catalog/sessionPlanner.js`:
+    - Nine goals: speed, agility, power, strength, endurance, technique, mobility, rehab, rehab + sport.
+    - A template of blocks: **prep** (activation / coordination / mobility) → **main** (only the goal's qualities, with the goal's dose) → **support** (what the goal relies on) → **cooldown** (mobility).
+    - Selection: seeded random choice (variety across days and weeks, the same day is stable), never the same pattern twice in a session, never the same exercise twice in a week when an alternative exists.
+    - Rehab / mobility: no plyometrics, no explosive tempo.
+    - **Rehab + sport:** the main block is rehab / stability with a controlled tempo; the support block is the sport's technique as safe shadow drills.
+    - `coherenceReport`: the share of main + support exercises on goal, whether the main block is all on goal, and the list of off-goal exercises.
+  - **Plan engine:**
+    - `engine/catalog/planBuilder.js`: the AI keeps deciding the **week structure and each day's focus**. Each day's goal is read from the focus (Hebrew / English keywords).
+      - Rehab-only tracks are always rehab / mobility.
+      - Rehab + sport is always rehab-first.
+      - Days without a clear focus rotate goals per sport family.
+      - The day is filled from the catalog.
+      - Deterministic per user / week / day, so the **dashboard** and the **training screen** show exactly the same session.
+    - Dashboard: "🎯 Session goal: <goal>" under each day.
+    - Training:
+      - A catalog exercise brings its exact profile + Ghost by `catalogId` (not by its name).
+      - Timed exercises (intervals "6×10 s", holds "3×30 s") are counted as **seconds of work**, and the clock stops when the trainee is out of position (`timedAnalyzer.js`).
+      - With the catalog on, live AI adaptation does not insert exercises without a Ghost.
+    - Server prompt: every day has ONE goal written at the start of its focus (fixed vocabulary), and every exercise serves it.
+    - Flag `FEATURES.CATALOG_PLANS` (off → the AI exercises as before). Errors fall back to the AI plan.
+  - *Tests:*
+    - +16 catalog / planner tests (`engine/catalog/__tests__/catalog.test.js`):
+      - **Every catalog item in every family has a drawable Ghost.**
+      - **Every Ghost variation of a measured pattern** (70+ tempo / range / side combinations) is a clean ≥ 85% demonstration.
+      - The side variation moves the right leg; ids round-trip; sizes ≥ 300 per family; body fit (above-knee / wheelchair / below-knee).
+      - **A football speed session's main block is 100% speed / acceleration** (10 seeds).
+      - **Every goal in every family is 100% coherent.**
+      - Rehab + sport is rehab-first with no plyometrics / explosive tempo, and has sport technique in support.
+      - Variety and stability; a week has no repeated exercise; an intruder exercise is flagged.
+      - Day goal inference; a whole plan rebuilt with a Ghost id + training parameters on every exercise; no catalog exercise needs equipment.
+    - +2 timed-analyzer tests; the 5 new patterns pass the all-sports Ghost sweep.
+    - Client 590 pass, server 10/10, 0 new failures.
+  - **Next (catalog growth, inside 3.1 → special sport libraries):**
+    - New Ghost patterns per sport: football — lateral bound, deceleration stop, crossover step, crutch kick / crutch sprint; basketball — shooting form, defensive stance, rebound jump; tennis — split step, lunge recovery; running — wall drill variants, bounding, ankling; martial arts — roundhouse, guard stance, sprawl; wheelchair — push stroke, seated rotations; floor core — dead bug, bird dog, side plank, mountain climber (prone stride base).
+    - Each new pattern multiplies into every family it serves.
+    - The server prompt moves from free exercises to day goals only (saves AI tokens).
    3. **Profile-based rep counting with a quality score per rep** (replacing the per-exercise analyzers step by step), including the correction hierarchy, timing and external-focus cues.
    4. **Special sport libraries:** leg amputees (amputee football: crutch kick / crutch sprint / balance / header / goalkeeper), wheelchair (push stroke, seated throws, shoulder protection), running (opened for selection), then tennis / martial arts (trunk-rotation metric) and basketball.
    - Following (already in the roadmap): velocity-based fatigue detection (stop the set at ~20% rep-speed loss or form decay), automatic progression / regression, Pain Traffic Light integration, two-way voice ("why?"), best vs. weakest rep clips with the Ghost in the Stage 4 report.
@@ -713,6 +769,11 @@ Two critical corrections to the existing onboarding (Stages 1B/1C), completed **
 | `client/src/engine/exercise/equipmentFit.js` | Hard equipment match: what an exercise needs, what the trainee has (ball / weights / bands), substitution by movement pattern |
 | `server/services/equipmentFit.js` | Server-side guard: no ball → no ball drill survives plan generation |
 | `client/src/engine/training/demoGhost.js` | Which demo Ghost an exercise gets (expert profile Ghost or a truly matching movement, never a misleading one) |
+| `client/src/engine/catalog/patterns.js` | Movement patterns of the catalog (Ghost source, qualities, sports, body needs, external-focus cue) |
+| `client/src/engine/catalog/catalog.js` | Catalog = pattern × variation (tempo / range / side / dose), each with its Ghost + profile; ~350+ per sport family |
+| `client/src/engine/catalog/sessionPlanner.js` | Coherent goal-based sessions (prep / main / support / cooldown) + coherence report + day-goal inference |
+| `client/src/engine/catalog/planBuilder.js` | Rebuilds the AI week plan's days from the catalog (deterministic, shared by dashboard + training) |
+| `client/src/engine/training/timedAnalyzer.js` | Timed exercises: seconds of work, paused when out of position |
 | `client/src/engine/training/rangeGauge.js` | When the ROM gauge is shown (dynamic rep exercises only) |
 | `client/src/engine/exercise/confidence.js` | Silence when unsure: camera-view detection + tracking confidence with hysteresis |
 | `client/src/engine/validation/clipRecorder.js` / `agreement.js` | Validation dataset: per-rep clips (landmarks only) + agreement / false alarms / misses / threshold tuning by replay |
@@ -787,3 +848,4 @@ Two critical corrections to the existing onboarding (Stages 1B/1C), completed **
 - **2026-10-05:** **Owner UX directive: trainees never label or rate; the coach positions them like a human coach.** New positioning coach (`setupCoach.js`): one precise spoken + on-screen instruction at a time (step back / tilt the camera down or up / move left or right / come closer / turn side-on / face the camera / add light), nothing counts until positioned right, then "Great, now I can see you — let's start!". The validation labelling stays an internal tool for the owner / clinicians (`?validate=1`). Principles updated in Stage 3.1. 15 tests; client 552 pass, 0 new failures. Not yet committed.
 - **2026-10-06:** Backup tag `backup-2026-10-06-pre-local-mediapipe` (`9f08c08`: positioning coach + validation work, committed). **Local MediaPipe:** Wasm + models served from `public/mediapipe` (versioned, immutable cache, application/wasm, exact version pin, idle prewarm), no CDN; verified in headless Chromium (runtime 49 ms + model 241 ms locally, zero external requests). **Exercise demo Ghost** on by default from the briefing through the calibration and the exercise (same profile as the evaluation). **ROM gauge** only for dynamic repetition exercises (never static holds / ball drills). +8 tests; client 560 pass, 0 new failures. Ready to deploy — awaiting the owner.
 - **2026-10-06:** Backup tag `backup-2026-10-06-pre-ghost-equipment-fix` (`39a1a74`). **Ghost on by default** in the warm-up and from the briefing through every set and rest of the exercise; the old skeleton Ghost retired; demo = expert profile Ghost or a truly matching movement (31/99 exercise types today); clearer overlay. **Hard equipment match:** `hasBall` profile fact (dashboard Yes / No, asked before a workout with ball drills, saved on an explicit tap), `equipmentFit` substitutes by movement pattern everywhere exercises are shown (dashboard, training, live adaptation) + server prompt rule + server post-generation guard. +13 client / +2 server tests; client 573 pass, server 10/10, 0 new failures. Not yet committed — server redeploy needed for the server guard.
+- **2026-10-06:** **Exercise catalog + coherent sessions (owner requirement: 300+ exercises per sport, a Ghost for every exercise, absolute session coherence).** Commit `90e4dc3` (Ghost / equipment fixes) + backup tag `backup-2026-10-06-pre-catalog`. Exercise = movement pattern × variation (tempo incl. asymmetric explosive, partial range, side, dose); 30 patterns incl. 5 new Ghost patterns (butt kicks, A-skip, acceleration lean, single-leg balance, squat jump with real flight / landing); 351-367 exercises per sport family, every one with a verified Ghost. Goal-based session templates (9 goals; prep → main → support → cooldown), 100% coherence in tests (football speed = all speed / acceleration; rehab + sport = rehab first, no plyometrics); the AI keeps the week structure, each day is filled from the catalog (dashboard and training identical); timed exercises count seconds of work; server prompt: one goal per day. +18 tests; client 590 pass, server 10/10, 0 new failures. Flag `CATALOG_PLANS`. Not yet committed.

@@ -70,7 +70,7 @@ describe('Expert Execution Profiles — coverage', () => {
         expect(r.msg.he && r.msg.en).toBeTruthy();
       }
       if (p.ghost.keyframes) {
-        expect(['cyclic', 'strike'], p.id).toContain(p.kind);
+        expect(['cyclic', 'strike', 'hold', 'reps'], p.id).toContain(p.kind);
         const keys = Object.keys(p.ghost.keyframes[0].a).sort();
         for (const k of p.ghost.keyframes) expect(Object.keys(k.a).sort(), p.id).toEqual(keys);
       } else {
