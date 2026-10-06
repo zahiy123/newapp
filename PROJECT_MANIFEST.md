@@ -113,7 +113,6 @@ Readiness Rating (1-5 emoji, 3 seconds)
 | 11 | `checkpoint-2026-10-06-checkin` | `a4947f5` | yes | + kick volume, big Ghost, split balance sets, crutch safety, daily check-in, one-leg crutch work, ball-day technique, arm-amputee / goalkeeper adaptation |
 
 | 12 | `checkpoint-2026-10-06-front-view` | `73ee592` | yes | + instant counting, distance-sized Ghost on the body for every exercise, true left / right splits, no crutch wording with a prosthesis, grouped kicks, front-view measurement |
-
 | 13 | `checkpoint-2026-10-06-pro-ghost` | `ad47b25` | **yes — the current production (2026-10-06)** | + early start with an immediate count, steady feet-anchored 3/4-view Ghost, a full set per leg for kicks, shadow ball, wide camera |
 **How to return to a checkpoint:**
 - **To a deployed point (#1, #2, #3, #5, #8, #9, #10, #11, #12, #13): instant rollback with no code change** — Vercel → Deployments → the deployment of that commit → "Promote to Production".
