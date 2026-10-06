@@ -16,7 +16,7 @@ import { availableEquipment, fitPlan } from '../engine/exercise/equipmentFit';
 import { FEATURES } from '../config/features';
 import { rebuildPlanFromCatalog, planContext } from '../engine/catalog/planBuilder';
 import { selectedSessionGoals, PROFILE_GOALS } from '../engine/catalog/trackGoals';
-import { getLimbProfile } from '../engine/limbProfile';
+import { getLimbProfile, trainingLimbs } from '../engine/limbProfile';
 
 
 const LOCATIONS = [
@@ -431,7 +431,7 @@ export default function Dashboard() {
     if (FEATURES.CATALOG_PLANS && plan?.weeks && userProfile) {
       // Coherent catalog sessions: every exercise has a Ghost and serves the day's goal
       try {
-        plan = rebuildPlanFromCatalog(plan, planContext(userProfile, getLimbProfile(userProfile), user?.uid), (userProfile.language || 'he') === 'he');
+        plan = rebuildPlanFromCatalog(plan, planContext(userProfile, trainingLimbs(getLimbProfile(userProfile)), user?.uid), (userProfile.language || 'he') === 'he');
       } catch (err) {
         console.error('[Catalog] plan build failed — showing the AI plan:', err);
       }

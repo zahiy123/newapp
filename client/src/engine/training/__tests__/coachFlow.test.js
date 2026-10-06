@@ -99,3 +99,21 @@ describe('Drive voice', () => {
     expect(startPositionPrompt(3, null, false)).toContain('start position');
   });
 });
+
+import { splitLegOrder, legLabel, liftedLeg, splitStartText, splitSwitchText } from '../coachFlow.js';
+import { getLimbProfile } from '../../limbProfile.js';
+
+describe('Split balance sets — both legs, the coach calls the switch', () => {
+  const bk = getLimbProfile({ scanData: { classification: 'TRANSTIBIAL_AMPUTEE', prostheticSide: 'left' } });
+  it('starts on the base leg, then the prosthesis', () => {
+    expect(splitLegOrder(bk)).toEqual({ first: 'right', second: 'left' });
+    expect(splitLegOrder({})).toEqual({ first: 'right', second: 'left' });
+    expect(legLabel('left', bk, true)).toBe('רגל שמאל — הפרוטזה');
+    expect(liftedLeg('right')).toBe('left');
+  });
+  it('clear spoken start and switch lines', () => {
+    expect(splitStartText(bk, true)).toContain('רגל ימין');
+    expect(splitStartText(bk, true)).toContain('נחליף רגל');
+    expect(splitSwitchText(bk, true)).toMatch(/^החלף רגל! עכשיו עמידה על רגל שמאל — הפרוטזה/);
+  });
+});

@@ -92,15 +92,20 @@ function allowedInGoal(item, goal) {
 
 // A pattern is used once per session — except a unilateral skill in a technique session, where
 // each side is its own exercise (right foot, left foot, alternating: the weak side matters most)
-const useKey = (it, goal) => (goal === 'technique' && it.variation.side !== 'both' ? `${it.patternId}|${it.variation.side}` : it.patternId);
+// in the sport skill block a power set and an accuracy set of the same kick are different exercises
+const useKey = (it, goal, role = null) => {
+  if (role === 'sport') return `${it.patternId}|${it.variation.side}|${it.variation.dose}`;
+  return goal === 'technique' && it.variation.side !== 'both' ? `${it.patternId}|${it.variation.side}` : it.patternId;
+};
 
-function pick(candidates, want, rand, usedPatterns, avoid, requireAll = [], goal = null) {
+function pick(candidates, want, rand, usedPatterns, avoid, requireAll = [], goal = null, role = null) {
   // preference: earlier `want` quality first; then not used this week; then random
   const score = (it) => {
     const idx = want.findIndex(q => it.qualities.includes(q));
     return (idx < 0 ? 99 : idx) * 10 + (avoid.has(it.id) ? 5 : 0) + rand();
   };
-  const matching = candidates.filter(it => !usedPatterns.has(useKey(it, goal)) && !usedPatterns.has(it.patternId) && want.some(q => it.qualities.includes(q))
+  const sideAware = goal === 'technique' || role === 'sport';
+  const matching = candidates.filter(it => !usedPatterns.has(useKey(it, goal, role)) && (sideAware || !usedPatterns.has(it.patternId)) && want.some(q => it.qualities.includes(q))
     && requireAll.every(q => it.qualities.includes(q)));
   // never repeat an exercise of this week when there is any alternative
   const fresh = matching.filter(it => !avoid.has(it.id));
@@ -118,7 +123,7 @@ function pick(candidates, want, rand, usedPatterns, avoid, requireAll = [], goal
  *   family: the catalog family for the main work (the sport); sportFamily: rehab + sport's sport family
  * @returns {{ goal, items: Array<{ item, role }>, coherence: Object }}
  */
-export function buildSession({ goal, family, sportFamily = null, lp = {}, seed, avoid = new Set(), patterns = null }) {
+export function buildSession({ goal, family, sportFamily = null, lp = {}, seed, avoid = new Set(), patterns = null, sportBlock = null }) {
   const g = GOALS[goal] ? goal : 'strength';
   const rand = rng(`${seed}|${g}`);
   const fam = g === 'rehabSport' ? (sportFamily || family) : family;
@@ -128,23 +133,29 @@ export function buildSession({ goal, family, sportFamily = null, lp = {}, seed, 
   const items = [];
   // Fill the goal's MAIN block first (it gets the best-fitting patterns), then support, prep and
   // cooldown; the session is then ordered prep → main → support → cooldown
-  const ORDER = ['main', 'support', 'prep', 'cooldown'];
-  const blocks = TEMPLATE(g).slice().sort((a, b) => ORDER.indexOf(a.role) - ORDER.indexOf(b.role));
+  const ORDER = ['main', 'support', 'sport', 'prep', 'cooldown'];
+  // A sport with a dedicated skill block (amputee football: kicks in EVERY session) gets it after support
+  const template = sportBlock ? [...TEMPLATE(g), { role: 'sport', n: sportBlock.n, want: sportBlock.want }] : TEMPLATE(g);
+  const blocks = template.slice().sort((a, b) => ORDER.indexOf(a.role) - ORDER.indexOf(b.role));
   for (const block of blocks) {
     const doseOk = (it) => (block.role === 'prep' ? PREP_DOSES.has(it.variation.dose)
       : block.role === 'cooldown' ? COOL_DOSES.has(it.variation.dose)
         : it.doseFit.some(q => block.want.includes(q) || GOALS[g].main.includes(q) || (GOALS[g].dose || []).includes(q)));
-    let cands = catalog.filter(doseOk);
+    // the sport skill block draws from the SPORT's family (kicks), whatever the session family
+    const source = block.role === 'sport' && sportFamily && sportFamily !== fam
+      ? buildCatalog(sportFamily, lp).filter(it => allowedInGoal(it, g) && (!patterns || patterns.has(it.patternId)))
+      : catalog;
+    let cands = block.role === 'sport' ? source.filter(it => it.variation.tempo !== 'explosive') : source.filter(doseOk);
     // rehab + sport: the support block uses the SPORT's technique patterns, gently (no explosive)
     if (g === 'rehabSport' && block.role === 'support') cands = cands.filter(it => it.variation.tempo !== 'explosive');
     for (let k = 0; k < block.n; k++) {
-      const it = pick(cands, block.want, rand, usedPatterns, avoid, block.requireAll, g);
+      const it = pick(cands, block.want, rand, usedPatterns, avoid, block.requireAll, g, block.role);
       if (!it) break;
-      usedPatterns.add(useKey(it, g));
+      usedPatterns.add(useKey(it, g, block.role));
       items.push({ item: it, role: block.role });
     }
   }
-  const SESSION_ORDER = ['prep', 'main', 'support', 'cooldown'];
+  const SESSION_ORDER = ['prep', 'main', 'support', 'sport', 'cooldown'];
   items.sort((a, b) => SESSION_ORDER.indexOf(a.role) - SESSION_ORDER.indexOf(b.role));
   return { goal: g, items, coherence: coherenceReport(items, g) };
 }
@@ -152,6 +163,7 @@ export function buildSession({ goal, family, sportFamily = null, lp = {}, seed, 
 /** Share of main + support exercises that serve the goal (100 = fully coherent). */
 export function coherenceReport(items, goal) {
   const g = GOALS[goal];
+  // main + support serve the session goal; the sport block (if any) is the sport's skill volume
   const core = items.filter(x => x.role === 'main' || x.role === 'support');
   const mainOk = (x) => x.item.qualities.some(q => g.main.includes(q)) && (g.mainAlso || []).every(q => x.item.qualities.includes(q));
   const onGoal = core.filter(x => (x.role === 'main' ? mainOk(x) : x.item.qualities.some(q => [...g.main, ...g.support].includes(q))));

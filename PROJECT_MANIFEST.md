@@ -727,6 +727,52 @@ Two critical corrections to the existing onboarding (Stages 1B/1C), completed **
     - Sport / rehab warm-ups get the push activation, never arm circles.
     - No equipment set-up for catalog exercises.
     - The crutch / prosthesis wording rule still holds.
+- **Kick volume, big Ghost, both legs in balance sets (owner, 2026-10-06; backup tag `backup-2026-10-06-pre-kicks-bigghost-sides` = `fce9d34`):**
+  1. **Kick volume.**
+     - A new measured pattern with its own Ghost: **shadow pass, inside of the foot** (shorter, controlled swing). It passed the all-sports Ghost sweep.
+     - **Every amputee-football session carries a dedicated kick block** of 3 exercises (football: 2), after the support block (`SPORT_SKILL_BLOCK`). Together with the technique work this gives 3-5 kick / pass exercises per session.
+     - Kick sets are named **power** (3×6, full force) or **accuracy** (3×10, controlled).
+     - **A leg amputee kicks and passes only with the working leg** (never the prosthesis, never "alternating"). A healthy footballer works both feet.
+     - Coherence stays 100%: the kick block is the sport's skill volume, outside the goal percentage.
+  2. **Big Ghost in every exercise.**
+     - The switch is now "צללית: גדולה / קטנה" and appears in every exercise with a demo.
+     - **Big:** standing exercises → full size on the body (as in the warm-up); floor exercises (plank, push-ups, bridge) → a large figure beside the trainee (48% of the width, 72% of the height) with no dark box, so the trainee stays visible.
+     - **Small:** the corner panel.
+  3. **Both legs in balance sets.**
+     - Single-leg balance is a **split set** (`bothSides`): each leg gets the full dose (3×30 s → 30 s on each leg).
+     - Order: **the base (sound) leg first, then the prosthesis.** A below-knee prosthesis bears weight; an above-knee leg or a wheelchair user gets no split.
+     - At the start of every set the coach says clearly: "מתחילים: עמידה על רגל ימין. באמצע הסט נחליף רגל."
+     - At half of the set's work: "החלף רגל! עכשיו עמידה על רגל שמאל — הפרוטזה. יאללה, יציב!" — the **Ghost switches legs**, a "🔄 החלף רגל!" banner appears, and a status chip shows "🦵 עמידה על … · חצי 1/2 → 2/2".
+  - *Tests:*
+    - Every amputee-football session has ≥ 3 kicks, all with the working leg.
+    - A healthy footballer kicks with both feet.
+    - Balance is split for below-knee (full dose per leg) and not for above-knee.
+    - The leg order and the spoken lines.
+    - Client 644 pass, 0 new failures.
+- **SAFETY — crutches without a prosthesis (owner hard rule, 2026-10-06):**
+  - *Rule:*
+    - A trainee who moves on crutches without a prosthesis cannot stand on, or switch to, a missing leg. Balance / two-leg standing work is cancelled or pre-adapted to the working leg (or crutch-supported).
+    - Only an ACTIVE prosthesis gets the split balance sets.
+    - Nothing ever tries to make a crutch user stand on a missing leg.
+  - *Risk found:* the leg status comes from the scan classification. A below-knee classification marks the leg "prosthetic" even when the trainee trains on crutches without wearing it, so a crutch user could have received a split set onto that side and a Ghost with a prosthesis.
+  - *Fix:*
+    1. **`trainingLimbs(lp)`** (`engine/limbProfile.js`): the limbs AS THEY TRAIN. On crutches, a prosthetic leg is treated as absent while training. It is used everywhere training is planned or demonstrated: the training screen (Ghost, evaluation, split sets), the plan on the dashboard and the training screen, and the warm-up planner.
+    2. **Body fit:**
+       - Crutch users never get two-leg work, neither dynamic (`twoLegs`: jumps, lunges, running) nor a static stance on both legs.
+       - A new need, `bilateralStance`, covers squat / mini squat / wall sit / hinge: both legs present, never on crutches. An active prosthesis of any level counts (an above-knee amputee with a prosthesis keeps these rehab staples).
+    3. **Split balance sets only with an active prosthesis** (`canSplitLegs`: both legs bear weight, no wheelchair, **no crutches**).
+    4. **Balance holds stand only on a weight-bearing leg:** the Ghost never stands on an absent / above-knee side (`supportMustBear`) and draws no prosthesis for a crutch user.
+    5. **Crutch wording** (`crutchLabel`):
+       - "עמידה על הרגל המתפקדת — יציבות" (crutch support allowed).
+       - "בעיטה בצל על הקביים" and "מסירה בצל על הקביים" (weight over the crutches, the working leg kicks).
+    6. **Warm-up:** a crutch user with one working leg gets no knee raise (lifting the only leg leaves nothing on the ground); trunk rotations replace it. Kicks on the crutches stay (that IS the sport, crutch-supported).
+  - *Tests (+7, `crutchSafety.test.js`):*
+    - The training-limbs view.
+    - For 3 crutch tracks over 4 weeks: no split, no two-leg standing, working-leg wording, kicks only with the working leg on the crutches.
+    - The balance Ghost stands on the working leg and draws no prosthesis.
+    - The crutch warm-up has no knee raise / leg switch.
+    - An active prosthesis keeps the split.
+  - Client 651 pass, 0 new failures.
    3. **Profile-based rep counting with a quality score per rep** (replacing the per-exercise analyzers step by step), including the correction hierarchy, timing and external-focus cues.
    4. **Special sport libraries:** leg amputees (amputee football: crutch kick / crutch sprint / balance / header / goalkeeper), wheelchair (push stroke, seated throws, shoulder protection), running (opened for selection), then tennis / martial arts (trunk-rotation metric) and basketball.
    - Following (already in the roadmap): velocity-based fatigue detection (stop the set at ~20% rep-speed loss or form decay), automatic progression / regression, Pain Traffic Light integration, two-way voice ("why?"), best vs. weakest rep clips with the Ghost in the Stage 4 report.
@@ -898,6 +944,7 @@ Two critical corrections to the existing onboarding (Stages 1B/1C), completed **
 | `client/src/engine/training/coachFlow.js` | Start gate (no false start), exact rep validity, real-work monitor, drive voice lines |
 | `client/src/engine/training/profileRepAnalyzer.js` | The rep count comes from the profile detector; the analyzer keeps form / posture feedback |
 | `client/src/engine/catalog/relevance.js` | Functional patterns per sport / limitation (no generic filler), amputee-football categories, sport-language labels |
+| `client/src/engine/limbProfile.js` → `trainingLimbs` | The limbs as they train (crutches → the prosthesis is not worn) — the safety base of all training planning |
 | `client/src/engine/training/exerciseSetup.js` | Equipment set-up instructions only for drills that really use equipment |
 | `client/src/engine/catalog/trackGoals.js` | Single source of truth: goals per track (rehab / sport / rehab + sport), the trainee's valid goals, legacy mapping |
 | `client/src/engine/catalog/planBuilder.js` | Rebuilds the AI week plan's days from the catalog (deterministic, shared by dashboard + training) |
@@ -984,3 +1031,5 @@ Two critical corrections to the existing onboarding (Stages 1B/1C), completed **
 - **2026-10-06:** Committed and pushed `1f714d0` → deployed to production, verified in the served bundle (start-position wait, honest start line, drive lines, balance & core goal present; the old "תפסתי את הטווח" line is still in the bundle only as the fallback when the expert module is off). New restore point `checkpoint-2026-10-06-start-gate` (#9).
 - **2026-10-06:** **Hard rule: no generic filler in sport / rehab tracks (owner device report: arm circles + "two chairs" first in rehab + amputee football).** Amputee football = only core / single-leg balance / crutch upper body / kicks, named in the sport's language; arm circles and knee-lift marches removed from every sport / rehab track (warm-up → functional push activation; prep → plank / balance holds; ROM → trunk rotation / hinge / lunge); equipment set-up only for drills that use equipment; drive in idle prods. Client 638 pass, 0 new failures. Not yet committed.
 - **2026-10-06:** Committed and pushed `5a9761f` → deployed, verified in the served bundle (push activation, amputee-football labels, drive prods present). Restore point `checkpoint-2026-10-06-functional` (#10).
+- **2026-10-06:** **Kick volume, big Ghost, both legs (owner).** Shadow-pass pattern + a 3-exercise kick block in every amputee-football session (power / accuracy sets, working leg only); "Ghost: big / small" in every exercise (on the body when standing, large beside the trainee on the floor); split balance sets — base leg then prosthesis (below-knee), each leg the full dose, the coach calls the start and the switch, the Ghost changes legs, a status chip. Client 644 pass, 0 new failures. Not yet committed.
+- **2026-10-06:** **SAFETY: crutches without a prosthesis.** `trainingLimbs` (on crutches the prosthesis is not worn) used by the training screen, the plan and the warm-up; no split sets, no two-leg standing (`twoLegs` / new `bilateralStance`) on crutches; split only with an active prosthesis; balance Ghost only on a weight-bearing leg; crutch wording; no knee raise of the only leg in the warm-up. +7 safety tests; client 651 pass, 0 new failures. Not yet committed (together with the kick / big Ghost / split work).

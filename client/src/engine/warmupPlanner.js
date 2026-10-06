@@ -26,7 +26,7 @@ import {
   WARM_UP_FORWARD_KICKS,
   WARM_UP_SINGLE_ARM_ROTATION,
 } from '../utils/exerciseAnalysis.js';
-import { getLimbProfile } from './limbProfile.js';
+import { getLimbProfile, trainingLimbs } from './limbProfile.js';
 
 const [ARM_CIRCLES, HIGH_KNEES, SIDE_STEPS] = WARM_UP_EXERCISES;
 
@@ -245,7 +245,8 @@ export function needsBallQuestion(profile) {
  * @returns {Object[]} 3 exercises (each with analyze, instructions, spokenSteps, ghost, suppressCorrections)
  */
 export function planWarmUp(profile, { hasBall = false } = {}) {
-  const lp = getLimbProfile(profile);
+  // The limbs as they train: on crutches the prosthesis is not worn (owner safety rule)
+  const lp = trainingLimbs(getLimbProfile(profile));
   const track = resolveTrack(profile);
   const rehab = track !== 'sport_only';
 
@@ -257,7 +258,8 @@ export function planWarmUp(profile, { hasBall = false } = {}) {
   const crutchSport = !!lp.crutches;
   const candidates = [
     genericOk ? armMobility(lp) : upperActivation(lp, crutchSport),
-    legMobility(lp, rehab),
+    // On crutches with one working leg, lifting it leaves nothing on the ground — no knee raises
+    lp.trainsOnCrutches && lp.affectedLegs.length > 0 ? null : legMobility(lp, rehab),
     activationSport(profile, track) ? sportActivation(activationSport(profile, track), lp, hasBall) : null,
     // fallbacks (in order) when a slot above is not possible for this body
     coreTwists(lp),

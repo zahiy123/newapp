@@ -479,7 +479,7 @@ RAW_EXPERT.kneeUpBalance = {
       why: msg('שליטה בהתנדנדות היא האימון של הקרסול והאגן', 'Controlling the sway is what trains the ankle and the hip') },
   ],
   ghost: {
-    view: 'side', base: 'stride', periodMs: 4000, restT: 0,
+    view: 'side', base: 'stride', periodMs: 4000, restT: 0, supportMustBear: true,
     keyframes: [{ t: 0, a: { 'A.knee': 172, 'B.thigh': 80, 'B.knee': 90, trunk: 2, armA: 20, armB: 20, elbow: 160 } }],
   },
 };
@@ -509,6 +509,23 @@ RAW_EXPERT.jumpSquat = {
   },
 };
 
+// Inside-foot pass: a shorter, controlled swing (accuracy over power)
+RAW_EXPERT.shadowPass = {
+  ...RAW_EXPERT.footballKick,
+  id: 'shadowPass', name: msg('מסירה בצל', 'Shadow pass'),
+  ghost: {
+    view: 'side', base: 'stride', periodMs: 1800, restT: 0,
+    keyframes: [
+      { t: 0, a: { 'A.knee': 168, 'B.thigh': 0, 'B.knee': 168, trunk: 4, armA: 10, armB: 10, elbow: 160 } },
+      { t: 0.3, a: { 'A.knee': 162, 'B.thigh': -20, 'B.knee': 95, trunk: 4, armA: 25, armB: -15, elbow: 155 } },
+      { t: 0.42, a: { 'A.knee': 160, 'B.thigh': 15, 'B.knee': 100, trunk: 5, armA: 30, armB: -15, elbow: 155 } },
+      { t: 0.5, a: { 'A.knee': 158, 'B.thigh': 28, 'B.knee': 160, trunk: 5, armA: 30, armB: -15, elbow: 155 } },
+      { t: 0.62, a: { 'A.knee': 162, 'B.thigh': 30, 'B.knee': 166, trunk: 5, armA: 20, armB: -8, elbow: 158 } },
+      { t: 0.85, a: { 'A.knee': 166, 'B.thigh': 8, 'B.knee': 162, trunk: 4, armA: 12, armB: 8, elbow: 160 } },
+    ],
+  },
+};
+
 // Movement-pattern tags (matched by the sport library)
 const TAGS = {
   squat: ['strength', 'lowerBody', 'bilateral', 'squatPattern'],
@@ -527,6 +544,7 @@ const TAGS = {
   rehabElbowFlex: ['strength', 'upperBody', 'arm', 'rehab'],
   runInPlace: ['gait', 'cyclic', 'landing', 'conditioning'],
   footballKick: ['strike', 'chain', 'singleLegStance', 'ballSkill'],
+  shadowPass: ['strike', 'chain', 'singleLegStance', 'ballSkill'],
   buttKicks: ['gait', 'cyclic', 'landing', 'conditioning'],
   aSkip: ['cyclic', 'landing', 'coordination', 'drill'],
   accelMarch: ['cyclic', 'acceleration'],

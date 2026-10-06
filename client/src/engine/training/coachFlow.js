@@ -123,3 +123,41 @@ export function withDrive(instruction, k, name, isHe) {
 export function startPositionPrompt(k, name, isHe) {
   return withDrive(isHe ? START_POSITION.he : START_POSITION.en, k, name, isHe);
 }
+
+// ---- Split balance sets: half a set on each leg, the coach calls the switch ----
+
+/**
+ * Leg order for a split set: start on the base (sound) leg, then the prosthetic side (a
+ * below-knee prosthesis bears weight — strength and stability work on it too). No limitation →
+ * right, then left.
+ * @returns {{ first: 'left'|'right', second: 'left'|'right' }}
+ */
+export function splitLegOrder(lp = {}) {
+  const pros = ['left', 'right'].find(s => lp[`${s}_leg`]?.state === 'prosthetic');
+  if (pros) return { first: pros === 'left' ? 'right' : 'left', second: pros };
+  return { first: 'right', second: 'left' };
+}
+
+/** "right leg" / "left leg — the prosthesis". */
+export function legLabel(side, lp = {}, isHe = true) {
+  const pros = lp[`${side}_leg`]?.state === 'prosthetic';
+  if (isHe) return `רגל ${side === 'left' ? 'שמאל' : 'ימין'}${pros ? ' — הפרוטזה' : ''}`;
+  return `${side === 'left' ? 'left' : 'right'} leg${pros ? ' — the prosthesis' : ''}`;
+}
+
+/** The working (lifted) leg of the Ghost when standing on `support`. */
+export const liftedLeg = (support) => (support === 'left' ? 'right' : 'left');
+
+export function splitStartText(lp, isHe) {
+  const { first } = splitLegOrder(lp);
+  return isHe
+    ? `מתחילים: עמידה על ${legLabel(first, lp, true)}. באמצע הסט נחליף רגל.`
+    : `Start standing on your ${legLabel(first, lp, false)}. We switch legs halfway through the set.`;
+}
+
+export function splitSwitchText(lp, isHe) {
+  const { second } = splitLegOrder(lp);
+  return isHe
+    ? `החלף רגל! עכשיו עמידה על ${legLabel(second, lp, true)}. יאללה, יציב!`
+    : `Switch legs! Now stand on your ${legLabel(second, lp, false)}. Steady — let's go!`;
+}

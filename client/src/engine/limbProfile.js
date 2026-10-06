@@ -21,6 +21,21 @@
 
 export const LIMBS = ['left_leg', 'right_leg', 'left_arm', 'right_arm'];
 
+/**
+ * The limbs AS THEY TRAIN (owner safety rule, 2026-10-06): a trainee who moves on CRUTCHES trains
+ * without a prosthesis — the prosthetic leg is treated as absent (no standing on it, no balance
+ * split onto it, no prosthesis drawn in the Ghost). Only a trainee with an ACTIVE prosthesis (no
+ * crutches) works on it. Everything that plans or demonstrates training uses this view.
+ */
+export function trainingLimbs(lp) {
+  if (!lp || !lp.crutches) return lp;
+  const out = { ...lp, trainsOnCrutches: true };
+  for (const k of ['left_leg', 'right_leg']) {
+    if (lp[k]?.state === 'prosthetic') out[k] = { ...lp[k], state: 'absent', trainable: false, prosthesisOffForTraining: true };
+  }
+  return out;
+}
+
 // A healthy shoulder reaches ~150-180° in the frontal 2D estimate
 const LIMITED_SHOULDER_DEG = 140;
 

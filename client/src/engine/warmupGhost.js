@@ -363,6 +363,14 @@ export function drawWarmupGhost(ctx, spec, lp, nowMs, w, h, opts = {}) {
   const oy = py + panelH * 0.5;
   const P = (p) => ({ x: ox + p.x * scale, y: oy + p.y * scale });
 
+  if (opts.bare) {
+    // Large mode: no dark box — a glowing, slightly transparent figure that never hides the trainee
+    ctx.save();
+    ctx.globalAlpha = 0.85;
+    drawFigure(ctx, pose, P, scale, { floorShadow: true, glow: true });
+    ctx.restore();
+    return;
+  }
   ctx.save();
   // Panel: rounded, soft dark gradient with a light border
   const bg = ctx.createLinearGradient(px, py, px, py + panelH);

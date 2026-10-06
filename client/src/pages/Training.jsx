@@ -11,7 +11,7 @@ import { useAICoach } from '../hooks/useAICoach';
 import { useHaikuVision } from '../hooks/useHaikuVision';
 import { findObstacles, obstacleMessage, LABEL_HE } from '../engine/environmentHazards';
 import { planWarmUp, needsBallQuestion } from '../engine/warmupPlanner';
-import { getLimbProfile } from '../engine/limbProfile';
+import { getLimbProfile, trainingLimbs } from '../engine/limbProfile';
 import WarmupGhostPanel from '../components/WarmupGhostPanel';
 import GhostOverlay from '../components/GhostOverlay';
 import ExecutionHud from '../components/ExecutionHud';
@@ -21,7 +21,7 @@ import { showsRangeGauge } from '../engine/training/rangeGauge';
 import { demoGhostFor } from '../engine/training/demoGhost';
 import { makeTimedAnalyzer } from '../engine/training/timedAnalyzer';
 import { makeProfileRepAnalyzer } from '../engine/training/profileRepAnalyzer';
-import { READY_DRIVE, withDrive } from '../engine/training/coachFlow';
+import { READY_DRIVE, withDrive, splitLegOrder, legLabel, liftedLeg, splitStartText, splitSwitchText } from '../engine/training/coachFlow';
 import { exerciseNeedsSetup } from '../engine/training/exerciseSetup';
 import { catalogGhostSpec } from '../engine/catalog/catalog';
 import { rebuildPlanFromCatalog, planContext } from '../engine/catalog/planBuilder';
@@ -395,7 +395,8 @@ export default function Training() {
   const [ballAnswer, setBallAnswer] = useState(null);          // null = not asked, true/false = answer
   const [showBallQuestion, setShowBallQuestion] = useState(false);
   const [warmUpGhostOn, setWarmUpGhostOn] = useState(true);    // ghost shown by default in the warm-up
-  const limbProfile = useMemo(() => getLimbProfile(userProfile), [userProfile]);
+  // The limbs AS THEY TRAIN: on crutches the prosthesis is not worn (safety — trainingLimbs)
+  const limbProfile = useMemo(() => trainingLimbs(getLimbProfile(userProfile)), [userProfile]);
   const warmUpExercises = useMemo(() => planWarmUp(userProfile, { hasBall: typeof ballAnswer === 'boolean' ? ballAnswer : userProfile?.hasBall === true }), [userProfile, ballAnswer]);
 
   // Ghost Overlay & Progressive Range Challenge (opt-in, behind FEATURES.GHOST_OVERLAY).
@@ -546,7 +547,7 @@ export default function Training() {
       if (FEATURES.CATALOG_PLANS) {
         // Coherent catalog session for this day (same builder + seed as the dashboard)
         try {
-          const built = rebuildPlanFromCatalog(plan, planContext(data, getLimbProfile(data), user.uid), (data.language || 'he') === 'he');
+          const built = rebuildPlanFromCatalog(plan, planContext(data, trainingLimbs(getLimbProfile(data)), user.uid), (data.language || 'he') === 'he');
           loadedExercises = built.weeks[weekIdx]?.days?.[dayIdx]?.exercises || [];
           sessionDataRef.current.sessionGoal = built.weeks[weekIdx]?.days?.[dayIdx]?.goal || null;
         } catch (err) {
@@ -704,13 +705,20 @@ export default function Training() {
     [demoGhostPhase, execution.profile, exerciseCueKey, currentExercise?.name, limbProfile, sportContexts],
   );
   // The profile's Ghost, or the matching animated movement for exercises without an expert model yet
+  // Split balance sets (both legs): which half of the set we are in — the Ghost stands on the same leg
+  const [splitHalf, setSplitHalf] = useState(1);
+  const splitOrder = useMemo(() => splitLegOrder(limbProfile), [limbProfile]);
+  const splitSupport = splitHalf === 1 ? splitOrder.first : splitOrder.second;
   const demoGhostSpec = useMemo(() => {
     if (!demoGhostPhase) return null;
     // A catalog exercise always has its Ghost (its pattern × variation)
     const cid = currentExercise?.catalogId;
-    if (cid) return catalogGhostSpec(cid, demoProfile?.catalogId === cid ? demoProfile : null);
-    return demoGhostFor(demoProfile, exerciseCueKey);
-  }, [demoGhostPhase, demoProfile, exerciseCueKey, currentExercise?.catalogId]);
+    let spec = cid ? catalogGhostSpec(cid, demoProfile?.catalogId === cid ? demoProfile : null) : demoGhostFor(demoProfile, exerciseCueKey);
+    if (spec?.profile && currentExercise?.sideSwitch) {
+      spec = { profile: { ...spec.profile, ghost: { ...spec.profile.ghost, workingSide: liftedLeg(splitSupport) } } };
+    }
+    return spec;
+  }, [demoGhostPhase, demoProfile, exerciseCueKey, currentExercise?.catalogId, currentExercise?.sideSwitch, splitSupport]);
   const showDemoGhost = exerciseGhostOn && !!demoGhostSpec;
   // ROM gauge only for dynamic range-of-motion exercises (never static holds / ball drills / kicks / running)
   const showRomGauge = useMemo(() => {
@@ -719,8 +727,10 @@ export default function Training() {
     const kind = buildExecutionProfile(a.cueKey, currentExercise.name, limbProfile, sportContexts, currentExercise.catalogId || null)?.kind;
     return showsRangeGauge({ analyzerType: a.type, profileKind: kind, exerciseName: currentExercise.name });
   }, [currentExercise?.name, limbProfile, sportContexts]);
-  const demoOnBody = overlayActive && (demoProfile?.posture === 'standing' || !!demoGhostSpec?.move)
-    && (phase === PHASE.EXERCISING || phase === PHASE.CALIBRATING);
+  const workPhase = phase === PHASE.EXERCISING || phase === PHASE.CALIBRATING;
+  const demoOnBody = overlayActive && (demoProfile?.posture === 'standing' || !!demoGhostSpec?.move) && workPhase;
+  // "Ghost: big" for floor exercises — a large figure beside the trainee (the body overlay needs standing)
+  const demoLarge = overlayActive && workPhase && !demoOnBody;
   const demoLabel = demoProfile?.precision === 'expert'
     ? (isHe ? `הדגמה: ${demoProfile.name.he}` : `Demo: ${demoProfile.name.en}`)
     : (isHe ? `הדגמה: ${currentExercise?.name || ''}` : `Demo: ${currentExercise?.nameEn || currentExercise?.name || ''}`);
@@ -750,6 +760,25 @@ export default function Training() {
       lastMindMuscleCueRef.current = 0;
     }
   }, [currentIdx, currentExercise]);
+
+  // Split balance sets: each set starts on the base leg; at half of the set's work the coach calls
+  // the switch (clear voice), the Ghost changes legs and the chip shows the second half
+  useEffect(() => {
+    if (phase !== PHASE.EXERCISING || !currentExercise?.sideSwitch) return undefined;
+    setSplitHalf(1);
+    const tm = setTimeout(() => speakPriority(splitStartText(limbProfile, isHe), { rate: 1.05 }), 1200);
+    return () => clearTimeout(tm);
+  }, [phase, currentSet, currentIdx]);
+
+  useEffect(() => {
+    if (phase !== PHASE.EXERCISING || !currentExercise?.sideSwitch || splitHalf !== 1) return;
+    const target = parseInt(currentExercise.reps, 10) || 0;
+    if (target > 1 && displayReps >= Math.ceil(target / 2)) {
+      setSplitHalf(2);
+      speakPriority(splitSwitchText(limbProfile, isHe), { rate: 1.1 });
+      setFeedback({ type: 'info', text: isHe ? '🔄 החלף רגל!' : '🔄 Switch legs!' });
+    }
+  }, [displayReps, phase, splitHalf]);
 
   // Form correction arcs on the pose canvas during the exercise. (The exercise Ghost is the demo
   // panel / overlay, on by default — the old skeleton Ghost is retired.)
@@ -2660,6 +2689,7 @@ export default function Training() {
           <WarmupGhostPanel
             spec={demoGhostSpec} limbProfile={limbProfile} isHe={isHe}
             placement={phase === PHASE.BRIEFING || phase === PHASE.CHECKING_EQUIPMENT || phase === PHASE.RESTING ? 'top' : 'middle'}
+            size={demoLarge ? 'large' : 'small'}
             label={demoLabel}
           />
         )}
@@ -2667,6 +2697,11 @@ export default function Training() {
           <GhostOverlay spec={demoGhostSpec} limbProfile={limbProfile} landmarksRef={poseLandmarksRef} videoRef={videoRef} onError={handleOverlayError} />
         )}
         {(phase === PHASE.EXERCISING || phase === PHASE.CALIBRATING) && <ExecutionHud execution={execution} isHe={isHe} />}
+        {phase === PHASE.EXERCISING && currentExercise?.sideSwitch && (
+          <div className={`absolute top-2 left-1/2 -translate-x-1/2 z-20 pointer-events-none rounded-full text-white text-sm font-bold px-3 py-1 shadow ${splitHalf === 1 ? 'bg-sky-700/90' : 'bg-orange-600/90'}`}>
+            {'🦵'} {isHe ? `עמידה על ${legLabel(splitSupport, limbProfile, true)} · חצי ${splitHalf}/2` : `Standing on your ${legLabel(splitSupport, limbProfile, false)} · half ${splitHalf}/2`}
+          </div>
+        )}
         {phase === PHASE.EXERCISING && validationMode && execution.active && (
           <div className="absolute top-2 right-2 z-20 pointer-events-none rounded-full bg-fuchsia-700/90 text-white text-[11px] font-bold px-2 py-1">
             {'🧪'} {isHe ? 'מצב אימות — מקליט חזרות' : 'Validation mode — recording reps'}
@@ -3179,7 +3214,7 @@ export default function Training() {
           </button>
         )}
         {FEATURES.GHOST_OVERLAY && ((phase === PHASE.WARM_UP && warmUpGhostOn) ||
-          ((phase === PHASE.EXERCISING || phase === PHASE.CALIBRATING) && showDemoGhost && (demoProfile?.posture === 'standing' || !!demoGhostSpec?.move))) && (
+          ((phase === PHASE.EXERCISING || phase === PHASE.CALIBRATING) && showDemoGhost)) && (
           <button
             onClick={() => setGhostModeSaved(overlayActive ? 'panel' : 'overlay')}
             className={`absolute top-28 left-4 px-3 py-2 rounded-xl text-xs font-bold z-10 transition ${
@@ -3187,7 +3222,7 @@ export default function Training() {
             }`}
             title={isHe ? 'צללית מלאה על הגוף / פאנל הדגמה' : 'Full-body ghost / demo panel'}
           >
-            {overlayActive ? (isHe ? 'צללית: מלאה' : 'Ghost: full') : (isHe ? 'צללית: פאנל' : 'Ghost: panel')}
+            {overlayActive ? (isHe ? 'צללית: גדולה' : 'Ghost: big') : (isHe ? 'צללית: קטנה' : 'Ghost: small')}
           </button>
         )}
 

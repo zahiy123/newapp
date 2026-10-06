@@ -8,7 +8,8 @@
 import { useEffect, useRef } from 'react';
 import { drawWarmupGhost } from '../engine/warmupGhost';
 
-export default function WarmupGhostPanel({ spec, limbProfile, isHe, placement = 'middle', label = null }) {
+export default function WarmupGhostPanel({ spec, limbProfile, isHe, placement = 'middle', label = null, size = 'small' }) {
+  const large = size === 'large';
   const canvasRef = useRef(null);
   // Animation clock that runs backward for a "backward" direction — continuous, no jump on the switch
   const clockRef = useRef({ last: null, ms: 0 });
@@ -28,19 +29,22 @@ export default function WarmupGhostPanel({ spec, limbProfile, isHe, placement = 
         const clk = clockRef.current;
         if (clk.last !== null) clk.ms += (now - clk.last) * (spec?.direction === 'backward' ? -1 : 1);
         clk.last = now;
-        drawWarmupGhost(ctx, spec, limbProfile, clk.ms, w, h, { fill: true });
+        drawWarmupGhost(ctx, spec, limbProfile, clk.ms, w, h, { fill: true, bare: large });
       }
       raf = requestAnimationFrame(draw);
     };
     raf = requestAnimationFrame(draw);
     return () => cancelAnimationFrame(raf);
-  }, [spec, limbProfile]);
+  }, [spec, limbProfile, large]);
 
   return (
-    <div className={`absolute left-3 pointer-events-none flex flex-col items-center gap-1 ${
-      placement === 'top' ? 'top-3 z-[25]' : 'top-1/2 -translate-y-1/2 z-[15]'}`}>
+    <div className={`absolute pointer-events-none flex flex-col items-center gap-1 ${
+      large ? 'left-1 top-1/2 -translate-y-1/2 z-[15]'
+        : placement === 'top' ? 'left-3 top-3 z-[25]' : 'left-3 top-1/2 -translate-y-1/2 z-[15]'}`}>
       {/* Mirrored like the camera view, so the figure moves like the trainee's reflection */}
-      <canvas ref={canvasRef} className="w-28 h-40 sm:w-36 sm:h-52 rounded-2xl shadow-xl" style={{ transform: 'scaleX(-1)' }} />
+      <canvas ref={canvasRef}
+        className={large ? 'w-[48vw] max-w-[420px] h-[72vh] max-h-[620px]' : 'w-28 h-40 sm:w-36 sm:h-52 rounded-2xl shadow-xl'}
+        style={{ transform: 'scaleX(-1)' }} />
       <div className="text-[11px] font-semibold text-white bg-black/55 rounded-full px-2 py-0.5">
         {label || (isHe ? 'הדגמה' : 'Demo')}
       </div>

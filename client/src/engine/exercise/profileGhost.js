@@ -351,6 +351,11 @@ function buildPose(profile, t, lp = {}) {
       if (!(st?.state === 'absent' || (st?.state === 'prosthetic' && st?.level !== 'below_knee'))) sideA = support;
     }
     if (ghost.alternate && (((t % 1) + 1) % 1) >= 0.5) sideA = sideA === 'left' ? 'right' : 'left';
+    // A balance hold stands ONLY on a weight-bearing leg (never on an absent / above-knee side)
+    if (ghost.supportMustBear) {
+      const bears = (s) => { const l = lp[`${s}_leg`]; return !(l?.state === 'absent' || (l?.state === 'prosthetic' && l?.level !== 'below_knee')); };
+      if (!bears(sideA)) sideA = sideA === 'left' ? 'right' : 'left';
+    }
     const sideB = sideA === 'left' ? 'right' : 'left';
     legPairs = [[sideA, k.legs.A], [sideB, k.legs.B]];
     armPairs = [[sideA, k.arms.A], [sideB, k.arms.B]];

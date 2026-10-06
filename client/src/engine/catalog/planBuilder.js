@@ -11,7 +11,16 @@
 import { buildSession, inferGoal, familyOf, GOALS } from './sessionPlanner.js';
 import { toExercise } from './catalog.js';
 import { trackOf, sportFamilyOf, selectedSessionGoals, patternsFor, sportOf } from './trackGoals.js';
-import { sportLabel } from './relevance.js';
+import { sportLabel, SPORT_SKILL_BLOCK, crutchLabel } from './relevance.js';
+
+/** Can this trainee stand on EACH leg (split balance sets)? A below-knee prosthesis can; absent / above-knee cannot. */
+export function canSplitLegs(lp = {}) {
+  const ok = (s) => {
+    const l = lp[`${s}_leg`];
+    return !(l?.state === 'absent' || (l?.state === 'prosthetic' && l?.level !== 'below_knee'));
+  };
+  return ok('left') && ok('right') && !lp.wheelchair && !lp.crutches;
+}
 
 /** Contexts for the builder from the profile. */
 export function planContext(userProfile, lp = {}, seedBase = null) {
@@ -25,6 +34,7 @@ export function planContext(userProfile, lp = {}, seedBase = null) {
     allowed: selectedSessionGoals(userProfile, lp),  // the locked chain: only the trainee's goals
     patterns: patternsFor(userProfile, lp),           // only functional patterns for the sport / limitation
     sport: sportOf(userProfile),                      // the sport whose language names the exercises
+    sportBlock: SPORT_SKILL_BLOCK[sportOf(userProfile)] || null,
     lp,
     seedBase: seedBase || userProfile?.uid || userProfile?.email || userProfile?.name || 'trainee',
   };
@@ -47,14 +57,14 @@ export function rebuildPlanFromCatalog(plan, ctx, isHe = true) {
         days: (w?.days || []).map((d, di) => {
           if (!d) return d;
           const goal = inferGoal(d, { allowed: ctx.allowed, dayIndex: dayCounter++ });
-          const s = buildSession({ goal, family: ctx.family, sportFamily: ctx.sportFamily, lp: ctx.lp, seed: `${ctx.seedBase}|w${wi}|d${di}`, avoid, patterns: ctx.patterns });
+          const s = buildSession({ goal, family: ctx.family, sportFamily: ctx.sportFamily, lp: ctx.lp, seed: `${ctx.seedBase}|w${wi}|d${di}`, avoid, patterns: ctx.patterns, sportBlock: ctx.sportBlock });
           s.items.forEach(x => avoid.add(x.item.id));
           return {
             ...d,
             goal: s.goal,
             goalName: GOALS[s.goal].name,
             coherence: s.coherence,
-            exercises: s.items.map(x => ({ ...toExercise(x.item, isHe, sportLabel(ctx.sport, x.item.patternId)), block: x.role })),
+            exercises: s.items.map(x => ({ ...toExercise(x.item, isHe, crutchLabel(ctx.lp, x.item.patternId) || sportLabel(ctx.sport, x.item.patternId), { canSplit: canSplitLegs(ctx.lp) }), block: x.role })),
           };
         }),
       };

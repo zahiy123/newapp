@@ -9,8 +9,9 @@
 //              { move: <warm-up Ghost move> }   (Ghost + required-limbs coverage)
 //   qualities  what it trains — matched against the session goal (coherence)
 //   sports     'all' or the sport families it belongs to
-//   needs      body requirements: 'standing' (not from a wheelchair), 'twoLegs' (jumps / landings
-//              on both legs), 'floor' (down on the floor), 'arms' (needs a working arm)
+//   needs      body requirements: 'standing' (not from a wheelchair), 'twoLegs' (dynamic loading —
+//              jumps / lunges / running — on two working legs), 'bilateralStance' (static stance on both legs:
+//              both legs present, an active prosthesis counts, never on crutches), 'floor', 'arms'
 //   unilateral the variation names a side (left / right / alternating)
 //   names      Hebrew / English (the Hebrew name keeps the analyzer keyword of the movement)
 // ============================================================
@@ -20,16 +21,16 @@ const t = (he, en) => ({ he, en });
 /** @type {Object<string, Object>} */
 export const PATTERNS = Object.freeze({
   // ---- Strength / lower body ----
-  squat: { source: { profile: 'squat' }, qualities: ['strength', 'lowerBody'], sports: 'all', needs: ['standing'],
+  squat: { source: { profile: 'squat' }, qualities: ['strength', 'lowerBody'], sports: 'all', needs: ['standing', 'bilateralStance'],
     name: t('סקוואט', 'Squat'), cue: t('דחוף את הרצפה למטה ועלה', 'Push the floor away and stand up') },
-  miniSquat: { source: { profile: 'miniSquat' }, qualities: ['rehab', 'strength', 'stability', 'activation'], sports: 'all', needs: ['standing'],
+  miniSquat: { source: { profile: 'miniSquat' }, qualities: ['rehab', 'strength', 'stability', 'activation'], sports: 'all', needs: ['standing', 'bilateralStance'],
     name: t('מיני סקוואט', 'Mini squat'), cue: t('ירידה קטנה ומבוקרת, ברכיים מעל האצבעות', 'A small controlled dip, knees over the toes') },
   // lunge / hinge are also FUNCTIONAL range-of-motion work (hip flexors / hamstrings) — used in ROM sessions
   lunge: { source: { profile: 'lunge' }, qualities: ['strength', 'balance', 'lowerBody', 'mobility'], sports: 'all', needs: ['standing', 'twoLegs'], unilateral: true,
     name: t("לאנג'", 'Lunge'), cue: t('רד ישר למטה כמו מעלית', 'Drop straight down like an elevator') },
-  wallSit: { source: { profile: 'wallSit' }, qualities: ['strength', 'endurance', 'rehab'], sports: 'all', needs: ['standing'],
+  wallSit: { source: { profile: 'wallSit' }, qualities: ['strength', 'endurance', 'rehab'], sports: 'all', needs: ['standing', 'bilateralStance'],
     name: t('ישיבה על הקיר', 'Wall sit'), cue: t('הצמד את הגב לקיר ודחוף את הרצפה', 'Back to the wall, push the floor') },
-  hipHinge: { source: { profile: 'hipHinge' }, qualities: ['strength', 'posteriorChain', 'mobility'], sports: 'all', needs: ['standing'],
+  hipHinge: { source: { profile: 'hipHinge' }, qualities: ['strength', 'posteriorChain', 'mobility'], sports: 'all', needs: ['standing', 'bilateralStance'],
     name: t('גוד מורנינג — הטיית אגן', 'Good morning — hip hinge'), cue: t('שלח את הישבן אחורה אל הקיר', 'Send your hips back to the wall') },
   gluteBridge: { source: { profile: 'gluteBridge' }, qualities: ['strength', 'rehab', 'posteriorChain', 'activation'], sports: 'all', needs: ['floor'],
     name: t('גשר ישבן', 'Glute bridge'), cue: t('דחוף את הרצפה עם העקבים והרם את האגן לתקרה', 'Drive the floor with your heels, hips to the ceiling') },
@@ -61,7 +62,9 @@ export const PATTERNS = Object.freeze({
     name: t('צעדי A — ברכיים גבוהות בקפיצה', 'A-skip — high-knee skip'), cue: t('ברך למעלה, כף רגל דורכת מתחת לגוף', 'Knee up, the foot strikes under the body') },
   accelMarch: { source: { profile: 'accelMarch' }, qualities: ['acceleration', 'speed', 'power'], sports: 'all', needs: ['standing', 'twoLegs'],
     name: t('האצה בהטיה — צעדת קיר', 'Acceleration lean — wall march'), cue: t('דחוף את הקיר ואת הקרקע אחורה', 'Push the wall and the ground back') },
-  kneeUpBalance: { source: { profile: 'kneeUpBalance' }, qualities: ['balance', 'stability', 'rehab', 'activation'], sports: 'all', needs: ['standing'], unilateral: true,
+  // Balance is trained on BOTH legs: each set is split — half on one leg, half on the other (the coach
+  // calls the switch); the prosthetic side too when it can bear weight (below-knee)
+  kneeUpBalance: { source: { profile: 'kneeUpBalance' }, qualities: ['balance', 'stability', 'rehab', 'activation'], sports: 'all', needs: ['standing'], unilateral: true, splitSides: true,
     name: t('עמידה על רגל אחת — ברך למעלה', 'Single-leg balance — knee up'), cue: t('צמח מהרגל העומדת אל התקרה', 'Grow tall from the standing leg') },
   jumpSquat: { source: { profile: 'jumpSquat' }, qualities: ['plyometric', 'power'], sports: 'all', needs: ['standing', 'twoLegs'],
     name: t('קפיצת סקוואט', 'Squat jump'), cue: t('דחוף את הרצפה ונחת שקט כמו חתול', 'Push the floor away, land quietly like a cat') },
@@ -76,6 +79,8 @@ export const PATTERNS = Object.freeze({
   // ---- Sport skills (shadow drills) ----
   shadowKick: { source: { profile: 'footballKick' }, qualities: ['technique', 'power', 'sportSkill'], sports: ['field'], needs: ['standing'], unilateral: true,
     name: t('בעיטה בצל — תנועת בעיטה באוויר', 'Shadow kick — kicking motion in the air'), cue: t('הירך מובילה, הרגל מצליפה קדימה', 'The hip leads, the leg whips through') },
+  shadowPass: { source: { profile: 'shadowPass' }, qualities: ['technique', 'sportSkill', 'balance'], sports: ['field'], needs: ['standing'], unilateral: true,
+    name: t('מסירה בצל — פנים כף הרגל', 'Shadow pass — inside of the foot'), cue: t('כף הרגל פתוחה, תנופה קצרה ומדויקת אל המטרה', 'Foot open, a short accurate swing to the target') },
   shadowChestPass: { source: { move: 'chest_pass' }, qualities: ['technique', 'sportSkill', 'upperBody'], sports: ['court', 'seated'], needs: ['arms'],
     name: t('תנועת מסירת חזה בצל', 'Shadow chest pass'), cue: t('דחוף את הכדור הדמיוני אל חזה השותף', "Push the imaginary ball to your partner's chest") },
   shadowStroke: { source: { move: 'twist' }, qualities: ['technique', 'sportSkill', 'core'], sports: ['racket', 'seated'], needs: [],
@@ -95,6 +100,10 @@ export function patternFitsBody(pattern, lp = {}) {
   const leg = (s) => lp[`${s}_leg`] || { state: 'ok' };
   const legWorks = (s) => !(leg(s).state === 'absent' || (leg(s).state === 'prosthetic' && leg(s).level !== 'below_knee'));
   if (lp.wheelchair && (needs.has('standing') || needs.has('floor') || needs.has('twoLegs'))) return false;
+  // On crutches: never two-leg standing work (only the working leg, or crutch-supported)
+  if (lp.crutches && (needs.has('twoLegs') || needs.has('bilateralStance'))) return false;
+  // Static stance on both legs: both legs present (an ACTIVE prosthesis of any level counts)
+  if (needs.has('bilateralStance') && ['left', 'right'].some(s => leg(s).state === 'absent')) return false;
   if (needs.has('twoLegs') && !(legWorks('left') && legWorks('right'))) return false;
   if (needs.has('standing') && !legWorks('left') && !legWorks('right')) return false;
   if (needs.has('arms') && lp.trainableArms && lp.trainableArms.length === 0) return false;

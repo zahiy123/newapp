@@ -31,6 +31,7 @@ export const SIDES = Object.freeze({
   left: { label: t('צד שמאל', 'left side') },
   right: { label: t('צד ימין', 'right side') },
   alternating: { label: t('לסירוגין', 'alternating') },
+  bothSides: { label: t('שתי הרגליים — חצי סט לכל רגל', 'both legs — half a set each') },
 });
 
 // Prescriptions per pattern kind; `fit` = the session qualities it serves
@@ -53,8 +54,9 @@ const DOSES = Object.freeze({
     i45: { sets: 3, reps: '45', rest: 45, label: t('3×45 שניות', '3×45 s'), fit: ['endurance', 'conditioning', 'mobility'] },
   },
   strike: {
-    k6: { sets: 3, reps: '6', rest: 60, label: t('3×6 לכל רגל', '3×6 each'), fit: ['technique', 'power', 'sportSkill'] },
-    k10: { sets: 3, reps: '10', rest: 45, label: t('3×10 לכל רגל', '3×10 each'), fit: ['technique', 'sportSkill', 'balance'] },
+    // a kick set is either POWER (few, full force) or ACCURACY (more, controlled) — named in the exercise
+    k6: { sets: 3, reps: '6', rest: 60, label: t('3×6', '3×6'), focus: t('בעוצמה', 'power'), fit: ['technique', 'power', 'sportSkill'] },
+    k10: { sets: 3, reps: '10', rest: 45, label: t('3×10', '3×10'), focus: t('בדיוק', 'accuracy'), fit: ['technique', 'sportSkill', 'balance'] },
   },
 });
 
@@ -81,7 +83,7 @@ export function variationAxes(patternId) {
   return {
     tempos: prof && prof.kind === 'reps' ? Object.keys(TEMPOS) : ['standard'],
     ranges: repsWithPeak ? Object.keys(RANGES) : ['full'],
-    sides: p.unilateral ? ['left', 'right', 'alternating'] : ['both'],
+    sides: p.splitSides ? ['bothSides'] : p.unilateral ? ['left', 'right', 'alternating'] : ['both'],
     doses: Object.keys(DOSES[doseKind(patternId)]),
   };
 }
@@ -152,7 +154,7 @@ export function catalogItem(id) {
   if (!v) return null;
   const pat = PATTERNS[v.pattern];
   const dose = DOSES[doseKind(v.pattern)][v.dose];
-  const labels = [TEMPOS[v.tempo].label, RANGES[v.range].label, SIDES[v.side].label];
+  const labels = [dose.focus || null, TEMPOS[v.tempo].label, RANGES[v.range].label, SIDES[v.side].label];
   const variantHe = joinLabels(labels, 'he');
   const variantEn = joinLabels(labels, 'en');
   const qualities = new Set(pat.qualities);
@@ -170,6 +172,18 @@ export function catalogItem(id) {
   };
 }
 
+const KICK_PATTERNS = new Set(['shadowKick', 'shadowPass']);
+const legAffectedSide = (lp, s) => ['prosthetic', 'absent'].includes(lp?.[`${s}_leg`]?.state);
+
+/** Variation-level body fit: a leg amputee kicks / passes ONLY with the working leg (never the prosthesis). */
+export function sideFitsBody(patternId, side, lp = {}) {
+  if (!KICK_PATTERNS.has(patternId)) return true;
+  const affected = ['left', 'right'].filter(s => legAffectedSide(lp, s));
+  if (!affected.length) return true;
+  if (side === 'alternating') return false;
+  return !affected.includes(side);
+}
+
 /** Every catalog item of a sport family that this trainee's body allows. */
 export function buildCatalog(family, lp = {}) {
   const items = [];
@@ -177,6 +191,7 @@ export function buildCatalog(family, lp = {}) {
     if (!patternFitsBody(PATTERNS[pid], lp)) continue;
     const ax = variationAxes(pid);
     for (const tempo of ax.tempos) for (const range of ax.ranges) for (const side of ax.sides) for (const dose of ax.doses) {
+      if (!sideFitsBody(pid, side, lp)) continue;
       if (range === 'partial' && tempo === 'explosive') continue;     // partial range is for controlled work
       items.push(catalogItem([pid, tempo, range, side, dose].join('|')));
     }
@@ -185,20 +200,24 @@ export function buildCatalog(family, lp = {}) {
 }
 
 /** Catalog item → an exercise object for the training screen / plan views. */
-export function toExercise(item, isHe = true, label = null) {
+export function toExercise(item, isHe = true, label = null, { canSplit = true } = {}) {
   const d = item.dose;
   const timed = doseKind(item.patternId) !== 'reps' && doseKind(item.patternId) !== 'strike';
   // a sport label renames the movement in the sport's language; the variation part is kept
   const variant = (lang) => item.name[lang].split(' — ').slice(PATTERNS[item.patternId].name[lang].split(' — ').length).join(' — ');
   const name = label ? { he: [label.name.he, variant('he')].filter(Boolean).join(' · '), en: [label.name.en, variant('en')].filter(Boolean).join(' · ') } : item.name;
   const cue = label?.cue || item.cue;
+  // Split sets: the target covers BOTH legs (each leg gets the full dose → the set is twice as long)
+  const split = item.variation.side === 'bothSides' && canSplit;
+  const reps = split ? String(Number(d.reps) * 2) : d.reps;
   return {
     name: name.he,
     nameEn: name.en,
-    description: `${cue.he}. ${d.label.he}`,
-    descriptionEn: `${cue.en}. ${d.label.en}`,
+    description: `${cue.he}. ${d.label.he}${split ? ' — לכל רגל' : ''}`,
+    descriptionEn: `${cue.en}. ${d.label.en}${split ? ' — each leg' : ''}`,
     sets: d.sets,
-    reps: d.reps,
+    reps,
+    sideSwitch: split,
     restSeconds: d.rest,
     tips: isHe ? cue.he : cue.en,
     catalogId: item.id,

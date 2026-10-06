@@ -187,3 +187,41 @@ describe('No generic filler anywhere in sport / rehab tracks (owner rule)', () =
     }
   });
 });
+
+describe('Kick volume, working-leg kicks, split balance sets', () => {
+  const plan = { weeks: Array.from({ length: 2 }, () => ({ days: [{}, {}, {}] })) };
+  const days = (profile, lp) => rebuildPlanFromCatalog(plan, planContext(profile, lp, 's')).weeks.flatMap(w => w.days);
+  const KICKS = new Set(['shadowKick', 'shadowPass']);
+
+  it('amputee football: every session carries ≥3 kick / pass exercises, only with the working leg', () => {
+    for (const profile of [{ sport: 'rehab', trainingTrack: 'rehab_sport', rehabSport: 'footballAmputee' }, { sport: 'footballAmputee' }]) {
+      for (const d of days(profile, lpBK)) {
+        const kicks = d.exercises.map(e => parseCatalogId(e.catalogId)).filter(v => KICKS.has(v.pattern));
+        expect(kicks.length, `${d.goal}`).toBeGreaterThanOrEqual(3);
+        for (const v of kicks) expect(v.side, 'kick with the working (right) leg only').toBe('right');
+      }
+    }
+  });
+
+  it('a healthy footballer kicks with both feet (left / right / alternating)', () => {
+    const sides = new Set(days({ sport: 'football' }, lpOk).flatMap(d => d.exercises.map(e => parseCatalogId(e.catalogId)).filter(v => KICKS.has(v.pattern)).map(v => v.side)));
+    expect(sides.size).toBeGreaterThan(1);
+  });
+
+  it('single-leg balance is split between both legs (below-knee prosthesis included), each leg gets the full dose', () => {
+    const balance = days({ sport: 'rehab', trainingTrack: 'rehab_sport', rehabSport: 'footballAmputee' }, lpBK)
+      .flatMap(d => d.exercises).filter(e => parseCatalogId(e.catalogId).pattern === 'kneeUpBalance');
+    expect(balance.length).toBeGreaterThan(0);
+    for (const e of balance) {
+      expect(e.sideSwitch).toBe(true);
+      expect(parseCatalogId(e.catalogId).side).toBe('bothSides');
+      expect([40, 60, 90]).toContain(Number(e.reps));
+    }
+  });
+
+  it('above-knee: no split onto the prosthesis (it cannot bear the single-leg stance)', () => {
+    const balance = days({ sport: 'rehab', trainingTrack: 'rehab_sport', rehabSport: 'footballAmputee' }, lpAK)
+      .flatMap(d => d.exercises).filter(e => parseCatalogId(e.catalogId).pattern === 'kneeUpBalance');
+    for (const e of balance) expect(e.sideSwitch).toBe(false);
+  });
+});
