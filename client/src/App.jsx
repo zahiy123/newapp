@@ -14,6 +14,7 @@ import Stats from './pages/Stats';
 import GameMode from './pages/GameMode';
 import RehabSelection from './pages/RehabSelection';
 import AnatomicScan from './pages/AnatomicScan';
+import ValidationReport from './pages/ValidationReport';
 
 function PrivateRoute({ children }) {
   const { user, loading, authError, refreshProfile } = useAuth();
@@ -54,6 +55,7 @@ function App() {
               <Route path="/stats" element={<Stats />} />
               <Route path="/game" element={<GameMode />} />
               <Route path="/scan" element={<AnatomicScan />} />
+              <Route path="/validation" element={<ValidationReport />} />
             </Route>
           </Routes>
         </LanguageProvider>

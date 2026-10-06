@@ -90,6 +90,7 @@ Readiness Rating (1-5 emoji, 3 seconds)
 |---|---|---|---|
 | `checkpoint-stage2-stable` | (see `git show checkpoint-stage2-stable`) | 2026-10-05 | Stages 0-2 complete and verified on device: scan (per-arm, side fix, pacing, lock, accurate diagnosis), track selection, environment scan + obstacles, scan-adapted warm-up with ball question, seated tracking, Ghost demo panel |
 | `checkpoint-stage2-final` | (see `git show checkpoint-stage2-final`) | 2026-10-05 | Everything above + the full-body Ghost overlay, progressive range challenge, real-time accuracy %, required-limbs-in-view gate, instant start, synchronized direction swapping — all verified on device. **Restore point before Stage 3.** |
+| `checkpoint-stage3.1-profiles` | `273d096` | 2026-10-05 | Everything above + Stage 3.1 Expert Execution Profiles (17 expert + family coverage of every exercise), temporal motion engine, sport library, dynamic Ghosts, required-limbs gate in exercises. Build + all new tests pass and it is deployed; **not yet verified on device**. Restore point before the validation / rep-counting work. Flag `FEATURES.EXPERT_PROFILE = false` turns the 3.1 layer off without a revert. |
 
 **How to return to a checkpoint:**
 - Look at it without changing anything: `git checkout checkpoint-stage2-stable` (then `git checkout main` to come back).
@@ -424,7 +425,68 @@ Two critical corrections to the existing onboarding (Stages 1B/1C), completed **
   - **3.x (coach intelligence, items 12-17):** the AI coach receives the profile + sport emphasis + recent temporal events, so its spoken feedback explains errors in the sport's language; the Coach Notebook stores per-sport recurring faults.
   - **Sport selection:** running, martial arts and endurance become selectable sports once their drill profiles exist (sport list + plan prompt), without changing the stage order.
   - **Stage 4 (analytics):** trends of the temporal features per sport (cadence, absorption, chain timing, tempo, pelvic stability) as personal-baseline progress.
-- **Next 3.1 steps:** see the sport-library roadmap above.
+- **Next 3.1 steps:** see the sport-library roadmap above, as re-ordered by the owner below.
+
+**3.1 — Approved coaching principles (owner approval 2026-10-05, "100%"). These apply to every exercise, sport and later stage:**
+1. **Measurement accuracy before coaching. No guessing:**
+   - **Validation dataset:** real recorded reps (landmarks only, never video) labelled by a person as **"good / fault"** (plus which fault). Every rule threshold is tuned and reported against this data (agreement %, false alarms, misses) instead of literature values alone.
+   - **Position the trainee like a real coach — never guess, never run a partial workout (owner UX directive, 2026-10-05; replaces "silence when unsure"):**
+     - When the camera angle or the trainee's position is not right (camera too low, feet cut off, standing at the wrong angle, too close or too far, off-centre), the coach **immediately says, by voice and on screen, ONE simple and precise instruction**. For example: "step back so I can see you head to toe", "tilt the camera down a little", "move a little to the left", "turn side-on to the camera".
+     - Nothing counts while the position is wrong.
+     - **Only once the trainee is positioned right** does the coach say **"Great, now I can see you — let's start!"** (later re-positionings: "Perfect, I can see you — carry on").
+   - **Trainees never label or rate anything.** The trainee is training, not doing quality control. The "good / fault" labelling of the validation dataset is an **internal tool** for the owner / clinicians only (hidden URL switch `?validate=1`); it never appears in a normal workout.
+   - Automatic view detection (front / side); personal calibration from the scan (limb lengths, ROM).
+2. **Correction hierarchy and timing:**
+   - **One correction at a time**, chosen by importance: **safety → foundation → precision**.
+   - Corrections are given **between reps** (at the end of a rep / in the rest phase), **never in the middle of a movement**. The only exception is **danger**, which is immediate.
+   - Each fault gets a cooldown, and a fixed fault gets positive confirmation ("exactly like that!").
+3. **External-focus cues:**
+   - The coach phrases corrections with an external focus (on the floor, the ball, the target), not dry joint commands. For example: "push the floor away" instead of "straighten your knee", "drive your knee toward the ball" instead of "flex your hip". This is research-based: an external focus improves learning and performance.
+   - Each fault has several phrasings, and the Coach Notebook (item 17) later learns which one works for this trainee.
+4. **Order of the next 3.1 steps (owner-approved):**
+   1. **Device check** of the deployed 3.1 (owner), plus fixes from it.
+   2. **Validation dataset + confidence gate** (recorder, labelling UI, agreement report; silence when unsure; view detection). **— code + tests done 2026-10-05, awaiting the owner's device check:**
+      - **Confidence gate** `engine/exercise/confidence.js`. The coach does not correct when it is unsure:
+        - Camera view: front / side / oblique, from shoulder width ÷ torso length. A side-view profile is not judged while the trainee faces the camera, and a front-view profile is not judged from the side.
+        - Tracking: mean visibility of the measured points < 0.65, or a primary-joint jump > 45° in 50 ms (a glitch).
+        - Hysteresis: about 0.5 s to lose confidence, about 0.25 s to regain it.
+        - While unsure: no rules, no danger, no coaching and no accuracy samples. After 2 s the HUD says what to fix ("📐 stand side-on" / "move closer or add light — until then I won't correct, no guessing"). A wrong view is spoken once per exercise.
+      - **Clip recorder** `engine/validation/clipRecorder.js`. In validation mode each set is cut into clips: one per rep, one per kick (with the follow-through), or 5 s windows for holds and running.
+        - Each clip holds the compact landmarks of 13 points and the system verdict (issues, accuracy, events). Landmarks only: no video, no image, Firestore-safe strings.
+        - Untrustworthy stretches (limbs out of view or low confidence) produce no clip.
+      - **Labelling:** `components/ValidationPanel.jsx`.
+        - Shown after the set (rest or exercise done). Every rep shows what the system said and has 👍 "good" / 👎 "fault" buttons, plus optional fault chips from the profile's rules.
+        - Labels are saved together on "Done" to `users/{uid}/validationReps` (`services/validationStore.js`).
+        - Validation mode is turned on with `?validate=1` (remembered per device; `?validate=0` turns it off). A 🧪 chip is shown while recording.
+      - **Agreement** `engine/validation/agreement.js` + page **`/validation`** (`pages/ValidationReport.jsx`):
+        - Per profile and sport context: labelled reps, agreement %, **false alarms** (a good rep was corrected — the worst for trust), **misses**, per rule.
+        - **"Check thresholds"** replays every stored rep through the live evaluator with candidate thresholds (±30%) and ranks them (ties: fewer false alarms). Thresholds are chosen from data.
+      - Tests (12, `engine/validation/__tests__/validation.test.js`):
+        - Confidence gate: view detection; a front-filmed squat is never corrected even with a collapsing back; weak tracking is silenced; one bad frame does not silence.
+        - Recorder: the encoding round-trip; one clip per rep / kick, windows for running; no clips from untrustworthy stretches.
+        - Agreement: replay reproduces the live verdict; agreement / false alarms / misses / per rule; tuning loosens a too-strict trunk-lean threshold to between the "good" (52°) and "fault" (66°) labels with 0 false alarms and 0 misses.
+      - *Verification:* client build passes; client 537 pass, 0 new failures (23 long-standing scan-module failures unchanged).
+      - *Note:* the Firestore rules are not in the repo. If saving labels fails on device, the rules must allow `users/{uid}/validationReps` for the owner (like `users/{uid}/workouts`).
+      - **Positioning coach (owner UX directive, 2026-10-05)** `engine/exercise/setupCoach.js`:
+        - Like a human coach, it returns the single most important fix per frame, in priority order:
+          1. Body found ("stand in front of the camera").
+          2. Too close / head and feet cut ("step back so I see you head to toe").
+          3. Feet cut: "tilt the camera down" when there is room above the head, otherwise "step back — I can't see your feet".
+          4. Head cut: "tilt the camera up" or step back.
+          5. Leaving the frame or off-centre: "move a little left / right", as the trainee sees the mirrored screen.
+          6. Too far: "come closer".
+          7. Orientation for the measurement: "turn side-on" / "face the camera".
+          8. Clarity: "add light or move whatever hides you". Hidden arms: "keep your arms clear".
+        - Feet are required only when the exercise uses the legs. Prosthetic / absent legs follow the Iron Rule; one visible foot is enough side-on.
+        - The evaluator's gate is now "positioned right + required limbs" (`setup` in each result). Until then there are no reps, no rules and no nudges.
+        - The hook speaks a new instruction once it has been stable for 0.5 s and repeats it every 7 s. When positioned right for 0.7 s: "Great, now I can see you — let's start!" with a green banner (later: "Perfect, I can see you — carry on").
+        - HUD: a big amber 📷 instruction, "we start as soon as I see you right".
+        - Tests: 15 (`setupCoach.test.js`): every instruction, from shifted / zoomed / turned / dimmed Ghost frames, the prosthesis and upper-body cases, and the evaluator gate guiding and then opening. The confidence tests now check that the coach says how to stand.
+        - Client: 552 pass, 0 new failures.
+        - *Follow-up:* run the same positioning check before the calibration countdown (today it starts at the exercise phase).
+   3. **Profile-based rep counting with a quality score per rep** (replacing the per-exercise analyzers step by step), including the correction hierarchy, timing and external-focus cues.
+   4. **Special sport libraries:** leg amputees (amputee football: crutch kick / crutch sprint / balance / header / goalkeeper), wheelchair (push stroke, seated throws, shoulder protection), running (opened for selection), then tennis / martial arts (trunk-rotation metric) and basketball.
+   - Following (already in the roadmap): velocity-based fatigue detection (stop the set at ~20% rep-speed loss or form decay), automatic progression / regression, Pain Traffic Light integration, two-way voice ("why?"), best vs. weakest rep clips with the Ghost in the Stage 4 report.
 
 1. Edge processing at 60FPS: MediaPipe + Kalman + local rep counting.
 2. Peak Event Triggering: send a single frame + JSON at the peak moment.
@@ -582,6 +644,9 @@ Two critical corrections to the existing onboarding (Stages 1B/1C), completed **
 | `client/src/engine/exercise/profileGhost.js` | Ghost generated from a profile (FK/IK), drawn by the warm-up Ghost drawers |
 | `client/src/engine/exercise/kinematics.js` | Shared joint-angle definitions (evaluator + Ghost) |
 | `client/src/engine/exercise/motionFeatures.js` | Temporal analysis: CoM / weight transfer, tempo, landing absorption, cadence, kinetic-chain sequencing, pelvic drop, sway |
+| `client/src/engine/exercise/confidence.js` | Silence when unsure: camera-view detection + tracking confidence with hysteresis |
+| `client/src/engine/validation/clipRecorder.js` / `agreement.js` | Validation dataset: per-rep clips (landmarks only) + agreement / false alarms / misses / threshold tuning by replay |
+| `client/src/pages/ValidationReport.jsx` | `/validation` page: coach vs. human agreement per exercise, threshold check |
 | `client/src/engine/sports/sportLibrary.js` | Sport library: emphasis, sport-specific dynamic rules + explanations, tempo, per-track contexts |
 | `client/src/hooks/training/useExpertExecution.js` | Exercise-phase profile loop (20 Hz), voice prompts, automatic fallback |
 | `client/src/components/ExecutionHud.jsx` | Exercise HUD: missing limbs, error/danger, accuracy |
@@ -647,3 +712,6 @@ Two critical corrections to the existing onboarding (Stages 1B/1C), completed **
 - **2026-10-05:** The owner verified on device the full Ghost overlay, accuracy %, required-limbs gate and direction swap → Stage 3.0 marked DONE. New restore point `checkpoint-stage2-final` before starting Stage 3.
 - **2026-10-05:** **Stage 3.1 started (owner approval): Expert Execution Profile per exercise.** New `engine/exercise/` (kinematics, 14 expert + 6 family profiles covering all 100 cueKeys, a Ghost generated from the profile by FK/IK, a live evaluator), `useExpertExecution` hook + `ExecutionHud` + shared `viewPrompts` / `ghostBody` modules extracted from Training.jsx. In the exercise phase (flag `EXPERT_PROFILE`, automatic fallback): required limbs in view before anything counts, danger voice alerts, error banners, accuracy %, and the Ghost of the same profile. 25 tests (incl. Ghost ⇄ profile sync); client 491 pass, 0 new failures. Not yet committed — awaiting the owner.
 - **2026-10-05:** **3.1 sport-depth extension (owner clarification: deep, professional coaching for every sport, not only strength angles).** Temporal motion engine (center of mass, weight transfer, tempo, shock absorption, cadence, kinetic-chain sequencing, pelvic drop, sway), profile tags + dynamic rules + `why` explanations, new expert profiles (running in place, high knees, football kick) with dynamic keyframe Ghosts, and the sport library (12 sports incl. library-ready running / martial arts / endurance) layered per track with a safer-threshold merge. HUD shows correction + why + sport focus + cadence; a repeated error is explained once by voice. +34 tests (every Ghost is clean under every sport); client 525 pass, 0 new failures. Sport-library roadmap recorded inside Stage 3/4. Not yet committed.
+- **2026-10-05:** Owner approved the coaching principles (validation dataset with good/fault labels + silence when unsure; correction hierarchy safety → foundation → precision, one at a time, between reps only except danger; external-focus cues) and the order of the next 3.1 steps (device check → validation + confidence gate → profile-based rep counting with quality scores → special sport libraries: amputees, wheelchair, running…). Recorded inside Stage 3.1. New restore point `checkpoint-stage3.1-profiles` (`273d096`, tag pushed). Started step 2 (validation dataset + confidence gate).
+- **2026-10-05:** **3.1 step 2 implemented: validation dataset + confidence gate.** Silence when unsure (camera-view detection, tracking confidence, hysteresis; no corrections, only "fix the camera" guidance), per-rep clip recorder (landmarks only) in validation mode (`?validate=1`), "good / fault" labelling after each set saved to Firestore, and the `/validation` page with agreement, false alarms, misses and data-driven threshold checks by replay. 12 tests; client 537 pass, 0 new failures. Not yet committed.
+- **2026-10-05:** **Owner UX directive: trainees never label or rate; the coach positions them like a human coach.** New positioning coach (`setupCoach.js`): one precise spoken + on-screen instruction at a time (step back / tilt the camera down or up / move left or right / come closer / turn side-on / face the camera / add light), nothing counts until positioned right, then "Great, now I can see you — let's start!". The validation labelling stays an internal tool for the owner / clinicians (`?validate=1`). Principles updated in Stage 3.1. 15 tests; client 552 pass, 0 new failures. Not yet committed.

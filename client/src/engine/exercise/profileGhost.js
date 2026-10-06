@@ -266,6 +266,7 @@ export function profileGhostPose(profile, t, lp = {}) {
   const add = (from, to, limb, part, dashed = false) => segments.push({ from, to, limb, part, dashed });
   const lm = Array.from({ length: 33 }, () => ({ x: 0, y: 0, visibility: 0 }));
   const put = (i, p) => { lm[i] = { x: p.x, y: p.y, z: 0, visibility: 1 }; };
+  const NOSE = 0;
 
   if (ghost.view === 'front') {
     const s = standFront(a);
@@ -288,6 +289,7 @@ export function profileGhostPose(profile, t, lp = {}) {
       }
     }
     const neck = { x: 0, y: B.shoulderY - 0.05 };
+    put(NOSE, { x: 0, y: B.headY });
     return {
       segments, landmarks: lm, floorY: FLOOR_Y + 0.05, neck,
       head: { x: 0, y: B.headY, r: B.headR },
@@ -350,6 +352,7 @@ export function profileGhostPose(profile, t, lp = {}) {
   const up = dir(aTrunk);
   const neck = { x: shoulder.x + up.x * 0.05, y: shoulder.y + up.y * 0.05 };
   const headC = { x: shoulder.x + up.x * 0.4 + fwd.x * 0.06, y: shoulder.y + up.y * 0.4 + fwd.y * 0.06 };
+  put(NOSE, { x: headC.x + fwd.x * 0.15, y: headC.y + fwd.y * 0.15 });
   return {
     segments, landmarks: lm, floorY: FLOOR_Y + 0.05, neck,
     head: { x: headC.x, y: headC.y, r: B.headR },

@@ -19,6 +19,8 @@ import ExecutionHud from '../components/ExecutionHud';
 import { viewPromptText } from '../engine/training/viewPrompts';
 import { useExpertExecution } from '../hooks/training/useExpertExecution';
 import { sportContextsFor } from '../engine/sports/sportLibrary';
+import ValidationPanel from '../components/ValidationPanel';
+import { readValidationMode, saveLabelledClip } from '../services/validationStore';
 import { FEATURES } from '../config/features';
 import { CHALLENGE_MOVES, createRangeChallenge, updateRangeChallenge, createPeakTracker, trackPeak, shoulderAngle } from '../engine/rangeProgression';
 import { detectActivity, requiredPointsFor } from '../engine/warmupActivity';
@@ -622,6 +624,17 @@ export default function Training() {
     () => sportContextsFor(userProfile),
     [userProfile?.sport, userProfile?.trainingTrack, userProfile?.rehabSport],
   );
+  // Validation dataset (Stage 3.1): `?validate=1` records each rep and asks "good / fault" after the set
+  const [validationMode] = useState(() => readValidationMode(window.location.search));
+  const [validationSet, setValidationSet] = useState(null);       // { clips, profile } awaiting labels
+  const handleValidationClips = useCallback((clips, profile) => setValidationSet({ clips, profile }), []);
+  const handleValidationDone = useCallback((items) => {
+    setValidationSet(null);
+    if (!user?.uid || !items.length) return;
+    Promise.all(items.map(it => saveLabelledClip(user.uid, it.clip, it.label, it.faults)))
+      .then(() => setFeedback({ type: 'info', text: isHe ? `נשמרו ${items.length} חזרות למאגר האימות` : `Saved ${items.length} reps to the validation set` }))
+      .catch(err => console.error('[Validation] save failed:', err));
+  }, [user?.uid, isHe]);
   const execution = useExpertExecution({
     enabled: FEATURES.EXPERT_PROFILE && phase === PHASE.EXERCISING,
     cueKey: exerciseCueKey,
@@ -631,6 +644,8 @@ export default function Training() {
     landmarksRef: poseLandmarksRef,
     isHe,
     speakPriority,
+    recordClips: validationMode,
+    onClips: handleValidationClips,
   });
   const executionInViewRef = execution.inViewRef;
   const expertGhostRef = useRef(null);
@@ -2543,6 +2558,14 @@ export default function Training() {
           <GhostOverlay spec={execution.ghostSpec} limbProfile={limbProfile} landmarksRef={poseLandmarksRef} videoRef={videoRef} onError={handleOverlayError} />
         )}
         {phase === PHASE.EXERCISING && <ExecutionHud execution={execution} isHe={isHe} />}
+        {phase === PHASE.EXERCISING && validationMode && execution.active && (
+          <div className="absolute top-2 right-2 z-20 pointer-events-none rounded-full bg-fuchsia-700/90 text-white text-[11px] font-bold px-2 py-1">
+            {'🧪'} {isHe ? 'מצב אימות — מקליט חזרות' : 'Validation mode — recording reps'}
+          </div>
+        )}
+        {validationSet && phase !== PHASE.EXERCISING && (
+          <ValidationPanel clips={validationSet.clips} profile={validationSet.profile} isHe={isHe} onDone={handleValidationDone} />
+        )}
 
         {/* Required limbs not in view → the timer is frozen; tell the trainee exactly what to do */}
         {phase === PHASE.WARM_UP && missingPart && (

@@ -2,6 +2,9 @@
 // profileEvaluator — live evaluation of an exercise against its Expert Execution Profile
 //
 // PURE LOGIC, fed with RAW pose landmarks at ~20 Hz (like the warm-up activity loop).
+//   setup              — setupCoach: the trainee must be positioned right (head to toe when the
+//                        legs matter, centred, right distance, side-on / facing as the profile
+//                        measures) — until then nothing counts and `setup` says exactly what to fix
 //   requiredRegions()  — which landmarks must be in the frame for this profile & trainee
 //   createExecutionTracker / updateExecution — per frame:
 //       inView    (hysteresis)          → nothing counts while the required limbs are out of frame
@@ -15,10 +18,15 @@
 //                 judged by the profile's + the sport's `dynamics` rules; a violated dynamic
 //                 rule stays on screen for DYNAMIC_SHOW_MS, and `coaching` reports a rule that
 //                 was violated COACH_AFTER times in a row (the coach explains it once)
+//       quality   "silence when unsure" (confidence.js): with low tracking confidence or a
+//                 camera view that does not suit the profile, NO rule is judged, no coaching,
+//                 no accuracy samples — the UI asks to fix the camera instead
 // ============================================================
 
 import { JOINTS, measureMetric, sideUsable } from './kinematics.js';
 import { createMotionState, updateMotion } from './motionFeatures.js';
+import { updateConfidence } from './confidence.js';
+import { assessSetup, SETUP } from './setupCoach.js';
 
 const MIN_VISIBILITY = 0.5;
 const FRAME_MARGIN = 0.02;
@@ -134,6 +142,7 @@ export function createExecutionTracker(profile, lp = {}) {
     dynStreak: {},          // rule id → consecutive violating events
     coached: {},            // rule id → true once explained
     strikes: [],            // { ok } of recent strikes
+    conf: {},               // confidence hysteresis state
   };
 }
 
@@ -173,30 +182,51 @@ export function accuracyOf(profile, samples, strikes = []) {
 
 /**
  * One frame.
- * @returns {{ tracker, inView: boolean, missing: string|null, metrics: Object, phase: string,
+ * @returns {{ tracker, inView: boolean, missing: string|null, setup: Object|null, metrics: Object, phase: string,
  *             issues: Object[], danger: Object|null, accuracy: number|null,
- *             events: Object[], coaching: Object[], live: { cadence?: number|null } }}
+ *             events: Object[], coaching: Object[], live: { cadence?: number|null },
+ *             quality: { confident: boolean, reason: null|'limbs'|'view'|'tracking', view: string|null } }}
  */
 export function updateExecution(tracker, landmarks, nowMs) {
   const tr = tracker;
   const { profile } = tr;
 
-  // 1. Required limbs in view (hysteresis)
-  const missingNow = landmarks ? missingRegion(landmarks, tr.regions) : (tr.regions[0]?.region || 'body');
-  if (missingNow === null) { tr.inStreak += 1; tr.outStreak = 0; } else { tr.outStreak += 1; tr.inStreak = 0; }
+  // 1. Positioned right + required limbs in view (hysteresis). Like a coach: one precise fix at a time
+  const setupNow = assessSetup(landmarks, profile, tr.lp);
+  let issueNow = setupNow.ok ? null : setupNow.issue;
+  if (!issueNow) {
+    const region = missingRegion(landmarks, tr.regions);
+    if (region) issueNow = region === 'arms' ? SETUP.arms : region === 'legs' ? SETUP.feetStepBack : { ...SETUP.noBody, region };
+  }
+  if (issueNow) tr.lastSetupIssue = issueNow;
+  if (issueNow === null) { tr.inStreak += 1; tr.outStreak = 0; } else { tr.outStreak += 1; tr.inStreak = 0; }
   if (!tr.inView && tr.inStreak >= VISIBLE_ON_SAMPLES) tr.inView = true;
   if (tr.inView && tr.outStreak >= VISIBLE_OFF_SAMPLES) tr.inView = false;
-  const missing = tr.inView ? null : (missingNow || tr.regions[0]?.region || null);
+  const setup = tr.inView ? null : (issueNow || tr.lastSetupIssue || SETUP.noBody);
+  const missing = setup ? setup.region : null;
 
+  const quiet = (quality) => ({
+    tracker: tr, inView: tr.inView, missing, setup, metrics: {}, phase: 'any', issues: [], danger: null,
+    accuracy: accuracyOf(profile, tr.samples, tr.strikes), events: [], coaching: [], live: {}, quality,
+  });
   if (!tr.inView || !landmarks || profile.precision !== 'expert') {
     tr.ruleSince = {};
     if (!tr.inView) tr.motion = createMotionState(profile, tr.lp);   // no motion history across a gap
-    return { tracker: tr, inView: tr.inView, missing, metrics: {}, phase: 'any', issues: [], danger: null, accuracy: accuracyOf(profile, tr.samples, tr.strikes), events: [], coaching: [], live: {} };
+    return quiet({ confident: profile.precision === 'expert' ? false : true, reason: tr.inView ? null : 'limbs', view: null });
   }
 
   // 2. Kinematics
   const metrics = measureProfile(profile, landmarks, tr.lp);
   const phase = phaseOf(repProgress(profile, metrics[profile.primary]));
+
+  // 2b. Silence when unsure — no judging on an untrustworthy measurement
+  const quality = updateConfidence(tr.conf, profile, landmarks, metrics[profile.primary]);
+  if (!quality.confident) {
+    tr.ruleSince = {};
+    tr.dynActive = {};
+    tr.motion = createMotionState(profile, tr.lp);
+    return { ...quiet(quality), metrics, phase };
+  }
 
   // 3. Rules with persistence
   const hits = violatedRules(profile, metrics, phase);
@@ -246,8 +276,8 @@ export function updateExecution(tracker, landmarks, nowMs) {
   }
 
   return {
-    tracker: tr, inView: true, missing: null, metrics, phase, issues, danger,
-    accuracy: accuracyOf(profile, tr.samples, tr.strikes), events, coaching, live,
+    tracker: tr, inView: true, missing: null, setup: null, metrics, phase, issues, danger,
+    accuracy: accuracyOf(profile, tr.samples, tr.strikes), events, coaching, live, quality,
   };
 }
 
