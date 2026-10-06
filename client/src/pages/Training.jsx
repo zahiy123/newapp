@@ -20,6 +20,8 @@ import { useExpertExecution, buildExecutionProfile } from '../hooks/training/use
 import { showsRangeGauge } from '../engine/training/rangeGauge';
 import { demoGhostFor } from '../engine/training/demoGhost';
 import { makeTimedAnalyzer } from '../engine/training/timedAnalyzer';
+import { makeProfileRepAnalyzer } from '../engine/training/profileRepAnalyzer';
+import { READY_DRIVE, withDrive } from '../engine/training/coachFlow';
 import { catalogGhostSpec } from '../engine/catalog/catalog';
 import { rebuildPlanFromCatalog, planContext } from '../engine/catalog/planBuilder';
 import { availableEquipment, fitExercises, needsBall } from '../engine/exercise/equipmentFit';
@@ -414,6 +416,7 @@ export default function Training() {
   const limbsInViewRef = useRef(false);
   const [missingPart, setMissingPart] = useState(null);     // 'legs' | 'arms' | 'upper' | null
   const lastViewPromptRef = useRef(0);
+  const warmUpDriveRef = useRef(Math.floor(Math.random() * 6));   // rotating energy lines
   const warmUpMovingMsRef = useRef(0);                      // accumulated moving time toward the next second
   // Real-time accuracy vs. the Ghost (range + position overlap), shown next to the movement indicator
   const [accuracy, setAccuracy] = useState(null);           // 0-100 or null
@@ -657,7 +660,9 @@ export default function Training() {
       .catch(err => console.error('[Validation] save failed:', err));
   }, [user?.uid, isHe]);
   const execution = useExpertExecution({
-    enabled: FEATURES.EXPERT_PROFILE && phase === PHASE.EXERCISING,
+    enabled: FEATURES.EXPERT_PROFILE && (phase === PHASE.EXERCISING || phase === PHASE.CALIBRATING),
+    counting: phase === PHASE.EXERCISING,
+    playerName,
     cueKey: exerciseCueKey,
     exerciseName: currentExercise?.name,
     catalogId: currentExercise?.catalogId || null,
@@ -670,6 +675,14 @@ export default function Training() {
     onClips: handleValidationClips,
   });
   const executionInViewRef = execution.inViewRef;
+  // Exact counting source for the analyzer wrapper (expert rep exercises only)
+  const profileRepsRef = useRef({ active: false, countRef: null });
+  profileRepsRef.current = {
+    active: execution.active && execution.profile?.precision === 'expert' && execution.profile?.kind === 'reps',
+    countRef: execution.repCountRef,
+  };
+  const workingSourceRef = useRef(execution);
+  workingSourceRef.current = execution;
 
   // Demo Ghost of the exercise: from the briefing right after the warm-up, through the
   // calibration, and during the exercise — generated from the SAME execution profile that is
@@ -715,10 +728,12 @@ export default function Training() {
   useEffect(() => {
     if (currentExercise) {
       const { analyze, type, cueKey, ballAware } = getAnalyzer(currentExercise.name);
-      // Timed catalog exercises (intervals / holds): the target is seconds of work, not reps
+      // Timed catalog exercises (intervals / holds): the target is seconds of REAL work, not reps.
+      // Rep exercises: the count comes from the exact profile rep detector when there is one.
+      const isWorking = () => !workingSourceRef.current?.active || workingSourceRef.current.workingRef.current;
       analyzerRef.current = currentExercise.timed
-        ? { analyze: makeTimedAnalyzer(analyze), type: 'hold', cueKey, ballAware }
-        : { analyze, type, cueKey, ballAware };
+        ? { analyze: makeTimedAnalyzer(analyze, isWorking), type: 'hold', cueKey, ballAware }
+        : { analyze: makeProfileRepAnalyzer(analyze, profileRepsRef), type, cueKey, ballAware };
       exerciseStateRef.current = { _userProfile: userProfile };
       setDisplayReps(0);
       setFeedback(null);
@@ -769,18 +784,28 @@ export default function Training() {
       maxAngles: {},
       frames: 0,
     };
-    setCalibrationCountdown(5);
-    speakCalibrationStart(playerName);
+    const gated = () => workingSourceRef.current?.active;     // the start gate is available
+    calibrationDataRef.current.readyMs = 0;
+    calibrationDataRef.current.lastTick = Date.now();
+    const CAL_MS = gated() ? 3000 : 5000;
+    setCalibrationCountdown(Math.ceil(CAL_MS / 1000));
+    if (!gated()) speakCalibrationStart(playerName);
 
-    // Countdown timer — updates every second, transitions to EXERCISING after 5s
+    // Countdown — with the start gate it advances ONLY while the trainee holds the start position
+    // (positioned + reliable + in the start pose); otherwise it waits (the coach says what to do)
     calibrationIntervalRef.current = setInterval(() => {
       const cal = calibrationDataRef.current;
       if (!cal) return;
-      const elapsed = (Date.now() - cal.startTime) / 1000;
-      const remaining = Math.max(0, Math.ceil(5 - elapsed));
-      setCalibrationCountdown(remaining);
+      const now = Date.now();
+      const step = now - cal.lastTick;
+      cal.lastTick = now;
+      const ready = !gated() || workingSourceRef.current.startReadyRef.current;
+      if (ready) cal.readyMs += step;
+      const elapsed = cal.readyMs / 1000;
+      const remaining = Math.max(0, Math.ceil(CAL_MS / 1000 - elapsed));
+      setCalibrationCountdown(ready ? remaining : null);
 
-      if (elapsed >= 5) {
+      if (cal.readyMs >= CAL_MS) {
         clearInterval(calibrationIntervalRef.current);
         calibrationIntervalRef.current = null;
 
@@ -804,7 +829,9 @@ export default function Training() {
           exerciseStateRef.current._calibration = baseline;
         }
 
-        speakCalibrationDone(playerName);
+        // Honest: we start because the trainee IS in the start position (not "I got your range")
+        if (gated()) speakPriority(isHe ? READY_DRIVE.start.he : READY_DRIVE.start.en, { rate: 1.12 });
+        else speakCalibrationDone(playerName);
         calibrationDataRef.current = null;
         setPhase(PHASE.EXERCISING);
         setTimer(0);
@@ -820,7 +847,7 @@ export default function Training() {
           setTimeout(() => speakCommandAndWait(1), 1500);
         }
       }
-    }, 1000);
+    }, 250);
 
     return () => {
       if (calibrationIntervalRef.current) {
@@ -841,6 +868,7 @@ export default function Training() {
     if (cal.frames === 0) {
       performWarmUpCalibration(captureFrame, videoRef.current);
     }
+    if (workingSourceRef.current?.active && !workingSourceRef.current.startReadyRef.current) return;
     cal.frames++;
     const cueKey = analyzerRef.current?.cueKey;
     const anglesToTrack = getCalibrationAngles(stableLm, cueKey);
@@ -1668,7 +1696,7 @@ export default function Training() {
         if (sinceStart > 1500 && now - lastViewPromptRef.current > 10000) {
           lastViewPromptRef.current = now;
           const part = requiredPointsFor(currentWarmUp.ghost, limbProfile).part;
-          speakPriority(viewPromptText(part, isHe), { rate: 1.0 });
+          speakPriority(withDrive(viewPromptText(part, isHe), warmUpDriveRef.current++, playerName, isHe), { rate: 1.12 });
         }
         return;
       }
@@ -2636,7 +2664,7 @@ export default function Training() {
         {demoGhostPhase && showDemoGhost && demoOnBody && (
           <GhostOverlay spec={demoGhostSpec} limbProfile={limbProfile} landmarksRef={poseLandmarksRef} videoRef={videoRef} onError={handleOverlayError} />
         )}
-        {phase === PHASE.EXERCISING && <ExecutionHud execution={execution} isHe={isHe} />}
+        {(phase === PHASE.EXERCISING || phase === PHASE.CALIBRATING) && <ExecutionHud execution={execution} isHe={isHe} />}
         {phase === PHASE.EXERCISING && validationMode && execution.active && (
           <div className="absolute top-2 right-2 z-20 pointer-events-none rounded-full bg-fuchsia-700/90 text-white text-[11px] font-bold px-2 py-1">
             {'🧪'} {isHe ? 'מצב אימות — מקליט חזרות' : 'Validation mode — recording reps'}
@@ -3084,16 +3112,20 @@ export default function Training() {
 
         {/* Calibration overlay — 5-second ROM measurement */}
         {phase === PHASE.CALIBRATING && (
-          <div className="absolute inset-0 flex items-center justify-center z-20">
-            <div className="bg-black/60 backdrop-blur-sm rounded-2xl p-6 text-center text-white">
-              <div className="text-lg font-bold mb-2">
-                {isHe ? 'כיול תנועה' : 'Calibrating'}
+          <div className="absolute inset-x-0 bottom-6 flex items-center justify-center z-20 pointer-events-none">
+            <div className="bg-black/60 backdrop-blur-sm rounded-2xl px-6 py-4 text-center text-white">
+              <div className="text-lg font-bold mb-1">
+                {execution.active ? (isHe ? 'עמדת פתיחה' : 'Start position') : (isHe ? 'כיול תנועה' : 'Calibrating')}
               </div>
-              <div className="text-4xl font-bold text-yellow-400 mb-2">
-                {calibrationCountdown}
+              <div className="text-4xl font-bold text-yellow-400 mb-1">
+                {calibrationCountdown === null ? '⏳' : calibrationCountdown}
               </div>
               <div className="text-sm opacity-80">
-                {isHe ? 'בצע תנועה אחת מלאה' : 'Perform one full movement'}
+                {calibrationCountdown === null
+                  ? (isHe ? 'מחכה שתיכנס לעמדת הפתיחה' : 'Waiting for you to get into the start position')
+                  : execution.active
+                    ? (isHe ? 'החזק את עמדת הפתיחה...' : 'Hold the start position...')
+                    : (isHe ? 'בצע תנועה אחת מלאה' : 'Perform one full movement')}
               </div>
             </div>
           </div>

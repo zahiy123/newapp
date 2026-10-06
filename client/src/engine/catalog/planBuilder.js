@@ -10,7 +10,7 @@
 
 import { buildSession, inferGoal, familyOf, GOALS } from './sessionPlanner.js';
 import { toExercise } from './catalog.js';
-import { trackOf, sportFamilyOf, selectedSessionGoals } from './trackGoals.js';
+import { trackOf, sportFamilyOf, selectedSessionGoals, patternsFor } from './trackGoals.js';
 
 /** Contexts for the builder from the profile. */
 export function planContext(userProfile, lp = {}, seedBase = null) {
@@ -21,7 +21,8 @@ export function planContext(userProfile, lp = {}, seedBase = null) {
     // rehab tracks build from the generic (rehab) family; the sport family feeds rehab + sport's support
     family: track === 'sport_only' ? sportFamily : familyOf('rehab'),
     sportFamily: track === 'rehab_only' ? familyOf('rehab') : sportFamily,
-    allowed: selectedSessionGoals(userProfile),     // the locked chain: only the trainee's goals
+    allowed: selectedSessionGoals(userProfile, lp),  // the locked chain: only the trainee's goals
+    patterns: patternsFor(userProfile, lp),           // only functional patterns for the sport / limitation
     lp,
     seedBase: seedBase || userProfile?.uid || userProfile?.email || userProfile?.name || 'trainee',
   };
@@ -33,6 +34,8 @@ export function planContext(userProfile, lp = {}, seedBase = null) {
  */
 export function rebuildPlanFromCatalog(plan, ctx, isHe = true) {
   if (!plan?.weeks) return plan;
+  // goals rotate over the whole plan (not per week): with 3 days a week and 4 goals, every goal still gets its days
+  let dayCounter = 0;
   return {
     ...plan,
     weeks: plan.weeks.map((w, wi) => {
@@ -41,8 +44,8 @@ export function rebuildPlanFromCatalog(plan, ctx, isHe = true) {
         ...w,
         days: (w?.days || []).map((d, di) => {
           if (!d) return d;
-          const goal = inferGoal(d, { allowed: ctx.allowed, dayIndex: di });
-          const s = buildSession({ goal, family: ctx.family, sportFamily: ctx.sportFamily, lp: ctx.lp, seed: `${ctx.seedBase}|w${wi}|d${di}`, avoid });
+          const goal = inferGoal(d, { allowed: ctx.allowed, dayIndex: dayCounter++ });
+          const s = buildSession({ goal, family: ctx.family, sportFamily: ctx.sportFamily, lp: ctx.lp, seed: `${ctx.seedBase}|w${wi}|d${di}`, avoid, patterns: ctx.patterns });
           s.items.forEach(x => avoid.add(x.item.id));
           return {
             ...d,

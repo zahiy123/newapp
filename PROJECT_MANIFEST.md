@@ -654,6 +654,48 @@ Two critical corrections to the existing onboarding (Stages 1B/1C), completed **
       - Every exercise is a valid catalog id **with a Ghost**, of the trainee's sport family only.
       - Rehab tracks have no explosive tempo or plyometrics.
     - Client 611 pass, server 10/10, 0 new failures.
+- **Owner fix cluster, 2026-10-06 (backup tag `backup-2026-10-06-pre-detection-fixes` = `7b9a017`):**
+  1. **No false "got you, let's start".**
+     - *Root cause:* the calibration stage ended after a fixed 5 s whether or not anyone was in the frame, then said "מעולה, תפסתי את הטווח שלך. יאללה נתחיל!" and started the exercise — a timer, not a detection.
+     - *Fix:* a hard **start gate** (`engine/training/coachFlow.js`). It opens only when the trainee is **positioned right** (setupCoach), the **measurement is reliable** (confidence gate) and they are **in the exercise's start position**:
+       - Rep exercises: at rest. Holds: inside the hold range. Kicks: standing tall.
+       - These must hold continuously for 600 ms. Leaving the position for 400 ms closes the gate again, and flickering detection / background noise never opens it.
+     - The expert module now also runs during the calibration. The countdown (3 s) **advances only while the gate is open**; otherwise it shows "⏳ waiting for the start position", and the coach says what to do ("take the start position — exactly like the Ghost", with drive).
+     - Calibration angles are collected only from real start-position frames.
+     - The start line is honest: "That's it, you're in position — let's start!" (no "I got your range").
+  2. **Exact rep counting.**
+     - For expert rep exercises the count comes from the profile rep detector (`isValidRep`): a full rest → peak → rest cycle of the primary joint with ≥ 250 ms to the peak and ≥ 200 ms back (no jitter / twitches), only in view, only with a reliable measurement, only during the exercise, from zero every set.
+     - The exercise's own analyzer still runs for posture / form / visibility feedback, but its count and count voice are replaced (`profileRepAnalyzer.js`).
+     - Timed exercises count **only seconds of real work** (`workingRef`): running in place = a stride / landing in the last 1.5 s; holds = inside the hold position. Standing or sitting idle stops the clock.
+     - *Tests:* the Ghost's 5 cycles → exactly 5 reps; standing still and sitting still with landmark noise for 10 s → 0 reps; a twitch is not a rep; running in place counts while striding and not while standing; the analyzer's own counts are dropped.
+  3. **The Ghost keeps a steady, proportional size.**
+     - *Root cause:* with the hips undetected, the overlay estimated the body size from the shoulder width. Turning side-on, the shoulders overlap, so the Ghost shrank to a dot.
+     - *Fix* (`engine/ghostOverlay.js`):
+       - The torso is measured shoulder → hip on whichever side is visible (works side-on).
+       - The shoulder-width estimate is used only when facing the camera; otherwise the last good size is kept.
+       - The size changes at most 6% per update.
+       - It is never drawn smaller than about 45% of the view height.
+     - *Tests:* +3 (turning side-on does not shrink it; one-side torso; gradual change + minimum size).
+  4. **Functional exercises only — no generic filler** (e.g. "point your hands at the wall" — the front-raise cue — in amputee football rehab).
+     - `engine/catalog/relevance.js`: per sport, the movement patterns that are functional for it.
+       - **Amputee football:** balance on the remaining leg, core, crutch upper body (push-ups, press), the kick, mini squat / hinge / bridge / lunge.
+       - **Wheelchair sports:** shoulders, pushing strength, trunk, the sport motion.
+       - Football / basketball / tennis / goalkeeper / running each have their own lists.
+       - **Rehab only with a leg limitation and healthy arms: no isolated arm raises / curls.** Arm rehab is kept when an arm is limited.
+     - **Adapted sport goals:** amputee football → technique, balance & core, upper-body strength, power; wheelchair sports → technique, upper-body strength, power.
+     - A goal is offered only when a real coherent session can be built for THIS trainee (sport + body).
+     - *Quality fixes found on the way:*
+       - An explosive tempo no longer turns a squat into a "speed" exercise.
+       - A controlled tempo no longer turns a push-up into a "stability" or "range of motion" exercise.
+       - The main block is filled first, so a mobility session no longer loses its patterns to the warm-up block.
+       - A unilateral skill may appear per side in a technique session (right foot, left foot, alternating).
+       - **Goals rotate over the whole plan**: before this, with 3 days a week and 4 goals the 4th goal never got a day.
+  5. **Drive in the coach's voice.**
+     - Positioning instructions ("step back…", "tilt the camera…") are now said with **rotating energy lines and the trainee's name**, never the same twice in a row: "יאללה {name}, קום ותן בראש!", "{name}, אני מחכה לך — בוא נעלה הילוך!", "קדימה אלוף, האימון לא מחכה!", "{name}, תראה לי שאתה רעב!"…
+     - It is spoken a little faster (1.12).
+     - The ready lines are energetic: "מעולה! עכשיו אני רואה אותך — יאללה, תן בראש!".
+     - The warm-up "step into the frame" prompt carries the same drive.
+  - *Verification:* client build passes; client 634 pass (+ coach-flow, rep-analyzer, overlay and relevance / chain tests), 0 new failures; server unchanged (10/10).
    3. **Profile-based rep counting with a quality score per rep** (replacing the per-exercise analyzers step by step), including the correction hierarchy, timing and external-focus cues.
    4. **Special sport libraries:** leg amputees (amputee football: crutch kick / crutch sprint / balance / header / goalkeeper), wheelchair (push stroke, seated throws, shoulder protection), running (opened for selection), then tennis / martial arts (trunk-rotation metric) and basketball.
    - Following (already in the roadmap): velocity-based fatigue detection (stop the set at ~20% rep-speed loss or form decay), automatic progression / regression, Pain Traffic Light integration, two-way voice ("why?"), best vs. weakest rep clips with the Ghost in the Stage 4 report.
@@ -822,6 +864,9 @@ Two critical corrections to the existing onboarding (Stages 1B/1C), completed **
 | `client/src/engine/catalog/patterns.js` | Movement patterns of the catalog (Ghost source, qualities, sports, body needs, external-focus cue) |
 | `client/src/engine/catalog/catalog.js` | Catalog = pattern × variation (tempo / range / side / dose), each with its Ghost + profile; ~350+ per sport family |
 | `client/src/engine/catalog/sessionPlanner.js` | Coherent goal-based sessions (prep / main / support / cooldown) + coherence report + day-goal inference |
+| `client/src/engine/training/coachFlow.js` | Start gate (no false start), exact rep validity, real-work monitor, drive voice lines |
+| `client/src/engine/training/profileRepAnalyzer.js` | The rep count comes from the profile detector; the analyzer keeps form / posture feedback |
+| `client/src/engine/catalog/relevance.js` | Functional patterns per sport / limitation (no generic filler) |
 | `client/src/engine/catalog/trackGoals.js` | Single source of truth: goals per track (rehab / sport / rehab + sport), the trainee's valid goals, legacy mapping |
 | `client/src/engine/catalog/planBuilder.js` | Rebuilds the AI week plan's days from the catalog (deterministic, shared by dashboard + training) |
 | `client/src/engine/training/timedAnalyzer.js` | Timed exercises: seconds of work, paused when out of position |
@@ -903,3 +948,4 @@ Two critical corrections to the existing onboarding (Stages 1B/1C), completed **
 - **2026-10-06:** Restore point `backup-2026-10-06-catalog-v1` (`7cbcc68`, the catalog work committed locally, tag pushed, not deployed) before the owner's track / goal lock fixes. The Stable Checkpoints section now lists **every** restore point (1-7) with its commit, deploy status, what it contains and how to return to it.
 - **2026-10-06:** **Locked chain (owner fix): track → goals → day goal → exercises → Ghost.** The Goals page offers only the track's goals (rehab: targeted strengthening / stability & balance / range of motion; sport: speed / explosive power / technique / agility; rehab + sport: both; fitness: strength / endurance / power / mobility); every day's goal is one of the trainee's selected goals; new rehab session goals with rehab-only main blocks; the server may only use the trainee's goals; martial arts and the standalone endurance sport removed. +23 chain tests over 17 track × sport × body cases; client 611 pass, server 10/10, 0 new failures. Not yet committed — awaiting the owner.
 - **2026-10-06:** Committed and pushed `66c98bf` (catalog + coherent sessions + locked chain + Ghost / equipment fixes) → deployed to production, verified in the served bundle (rehab goals, "sport tools in rehab", shadow kick, session goal line, ball question present; martial-arts patterns absent). New restore point `checkpoint-2026-10-06-locked-chain` (#8). **The server must be redeployed** for the server-side parts (ball guard, one goal per day from the trainee's goals); the client enforces both without it.
+- **2026-10-06:** **Owner fix cluster.** Backup tag `backup-2026-10-06-pre-detection-fixes` (`7b9a017`). (1) A hard start gate replaces the 5 s calibration timer: positioned + reliable + in the start position for 600 ms before anything starts, honest start line. (2) Exact rep counting from the profile detector (full cycles with real durations; idle / sitting / noise = 0), and timed exercises count only real work. (3) The overlay Ghost keeps its size side-on (same-side torso, no shoulder-width shrink, ±6% per update, minimum ~45% of the view). (4) Functional patterns per sport / limitation (amputee football: balance, core, crutch upper body, the kick — no isolated arm raises), adapted sport goals, honest goal feasibility, quality fixes (tempo no longer inflates qualities, main block first, per-side technique, goals rotate over the whole plan). (5) Positioning prompts with rotating drive lines and the name. Client 634 pass, 0 new failures. Not yet committed.

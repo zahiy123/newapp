@@ -16,8 +16,13 @@
 // coach says EXACTLY what to fix ("step back so I see you head to toe", "tilt the camera down",
 // "move a little to the left", "turn side-on") — immediately, then every few seconds — and
 // nothing counts. Once positioned right: "Great, now I can see you — let's start!".
-// Voice (critical-only policy): positioning, DANGER alerts, and a technique error that
-// repeated COACH_AFTER times in a row is explained ONCE per exercise (correction + why).
+// Voice (critical-only policy): positioning (with DRIVE — energy words, rotated, with the name),
+// DANGER alerts, and a technique error that repeated COACH_AFTER times in a row is explained
+// ONCE per exercise (correction + why).
+// Start gate (coachFlow): startReadyRef opens only when positioned + measured reliably + in the
+// exercise's START POSITION continuously — the calibration / exercise start waits for it.
+// Counting: repCountRef counts only full, real reps of the profile (rest → peak → rest with real
+// durations) while `counting`; workingRef tells timed exercises whether the trainee is working.
 // SAFETY: any runtime error disables the module for the session and re-opens the gates,
 // so the exercise falls back to the previous pipeline.
 
@@ -26,7 +31,9 @@ import { getExerciseProfile, personalizeProfile } from '../../engine/exercise/ex
 import { variationProfile } from '../../engine/catalog/catalog';
 import { applySportContext } from '../../engine/sports/sportLibrary';
 import { createExecutionTracker, updateExecution } from '../../engine/exercise/profileEvaluator';
-import { READY } from '../../engine/exercise/setupCoach';
+import {
+  createStartGate, updateStartGate, isStartPosition, isValidRep, updateWork, withDrive, startPositionPrompt, READY_DRIVE,
+} from '../../engine/training/coachFlow';
 import { createClipRecorder, recordFrame } from '../../engine/validation/clipRecorder';
 
 const TICK_MS = 50;
@@ -38,6 +45,8 @@ const DANGER_VOICE_EVERY_MS = 6000;
 const ACCURACY_EVERY_MS = 1000;
 const COACH_VOICE_GAP_MS = 8000;           // a coaching explanation never follows another / a danger alert within this
 const UNSURE_NOTICE_MS = 2000;             // low confidence this long → show / say what to fix
+const START_PROMPT_AFTER_MS = 1500;        // positioned but not in the start position this long → prompt
+const START_PROMPT_REPEAT_MS = 7000;
 
 /**
  * The execution profile of an exercise for this trainee: exercise profile → personalized
@@ -52,7 +61,10 @@ export function buildExecutionProfile(cueKey, exerciseName, limbProfile, sportCo
   return applySportContext(personalizeProfile(base, limbProfile || {}), ctx);
 }
 
-export function useExpertExecution({ enabled, cueKey, exerciseName, catalogId = null, sportContexts, limbProfile, landmarksRef, isHe, speakPriority, recordClips = false, onClips }) {
+export function useExpertExecution({
+  enabled, counting = false, cueKey, exerciseName, catalogId = null, sportContexts, limbProfile, landmarksRef,
+  isHe, playerName = '', speakPriority, recordClips = false, onClips,
+}) {
   const [failed, setFailed] = useState(false);
   const contextsKey = (sportContexts || []).join('+');
   const profile = useMemo(
@@ -62,6 +74,13 @@ export function useExpertExecution({ enabled, cueKey, exerciseName, catalogId = 
   const active = !!profile && !failed;
 
   const inViewRef = useRef(true);            // open by default: an inactive module never blocks anything
+  const startReadyRef = useRef(true);        // the start gate (open by default when inactive)
+  const repCountRef = useRef(0);             // real reps of this set (profile-based)
+  const workingRef = useRef(true);           // the trainee is working right now (timed exercises)
+  const countingRef = useRef(counting);
+  countingRef.current = counting;
+  const nameRef = useRef(playerName);
+  nameRef.current = playerName;
   const statsRef = useRef({ dangers: 0, errors: {} });
   const [missingPart, setMissingPart] = useState(null);
   const [issue, setIssue] = useState(null);
@@ -70,6 +89,7 @@ export function useExpertExecution({ enabled, cueKey, exerciseName, catalogId = 
   const [unsure, setUnsure] = useState(null);   // null | 'view' | 'tracking' — measurement not reliable
   const [setup, setSetup] = useState(null);     // positioning fix { code, he, en } or null
   const [readyFlash, setReadyFlash] = useState(null);   // READY message shown briefly
+  const [startPrompt, setStartPrompt] = useState(false); // positioned, but not in the start position
 
   // Latest callbacks without restarting the loop
   const speakRef = useRef(speakPriority);
@@ -82,12 +102,23 @@ export function useExpertExecution({ enabled, cueKey, exerciseName, catalogId = 
   useEffect(() => {
     if (!active) {
       inViewRef.current = true;
+      startReadyRef.current = true;
+      workingRef.current = true;
+      setStartPrompt(false);
       setMissingPart(null); setIssue(null); setAccuracy(null); setCadence(null); setUnsure(null);
       setSetup(null); setReadyFlash(null);
       return undefined;
     }
     const tracker = createExecutionTracker(profile, limbProfile || {});
     inViewRef.current = false;
+    startReadyRef.current = false;
+    repCountRef.current = 0;
+    const gate = createStartGate();
+    const work = {};
+    let wasCounting = countingRef.current;
+    let notStartSince = null; let startSpokenAt = 0; let lastStartPrompt = false;
+    let driveK = Math.floor(Math.random() * 6);
+    const countsReps = profile.precision === 'expert' && profile.kind === 'reps';
     statsRef.current = { dangers: 0, errors: {}, coached: [] };
     let lastMissing; let lastIssueId; let lastDanger = 0; let lastAccuracyAt = 0; let lastVoice = 0;
     let lastCadence = null;
@@ -106,6 +137,18 @@ export function useExpertExecution({ enabled, cueKey, exerciseName, catalogId = 
         inViewRef.current = r.inView;
         if (recorder) recordFrame(recorder, lm, r, now);
 
+        // ---- Start gate: positioned + reliable + in the START POSITION, held ----
+        const inStart = r.inView && isStartPosition(profile, r.metrics);
+        startReadyRef.current = updateStartGate(gate, { positioned: r.inView, confident: r.quality?.confident, inStart }, now);
+        workingRef.current = updateWork(work, profile, r, now);
+
+        // ---- Exact rep counting (a new set starts from zero) ----
+        if (countingRef.current && !wasCounting) repCountRef.current = 0;
+        wasCounting = countingRef.current;
+        if (countsReps && countingRef.current && r.inView) {
+          for (const ev of r.events) if (isValidRep(ev)) repCountRef.current += 1;
+        }
+
         // ---- Positioning: one precise instruction at a time, then "now I can see you" ----
         const he = isHeRef.current;
         const code = r.setup?.code || null;
@@ -116,21 +159,33 @@ export function useExpertExecution({ enabled, cueKey, exerciseName, catalogId = 
           const settled = now - setupSince >= SETUP_SETTLE_MS;
           if (settled && (code !== spokenCode || now - spokenAt >= SETUP_REPEAT_MS)) {
             spokenCode = code; spokenAt = now; lastVoice = now;
-            speakRef.current?.(he ? r.setup.he : r.setup.en, { rate: 1.0 });
+            // drive + the precise instruction, a different energy line every time
+            speakRef.current?.(withDrive(he ? r.setup.he : r.setup.en, driveK++, nameRef.current, he), { rate: 1.12 });
           }
         } else {
           if (readySince === null) readySince = now;
           if (!announcedReady && now - readySince >= READY_SETTLE_MS) {
             announcedReady = true;
-            const msg = everReady ? READY.again : READY.first;
+            const msg = everReady ? READY_DRIVE.again : READY_DRIVE.first;
             everReady = true;
             spokenCode = null; lastVoice = now;
             flashUntil = now + READY_FLASH_MS;
             setReadyFlash(msg);
-            speakRef.current?.(he ? msg.he : msg.en, { rate: 1.05 });
+            speakRef.current?.(he ? msg.he : msg.en, { rate: 1.12 });
           }
         }
         if (flashUntil && now > flashUntil) { flashUntil = 0; setReadyFlash(null); }
+
+        // Positioned, but not in the start position (before the start / between reps of a hold):
+        // tell them to take it, with drive — never "start" before they are in it
+        const needStart = !code && r.inView && !inStart && !startReadyRef.current && !countingRef.current;
+        if (needStart) { if (notStartSince === null) notStartSince = now; } else notStartSince = null;
+        const showStart = notStartSince !== null && now - notStartSince >= START_PROMPT_AFTER_MS;
+        if (showStart !== lastStartPrompt) { lastStartPrompt = showStart; setStartPrompt(showStart); }
+        if (showStart && now - startSpokenAt >= START_PROMPT_REPEAT_MS && now - lastVoice > 2500) {
+          startSpokenAt = now; lastVoice = now;
+          speakRef.current?.(startPositionPrompt(driveK++, nameRef.current, he), { rate: 1.12 });
+        }
 
         // Positioned right but the measurement is momentarily unreliable (tracking glitch)
         const reason = r.inView && r.quality && !r.quality.confident ? r.quality.reason : null;
@@ -177,6 +232,8 @@ export function useExpertExecution({ enabled, cueKey, exerciseName, catalogId = 
     return () => {
       clearInterval(id);
       inViewRef.current = true;
+      startReadyRef.current = true;
+      workingRef.current = true;
       // Validation mode: hand the set's clips over for labelling
       if (recorder?.clips.length) onClipsRef.current?.(recorder.clips, profile);
     };
@@ -184,5 +241,8 @@ export function useExpertExecution({ enabled, cueKey, exerciseName, catalogId = 
 
   const ghostSpec = useMemo(() => (active && profile?.ghost ? { profile } : null), [active, profile]);
 
-  return { active, profile, inViewRef, missingPart, setup, readyFlash, issue, accuracy, cadence, unsure, ghostSpec, statsRef };
+  return {
+    active, profile, inViewRef, startReadyRef, repCountRef, workingRef,
+    missingPart, setup, readyFlash, startPrompt, issue, accuracy, cadence, unsure, ghostSpec, statsRef,
+  };
 }

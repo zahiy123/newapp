@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { goalOptions, selectedSessionGoals, trackOf, sportFamilyOf, PROFILE_GOALS } from '../trackGoals.js';
+import { goalOptions, selectedSessionGoals, trackOf, sportFamilyOf, PROFILE_GOALS, patternsFor } from '../trackGoals.js';
+import { SPORT_PATTERNS, ARM_ISOLATION } from '../relevance.js';
 import { rebuildPlanFromCatalog, planContext } from '../planBuilder.js';
 import { catalogGhostSpec, parseCatalogId } from '../catalog.js';
 import { PATTERNS } from '../patterns.js';
@@ -24,7 +25,7 @@ const CASES = [
 ];
 
 const fourWeeks = { weeks: Array.from({ length: 4 }, () => ({ days: [{ focus: 'אימון מהירות' }, { focus: 'כוח' }, { focus: '' }] })) };
-const SPORT_GOALS = new Set(['speed', 'power', 'technique', 'agility', 'strength', 'endurance', 'mobility']);
+const SPORT_GOALS = new Set(['speed', 'power', 'technique', 'agility', 'strength', 'endurance', 'mobility', 'balanceCore', 'upperBody']);
 const REHAB_GOALS = new Set(['rehabStrength', 'rehabStability', 'rehabMobility', 'rehabSport']);
 
 describe('Only the app\'s sports (no unrelated sports)', () => {
@@ -64,11 +65,12 @@ describe('The locked chain: track → goals → day goal → exercises → Ghost
   for (const c of CASES) {
     it(c.label, () => {
       const track = trackOf(c.profile);
-      for (const selected of [undefined, goalOptions(c.profile).slice(0, 2)]) {
+      for (const selected of [undefined, goalOptions(c.profile, c.lp).slice(0, 2)]) {
         const profile = { ...c.profile, goals: selected };
-        const allowed = selectedSessionGoals(profile);
+        const allowed = selectedSessionGoals(profile, c.lp);
+        const functional = patternsFor(profile, c.lp);
         // the offered goals belong to the track only
-        for (const g of goalOptions(profile)) {
+        for (const g of goalOptions(profile, c.lp)) {
           expect(track === 'sport_only' ? SPORT_GOALS.has(g) : REHAB_GOALS.has(g), `${c.label}: offered ${g}`).toBe(true);
         }
         const built = rebuildPlanFromCatalog(fourWeeks, planContext(profile, c.lp, 'seed'));
@@ -83,6 +85,7 @@ describe('The locked chain: track → goals → day goal → exercises → Ghost
             expect(v, e.name).toBeTruthy();
             expect(catalogGhostSpec(e.catalogId), e.name).toBeTruthy();                // every exercise has its Ghost
             const pat = PATTERNS[v.pattern];
+            if (functional) expect(functional.has(v.pattern), `${c.label}: ${v.pattern} is not functional for this sport / limitation`).toBe(true);
             expect(pat.sports === 'all' || pat.sports.includes(family), `${c.label}: ${v.pattern} not of ${family}`).toBe(true);
             if (track !== 'sport_only') {
               expect(v.tempo, `${c.label}: explosive in rehab`).not.toBe('explosive');
@@ -93,4 +96,60 @@ describe('The locked chain: track → goals → day goal → exercises → Ghost
       }
     });
   }
+});
+
+describe('Functional exercises only (no generic filler)', () => {
+  const plan = { weeks: Array.from({ length: 4 }, () => ({ days: [{ focus: '' }, { focus: '' }, { focus: '' }] })) };
+  const ids = (profile, lp) => rebuildPlanFromCatalog(plan, planContext(profile, lp, 's')).weeks
+    .flatMap(w => w.days.flatMap(d => d.exercises.map(e => parseCatalogId(e.catalogId).pattern)));
+
+  it('rehab + amputee football: never an isolated arm raise / curl — balance, core, crutch upper body, the kick', () => {
+    for (const lp of [lpBK, lpAK]) {
+      const used = ids({ sport: 'rehab', trainingTrack: 'rehab_sport', rehabSport: 'footballAmputee' }, lp);
+      for (const p of ARM_ISOLATION) expect(used, p).not.toContain(p);
+      for (const p of used) expect(SPORT_PATTERNS.footballAmputee, p).toContain(p);
+      expect(used).toContain('kneeUpBalance');
+      expect(used).toContain('shadowKick');
+    }
+  });
+
+  it('rehab only with a leg limitation and healthy arms: no isolated arm work', () => {
+    const used = ids({ sport: 'rehab', trainingTrack: 'rehab_only' }, lpBK);
+    for (const p of ARM_ISOLATION) expect(used, p).not.toContain(p);
+  });
+
+  it('rehab only with a limited arm keeps the arm rehab', () => {
+    const lpArm = { ...lpOk, left_arm: { ...lpOk.left_arm, state: 'limited', romCapDeg: 100 } };
+    expect(patternsFor({ sport: 'rehab', trainingTrack: 'rehab_only' }, lpArm)).toBeNull();
+  });
+
+  it('amputee football goals are the adapted ones; wheelchair sports never get standing work', () => {
+    expect(goalOptions({ sport: 'footballAmputee' }, lpAK)).toEqual(expect.arrayContaining(['balanceCore', 'upperBody']));
+    expect(goalOptions({ sport: 'footballAmputee' }, lpAK)).not.toContain('speed');
+    const used = ids({ sport: 'basketballWheelchair' }, lpChair);
+    for (const p of used) expect(PATTERNS[p].needs.includes('standing'), p).toBe(false);
+  });
+});
+
+describe('Every rehab goal is always deliverable', () => {
+  it('rehab only offers all three rehab goals for healthy, below-knee and above-knee trainees', () => {
+    for (const lp of [lpOk, lpBK, lpAK]) {
+      expect(goalOptions({ sport: 'rehab', trainingTrack: 'rehab_only' }, lp)).toEqual(['rehabStrength', 'rehabStability', 'rehabMobility']);
+    }
+  });
+  it('rehab + amputee football offers the three rehab goals + the sport tools', () => {
+    for (const lp of [lpBK, lpAK]) {
+      expect(goalOptions({ sport: 'rehab', trainingTrack: 'rehab_sport', rehabSport: 'footballAmputee' }, lp))
+        .toEqual(['rehabStrength', 'rehabStability', 'rehabMobility', 'rehabSport']);
+    }
+  });
+});
+
+describe('Goal rotation over the plan', () => {
+  it('every selected goal gets days even when there are fewer days a week than goals', () => {
+    const plan = { weeks: Array.from({ length: 4 }, () => ({ days: [{}, {}, {}] })) };
+    const built = rebuildPlanFromCatalog(plan, planContext({ sport: 'rehab', trainingTrack: 'rehab_sport', rehabSport: 'footballAmputee' }, lpBK, 's'));
+    const goals = new Set(built.weeks.flatMap(w => w.days.map(d => d.goal)));
+    expect([...goals].sort()).toEqual(['rehabMobility', 'rehabSport', 'rehabStability', 'rehabStrength']);
+  });
 });

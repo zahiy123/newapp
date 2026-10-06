@@ -12,7 +12,8 @@
 //   rehab + sport  → the rehab goals + "integrating the sport's tools into rehab"
 // ============================================================
 
-import { familyOf } from './sessionPlanner.js';
+import { familyOf, buildSession } from './sessionPlanner.js';
+import { relevantPatterns } from './relevance.js';
 import { SPORT_LIBRARY } from '../sports/sportLibrary.js';
 
 const t = (he, en) => ({ he, en });
@@ -33,6 +34,9 @@ export const PROFILE_GOALS = Object.freeze({
   power: { name: t('כוח מתפרץ', 'Explosive power'), icon: '🚀', group: 'sport', desc: t('קפיצות ודחיפות מתפרצות', 'Jumps and explosive drives') },
   technique: { name: t('טכניקה', 'Technique'), icon: '🎯', group: 'sport', desc: t('תנועות הענף בביצוע מדויק', 'The sport movements, precisely') },
   agility: { name: t('זריזות', 'Agility'), icon: '🔀', group: 'sport', desc: t('שינויי כיוון ותגובה מהירה', 'Changes of direction and quick reactions') },
+  // adapted sport goals
+  balanceCore: { name: t('שיווי משקל וליבה', 'Balance & core'), icon: '⚖️', group: 'sport', desc: t('יציבות על רגל אחת וליבה חזקה', 'Single-leg stability and a strong core') },
+  upperBody: { name: t('כוח פלג גוף עליון', 'Upper-body strength'), icon: '💪', group: 'sport', desc: t('הכוח שהקביים / הכיסא דורשים', 'The strength the crutches / chair demand') },
   // fitness
   strength: { name: t('כוח', 'Strength'), icon: '🏋️', group: 'fitness', desc: t('חיזוק כל הגוף', 'Whole-body strength') },
   endurance: { name: t('סיבולת', 'Endurance'), icon: '❤️', group: 'fitness', desc: t('כושר אירובי וסיבולת שריר', 'Aerobic fitness and muscular endurance') },
@@ -41,6 +45,12 @@ export const PROFILE_GOALS = Object.freeze({
 
 // Sport goals each sport family can really train with today's catalog (honest: a family gets a
 // goal only when there are enough patterns for a coherent session)
+// Sports whose goals differ from their family's (adapted sports)
+const SPORT_GOALS_BY_SPORT = {
+  footballAmputee: ['technique', 'balanceCore', 'upperBody', 'power'],
+  basketballWheelchair: ['technique', 'upperBody', 'power'],
+  tennisWheelchair: ['technique', 'upperBody', 'power'],
+};
 const SPORT_GOALS_BY_FAMILY = {
   field: ['speed', 'power', 'technique', 'agility'],
   court: ['speed', 'power', 'technique', 'agility'],
@@ -67,12 +77,37 @@ export function sportFamilyOf(profile) {
   return familyOf(sport);
 }
 
-/** Goals the Goals page offers for this profile (ids, in display order). */
-export function goalOptions(profile) {
+/** The trainee's sport id (rehab + sport → the chosen sport). */
+export function sportOf(profile) {
+  const p = profile || {};
+  return trackOf(p) === 'rehab_sport' ? (p.rehabSport || null) : (p.sport || null);
+}
+
+/** Functional pattern ids for this trainee (null = unrestricted). */
+export function patternsFor(profile, lp = {}) {
+  return relevantPatterns({ track: trackOf(profile), sport: sportOf(profile), lp });
+}
+
+/**
+ * Goals the Goals page offers for this profile (ids, in display order). A goal is offered only
+ * when a real, fully coherent session can be built for THIS trainee (sport + body) — never a
+ * goal the catalog cannot honestly deliver.
+ */
+export function goalOptions(profile, lp = null) {
   const track = trackOf(profile);
-  if (track === 'rehab_only') return [...REHAB_GOALS];
-  if (track === 'rehab_sport') return [...REHAB_GOALS, 'rehabSport'];
-  return [...(SPORT_GOALS_BY_FAMILY[sportFamilyOf(profile)] || SPORT_GOALS_BY_FAMILY.strength)];
+  let list;
+  if (track === 'rehab_only') list = [...REHAB_GOALS];
+  else if (track === 'rehab_sport') list = [...REHAB_GOALS, 'rehabSport'];
+  else list = [...(SPORT_GOALS_BY_SPORT[sportOf(profile)] || SPORT_GOALS_BY_FAMILY[sportFamilyOf(profile)] || SPORT_GOALS_BY_FAMILY.strength)];
+  if (!lp) return list;
+  const fam = sportFamilyOf(profile);
+  const family = track === 'sport_only' ? fam : familyOf('rehab');
+  const patterns = patternsFor(profile, lp);
+  const feasible = list.filter((g) => {
+    const s = buildSession({ goal: g, family, sportFamily: fam, lp, seed: 'feasibility', patterns });
+    return s.items.filter(x => x.role === 'main').length >= 2 && s.coherence.mainOnGoal;
+  });
+  return feasible.length ? feasible : list;
 }
 
 // Goal ids of the previous Goals page → today's ids (per track), so existing profiles keep working
@@ -86,14 +121,14 @@ const LEGACY = {
  * The trainee's session goals: their selected goals that belong to the track (legacy ids
  * mapped), or — when none is selected / valid — every goal of the track.
  */
-export function selectedSessionGoals(profile) {
-  const picked = validProfileGoals(profile);
-  return picked.length ? picked : goalOptions(profile);
+export function selectedSessionGoals(profile, lp = null) {
+  const picked = validProfileGoals(profile, lp);
+  return picked.length ? picked : goalOptions(profile, lp);
 }
 
 /** The profile's selected goals that are valid for its track (legacy ids mapped); may be empty. */
-export function validProfileGoals(profile) {
-  const options = goalOptions(profile);
+export function validProfileGoals(profile, lp = null) {
+  const options = goalOptions(profile, lp);
   const track = trackOf(profile);
   const legacy = track !== 'sport_only' ? LEGACY.rehab : sportFamilyOf(profile) === 'strength' ? LEGACY.fitness : LEGACY.sport;
   const picked = [];

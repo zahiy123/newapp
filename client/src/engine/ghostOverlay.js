@@ -31,34 +31,51 @@ const TORSO_PER_SHOULDER_WIDTH = 1.4 / 0.84;
 
 /**
  * Hip center + torso length from landmarks (normalized), smoothed with the previous anchor.
- * If the hips are not visible (seated close to the camera), they are estimated from the
- * shoulders (torso ≈ 1.67 × shoulder width). Keeps the previous anchor if the body is lost.
+ * Robust to turning sideways (the Ghost must keep a steady, proportional size):
+ *   • the torso is measured shoulder → hip on whichever side is visible (one side is enough);
+ *   • the shoulder-width estimate (hips hidden, e.g. seated close) is used ONLY when facing the
+ *     camera — side-on, the shoulders overlap and the width says nothing about the body size,
+ *     so the previous size is kept;
+ *   • the size changes at most ±MAX_SIZE_STEP per update (no sudden shrink / jump).
+ * Keeps the previous anchor if the body is lost.
  * @param {number} [aspect=4/3] - video width / height (normalized x and y have different px scales)
  * @returns {{ hipX, hipY, torso } | null}
  */
+const MAX_SIZE_STEP = 0.06;          // relative torso change allowed per update
 export function bodyAnchor(landmarks, prev = null, alpha = 0.25, aspect = 4 / 3) {
   const ok = (p) => p && (p.visibility ?? 1) >= 0.5;
   const ls = landmarks?.[11], rs = landmarks?.[12], lh = landmarks?.[23], rh = landmarks?.[24];
-  if (!ok(ls) || !ok(rs)) return prev;
-  const shX = (ls.x + rs.x) / 2;
-  const shY = (ls.y + rs.y) / 2;
+  const shoulders = [ls, rs].filter(ok);
+  if (!shoulders.length) return prev;
+  const mid = (pts) => ({ x: pts.reduce((a, p) => a + p.x, 0) / pts.length, y: pts.reduce((a, p) => a + p.y, 0) / pts.length });
+  const sh = mid(shoulders);
+  const len = (a, b) => Math.hypot((a.x - b.x) * aspect, a.y - b.y);      // in y-normalized units
+  // torso from the best visible same-side pair (works side-on), else from the midpoints
+  const sidePairs = [[ls, lh], [rs, rh]].filter(([s, h]) => ok(s) && ok(h)).map(([s, h]) => len(s, h));
+  const hips = [lh, rh].filter(ok);
   let hipX, hipY, torso;
-  if (ok(lh) && ok(rh)) {
-    hipX = (lh.x + rh.x) / 2;
-    hipY = (lh.y + rh.y) / 2;
-    torso = Math.hypot(shX - hipX, shY - hipY);
+  if (sidePairs.length && hips.length) {
+    torso = Math.max(...sidePairs);
+    const hp = mid(hips);
+    hipX = hp.x; hipY = hp.y;
+  } else if (ok(ls) && ok(rs)) {
+    const width = Math.abs(ls.x - rs.x) * aspect;
+    const facing = !prev || width * TORSO_PER_SHOULDER_WIDTH > prev.torso * 0.75;
+    torso = facing ? width * TORSO_PER_SHOULDER_WIDTH : prev.torso;
+    hipX = sh.x; hipY = sh.y + torso;
   } else {
-    const widthInY = Math.abs(ls.x - rs.x) * aspect;      // shoulder width in y-normalized units
-    torso = widthInY * TORSO_PER_SHOULDER_WIDTH;
-    hipX = shX;
-    hipY = shY + torso;
+    if (!prev) return null;
+    torso = prev.torso;
+    hipX = sh.x; hipY = sh.y + torso;
   }
   if (!(torso > 0.03)) return prev;
   if (!prev) return { hipX, hipY, torso };
+  // no sudden shrink / growth (turning, a dropped landmark)
+  const bounded = Math.min(prev.torso * (1 + MAX_SIZE_STEP), Math.max(prev.torso * (1 - MAX_SIZE_STEP), torso));
   return {
     hipX: prev.hipX + alpha * (hipX - prev.hipX),
     hipY: prev.hipY + alpha * (hipY - prev.hipY),
-    torso: prev.torso + alpha * (torso - prev.torso),
+    torso: prev.torso + alpha * (bounded - prev.torso),
   };
 }
 
@@ -73,8 +90,10 @@ export function defaultPlacement(viewW, viewH) {
  */
 export function overlayPlacement(anchor, videoW, videoH, viewW, viewH) {
   const map = coverTransform(videoW, videoH, viewW, viewH);
+  // Always clearly visible: never smaller than ~45% of the view height (body ≈ 3.8 units)
+  const minScale = viewH / 8.5;
   return {
     origin: map(anchor.hipX, anchor.hipY),
-    scale: (anchor.torso * map.scaleY) / GHOST_TORSO_UNITS,
+    scale: Math.max(minScale, (anchor.torso * map.scaleY) / GHOST_TORSO_UNITS),
   };
 }

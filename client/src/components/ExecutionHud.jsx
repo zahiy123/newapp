@@ -10,7 +10,7 @@ import { cameraViewHint } from '../engine/training/viewPrompts';
 
 export default function ExecutionHud({ execution, isHe }) {
   if (!execution?.active) return null;
-  const { profile, setup, readyFlash, issue, accuracy, cadence, unsure } = execution;
+  const { profile, setup, readyFlash, startPrompt, issue, accuracy, cadence, unsure } = execution;
   // The most specific sport's first focus (rehab + sport → the sport's)
   const lastSport = profile.sportContexts?.[profile.sportContexts.length - 1];
   const emphasis = profile.sportEmphasis?.find(e => e.sport === lastSport);
@@ -22,6 +22,12 @@ export default function ExecutionHud({ execution, isHe }) {
         <div className="absolute top-24 left-1/2 -translate-x-1/2 z-[16] pointer-events-none bg-amber-500 text-white rounded-2xl px-4 py-3 text-base sm:text-lg font-bold shadow-lg text-center max-w-[92%]">
           {'📷'} {isHe ? setup.he : setup.en}
           <div className="text-xs font-medium opacity-90 mt-0.5">{isHe ? 'מתחילים ברגע שאראה אותך נכון' : "We start as soon as I see you right"}</div>
+        </div>
+      )}
+      {!setup && !readyFlash && startPrompt && (
+        <div className="absolute top-24 left-1/2 -translate-x-1/2 z-[16] pointer-events-none bg-sky-600 text-white rounded-2xl px-4 py-3 text-base sm:text-lg font-bold shadow-lg text-center max-w-[92%]">
+          {'🏁'} {isHe ? 'קח עמדת פתיחה — בדיוק כמו הצללית' : 'Get into the start position — exactly like the Ghost'}
+          <div className="text-xs font-medium opacity-90 mt-0.5">{isHe ? 'מתחילים ברגע שאתה בעמדה' : "We start the moment you're in position"}</div>
         </div>
       )}
       {!setup && readyFlash && (

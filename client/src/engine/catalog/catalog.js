@@ -18,8 +18,9 @@ const t = (he, en) => ({ he, en });
 
 export const TEMPOS = Object.freeze({
   standard: { factor: 1, label: null, fit: ['strength', 'endurance', 'conditioning', 'technique', 'stability'] },
-  controlled: { factor: 1.6, label: t('קצב איטי 3-1-1', 'slow tempo 3-1-1'), fit: ['rehab', 'strength', 'stability', 'mobility'] },
-  explosive: { factor: 0.85, label: t('שלב הדחיפה מתפרץ', 'explosive drive'), fit: ['power', 'speed', 'plyometric', 'acceleration'] },
+  // a slow tempo makes it CONTROLLED strength work (rehab-safe) — it does not turn it into a stability / mobility drill
+  controlled: { factor: 1.6, label: t('קצב איטי 3-1-1', 'slow tempo 3-1-1'), fit: ['rehab', 'strength'] },
+  explosive: { factor: 0.85, label: t('שלב הדחיפה מתפרץ', 'explosive drive'), fit: ['power', 'plyometric'] },
 });
 export const RANGES = Object.freeze({
   full: { label: null, fit: null },

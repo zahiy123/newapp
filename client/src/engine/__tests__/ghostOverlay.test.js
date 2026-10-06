@@ -84,10 +84,39 @@ describe('Ghost overlay placement', () => {
       lm[11] = { x: 0.56, y: 0.6 - torso, visibility: 0.9 }; lm[12] = { x: 0.44, y: 0.6 - torso, visibility: 0.9 };
       return lm;
     };
-    const far = overlayPlacement(bodyAnchor(body(0.15)), 640, 480, 640, 480);
-    const near = overlayPlacement(bodyAnchor(body(0.3)), 640, 480, 640, 480);
-    expect(near.scale).toBeCloseTo(far.scale * 2, 1);
+    const far = overlayPlacement(bodyAnchor(body(0.2)), 640, 480, 640, 480);
+    const near = overlayPlacement(bodyAnchor(body(0.4)), 640, 480, 640, 480);
+    expect(near.scale / far.scale).toBeCloseTo(2, 1);
     expect(far.origin.x).toBeCloseTo(320); expect(far.origin.y).toBeCloseTo(288);
+  });
+
+  it('turning side-on (shoulders overlap, hips hidden) does NOT shrink the Ghost', () => {
+    const front = Array.from({ length: 33 }, () => ({ x: 0.5, y: 0.5, visibility: 0.9 }));
+    front[23] = { x: 0.55, y: 0.65, visibility: 0.9 }; front[24] = { x: 0.45, y: 0.65, visibility: 0.9 };
+    front[11] = { x: 0.58, y: 0.35, visibility: 0.9 }; front[12] = { x: 0.42, y: 0.35, visibility: 0.9 };
+    let a = bodyAnchor(front);
+    const startTorso = a.torso;
+    // side-on: shoulders on top of each other, hips not detected
+    const side = front.map(p => ({ ...p }));
+    side[11] = { x: 0.505, y: 0.35, visibility: 0.9 }; side[12] = { x: 0.495, y: 0.35, visibility: 0.6 };
+    side[23] = { ...side[23], visibility: 0.1 }; side[24] = { ...side[24], visibility: 0.1 };
+    for (let i = 0; i < 60; i++) a = bodyAnchor(side, a);
+    expect(a.torso).toBeGreaterThan(startTorso * 0.95);
+  });
+
+  it('side-on with one visible side measures the torso from that side', () => {
+    const side = Array.from({ length: 33 }, () => ({ x: 0.5, y: 0.5, visibility: 0.1 }));
+    side[11] = { x: 0.5, y: 0.35, visibility: 0.9 }; side[23] = { x: 0.5, y: 0.65, visibility: 0.9 };
+    expect(bodyAnchor(side).torso).toBeCloseTo(0.3, 2);
+  });
+
+  it('the size changes gradually and never below a clear minimum', () => {
+    const prev = { hipX: 0.5, hipY: 0.6, torso: 0.3 };
+    const tiny = Array.from({ length: 33 }, () => ({ x: 0.5, y: 0.5, visibility: 0.9 }));
+    tiny[11] = { x: 0.5, y: 0.55, visibility: 0.9 }; tiny[23] = { x: 0.5, y: 0.6, visibility: 0.9 };
+    tiny[12] = { x: 0.5, y: 0.55, visibility: 0.9 }; tiny[24] = { x: 0.5, y: 0.6, visibility: 0.9 };
+    expect(bodyAnchor(tiny, prev).torso).toBeGreaterThan(0.29);        // one update: at most a few % change
+    expect(overlayPlacement({ hipX: 0.5, hipY: 0.6, torso: 0.02 }, 640, 480, 640, 480).scale).toBeGreaterThanOrEqual(480 / 8.5 - 0.01);
   });
 
   it('keeps the previous anchor when the body is not visible, and smooths movement', () => {

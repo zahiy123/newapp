@@ -108,7 +108,7 @@ describe('Coherent sessions — one goal, every exercise serves it', () => {
       const main = s.items.filter(x => x.role === 'main');
       expect(main.length).toBe(4);
       for (const x of main) expect(x.item.qualities.some(q => ['speed', 'acceleration'].includes(q)), x.item.id).toBe(true);
-      expect(new Set(s.items.map(x => x.item.patternId)).size).toBe(s.items.length);    // no pattern twice
+      expect(new Set(s.items.map(x => x.item.patternId)).size).toBe(s.items.length);    // no pattern twice (speed)
     }
   });
 
@@ -116,6 +116,7 @@ describe('Coherent sessions — one goal, every exercise serves it', () => {
     for (const fam of ['field', 'court', 'racket', 'strength', 'endurance']) {
       for (const goal of Object.keys(GOALS)) {
         if (goal === 'technique' && ['strength', 'endurance'].includes(fam)) continue;
+        if (['balanceCore', 'upperBody'].includes(goal)) continue;      // adapted-sport goals: covered by the chain tests
         const s = buildSession({ goal, family: fam, sportFamily: fam, lp: lpOk, seed: 'x' });
         expect(s.items.length, `${fam}/${goal}`).toBeGreaterThanOrEqual(6);
         expect(s.coherence.pct, `${fam}/${goal} off: ${s.coherence.offGoal}`).toBe(100);
