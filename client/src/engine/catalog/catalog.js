@@ -144,7 +144,12 @@ export function catalogGhostSpec(id, profile = null) {
   const v = parseCatalogId(id);
   if (!v) return null;
   const pat = PATTERNS[v.pattern];
-  if (pat.source.profile) return { profile: profile || variationProfile(id) };
+  if (pat.source.profile) {
+    const spec = { profile: profile || variationProfile(id) };
+    // a shadow kick / pass has no real ball → the Ghost kicks a shadow ball (depth, realism)
+    if (KICK_PATTERNS.has(v.pattern)) spec.ball = v.pattern === 'shadowPass' ? 'pass' : 'kick';
+    return spec;
+  }
   return { move: pat.source.move, ...(v.side === 'left' || v.side === 'right' ? { side: v.side } : {}) };
 }
 
@@ -226,16 +231,21 @@ export function toExercise(item, isHe = true, label = null, { canSplit = true } 
   // splitMode: 'kick' = the working (kicking) leg alternates; 'stand' = the leg you stand / work on
   const split = item.variation.side === 'bothSides' && canSplit;
   const splitMode = KICK_PATTERNS.has(item.patternId) ? 'kick' : 'stand';
-  const reps = split ? String(Number(d.reps) * 2) : d.reps;
+  // Kicks / passes (owner): a FULL, separate set per leg (base leg set, then the other leg's set) →
+  // twice the sets, the reps per set unchanged. Balance / one-leg work: the leg switches mid-set.
+  const perSet = split && splitMode === 'kick';
+  const reps = split && !perSet ? String(Number(d.reps) * 2) : d.reps;
+  const sets = perSet ? Number(d.sets) * 2 : d.sets;
   return {
     name: name.he,
     nameEn: name.en,
-    description: `${cue.he}. ${d.label.he}${split ? ' — לכל רגל' : ''}`,
-    descriptionEn: `${cue.en}. ${d.label.en}${split ? ' — each leg' : ''}`,
-    sets: d.sets,
+    description: `${cue.he}. ${d.label.he}${perSet ? ' — סט נפרד לכל רגל' : split ? ' — לכל רגל' : ''}`,
+    descriptionEn: `${cue.en}. ${d.label.en}${perSet ? ' — a separate set for each leg' : split ? ' — each leg' : ''}`,
+    sets,
     reps,
     sideSwitch: split,
     splitMode: split ? splitMode : null,
+    splitBy: perSet ? 'set' : split ? 'half' : null,
     restSeconds: d.rest,
     tips: isHe ? cue.he : cue.en,
     catalogId: item.id,

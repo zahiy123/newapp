@@ -173,3 +173,33 @@ export function splitWorkingSide(lp, half, mode = 'stand') {
   const current = half === 1 ? first : second;
   return mode === 'kick' ? current : liftedLeg(current);
 }
+
+// ---- Kicks / passes: a FULL set per leg (owner) — set 1 base leg, set 2 the other leg / prosthesis, … ----
+
+/** Which leg (half 1 = base leg, 2 = the other) a set works in "a set per leg" mode. */
+export const setLegHalf = (set) => (Number(set) % 2 === 1 ? 1 : 2);
+
+/** Said at the start of a per-leg set. */
+export function legSetStartText(lp, isHe, mode, set) {
+  const half = setLegHalf(set);
+  const { first, second } = splitLegOrder(lp);
+  const leg = legLabel(half === 1 ? first : second, lp, isHe);
+  if (isHe) {
+    return half === 1
+      ? `סט מלא: ${action(mode, true)}${leg}. בסט הבא מחליפים רגל.`
+      : `החלפנו רגל! סט מלא: ${action(mode, true)}${leg}. יאללה!`;
+  }
+  return half === 1
+    ? `A full set: ${action(mode, false)}${leg}. Next set we switch legs.`
+    : `Legs switched! A full set: ${action(mode, false)}${leg}. Let's go!`;
+}
+
+/** Said in the rest before the next per-leg set: the leg changes. */
+export function legSetNextText(lp, isHe, mode, nextSet) {
+  const half = setLegHalf(nextSet);
+  const { first, second } = splitLegOrder(lp);
+  const leg = legLabel(half === 1 ? first : second, lp, isHe);
+  return isHe
+    ? `בסט הבא מחליפים רגל: ${action(mode, true)}${leg}.`
+    : `Next set we switch legs: ${action(mode, false)}${leg}.`;
+}

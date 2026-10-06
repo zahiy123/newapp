@@ -23,6 +23,10 @@
 // exercise's START POSITION continuously — the calibration / exercise start waits for it.
 // Counting: repCountRef counts only full, real reps of the profile (rest → peak → rest with real
 // durations) while `counting`; workingRef tells timed exercises whether the trainee is working.
+// Early start (owner): the trainee may start working while the coach is still explaining —
+// `quiet` runs the module silently (briefing: no positioning voice over the explanation) and
+// earlyRef turns true on the first REAL work (a full rep, a kick, running strides), so the page
+// starts the exercise at once; reps done meanwhile are already counted (repCountRef / strikeCountRef).
 // SAFETY: any runtime error disables the module for the session and re-opens the gates,
 // so the exercise falls back to the previous pipeline.
 
@@ -62,7 +66,7 @@ export function buildExecutionProfile(cueKey, exerciseName, limbProfile, sportCo
 }
 
 export function useExpertExecution({
-  enabled, counting = false, cueKey, exerciseName, catalogId = null, sportContexts, limbProfile, landmarksRef,
+  enabled, counting = false, quiet = false, cueKey, exerciseName, catalogId = null, sportContexts, limbProfile, landmarksRef,
   isHe, playerName = '', speakPriority, recordClips = false, onClips,
 }) {
   const [failed, setFailed] = useState(false);
@@ -79,6 +83,10 @@ export function useExpertExecution({
   const workingRef = useRef(true);           // the trainee is working right now (timed exercises)
   const countingRef = useRef(counting);
   countingRef.current = counting;
+  const quietRef = useRef(quiet);
+  quietRef.current = quiet;
+  const earlyRef = useRef(false);            // real work seen (rep / kick / strides) — start now
+  const strikeCountRef = useRef(0);          // kicks seen while counting (legacy-counted exercises)
   const nameRef = useRef(playerName);
   nameRef.current = playerName;
   const statsRef = useRef({ dangers: 0, errors: {} });
@@ -91,9 +99,11 @@ export function useExpertExecution({
   const [readyFlash, setReadyFlash] = useState(null);   // READY message shown briefly
   const [startPrompt, setStartPrompt] = useState(false); // positioned, but not in the start position
 
-  // Latest callbacks without restarting the loop
+  // Latest callbacks without restarting the loop; silent while `quiet` (the coach is explaining)
   const speakRef = useRef(speakPriority);
-  speakRef.current = speakPriority;
+  speakRef.current = (...args) => { if (!quietRef.current) speakPriority?.(...args); };
+  const speakAlwaysRef = useRef(speakPriority);       // safety (danger) is never silenced
+  speakAlwaysRef.current = speakPriority;
   const isHeRef = useRef(isHe);
   isHeRef.current = isHe;
   const onClipsRef = useRef(onClips);
@@ -113,6 +123,8 @@ export function useExpertExecution({
     inViewRef.current = false;
     startReadyRef.current = false;
     repCountRef.current = 0;
+    strikeCountRef.current = 0;
+    earlyRef.current = false;
     const gate = createStartGate();
     const work = {};
     let wasCounting = countingRef.current;
@@ -143,10 +155,14 @@ export function useExpertExecution({
         workingRef.current = updateWork(work, profile, r, now);
 
         // ---- Exact rep counting (a new set starts from zero) ----
-        if (countingRef.current && !wasCounting) repCountRef.current = 0;
+        if (countingRef.current && !wasCounting) { repCountRef.current = 0; strikeCountRef.current = 0; earlyRef.current = false; }
         wasCounting = countingRef.current;
-        if (countsReps && countingRef.current && r.inView) {
-          for (const ev of r.events) if (isValidRep(ev)) repCountRef.current += 1;
+        if (countingRef.current && r.inView) {
+          for (const ev of r.events) {
+            if (countsReps && isValidRep(ev)) { repCountRef.current += 1; earlyRef.current = true; }
+            if (ev.type === 'strike' && profile.kind === 'strike') { strikeCountRef.current += 1; earlyRef.current = true; }
+          }
+          if (profile.kind === 'cyclic' && workingRef.current) earlyRef.current = true;
         }
 
         // ---- Positioning: one precise instruction at a time, then "now I can see you" ----
@@ -157,14 +173,14 @@ export function useExpertExecution({
           readySince = null;
           announcedReady = false;
           const settled = now - setupSince >= SETUP_SETTLE_MS;
-          if (settled && (code !== spokenCode || now - spokenAt >= SETUP_REPEAT_MS)) {
+          if (settled && !quietRef.current && (code !== spokenCode || now - spokenAt >= SETUP_REPEAT_MS)) {
             spokenCode = code; spokenAt = now; lastVoice = now;
             // drive + the precise instruction, a different energy line every time
             speakRef.current?.(withDrive(he ? r.setup.he : r.setup.en, driveK++, nameRef.current, he), { rate: 1.12 });
           }
         } else {
           if (readySince === null) readySince = now;
-          if (!announcedReady && now - readySince >= READY_SETTLE_MS) {
+          if (!announcedReady && !quietRef.current && now - readySince >= READY_SETTLE_MS) {
             announcedReady = true;
             const msg = everReady ? READY_DRIVE.again : READY_DRIVE.first;
             everReady = true;
@@ -182,7 +198,7 @@ export function useExpertExecution({
         if (needStart) { if (notStartSince === null) notStartSince = now; } else notStartSince = null;
         const showStart = notStartSince !== null && now - notStartSince >= START_PROMPT_AFTER_MS;
         if (showStart !== lastStartPrompt) { lastStartPrompt = showStart; setStartPrompt(showStart); }
-        if (showStart && now - startSpokenAt >= START_PROMPT_REPEAT_MS && now - lastVoice > 2500) {
+        if (showStart && !quietRef.current && now - startSpokenAt >= START_PROMPT_REPEAT_MS && now - lastVoice > 2500) {
           startSpokenAt = now; lastVoice = now;
           speakRef.current?.(startPositionPrompt(driveK++, nameRef.current, he), { rate: 1.12 });
         }
@@ -211,7 +227,7 @@ export function useExpertExecution({
           lastDanger = now;
           lastVoice = now;
           statsRef.current.dangers += 1;
-          speakRef.current?.(isHeRef.current ? r.danger.msg.he : r.danger.msg.en, { rate: 1.1 });
+          speakAlwaysRef.current?.(isHeRef.current ? r.danger.msg.he : r.danger.msg.en, { rate: 1.1 });
         }
         // A repeated technique error: the coach corrects AND explains it, once per exercise
         const coach = r.coaching?.[0];
@@ -242,7 +258,7 @@ export function useExpertExecution({
   const ghostSpec = useMemo(() => (active && profile?.ghost ? { profile } : null), [active, profile]);
 
   return {
-    active, profile, inViewRef, startReadyRef, repCountRef, workingRef,
+    active, profile, inViewRef, startReadyRef, repCountRef, workingRef, earlyRef, strikeCountRef,
     missingPart, setup, readyFlash, startPrompt, issue, accuracy, cadence, unsure, ghostSpec, statsRef,
   };
 }

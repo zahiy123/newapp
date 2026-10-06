@@ -20,8 +20,8 @@ import { useExpertExecution, buildExecutionProfile } from '../hooks/training/use
 import { showsRangeGauge } from '../engine/training/rangeGauge';
 import { demoGhostFor } from '../engine/training/demoGhost';
 import { makeTimedAnalyzer } from '../engine/training/timedAnalyzer';
-import { makeProfileRepAnalyzer } from '../engine/training/profileRepAnalyzer';
-import { READY_DRIVE, withDrive, splitLegOrder, legLabel, splitStartText, splitSwitchText, splitWorkingSide } from '../engine/training/coachFlow';
+import { makeProfileRepAnalyzer, withRepOffset } from '../engine/training/profileRepAnalyzer';
+import { READY_DRIVE, withDrive, splitLegOrder, legLabel, splitStartText, splitSwitchText, splitWorkingSide, setLegHalf, legSetStartText, legSetNextText } from '../engine/training/coachFlow';
 import { exerciseNeedsSetup } from '../engine/training/exerciseSetup';
 import DailyCheckIn from '../components/DailyCheckIn';
 import { applyCheckIn } from '../engine/training/dailyCheckIn';
@@ -279,7 +279,7 @@ export default function Training() {
     if (cmdPhase === 'IDLE') {
       // Hold exercises or no command coaching — short rep count + technical feedback only
       if (repConfirmed) {
-        speakCritical(`${repNumber}. ${aiFeedback}`, { rate: 1.3 });
+        speakCritical(`${alreadySaid(repNumber) ? '' : `${repNumber}. `}${aiFeedback}`, { rate: 1.3 });
       } else {
         speakCritical(`${aiFeedback}. נסה שוב`, { rate: 1.3 });
       }
@@ -300,7 +300,7 @@ export default function Training() {
       const nextRep = repNumber + 1;
       const isLastRep = nextRep > targetReps;
       const nextCmd = isLastRep ? '' : `. ${getCommandText(nextRep, cueKey, cueType) || `חזרה ${nextRep}`}`;
-      fullSpeech = `${repNumber}. ${aiFeedback}${nextCmd}`;
+      fullSpeech = `${alreadySaid(repNumber) ? '' : `${repNumber}. `}${aiFeedback}${nextCmd}`;
     } else {
       // Partial rep: feedback + retry
       fullSpeech = `${aiFeedback}. נסה שוב`;
@@ -661,6 +661,19 @@ export default function Training() {
   }, [phase, currentIdx, currentSet, displayReps, timer, searchParams]);
 
   const currentExercise = exercises[currentIdx];
+  const earlyStartPhase = phase === PHASE.BRIEFING || phase === PHASE.CHECKING_EQUIPMENT
+    || phase === PHASE.CALIBRATING || phase === PHASE.EXERCISING;
+  // Reps (kicks) done before the exercise phase began → carried into the count
+  const earlyOffsetRef = useRef(0);
+  // The count is spoken the moment a rep is done — once per number (per exercise / set)
+  const spokenCountRef = useRef({ n: 0 });
+  /** Say the rep number right now (cuts an explanation in progress) — each number once. */
+  function speakCountNow(n) {
+    if (!(n > spokenCountRef.current.n)) return;
+    spokenCountRef.current.n = n;
+    speakCount(n);
+  }
+  const alreadySaid = (n) => n <= spokenCountRef.current.n;
   currentExerciseRef.current = currentExercise;
 
   // Stage 3.1 — Expert Execution Profile of the current exercise (isolated module, behind a flag):
@@ -686,8 +699,11 @@ export default function Training() {
       .catch(err => console.error('[Validation] save failed:', err));
   }, [user?.uid, isHe]);
   const execution = useExpertExecution({
-    enabled: FEATURES.EXPERT_PROFILE && (phase === PHASE.EXERCISING || phase === PHASE.CALIBRATING),
-    counting: phase === PHASE.EXERCISING,
+    // From the briefing on: the trainee may start working while the coach still explains —
+    // the module counts silently and the exercise starts at once (early start, below)
+    enabled: FEATURES.EXPERT_PROFILE && earlyStartPhase,
+    counting: earlyStartPhase,
+    quiet: phase === PHASE.BRIEFING || phase === PHASE.CHECKING_EQUIPMENT,
     playerName,
     cueKey: exerciseCueKey,
     exerciseName: currentExercise?.name,
@@ -740,7 +756,7 @@ export default function Training() {
     let spec = cid ? catalogGhostSpec(cid, demoProfile?.catalogId === cid ? demoProfile : null) : demoGhostFor(demoProfile, exerciseCueKey);
     if (spec?.profile && currentExercise?.sideSwitch) {
       // this half's working leg: the kicking leg (kicks) or the free leg while standing on the other
-      spec = { profile: { ...spec.profile, ghost: { ...spec.profile.ghost, workingSide: splitWorkingSide(limbProfile, splitHalf, currentExercise.splitMode) } } };
+      spec = { ...spec, profile: { ...spec.profile, ghost: { ...spec.profile.ghost, workingSide: splitWorkingSide(limbProfile, splitHalf, currentExercise.splitMode) } } };
     }
     return spec;
   }, [demoGhostPhase, demoProfile, exerciseCueKey, currentExercise?.catalogId, currentExercise?.sideSwitch, currentExercise?.splitMode, splitHalf, limbProfile]);
@@ -770,7 +786,8 @@ export default function Training() {
       const isWorking = () => !workingSourceRef.current?.active || workingSourceRef.current.workingRef.current;
       analyzerRef.current = currentExercise.timed
         ? { analyze: makeTimedAnalyzer(analyze, isWorking), type: 'hold', cueKey, ballAware }
-        : { analyze: makeProfileRepAnalyzer(analyze, profileRepsRef), type, cueKey, ballAware };
+        : { analyze: withRepOffset(makeProfileRepAnalyzer(analyze, profileRepsRef), earlyOffsetRef), type, cueKey, ballAware };
+      earlyOffsetRef.current = 0;
       exerciseStateRef.current = { _userProfile: userProfile };
       setDisplayReps(0);
       setFeedback(null);
@@ -791,13 +808,18 @@ export default function Training() {
   // the switch (clear voice), the Ghost changes legs and the chip shows the second half
   useEffect(() => {
     if (phase !== PHASE.EXERCISING || !currentExercise?.sideSwitch) return undefined;
-    setSplitHalf(1);
-    const tm = setTimeout(() => speakPriority(splitStartText(limbProfile, isHe, currentExercise.splitMode), { rate: 1.05 }), 1200);
+    // Kicks / passes: a full set per leg — odd sets the base leg, even sets the other leg
+    const perSet = currentExercise.splitBy === 'set';
+    setSplitHalf(perSet ? setLegHalf(currentSet) : 1);
+    const text = perSet
+      ? legSetStartText(limbProfile, isHe, currentExercise.splitMode, currentSet)
+      : splitStartText(limbProfile, isHe, currentExercise.splitMode);
+    const tm = setTimeout(() => speakPriority(text, { rate: 1.1 }), 900);
     return () => clearTimeout(tm);
   }, [phase, currentSet, currentIdx]);
 
   useEffect(() => {
-    if (phase !== PHASE.EXERCISING || !currentExercise?.sideSwitch || splitHalf !== 1) return;
+    if (phase !== PHASE.EXERCISING || !currentExercise?.sideSwitch || currentExercise.splitBy === 'set' || splitHalf !== 1) return;
     const target = parseInt(currentExercise.reps, 10) || 0;
     if (target > 1 && displayReps >= Math.ceil(target / 2)) {
       setSplitHalf(2);
@@ -805,6 +827,41 @@ export default function Training() {
       setFeedback({ type: 'info', text: isHe ? '🔄 החלף רגל!' : '🔄 Switch legs!' });
     }
   }, [displayReps, phase, splitHalf]);
+
+  // A new set / exercise counts from zero again
+  useEffect(() => { if (displayReps === 0) spokenCountRef.current.n = 0; }, [displayReps, currentIdx, currentSet]);
+
+  // EARLY START (owner): the trainee started working while the coach was still explaining /
+  // before the start countdown ended → the exercise starts NOW. The explanation is cut to one
+  // short line; reps already done are counted and said at once (never wait for the talk to end).
+  useEffect(() => {
+    if (phase !== PHASE.BRIEFING && phase !== PHASE.CHECKING_EQUIPMENT && phase !== PHASE.CALIBRATING) return undefined;
+    const id = setInterval(() => {
+      const ex = workingSourceRef.current;
+      if (!ex?.active || !ex.earlyRef?.current) return;
+      clearInterval(id);
+      const kind = ex.profile?.kind;
+      const early = kind === 'reps' ? (ex.repCountRef.current || 0) : kind === 'strike' ? (ex.strikeCountRef.current || 0) : 0;
+      if (kind === 'strike') earlyOffsetRef.current = early;    // the kick analyzer counts on from here
+      calibrationDataRef.current = null;
+      commandPhaseRef.current = 'IDLE';                          // no rep-by-rep commands over the work
+      sittingWarnedRef.current = false;
+      setPhase(PHASE.EXERCISING);
+      setTimer(0);
+      lastActivityRef.current = Date.now();
+      exerciseStartTimeRef.current = Date.now();
+      lastNudgeTimeRef.current = 0;
+      const line = isHe ? 'יפה, התחלת! אני סופר איתך.' : "Nice, you've started! I'm counting with you.";
+      if (early > 0) {
+        setDisplayReps(early);
+        spokenCountRef.current.n = early;
+        speakCritical(`${early}! ${line}`, { rate: 1.2 });
+      } else {
+        speakCritical(line, { rate: 1.2 });
+      }
+    }, 100);
+    return () => clearInterval(id);
+  }, [phase]);
 
   // Form correction arcs on the pose canvas during the exercise. (The exercise Ghost is the demo
   // panel / overlay, on by default — the old skeleton Ghost is retired.)
@@ -1218,12 +1275,10 @@ export default function Training() {
           // Always update display immediately so user sees counter change
           setDisplayReps(fb.count);
           lastSpokenRef.current = fb.text;
+          // The number is said NOW, in real time — it cuts any explanation / command in progress
+          speakCountNow(fb.count);
 
           if (cmdPhase === 'IDLE' || isHoldExercise) {
-            // Non-command mode: speak count only if not currently speaking server feedback
-            if (!isSpeaking()) {
-              speakCount(fb.count);
-            }
             if (coachingText) {
               const now = Date.now();
               if (now - lastCoachingTimeRef.current > 10000) {
@@ -1250,7 +1305,7 @@ export default function Training() {
               const fallbackCmd = nextRep <= targetReps2
                 ? `. עכשיו ${getCommandText(nextRep, analyzerRef.current?.cueKey, analyzerRef.current?.type) || `רד לחזרה ${nextRep}`}`
                 : '';
-              speakPriority(`חזרה ${fb.count}. המשך ככה${fallbackCmd}`, { rate: 1.25 });
+              speakPriority(`המשך ככה${fallbackCmd}`, { rate: 1.25 });
               if (nextRep <= targetReps2) {
                 commandRepRef.current = nextRep;
                 commandPhaseRef.current = 'COMMANDING';
@@ -2457,7 +2512,14 @@ export default function Training() {
     } else {
       setPhase(PHASE.RESTING);
       setRestTime(restDuration);
-      speakRestTip(currentExercise?.tips || '');
+      if (currentExercise?.sideSwitch && currentExercise.splitBy === 'set') {
+        // the next set is the OTHER leg — said clearly in the rest
+        const next = legSetNextText(limbProfile, isHe, currentExercise.splitMode, currentSet + 1);
+        speakPriority(next, { rate: 1.05 });
+        setFeedback({ type: 'info', text: `🔄 ${next}` });
+      } else {
+        speakRestTip(currentExercise?.tips || '');
+      }
     }
   }
 
@@ -2727,7 +2789,9 @@ export default function Training() {
         {phase === PHASE.EXERCISING && currentExercise?.sideSwitch && (
           <div className={`absolute top-2 left-1/2 -translate-x-1/2 z-20 pointer-events-none rounded-full text-white text-sm font-bold px-3 py-1 shadow ${splitHalf === 1 ? 'bg-sky-700/90' : 'bg-orange-600/90'}`}>
             {'🦵'} {currentExercise.splitMode === 'kick'
-              ? (isHe ? `בעיטות ב${legLabel(splitSupport, limbProfile, true)} · חצי ${splitHalf}/2` : `Kicking with your ${legLabel(splitSupport, limbProfile, false)} · half ${splitHalf}/2`)
+              ? (currentExercise.splitBy === 'set'
+                ? (isHe ? `בעיטות ב${legLabel(splitSupport, limbProfile, true)} · סט ${currentSet}/${totalSets}` : `Kicking with your ${legLabel(splitSupport, limbProfile, false)} · set ${currentSet}/${totalSets}`)
+                : (isHe ? `בעיטות ב${legLabel(splitSupport, limbProfile, true)} · חצי ${splitHalf}/2` : `Kicking with your ${legLabel(splitSupport, limbProfile, false)} · half ${splitHalf}/2`))
               : (isHe ? `עמידה על ${legLabel(splitSupport, limbProfile, true)} · חצי ${splitHalf}/2` : `Standing on your ${legLabel(splitSupport, limbProfile, false)} · half ${splitHalf}/2`)}
           </div>
         )}

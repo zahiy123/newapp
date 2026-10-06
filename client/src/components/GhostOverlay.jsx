@@ -13,6 +13,7 @@ import { bodyAnchor, overlayPlacement, defaultPlacement } from '../engine/ghostO
 export default function GhostOverlay({ spec, limbProfile, landmarksRef, videoRef, onError }) {
   const canvasRef = useRef(null);
   const anchorRef = useRef(null);
+  const lastAnchorAt = useRef(null);
   // Animation clock that runs backward for a "backward" direction — continuous, no jump on the switch
   const clockRef = useRef({ last: null, ms: 0 });
 
@@ -31,17 +32,21 @@ export default function GhostOverlay({ spec, limbProfile, landmarksRef, videoRef
           if (c.width !== w || c.height !== h) { c.width = w; c.height = h; }
           const ctx = c.getContext('2d');
           ctx.clearRect(0, 0, w, h);
-          anchorRef.current = bodyAnchor(landmarksRef?.current, anchorRef.current, 0.25, v.videoWidth / v.videoHeight);
+          // time-based smoothing with a noise dead-band: the Ghost glides with the body, never trembles
+          const tNow = performance.now();
+          const dt = lastAnchorAt.current === null ? null : tNow - lastAnchorAt.current;
+          lastAnchorAt.current = tNow;
+          anchorRef.current = bodyAnchor(landmarksRef?.current, anchorRef.current, 0.25, v.videoWidth / v.videoHeight, dt);
           // On the trainee's body when seen (hips, or estimated from the shoulders when seated);
           // centered at full height before a body has been seen — the big Ghost is always visible
-          const { origin, scale } = anchorRef.current
+          const { origin, scale, feetY = null } = anchorRef.current
             ? overlayPlacement(anchorRef.current, v.videoWidth, v.videoHeight, w, h)
             : defaultPlacement(w, h);
           const now = performance.now();
           const clk = clockRef.current;
           if (clk.last !== null) clk.ms += (now - clk.last) * (spec?.direction === 'backward' ? -1 : 1);
           clk.last = now;
-          drawGhostOverlay(ctx, spec, limbProfile, clk.ms, origin, scale);
+          drawGhostOverlay(ctx, spec, limbProfile, clk.ms, origin, scale, 0.55, feetY);
         }
       } catch (err) {
         stopped = true;

@@ -24,3 +24,19 @@ export function makeProfileRepAnalyzer(base, sourceRef) {
     };
   };
 }
+
+/**
+ * Reps done BEFORE the analyzer started (the trainee began while the coach was still explaining —
+ * kicks seen by the execution module) are carried into the analyzer's own count: the base runs
+ * on its own reps, the trainee sees and hears the total.
+ */
+export function withRepOffset(base, offsetRef) {
+  return (landmarks, prev = {}, ball) => {
+    const off = offsetRef?.current || 0;
+    if (!off) return base(landmarks, prev, ball);
+    const st = base(landmarks, { ...prev, reps: Math.max(0, (prev.reps || 0) - off) }, ball);
+    const reps = (st.reps || 0) + off;
+    const fb = st.feedback?.type === 'count' ? { ...st.feedback, count: reps, text: `${reps}!` } : st.feedback;
+    return { ...st, reps, feedback: fb };
+  };
+}

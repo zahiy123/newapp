@@ -42,7 +42,19 @@ const TORSO_PER_SHOULDER_WIDTH = 1.4 / 0.84;
  * @returns {{ hipX, hipY, torso } | null}
  */
 const MAX_SIZE_STEP = 0.06;          // relative torso change allowed per update
-export function bodyAnchor(landmarks, prev = null, alpha = 0.25, aspect = 4 / 3) {
+// Steady Ghost (owner: "it jumps and trembles"): with the frame time `dtMs` the smoothing is
+// time-based (the same on every screen / frame rate) and tiny landmark noise is ignored
+const POS_TAU_MS = 220;              // position follows the body with this time constant
+const SIZE_TAU_MS = 650;             // the size changes slower still
+const POS_DEADBAND = 0.012;          // hip noise below ~1% of the frame is not followed (soft)
+const SIZE_DEADBAND = 0.04;          // relative torso noise below 4% is not followed (soft)
+const FOOT_KEEP_UPDATES = 30;        // ~0.5 s of frames
+const follow = (prev, target, a, band) => {
+  const d = target - prev;
+  const k = band > 0 ? Math.min(1, Math.abs(d) / band) : 1;   // quadratic below the band → no tremble
+  return prev + d * a * k;
+};
+export function bodyAnchor(landmarks, prev = null, alpha = 0.25, aspect = 4 / 3, dtMs = null) {
   const ok = (p) => p && (p.visibility ?? 1) >= 0.5;
   const ls = landmarks?.[11], rs = landmarks?.[12], lh = landmarks?.[23], rh = landmarks?.[24];
   const shoulders = [ls, rs].filter(ok);
@@ -71,13 +83,34 @@ export function bodyAnchor(landmarks, prev = null, alpha = 0.25, aspect = 4 / 3)
     hipX = sh.x; hipY = sh.y + torso;
   }
   if (!(torso > 0.03)) return prev;
-  if (!prev) return { hipX, hipY, torso };
+  // Feet line (the lower ankle = the standing foot); kept ~0.5 s when the ankles flicker
+  const ankles = [landmarks?.[27], landmarks?.[28]].filter(ok);
+  const footSeen = ankles.length ? Math.max(...ankles.map(a => a.y)) : null;
+  const footMiss = footSeen === null ? (prev?.footMiss ?? 0) + 1 : 0;
+  const keepFoot = footSeen === null && prev?.footY != null && footMiss <= FOOT_KEEP_UPDATES;
+  if (!prev) return { hipX, hipY, torso, footY: footSeen, footMiss };
   // no sudden shrink / growth (turning, a dropped landmark)
   const bounded = Math.min(prev.torso * (1 + MAX_SIZE_STEP), Math.max(prev.torso * (1 - MAX_SIZE_STEP), torso));
+  if (typeof dtMs === 'number' && dtMs > 0) {
+    const dt = Math.min(dtMs, 100);
+    const aPos = 1 - Math.exp(-dt / POS_TAU_MS);
+    const aSize = 1 - Math.exp(-dt / SIZE_TAU_MS);
+    return {
+      hipX: follow(prev.hipX, hipX, aPos, POS_DEADBAND),
+      hipY: follow(prev.hipY, hipY, aPos, POS_DEADBAND),
+      torso: follow(prev.torso, bounded, aSize, SIZE_DEADBAND * prev.torso),
+      footY: footSeen === null ? (keepFoot ? prev.footY : null)
+        : prev.footY == null ? footSeen : follow(prev.footY, footSeen, aPos, POS_DEADBAND),
+      footMiss,
+    };
+  }
   return {
     hipX: prev.hipX + alpha * (hipX - prev.hipX),
     hipY: prev.hipY + alpha * (hipY - prev.hipY),
     torso: prev.torso + alpha * (bounded - prev.torso),
+    footY: footSeen === null ? (keepFoot ? prev.footY : null)
+      : prev.footY == null ? footSeen : prev.footY + alpha * (footSeen - prev.footY),
+    footMiss,
   };
 }
 
@@ -97,5 +130,6 @@ export function overlayPlacement(anchor, videoW, videoH, viewW, viewH) {
   return {
     origin: map(anchor.hipX, anchor.hipY),
     scale: Math.max(minScale, (anchor.torso * map.scaleY) / GHOST_TORSO_UNITS),
+    feetY: typeof anchor.footY === 'number' ? map(anchor.hipX, anchor.footY).y : null,
   };
 }

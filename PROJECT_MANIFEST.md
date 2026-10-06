@@ -834,6 +834,33 @@ Two critical corrections to the existing onboarding (Stages 1B/1C), completed **
      - Floor exercises (push-up, plank, bridge) accept any view and keep their lying Ghost.
      - Tests were rewritten for the front view (side-on → "face the camera", lean in depth).
   - *Verification:* client 661 pass (+ new tests), 0 new failures; server 10/10; build passes.
+- **Six owner upgrades, 2026-10-06 (backup tag `backup-2026-10-06-pre-smooth-ghost` = `88deef1`):**
+  1. **Fast start, immediate count.**
+     - The execution module now runs from the briefing on. In the briefing and the equipment check it runs *quietly*: no positioning voice over the explanation; danger alerts are still spoken.
+     - The first real work (a full rep, a kick, running strides) starts the exercise at once (`earlyRef`), from the briefing, the equipment check or the start countdown. The explanation is cut to one short line ("יפה, התחלת! אני סופר איתך") and the reps already done are counted and said.
+     - Kicks done before the start are carried into the kick analyzer's count (`withRepOffset`).
+     - In the exercise, the count is said **the moment the rep is done** (`speakCountNow`), cutting any explanation or command in progress. Each number is said once; the AI feedback no longer repeats the number.
+  2. **Steady Ghost.**
+     - The on-body Ghost's anchor is smoothed by time (position τ 220 ms, size τ 650 ms) with a soft dead-band, so landmark noise does not shake it.
+     - Standing exercises: the Ghost **stands on the trainee's feet** (ankles, kept 0.5 s when they flicker) instead of following the moving hips, so it no longer bobs up and down. Floor exercises keep the hip alignment.
+     - Keyframe motion is a **monotone cubic** through the keyframes: continuous speed, no stop at each keyframe, no overshoot.
+  3. **Kicks / passes: a full set per leg.**
+     - A split kick exercise has twice the sets, with the reps per set unchanged (`splitBy: 'set'`). Odd sets use the base leg, even sets the other leg / prosthesis.
+     - Each set starts with "סט מלא: בעיטות ב…". The rest before a leg change says "בסט הבא מחליפים רגל: …".
+     - The chip shows "בעיטות ב… · סט X/Y" and the Ghost kicks with that set's leg.
+     - Balance / one-leg work still switches legs mid-set.
+  4. **Professional Ghost look.**
+     - Standing exercise Ghosts are drawn in a **3/4 view** (turned 38° for kicks, toward the kicking leg; 26° otherwise). The depth of the movement is visible, and the measurement stays frontal.
+     - Far-side limbs are drawn behind the body and shaded; near-side limbs are drawn in front.
+     - The figure has tapered athletic limbs with a crisp outline, a jersey, shorts, boots and an oval head.
+     - Depth is measured from the planted feet, so in a squat the hips move back and the feet stay put.
+  5. **Shadow ball.**
+     - In shadow kick / pass exercises the Ghost has a ball. It rests in front of the kicking foot, and at contact it flies toward the camera, growing and fading with a floor shadow. A kick lifts it in an arc; a pass rolls it.
+     - Only these two exercises get the ball (`catalogGhostSpec` → `spec.ball`).
+  6. **Wide camera.**
+     - The camera request is 4:3 (the full phone sensor; 16:9 modes crop the body), 1440×1080, `resizeMode: none`, with zoom set to its minimum (widest) where supported.
+     - If the device refuses the wide request, the previous request is used as a fallback.
+  - *Verification:* new tests in `engine/__tests__/ghostPro.test.js`; client 673 pass, 0 new failures (the 23 baseline scan failures are unchanged); server 10/10; build passes. Rendered in Chromium and checked visually.
    3. **Profile-based rep counting with a quality score per rep** (replacing the per-exercise analyzers step by step), including the correction hierarchy, timing and external-focus cues.
    4. **Special sport libraries:** leg amputees (amputee football: crutch kick / crutch sprint / balance / header / goalkeeper), wheelchair (push stroke, seated throws, shoulder protection), running (opened for selection), then tennis / martial arts (trunk-rotation metric) and basketball.
    - Following (already in the roadmap): velocity-based fatigue detection (stop the set at ~20% rep-speed loss or form decay), automatic progression / regression, Pain Traffic Light integration, two-way voice ("why?"), best vs. weakest rep clips with the Ghost in the Stage 4 report.
@@ -1099,3 +1126,4 @@ Two critical corrections to the existing onboarding (Stages 1B/1C), completed **
 - **2026-10-06:** Committed and pushed `a4947f5` (includes `30377e7`) → deployed, verified in the served bundle (check-in, crutch-only option, crutch-supported one-leg work, goalkeeper stance, ball wall work, leg switch). Restore point `checkpoint-2026-10-06-checkin` (#11).
 - **2026-10-06:** **Six owner fixes.** Instant mid-return rep count; the big Ghost on the body for every exercise, sized by the 3D torso (distance) and hip-aligned; unilateral work = one exercise split between both legs (kick / stand wording, Ghost switches leg; working leg only on crutches); no crutch wording for prosthesis users; kicks / passes grouped in one run; standing exercises measured and demonstrated FACING the camera (3D front Ghost, trunk-axis hip / shoulder angles, 3D trunk lean and torso). Client 661 pass, server 10/10, 0 new failures. Not yet committed.
 - **2026-10-06:** Committed and pushed `73ee592` → deployed, verified in the served bundle. Restore point `checkpoint-2026-10-06-front-view` (#12). Awaiting the owner's device check (front-view measurement relies on MediaPipe depth — thresholds may need per-exercise tuning).
+- **2026-10-06:** **Six owner upgrades.** Early start with an immediate count (counts from the briefing; the number is said at the rep); steady Ghost (time-based smoothing, feet-anchored, smooth keyframes); kicks and passes as a full set per leg with a spoken leg change; professional 3/4-view Ghost (tapered limbs, jersey, boots, depth order); shadow ball in shadow kicks / passes; wide 4:3 camera with minimum zoom. Client 673 pass, server 10/10, 0 new failures. Not yet committed.

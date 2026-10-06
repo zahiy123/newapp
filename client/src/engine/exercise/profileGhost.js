@@ -46,20 +46,42 @@ function ikJoint(a, la, b, lb, prefer) {
   return prefer(s1) >= prefer(s2) ? s1 : s2;
 }
 
-const smooth = (x) => x * x * (3 - 2 * x);
-
-/** Cyclic keyframe interpolation (smoothstep between keyframes; the last wraps to the first). */
+/**
+ * Cyclic keyframe interpolation — a MONOTONE CUBIC (Fritsch–Carlson) through the keyframes:
+ * the motion flows through each keyframe with a continuous speed (no stop-and-go at every
+ * keyframe, which looked mechanical), and never overshoots a keyframe value (the Ghost stays
+ * inside the profile ranges). The last keyframe wraps to the first.
+ */
 function keyframeAngles(keyframes, u) {
   const n = keyframes.length;
+  if (n === 1) return { ...keyframes[0].a };
   let i = n - 1;
   for (let k = 0; k < n; k++) if (keyframes[k].t <= u) i = k;
-  const a = keyframes[i];
-  const b = keyframes[(i + 1) % n];
-  const tb = i === n - 1 ? b.t + 1 : b.t;
-  const ta = a.t > u ? a.t - 1 : a.t;
-  const x = tb > ta ? smooth(Math.min(1, Math.max(0, (u - ta) / (tb - ta)))) : 0;
+  const ta = keyframes[i].t > u ? keyframes[i].t - 1 : keyframes[i].t;
+  const tb = i === n - 1 ? keyframes[0].t + 1 : keyframes[i + 1].t;
+  const h = tb - ta;
+  const s = h > 0 ? Math.min(1, Math.max(0, (u - ta) / h)) : 0;
+  // neighbours (cyclic) with their unwrapped times
+  const at = (k) => {
+    const m = ((k % n) + n) % n;
+    const wrap = Math.floor(k / n);
+    return { t: keyframes[m].t + wrap, a: keyframes[m].a };
+  };
+  const p0 = at(i - 1), p1 = at(i), p2 = at(i + 1), p3 = at(i + 2);
+  const t1 = ta, t2 = tb;
+  const t0 = p0.t - (p1.t - ta), t3 = p3.t - (p2.t - tb);
   const out = {};
-  for (const k of Object.keys(a.a)) out[k] = a.a[k] + ((b.a[k] ?? a.a[k]) - a.a[k]) * x;
+  for (const key of Object.keys(p1.a)) {
+    const v0 = p0.a[key] ?? p1.a[key], v1 = p1.a[key], v2 = p2.a[key] ?? v1, v3 = p3.a[key] ?? v2;
+    const d0 = (v1 - v0) / Math.max(1e-6, t1 - t0);
+    const d1 = (v2 - v1) / Math.max(1e-6, t2 - t1);
+    const d2 = (v3 - v2) / Math.max(1e-6, t3 - t2);
+    // tangents: 0 at a turning point (no overshoot), else the harmonic mean of the slopes
+    const tan = (a, b) => (a * b <= 0 ? 0 : (2 * a * b) / (a + b));
+    const m1 = tan(d0, d1), m2 = tan(d1, d2);
+    const s2 = s * s, s3 = s2 * s;
+    out[key] = (2 * s3 - 3 * s2 + 1) * v1 + (s3 - 2 * s2 + s) * h * m1 + (-2 * s3 + 3 * s2) * v2 + (s3 - s2) * h * m2;
+  }
   return out;
 }
 
@@ -397,7 +419,13 @@ function buildPose(profile, t, lp = {}) {
   };
   // Standing exercises are shown and measured FACING the camera (owner, 2026-10-06): the sagittal
   // movement goes into depth (z), so every joint angle stays exactly the profile's
-  return profile.posture === 'standing' ? toFront(sidePose) : sidePose;
+  if (profile.posture !== 'standing') return sidePose;
+  // Drawn in a 3/4 view (the measurement stays frontal): the depth of the movement — the kick's
+  // swing, the squat's hips back / knees forward — is visible. A kick turns toward the kicking leg.
+  let out = 1;
+  if (ghost.base === 'stride' && !ghost.alternate) out = legPairs[1][0] === 'left' ? 1 : -1;
+  // depth is measured from the planted feet, so the feet stay put and the hips move (squat: back)
+  return toFront(sidePose, { yaw: profile.kind === 'strike' ? 38 : 26, out, refX: ghost.base === 'lunge' ? -0.2 : 0 });
 }
 
 // Lateral position (body units, the figure's LEFT at +x) of each landmark in the front view
@@ -422,32 +450,39 @@ const SEG_POINTS = {
  * Side-view pose → the same pose seen from the FRONT: lateral x per body side, the same height y,
  * and the side view's forward axis as depth z (toward the camera = negative z, like MediaPipe).
  */
-function toFront(pose) {
-  // the figure stands where its hips are (the side view's forward offset is depth now)
-  const hipX = (pose.landmarks[P.LEFT_HIP].x + pose.landmarks[P.RIGHT_HIP].x) / 2;
+function toFront(pose, view = {}) {
+  // depth reference: the planted feet (the side view's forward offset is depth now)
+  const hipX = typeof view.refX === 'number' ? view.refX : (pose.landmarks[P.LEFT_HIP].x + pose.landmarks[P.RIGHT_HIP].x) / 2;
   const lm = pose.landmarks.map((p, i) => (p.visibility
     ? { x: LATERAL[i] ?? 0, y: p.y, z: -(p.x - hipX), visibility: 1 }
     : p));
-  const pt = (i) => ({ x: lm[i].x, y: lm[i].y });
+  const pt = (i) => ({ x: lm[i].x, y: lm[i].y, z: lm[i].z });
+  const zOf = (p) => -(p.x - hipX);
   const segments = pose.segments.map((sg) => {
     const idx = SEG_POINTS[sg.limb]?.[sg.part];
     return idx ? { ...sg, from: pt(idx[0]), to: pt(idx[1]) } : sg;
   });
   const sh = (lm[P.LEFT_SHOULDER].y + lm[P.RIGHT_SHOULDER].y) / 2;
   const hp = (lm[P.LEFT_HIP].y + lm[P.RIGHT_HIP].y) / 2;
+  const shZ = lm[P.LEFT_SHOULDER].z, hpZ = lm[P.LEFT_HIP].z;
   const waistY = hp + (sh - hp) * 0.4;
+  const waistZ = hpZ + (shZ - hpZ) * 0.4;
   const headY = pose.head.y;
-  lm[0] = { x: 0, y: headY + 0.12, z: -0.15, visibility: 1 };
+  const headZ = zOf(pose.head);
+  lm[0] = { x: 0, y: headY + 0.12, z: headZ - 0.15, visibility: 1 };
   return {
     ...pose,
     landmarks: lm,
     segments,
     view: 'front',
-    neck: { x: 0, y: sh - 0.05 },
-    head: { x: 0, y: headY, r: pose.head.r },
+    depth: true,                                  // points carry z → drawn in a 3/4 view
+    yaw: view.yaw ?? 0,
+    yawOut: view.out ?? 1,
+    neck: { x: 0, y: sh - 0.05, z: zOf(pose.neck) },
+    head: { x: 0, y: headY, z: headZ, r: pose.head.r },
     torso: {
       ls: pt(P.LEFT_SHOULDER), rs: pt(P.RIGHT_SHOULDER), lh: pt(P.LEFT_HIP), rh: pt(P.RIGHT_HIP),
-      lw: { x: B.waistX, y: waistY }, rw: { x: -B.waistX, y: waistY },
+      lw: { x: B.waistX, y: waistY, z: waistZ }, rw: { x: -B.waistX, y: waistY, z: waistZ },
     },
   };
 }
