@@ -110,10 +110,12 @@ Readiness Rating (1-5 emoji, 3 seconds)
 
 | 10 | `checkpoint-2026-10-06-functional` | `5a9761f` | yes | + no generic filler in sport / rehab tracks, amputee football = 4 functional categories in the sport's language, equipment set-up only where used |
 
-| 11 | `checkpoint-2026-10-06-checkin` | `a4947f5` | **yes — the current production (2026-10-06)** | + kick volume, big Ghost, split balance sets, crutch safety, daily check-in, one-leg crutch work, ball-day technique, arm-amputee / goalkeeper adaptation |
+| 11 | `checkpoint-2026-10-06-checkin` | `a4947f5` | yes | + kick volume, big Ghost, split balance sets, crutch safety, daily check-in, one-leg crutch work, ball-day technique, arm-amputee / goalkeeper adaptation |
+
+| 12 | `checkpoint-2026-10-06-front-view` | `73ee592` | **yes — the current production (2026-10-06)** | + instant counting, distance-sized Ghost on the body for every exercise, true left / right splits, no crutch wording with a prosthesis, grouped kicks, front-view measurement |
 
 **How to return to a checkpoint:**
-- **To a deployed point (#1, #2, #3, #5, #8, #9, #10, #11): instant rollback with no code change** — Vercel → Deployments → the deployment of that commit → "Promote to Production".
+- **To a deployed point (#1, #2, #3, #5, #8, #9, #10, #11, #12): instant rollback with no code change** — Vercel → Deployments → the deployment of that commit → "Promote to Production".
 - **To any point in the code:** `git checkout <tag>` to look at it, or create a branch from it (`git checkout -b restore-<n> <tag>`) and deploy that branch / merge it into `main` after approval.
 - Look at it without changing anything: `git checkout checkpoint-stage2-stable` (then `git checkout main` to come back).
 - Undo later work on `main` safely (keeps history): `git revert <commits after the checkpoint>`, then push → Vercel redeploys.
@@ -1096,3 +1098,4 @@ Two critical corrections to the existing onboarding (Stages 1B/1C), completed **
 - **2026-10-06:** **Daily check-in + one-leg crutch work + today's technique + arm amputees (owner).** A pre-workout check-in (where / ball / prosthesis or crutches today, prefilled) rebuilds the day from today's reality and overrides the profile (`applyCheckIn`, `trainingLimbs(lp, todayMobility)`); single-leg squat / lunge patterns (crutch-supported wording); ball-day kicks / passes as real wall / goal work by location; arm amputees get no two-arm floor work, plus the goalkeeper ready stance and goalkeeper language. +7 tests; client 658 pass, 0 new failures. Not yet committed.
 - **2026-10-06:** Committed and pushed `a4947f5` (includes `30377e7`) → deployed, verified in the served bundle (check-in, crutch-only option, crutch-supported one-leg work, goalkeeper stance, ball wall work, leg switch). Restore point `checkpoint-2026-10-06-checkin` (#11).
 - **2026-10-06:** **Six owner fixes.** Instant mid-return rep count; the big Ghost on the body for every exercise, sized by the 3D torso (distance) and hip-aligned; unilateral work = one exercise split between both legs (kick / stand wording, Ghost switches leg; working leg only on crutches); no crutch wording for prosthesis users; kicks / passes grouped in one run; standing exercises measured and demonstrated FACING the camera (3D front Ghost, trunk-axis hip / shoulder angles, 3D trunk lean and torso). Client 661 pass, server 10/10, 0 new failures. Not yet committed.
+- **2026-10-06:** Committed and pushed `73ee592` → deployed, verified in the served bundle. Restore point `checkpoint-2026-10-06-front-view` (#12). Awaiting the owner's device check (front-view measurement relies on MediaPipe depth — thresholds may need per-exercise tuning).
