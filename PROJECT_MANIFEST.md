@@ -773,6 +773,32 @@ Two critical corrections to the existing onboarding (Stages 1B/1C), completed **
     - The crutch warm-up has no knee raise / leg switch.
     - An active prosthesis keeps the split.
   - Client 651 pass, 0 new failures.
+- **Daily check-in, one-leg crutch work, today's technique, arm amputees (owner, 2026-10-06; restore tag `backup-2026-10-06-pre-checkin` = `30377e7`):**
+  1. **Daily check-in before every workout** (`engine/training/dailyCheckIn.js`, `components/DailyCheckIn.jsx`).
+     - Before the first exercise the coach asks:
+       - **Where do you train today** (home / yard / field / gym).
+       - **Is a ball available** (ball sports and rehab + sport).
+       - **Prosthesis today, or crutches only** (leg amputees, not wheelchair users).
+     - The answers are prefilled from the last check-in (`lastCheckIn`, saved to the profile), and the start is blocked until it is answered.
+     - **Today's workout is built ONLY from the answers:** `applyCheckIn` gives the effective profile, and `trainingLimbs(lp, todayMobility)` lets today's answer override the profile / scan. "Crutches today" means the prosthesis is not worn; "prosthesis today" means an active prosthesis even if the scan once saw crutches.
+     - The effective profile drives the day's plan (rebuilt after the answers), the warm-up, the Ghost, the safety rules, the equipment fit and the set-up texts. The separate ball question is skipped when the check-in answered it.
+  2. **One-leg squats / lunges with crutches.**
+     - New measured patterns with Ghosts: **single-leg squat** and **single-leg lunge** (the Ghost stands on the weight-bearing leg).
+     - On crutches they are named "סקוואט / לאנג' על רגל אחת — בתמיכת קביים" (crutches at the sides to stabilize).
+     - They are a new 5th amputee-football category (`singleLegStrength`) and part of football / basketball / tennis / running / rehab.
+  3. **Technique that fits today.**
+     - With a ball today, the kick / pass become real ball work with the same motion and the same Ghost, set up for the place: at home, soft control kicks / passes to a wall from 2 m; outside, to a wall / goal / partner from 5–10 m. On crutches the line keeps "על הקביים".
+     - Ball variants require the ball (`requiresBall` → the equipment fit) and get the place's set-up text. Without a ball they stay shadow drills.
+  4. **Arm amputees / limited arms (e.g. amputee goalkeepers).**
+     - No weight on both arms (`twoArms`: push-ups, planks) with an absent / non-trainable arm.
+     - Arm patterns work the usable arm (the profiles already measure per usable arm, and the Ghost never draws the absent arm).
+     - **Goalkeeper work:** a new **goalkeeper ready stance** pattern (hold, Ghost), plus the goalkeeper's language: "צעדי שוער לצדדים", "קפיצת שוער — זינוק למעלה", "לחיצת כתפיים — כוח לתפיסה ולזריקה", "בעיטת הוצאה בצל".
+  - *Tests:*
+    - +7 (`dailyCheckIn.test.js`): the questions per profile; prefill / completeness; today overrides the profile both ways.
+    - **The same trainee:** prosthesis day → split sets; crutch day → working leg only + crutch-supported one-leg squats / lunges; ball at home → wall ball work requiring the ball; no ball → shadow; crutch-day warm-up has no knee raise.
+    - Arm-amputee goalkeeper: no push-ups / planks, goalkeeper work present.
+    - The 3 new patterns pass the all-sports Ghost sweep and the variation sweep.
+    - Client 658 pass, 0 new failures.
    3. **Profile-based rep counting with a quality score per rep** (replacing the per-exercise analyzers step by step), including the correction hierarchy, timing and external-focus cues.
    4. **Special sport libraries:** leg amputees (amputee football: crutch kick / crutch sprint / balance / header / goalkeeper), wheelchair (push stroke, seated throws, shoulder protection), running (opened for selection), then tennis / martial arts (trunk-rotation metric) and basketball.
    - Following (already in the roadmap): velocity-based fatigue detection (stop the set at ~20% rep-speed loss or form decay), automatic progression / regression, Pain Traffic Light integration, two-way voice ("why?"), best vs. weakest rep clips with the Ghost in the Stage 4 report.
@@ -945,6 +971,7 @@ Two critical corrections to the existing onboarding (Stages 1B/1C), completed **
 | `client/src/engine/training/profileRepAnalyzer.js` | The rep count comes from the profile detector; the analyzer keeps form / posture feedback |
 | `client/src/engine/catalog/relevance.js` | Functional patterns per sport / limitation (no generic filler), amputee-football categories, sport-language labels |
 | `client/src/engine/limbProfile.js` → `trainingLimbs` | The limbs as they train (crutches → the prosthesis is not worn) — the safety base of all training planning |
+| `client/src/engine/training/dailyCheckIn.js` + `components/DailyCheckIn.jsx` | Daily check-in (where / ball / prosthesis or crutches today) → the effective profile of the workout |
 | `client/src/engine/training/exerciseSetup.js` | Equipment set-up instructions only for drills that really use equipment |
 | `client/src/engine/catalog/trackGoals.js` | Single source of truth: goals per track (rehab / sport / rehab + sport), the trainee's valid goals, legacy mapping |
 | `client/src/engine/catalog/planBuilder.js` | Rebuilds the AI week plan's days from the catalog (deterministic, shared by dashboard + training) |
@@ -1033,3 +1060,4 @@ Two critical corrections to the existing onboarding (Stages 1B/1C), completed **
 - **2026-10-06:** Committed and pushed `5a9761f` → deployed, verified in the served bundle (push activation, amputee-football labels, drive prods present). Restore point `checkpoint-2026-10-06-functional` (#10).
 - **2026-10-06:** **Kick volume, big Ghost, both legs (owner).** Shadow-pass pattern + a 3-exercise kick block in every amputee-football session (power / accuracy sets, working leg only); "Ghost: big / small" in every exercise (on the body when standing, large beside the trainee on the floor); split balance sets — base leg then prosthesis (below-knee), each leg the full dose, the coach calls the start and the switch, the Ghost changes legs, a status chip. Client 644 pass, 0 new failures. Not yet committed.
 - **2026-10-06:** **SAFETY: crutches without a prosthesis.** `trainingLimbs` (on crutches the prosthesis is not worn) used by the training screen, the plan and the warm-up; no split sets, no two-leg standing (`twoLegs` / new `bilateralStance`) on crutches; split only with an active prosthesis; balance Ghost only on a weight-bearing leg; crutch wording; no knee raise of the only leg in the warm-up. +7 safety tests; client 651 pass, 0 new failures. Not yet committed (together with the kick / big Ghost / split work).
+- **2026-10-06:** **Daily check-in + one-leg crutch work + today's technique + arm amputees (owner).** A pre-workout check-in (where / ball / prosthesis or crutches today, prefilled) rebuilds the day from today's reality and overrides the profile (`applyCheckIn`, `trainingLimbs(lp, todayMobility)`); single-leg squat / lunge patterns (crutch-supported wording); ball-day kicks / passes as real wall / goal work by location; arm amputees get no two-arm floor work, plus the goalkeeper ready stance and goalkeeper language. +7 tests; client 658 pass, 0 new failures. Not yet committed.

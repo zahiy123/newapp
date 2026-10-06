@@ -246,7 +246,7 @@ export function needsBallQuestion(profile) {
  */
 export function planWarmUp(profile, { hasBall = false } = {}) {
   // The limbs as they train: on crutches the prosthesis is not worn (owner safety rule)
-  const lp = trainingLimbs(getLimbProfile(profile));
+  const lp = trainingLimbs(getLimbProfile(profile), profile?.todayMobility);
   const track = resolveTrack(profile);
   const rehab = track !== 'sport_only';
 

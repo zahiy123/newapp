@@ -27,9 +27,13 @@ export const LIMBS = ['left_leg', 'right_leg', 'left_arm', 'right_arm'];
  * split onto it, no prosthesis drawn in the Ghost). Only a trainee with an ACTIVE prosthesis (no
  * crutches) works on it. Everything that plans or demonstrates training uses this view.
  */
-export function trainingLimbs(lp) {
-  if (!lp || !lp.crutches) return lp;
-  const out = { ...lp, trainsOnCrutches: true };
+export function trainingLimbs(lp, todayMobility = null) {
+  if (!lp) return lp;
+  // today's check-in wins: an active prosthesis today, or crutches only today
+  if (todayMobility === 'prosthesis') return { ...lp, crutches: false };
+  const onCrutches = todayMobility === 'crutches' || lp.crutches;
+  if (!onCrutches) return lp;
+  const out = { ...lp, crutches: true, trainsOnCrutches: true };
   for (const k of ['left_leg', 'right_leg']) {
     if (lp[k]?.state === 'prosthetic') out[k] = { ...lp[k], state: 'absent', trainable: false, prosthesisOffForTraining: true };
   }

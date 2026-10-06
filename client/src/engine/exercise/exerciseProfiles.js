@@ -526,6 +526,65 @@ RAW_EXPERT.shadowPass = {
   },
 };
 
+// ---------------- One-leg strength (crutch-supported for a one-legged trainee) ----------------
+RAW_EXPERT.singleLegSquat = {
+  id: 'singleLegSquat', name: msg('סקוואט על רגל אחת', 'Single-leg squat'), precision: 'expert', kind: 'reps',
+  posture: 'standing', cameraView: 'side', require: ['legs', 'torso'], primary: 'knee',
+  joints: { knee: { rest: [150, 180], peak: [85, 125] } },
+  rules: [
+    { id: 'too_shallow', metric: 'knee', op: '>', value: 140, severity: 'error', when: 'peak',
+      msg: msg('רד עוד קצת — לאט ובשליטה', 'A little lower — slowly, with control'),
+      why: msg('הטווח בונה את הכוח של רגל התמיכה', 'The range builds the support leg\'s strength') },
+    UPRIGHT_TORSO(50),
+  ],
+  dynamics: [],
+  ghost: {
+    view: 'side', base: 'stride', periodMs: 3600, restT: 0, peakT: 0.5, supportMustBear: true,
+    keyframes: [
+      { t: 0, a: { 'A.knee': 172, 'A.shank': 4, 'B.thigh': 30, 'B.knee': 160, trunk: 8, armA: 45, armB: 45, elbow: 150 } },
+      { t: 0.5, a: { 'A.knee': 105, 'A.shank': 30, 'B.thigh': 45, 'B.knee': 165, trunk: 28, armA: 55, armB: 55, elbow: 150 } },
+    ],
+  },
+};
+
+RAW_EXPERT.singleLegLunge = {
+  id: 'singleLegLunge', name: msg("לאנג' על רגל אחת", 'Single-leg lunge'), precision: 'expert', kind: 'reps',
+  posture: 'standing', cameraView: 'side', require: ['legs', 'torso'], primary: 'knee',
+  joints: { knee: { rest: [150, 180], peak: [80, 120] } },
+  rules: [
+    { id: 'too_shallow', metric: 'knee', op: '>', value: 135, severity: 'error', when: 'peak',
+      msg: msg('רד עד שהברך קרובה ל-90 מעלות', 'Lower until the knee is near 90 degrees'),
+      why: msg('ירידה מלאה מחזקת את הירך והישבן של הרגל העובדת', 'A full descent strengthens the working leg\'s thigh and glutes') },
+    UPRIGHT_TORSO(40),
+  ],
+  dynamics: [],
+  ghost: {
+    view: 'side', base: 'stride', periodMs: 3600, restT: 0, peakT: 0.5, supportMustBear: true,
+    keyframes: [
+      { t: 0, a: { 'A.knee': 170, 'A.shank': 4, 'B.thigh': -12, 'B.knee': 170, trunk: 5, armA: 40, armB: 40, elbow: 150 } },
+      { t: 0.5, a: { 'A.knee': 98, 'A.shank': 18, 'B.thigh': -35, 'B.knee': 128, trunk: 16, armA: 50, armB: 50, elbow: 150 } },
+    ],
+  },
+};
+
+// ---------------- Goalkeeper (incl. arm-amputee keepers) ----------------
+RAW_EXPERT.gkStance = {
+  id: 'gkStance', name: msg('עמידת מוכנות שוער', 'Goalkeeper ready stance'), precision: 'expert', kind: 'hold',
+  posture: 'standing', cameraView: 'side', require: ['legs', 'torso'], primary: 'knee',
+  joints: { knee: { rest: [115, 150] }, hip: { rest: [95, 140] } },
+  rules: [
+    { id: 'too_high', metric: 'knee', op: '>', value: 158, severity: 'error', when: 'any',
+      msg: msg('נמוך יותר — ברכיים כפופות, מוכן לזנק', 'Lower — knees bent, ready to spring'),
+      why: msg('עמידה נמוכה היא מה שנותן לשוער לזנק מהר לשני הצדדים', 'A low stance is what lets the keeper spring fast to both sides') },
+    UPRIGHT_TORSO(45),
+  ],
+  dynamics: [],
+  ghost: {
+    view: 'side', base: 'stand', periodMs: 4000,
+    rest: { knee: 132, hip: 118, shoulder: 60, elbow: 120 },
+  },
+};
+
 // Movement-pattern tags (matched by the sport library)
 const TAGS = {
   squat: ['strength', 'lowerBody', 'bilateral', 'squatPattern'],
@@ -545,6 +604,9 @@ const TAGS = {
   runInPlace: ['gait', 'cyclic', 'landing', 'conditioning'],
   footballKick: ['strike', 'chain', 'singleLegStance', 'ballSkill'],
   shadowPass: ['strike', 'chain', 'singleLegStance', 'ballSkill'],
+  singleLegSquat: ['strength', 'lowerBody', 'singleLeg'],
+  singleLegLunge: ['strength', 'lowerBody', 'singleLeg'],
+  gkStance: ['hold', 'isometric', 'lowerBody'],
   buttKicks: ['gait', 'cyclic', 'landing', 'conditioning'],
   aSkip: ['cyclic', 'landing', 'coordination', 'drill'],
   accelMarch: ['cyclic', 'acceleration'],

@@ -42,8 +42,8 @@ const has = (text, words) => words.some(w => text.includes(w));
 export function requiredEquipment(ex) {
   const need = new Set();
   if (!ex) return need;
-  // Catalog exercises are equipment-free by construction (shadow / bodyweight patterns)
-  if (ex.catalogId) return need;
+  // Catalog exercises are equipment-free by construction — except today's ball variants
+  if (ex.catalogId) { if (ex.requiresBall) need.add('ball'); return need; }
   const nameText = ` ${[ex.name, ex.nameEn].filter(Boolean).join(' ')} `.toLowerCase();
   const text = textOf(ex);
   const cleaned = FALSE_BALL.reduce((t, w) => t.split(w).join(' '), text);

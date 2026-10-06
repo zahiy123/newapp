@@ -35,9 +35,9 @@ export const PATTERNS = Object.freeze({
   gluteBridge: { source: { profile: 'gluteBridge' }, qualities: ['strength', 'rehab', 'posteriorChain', 'activation'], sports: 'all', needs: ['floor'],
     name: t('גשר ישבן', 'Glute bridge'), cue: t('דחוף את הרצפה עם העקבים והרם את האגן לתקרה', 'Drive the floor with your heels, hips to the ceiling') },
   // ---- Upper body ----
-  pushUp: { source: { profile: 'pushUp' }, qualities: ['strength', 'core', 'upperBody'], sports: 'all', needs: ['floor', 'arms'],
+  pushUp: { source: { profile: 'pushUp' }, qualities: ['strength', 'core', 'upperBody'], sports: 'all', needs: ['floor', 'arms', 'twoArms'],
     name: t('שכיבות סמיכה', 'Push-ups'), cue: t('דחוף את הרצפה הרחק ממך', 'Push the floor away from you') },
-  plank: { source: { profile: 'plank' }, qualities: ['core', 'stability', 'rehab', 'activation'], sports: 'all', needs: ['floor'],
+  plank: { source: { profile: 'plank' }, qualities: ['core', 'stability', 'rehab', 'activation'], sports: 'all', needs: ['floor', 'twoArms'],
     name: t('פלאנק', 'Plank'), cue: t('גוף אחד ישר כמו קרש', 'One straight line, like a board') },
   shoulderPress: { source: { profile: 'shoulderPress' }, qualities: ['strength', 'upperBody'], sports: 'all', needs: ['arms'],
     name: t('לחיצת כתפיים', 'Shoulder press'), cue: t('דחוף את התקרה למעלה', 'Push the ceiling up') },
@@ -79,6 +79,13 @@ export const PATTERNS = Object.freeze({
   // ---- Sport skills (shadow drills) ----
   shadowKick: { source: { profile: 'footballKick' }, qualities: ['technique', 'power', 'sportSkill'], sports: ['field'], needs: ['standing'], unilateral: true,
     name: t('בעיטה בצל — תנועת בעיטה באוויר', 'Shadow kick — kicking motion in the air'), cue: t('הירך מובילה, הרגל מצליפה קדימה', 'The hip leads, the leg whips through') },
+  // One-leg strength: a one-legged trainee does it on the working leg with CRUTCH support (stability)
+  singleLegSquat: { source: { profile: 'singleLegSquat' }, qualities: ['strength', 'balance', 'lowerBody', 'singleLegStrength'], sports: 'all', needs: ['standing'],
+    name: t('סקוואט על רגל אחת', 'Single-leg squat'), cue: t('רד לאט על רגל התמיכה, הברך מעל האצבעות', 'Lower slowly on the support leg, knee over the toes') },
+  singleLegLunge: { source: { profile: 'singleLegLunge' }, qualities: ['strength', 'balance', 'lowerBody', 'singleLegStrength'], sports: 'all', needs: ['standing'],
+    name: t("לאנג' על רגל אחת", 'Single-leg lunge'), cue: t('רד ישר למטה על הרגל הקדמית, הגו זקוף', 'Drop straight down on the front leg, tall trunk') },
+  gkStance: { source: { profile: 'gkStance' }, qualities: ['stability', 'strength', 'technique', 'sportSkill'], sports: ['field'], needs: ['standing', 'bilateralStance'],
+    name: t('עמידת מוכנות שוער', 'Goalkeeper ready stance'), cue: t('נמוך, משקל על כריות כפות הרגליים, ידיים מוכנות', 'Low, weight on the balls of the feet, hands ready') },
   shadowPass: { source: { profile: 'shadowPass' }, qualities: ['technique', 'sportSkill', 'balance'], sports: ['field'], needs: ['standing'], unilateral: true,
     name: t('מסירה בצל — פנים כף הרגל', 'Shadow pass — inside of the foot'), cue: t('כף הרגל פתוחה, תנופה קצרה ומדויקת אל המטרה', 'Foot open, a short accurate swing to the target') },
   shadowChestPass: { source: { move: 'chest_pass' }, qualities: ['technique', 'sportSkill', 'upperBody'], sports: ['court', 'seated'], needs: ['arms'],
@@ -107,5 +114,7 @@ export function patternFitsBody(pattern, lp = {}) {
   if (needs.has('twoLegs') && !(legWorks('left') && legWorks('right'))) return false;
   if (needs.has('standing') && !legWorks('left') && !legWorks('right')) return false;
   if (needs.has('arms') && lp.trainableArms && lp.trainableArms.length === 0) return false;
+  // Weight on both arms (push-ups, planks): not with an absent / non-trainable arm (arm amputees)
+  if (needs.has('twoArms') && lp.trainableArms && lp.trainableArms.length < 2) return false;
   return true;
 }

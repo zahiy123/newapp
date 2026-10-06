@@ -23,22 +23,26 @@ export const GENERIC_DRILLS = ['armCircles', 'kneeLiftMarch'];
 export const AMPUTEE_FOOTBALL_CATEGORIES = Object.freeze({
   core: ['plank', 'gluteBridge', 'trunkRotation'],
   singleLegBalance: ['kneeUpBalance'],
+  // one-leg strength — on crutches it is crutch-supported (owner, 2026-10-06)
+  singleLegStrength: ['singleLegSquat', 'singleLegLunge'],
   crutchUpperBody: ['pushUp', 'shoulderPress'],
   kicks: ['shadowKick', 'shadowPass'],
 });
 const AMPUTEE_FOOTBALL = Object.values(AMPUTEE_FOOTBALL_CATEGORIES).flat();
 
 export const SPORT_PATTERNS = Object.freeze({
-  football: [...LOWER_STRENGTH, ...SPEED, 'jumpSquat', 'lateralShuffle', 'kneeUpBalance', 'plank', 'pushUp', 'trunkRotation', 'shadowKick', 'shadowPass'],
+  football: [...LOWER_STRENGTH, ...SPEED, 'jumpSquat', 'lateralShuffle', 'kneeUpBalance', 'singleLegSquat', 'singleLegLunge', 'plank', 'pushUp', 'trunkRotation', 'shadowKick', 'shadowPass'],
   footballAmputee: AMPUTEE_FOOTBALL,
   // Amputee goalkeeper (arm amputees): low stance, lateral power, reactions, core
-  footballAmputeeGK: [...LOWER_STRENGTH, 'jumpSquat', 'lateralShuffle', 'kneeUpBalance', 'plank', 'shoulderPress', 'highKnees', 'accelMarch', 'trunkRotation'],
-  basketball: [...LOWER_STRENGTH, ...SPEED, 'jumpSquat', 'lateralShuffle', 'kneeUpBalance', 'plank', 'pushUp', 'shoulderPress', 'trunkRotation', 'shadowChestPass'],
-  tennis: [...LOWER_STRENGTH, ...SPEED, 'jumpSquat', 'lateralShuffle', 'kneeUpBalance', 'plank', 'lateralRaise', 'trunkRotation', 'shadowStroke'],
+  // Amputee goalkeeper (often an arm amputee): ready stance, lateral power, reactions, core,
+  // the working arm / shoulder; the distribution kick
+  footballAmputeeGK: [...LOWER_STRENGTH, 'gkStance', 'jumpSquat', 'lateralShuffle', 'kneeUpBalance', 'singleLegSquat', 'plank', 'shoulderPress', 'lateralRaise', 'highKnees', 'accelMarch', 'trunkRotation', 'shadowKick'],
+  basketball: [...LOWER_STRENGTH, ...SPEED, 'jumpSquat', 'lateralShuffle', 'kneeUpBalance', 'singleLegSquat', 'singleLegLunge', 'plank', 'pushUp', 'shoulderPress', 'trunkRotation', 'shadowChestPass'],
+  tennis: [...LOWER_STRENGTH, ...SPEED, 'jumpSquat', 'lateralShuffle', 'kneeUpBalance', 'singleLegSquat', 'singleLegLunge', 'plank', 'lateralRaise', 'trunkRotation', 'shadowStroke'],
   // Wheelchair sports: shoulders (protect them), pushing strength, trunk, the sport motion
   basketballWheelchair: ['trunkRotation', 'shoulderPress', 'lateralRaise', 'frontRaise', 'bicepCurl', 'shadowChestPass'],
   tennisWheelchair: ['trunkRotation', 'shoulderPress', 'lateralRaise', 'frontRaise', 'bicepCurl', 'shadowStroke'],
-  running: [...LOWER_STRENGTH, ...SPEED, 'jumpSquat', 'kneeUpBalance', 'plank'],
+  running: [...LOWER_STRENGTH, ...SPEED, 'jumpSquat', 'kneeUpBalance', 'singleLegSquat', 'singleLegLunge', 'plank'],
   fitness: null,     // general fitness: all generic patterns
 });
 
@@ -54,6 +58,15 @@ export const SPORT_LABELS = Object.freeze({
     shoulderPress: { name: t('לחיצת כתפיים — דחיפה על הקביים', 'Shoulder press — pushing on the crutches'), cue: t('דחוף את התקרה — כתפיים חזקות נושאות אותך במגרש', 'Push the ceiling — strong shoulders carry you on the pitch') },
     shadowKick: { name: t('בעיטה בצל — טכניקת בעיטה', 'Shadow kick — kicking technique'), cue: t('הירך מובילה, הרגל מצליפה, החזה מעל הכדור הדמיוני', 'The hip leads, the leg whips through, chest over the imaginary ball') },
     shadowPass: { name: t('מסירה בצל — פנים כף הרגל', 'Shadow pass — inside of the foot'), cue: t('כף רגל פתוחה, תנופה קצרה ומדויקת — כמו מסירה לחבר', 'Foot open, a short accurate swing — like a pass to a teammate') },
+    singleLegSquat: { name: t('סקוואט על רגל אחת — כוח לרגל הבעיטה', 'Single-leg squat — strength for the kicking leg'), cue: t('רד לאט על הרגל המתפקדת והתרומם בכוח', 'Lower slowly on the working leg, drive back up') },
+    singleLegLunge: { name: t("לאנג' על רגל אחת — כוח ויציבות", 'Single-leg lunge — strength and stability'), cue: t('רד ישר למטה על הרגל הקדמית, הגו זקוף', 'Drop straight down on the front leg, tall trunk') },
+  },
+  footballAmputeeGK: {
+    gkStance: { name: t('עמידת מוכנות שוער', 'Goalkeeper ready stance'), cue: t('נמוך, משקל על כריות כפות הרגליים, ידיים מוכנות לזינוק', 'Low, weight on the balls of the feet, hands ready to spring') },
+    lateralShuffle: { name: t('צעדי שוער לצדדים', 'Goalkeeper side steps'), cue: t('נמוך, צעדים קצרים מעמוד לעמוד, בלי להצליב', 'Low, short steps post to post, never crossing') },
+    jumpSquat: { name: t('קפיצת שוער — זינוק למעלה', 'Goalkeeper jump — spring up'), cue: t('דחוף את הרצפה וזנק — נחיתה רכה ומוכנה', 'Drive the floor and spring — land soft and ready') },
+    shoulderPress: { name: t('לחיצת כתפיים — כוח לתפיסה ולזריקה', 'Shoulder press — strength for catching and throwing'), cue: t('דחוף את התקרה — כתף חזקה ויציבה', 'Push the ceiling — a strong, stable shoulder') },
+    shadowKick: { name: t('בעיטת הוצאה בצל', 'Shadow goal kick'), cue: t('תנופה מהירך, מעקב גבוה — הוצאה ארוכה', 'Swing from the hip, high follow-through — a long clearance') },
   },
 });
 
@@ -74,7 +87,7 @@ export function relevantPatterns({ track, sport, lp = {} }) {
     // a limited arm: arm range-of-motion work IS the rehab (arm circles here are real ROM work)
     return null;
   }
-  const base = ['squat', 'miniSquat', 'lunge', 'wallSit', 'hipHinge', 'gluteBridge', 'pushUp', 'plank', 'kneeUpBalance', 'trunkRotation'];
+  const base = ['squat', 'miniSquat', 'lunge', 'wallSit', 'hipHinge', 'gluteBridge', 'pushUp', 'plank', 'kneeUpBalance', 'singleLegSquat', 'singleLegLunge', 'trunkRotation'];
   return new Set(legAffected(lp) ? base : [...base, ...ARM_ISOLATION]);
 }
 
@@ -89,7 +102,34 @@ const CRUTCH_LABELS = {
   kneeUpBalance: { name: t('עמידה על הרגל המתפקדת — יציבות', 'Standing on the working leg — stability'), cue: t('עמוד על הרגל המתפקדת, אפשר להיעזר בקביים — גו זקוף ויציב', 'Stand on your working leg, crutch support allowed — tall and steady') },
   shadowKick: { name: t('בעיטה בצל על הקביים', 'Shadow kick on the crutches'), cue: t('משקל מעל הקביים, הרגל המתפקדת מצליפה מהירך', 'Weight over the crutches, the working leg whips from the hip') },
   shadowPass: { name: t('מסירה בצל על הקביים — פנים כף הרגל', 'Shadow pass on the crutches — inside of the foot'), cue: t('משקל מעל הקביים, תנופה קצרה ומדויקת', 'Weight over the crutches, a short accurate swing') },
+  singleLegSquat: { name: t('סקוואט על רגל אחת — בתמיכת קביים', 'Single-leg squat — crutch-supported'), cue: t('קביים בצדדים לייצוב, רד לאט על הרגל המתפקדת והתרומם בשליטה', 'Crutches at your sides for support, lower slowly on the working leg, rise with control') },
+  singleLegLunge: { name: t("לאנג' על רגל אחת — בתמיכת קביים", 'Single-leg lunge — crutch-supported'), cue: t('הקביים מייצבות, רד ישר למטה על הרגל המתפקדת', 'The crutches stabilize, drop straight down on the working leg') },
 };
+
+// WITH a ball today: the kick / pass become real ball work — same motion, same Ghost — with a
+// location-specific set-up (home: soft control kicks; yard / field: to a wall or a goal)
+const BALL_LABELS = {
+  shadowKick: {
+    home: { name: t('בעיטה בכדור לקיר — שליטה', 'Kick a ball to the wall — control'), cue: t('בעיטות שליטה רכות לקיר מ-2 מטר, החזה מעל הכדור', 'Soft control kicks to the wall from 2 m, chest over the ball') },
+    out: { name: t('בעיטה בכדור — טכניקת בעיטה', 'Ball kick — kicking technique'), cue: t('לקיר או לשער מ-5–10 מטר: הירך מובילה, הקרסול נעול', 'To a wall or goal from 5–10 m: the hip leads, ankle locked') },
+  },
+  shadowPass: {
+    home: { name: t('מסירה בכדור לקיר — פנים כף הרגל', 'Pass a ball to the wall — inside of the foot'), cue: t('מסירות קצרות לקיר מ-2 מטר וקבלת הכדור בחזרה', 'Short passes to the wall from 2 m and receive it back') },
+    out: { name: t('מסירה בכדור — פנים כף הרגל', 'Ball pass — inside of the foot'), cue: t('מסירות לקיר או לשותף מ-5 מטר, כף רגל פתוחה', 'Passes to a wall or partner from 5 m, foot open') },
+  },
+};
+
+/**
+ * Today's ball work for a kick / pass pattern: { name, cue } or null (no ball / not a kick).
+ * On crutches the line keeps the crutch wording.
+ */
+export function ballLabel({ hasBall, location, crutches }, patternId) {
+  const b = hasBall === true ? BALL_LABELS[patternId] : null;
+  if (!b) return null;
+  const v = location === 'home' ? b.home : b.out;
+  if (!crutches) return v;
+  return { name: t(`${v.name.he} — על הקביים`, `${v.name.en} — on the crutches`), cue: t(`משקל מעל הקביים. ${v.cue.he}`, `Weight over the crutches. ${v.cue.en}`) };
+}
 
 /** Crutch-user wording for a pattern (null when not on crutches / no special wording). */
 export function crutchLabel(lp, patternId) {

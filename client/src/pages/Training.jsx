@@ -23,6 +23,8 @@ import { makeTimedAnalyzer } from '../engine/training/timedAnalyzer';
 import { makeProfileRepAnalyzer } from '../engine/training/profileRepAnalyzer';
 import { READY_DRIVE, withDrive, splitLegOrder, legLabel, liftedLeg, splitStartText, splitSwitchText } from '../engine/training/coachFlow';
 import { exerciseNeedsSetup } from '../engine/training/exerciseSetup';
+import DailyCheckIn from '../components/DailyCheckIn';
+import { applyCheckIn } from '../engine/training/dailyCheckIn';
 import { catalogGhostSpec } from '../engine/catalog/catalog';
 import { rebuildPlanFromCatalog, planContext } from '../engine/catalog/planBuilder';
 import { availableEquipment, fitExercises, needsBall } from '../engine/exercise/equipmentFit';
@@ -125,7 +127,11 @@ export default function Training() {
   const lang = userProfile?.lang === 'en' ? 'en-US' : 'he-IL';
   const isHe = lang.startsWith('he');
   const playerName = userProfile?.name || '';
-  const currentLocation = userProfile?.trainingLocation || userProfile?.currentLocation || 'field';
+  // Daily check-in (where / ball / prosthesis or crutches TODAY) → the effective profile of this workout
+  const [checkIn, setCheckIn] = useState(null);
+  const todayProfile = useMemo(() => applyCheckIn(userProfile, checkIn), [userProfile, checkIn]);
+  const planSourceRef = useRef(null);       // { plan, data, weekIdx, dayIdx } — rebuilt after the check-in
+  const currentLocation = todayProfile?.trainingLocation || todayProfile?.currentLocation || 'field';
   const locationProps = getLocationProps(currentLocation, isHe, userProfile?.sport);
 
   const beforeDrawRef = useRef(null);
@@ -396,8 +402,8 @@ export default function Training() {
   const [showBallQuestion, setShowBallQuestion] = useState(false);
   const [warmUpGhostOn, setWarmUpGhostOn] = useState(true);    // ghost shown by default in the warm-up
   // The limbs AS THEY TRAIN: on crutches the prosthesis is not worn (safety — trainingLimbs)
-  const limbProfile = useMemo(() => trainingLimbs(getLimbProfile(userProfile)), [userProfile]);
-  const warmUpExercises = useMemo(() => planWarmUp(userProfile, { hasBall: typeof ballAnswer === 'boolean' ? ballAnswer : userProfile?.hasBall === true }), [userProfile, ballAnswer]);
+  const limbProfile = useMemo(() => trainingLimbs(getLimbProfile(todayProfile), todayProfile?.todayMobility), [todayProfile]);
+  const warmUpExercises = useMemo(() => planWarmUp(todayProfile, { hasBall: typeof ballAnswer === 'boolean' ? ballAnswer : todayProfile?.hasBall === true }), [todayProfile, ballAnswer]);
 
   // Ghost Overlay & Progressive Range Challenge (opt-in, behind FEATURES.GHOST_OVERLAY).
   // 'panel' = the stable demo panel (checkpoint-stage2-stable) and the default; 'overlay' = full-size on the body.
@@ -526,6 +532,43 @@ export default function Training() {
   const rawExercisesRef = useRef([]);      // the day's exercises before the equipment fit
   const aiSummaryRef = useRef(null);
 
+  // Build the day's exercises from the plan for TODAY's reality (check-in answers; null = profile defaults)
+  function buildTodayExercises(src, status) {
+    const { plan, data, weekIdx, dayIdx } = src;
+    const eff = applyCheckIn(data, status);
+    const week = plan.weeks[weekIdx];
+    const sport = data.sport || plan.sport || 'fitness';
+    let loaded = null;
+    if (FEATURES.CATALOG_PLANS) {
+      // Coherent catalog session for this day (same builder + seed as the dashboard), for today's body / ball / place
+      try {
+        const lp = trainingLimbs(getLimbProfile(eff), eff.todayMobility);
+        const built = rebuildPlanFromCatalog(plan, planContext(eff, lp, user.uid), (data.language || 'he') === 'he');
+        loaded = built.weeks[weekIdx]?.days?.[dayIdx]?.exercises || [];
+        sessionDataRef.current.sessionGoal = built.weeks[weekIdx]?.days?.[dayIdx]?.goal || null;
+      } catch (err) {
+        console.error('[Catalog] session build failed — using the AI exercises:', err);
+        loaded = null;
+      }
+    }
+    if (!loaded?.length) {
+      const sanitized = sanitizePlan({ weeks: [{ days: [{ exercises: week.days[dayIdx].exercises || [] }] }] }, sport, data.age || userProfile?.age);
+      loaded = sanitized.weeks[0].days[0].exercises || [];
+    }
+    // HARD equipment fit: never offer an exercise the trainee can't do (e.g. a ball drill without a ball)
+    rawExercisesRef.current = loaded;
+    return fitExercises(loaded, availableEquipment(eff, { hasBall: status?.hasBall })).exercises;
+  }
+
+  // Check-in answered → rebuild today's workout from the answers, remember them for next time
+  function handleCheckInDone(status) {
+    setCheckIn(status);
+    sessionDataRef.current.checkIn = status;
+    if (typeof status.hasBall === 'boolean') setBallAnswer(status.hasBall);   // no separate ball question
+    if (planSourceRef.current) setExercises(buildTodayExercises(planSourceRef.current, status));
+    if (user?.uid) updateDoc(doc(db, 'users', user.uid), { lastCheckIn: status }).catch(err => console.error('[CheckIn] save failed:', err));
+  }
+
   // Load exercises
   useEffect(() => {
     async function load() {
@@ -541,27 +584,8 @@ export default function Training() {
       const week = plan.weeks[weekIdx];
       if (!week?.days?.[dayIdx]) return;
 
-      // Sanitize exercises in-place before displaying (last-mile defense)
-      const sport = data.sport || plan.sport || 'fitness';
-      let loadedExercises;
-      if (FEATURES.CATALOG_PLANS) {
-        // Coherent catalog session for this day (same builder + seed as the dashboard)
-        try {
-          const built = rebuildPlanFromCatalog(plan, planContext(data, trainingLimbs(getLimbProfile(data)), user.uid), (data.language || 'he') === 'he');
-          loadedExercises = built.weeks[weekIdx]?.days?.[dayIdx]?.exercises || [];
-          sessionDataRef.current.sessionGoal = built.weeks[weekIdx]?.days?.[dayIdx]?.goal || null;
-        } catch (err) {
-          console.error('[Catalog] session build failed — using the AI exercises:', err);
-          loadedExercises = null;
-        }
-      }
-      if (!loadedExercises?.length) {
-        const sanitized = sanitizePlan({ weeks: [{ days: [{ exercises: week.days[dayIdx].exercises || [] }] }] }, sport, data.age || userProfile?.age);
-        loadedExercises = sanitized.weeks[0].days[0].exercises || [];
-      }
-      // HARD equipment fit: never offer an exercise the trainee can't do (e.g. a ball drill without a ball)
-      rawExercisesRef.current = loadedExercises;
-      setExercises(fitExercises(loadedExercises, availableEquipment(data)).exercises);
+      planSourceRef.current = { plan, data, weekIdx, dayIdx };
+      setExercises(buildTodayExercises(planSourceRef.current, null));
       resetVisionSession();
 
       // Load per-exercise score history from Firestore (last 5 workouts)
@@ -2285,6 +2309,7 @@ export default function Training() {
   }
 
   function handleStartBriefing() {
+    if (currentIdx === 0 && !checkIn) return;      // today's check-in first (the overlay asks for it)
     // Apply readiness adjustment once at workout start
     if (readinessRating > 0 && !readinessApplied && exercises.length > 0) {
       const adjusted = exercises.map(ex => {
@@ -3031,7 +3056,16 @@ export default function Training() {
         )}
 
         {/* START TRAINING — readiness rating + start button when IDLE and camera ready */}
-        {phase === PHASE.IDLE && cameraActive && exercises.length > 0 && (
+        {/* TODAY's check-in: where / ball / prosthesis or crutches — the workout is built from it */}
+        {phase === PHASE.IDLE && exercises.length > 0 && currentIdx === 0 && !checkIn && userProfile && (
+          <div className="absolute inset-0 flex items-center justify-center z-[30] bg-black/40 p-3 overflow-y-auto">
+            <div className="w-full max-w-md">
+              <DailyCheckIn profile={userProfile} isHe={isHe} onDone={handleCheckInDone} />
+            </div>
+          </div>
+        )}
+
+        {phase === PHASE.IDLE && cameraActive && exercises.length > 0 && (checkIn || currentIdx > 0) && (
           <div className="absolute inset-0 flex items-center justify-center z-[6]">
             <div className="text-center space-y-4">
               {/* Readiness Rating */}

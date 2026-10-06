@@ -11,7 +11,7 @@
 import { buildSession, inferGoal, familyOf, GOALS } from './sessionPlanner.js';
 import { toExercise } from './catalog.js';
 import { trackOf, sportFamilyOf, selectedSessionGoals, patternsFor, sportOf } from './trackGoals.js';
-import { sportLabel, SPORT_SKILL_BLOCK, crutchLabel } from './relevance.js';
+import { sportLabel, SPORT_SKILL_BLOCK, crutchLabel, ballLabel } from './relevance.js';
 
 /** Can this trainee stand on EACH leg (split balance sets)? A below-knee prosthesis can; absent / above-knee cannot. */
 export function canSplitLegs(lp = {}) {
@@ -35,6 +35,9 @@ export function planContext(userProfile, lp = {}, seedBase = null) {
     patterns: patternsFor(userProfile, lp),           // only functional patterns for the sport / limitation
     sport: sportOf(userProfile),                      // the sport whose language names the exercises
     sportBlock: SPORT_SKILL_BLOCK[sportOf(userProfile)] || null,
+    // today's reality (daily check-in): ball + location shape the technique work
+    hasBall: userProfile?.hasBall === true,
+    location: userProfile?.trainingLocation || userProfile?.currentLocation || 'home',
     lp,
     seedBase: seedBase || userProfile?.uid || userProfile?.email || userProfile?.name || 'trainee',
   };
@@ -64,7 +67,12 @@ export function rebuildPlanFromCatalog(plan, ctx, isHe = true) {
             goal: s.goal,
             goalName: GOALS[s.goal].name,
             coherence: s.coherence,
-            exercises: s.items.map(x => ({ ...toExercise(x.item, isHe, crutchLabel(ctx.lp, x.item.patternId) || sportLabel(ctx.sport, x.item.patternId), { canSplit: canSplitLegs(ctx.lp) }), block: x.role })),
+            exercises: s.items.map((x) => {
+              // with a ball today the kick / pass is real ball work (same motion, same Ghost)
+              const ball = ballLabel({ hasBall: ctx.hasBall, location: ctx.location, crutches: !!ctx.lp?.crutches }, x.item.patternId);
+              const label = ball || crutchLabel(ctx.lp, x.item.patternId) || sportLabel(ctx.sport, x.item.patternId);
+              return { ...toExercise(x.item, isHe, label, { canSplit: canSplitLegs(ctx.lp) }), block: x.role, ...(ball ? { requiresBall: true } : {}) };
+            }),
           };
         }),
       };

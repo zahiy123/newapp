@@ -11,6 +11,7 @@ const SETUP_CUES = new Set([
 ]);
 
 export function exerciseNeedsSetup(ex) {
-  if (!ex || ex.catalogId) return false;
+  if (!ex) return false;
+  if (ex.catalogId) return !!ex.requiresBall;          // a ball drill today needs a wall / goal / cones
   return SETUP_CUES.has(getAnalyzer(ex.name || '').cueKey);
 }
