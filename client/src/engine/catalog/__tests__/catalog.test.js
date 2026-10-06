@@ -18,7 +18,7 @@ const lpChair = { ...lpOk, wheelchair: true };
 const FAMILIES = ['field', 'court', 'racket', 'endurance', 'rehab', 'strength', 'seated'];
 
 const frame = (p, t) => profileGhostPose(p, t, lpOk).landmarks
-  .map(q => (q.visibility ? { ...q, x: 0.5 + q.x * 0.17, y: 0.5 + q.y * 0.17 } : q));
+  .map(q => (q.visibility ? { ...q, x: 0.5 + q.x * 0.17, y: 0.5 + q.y * 0.17, z: (q.z ?? 0) * 0.17 } : q));
 
 describe('Catalog — every exercise has a live Ghost', () => {
   it('every catalog item in every family has a drawable Ghost', () => {
@@ -56,10 +56,11 @@ describe('Catalog — every exercise has a live Ghost', () => {
   it('a working-side variation moves that leg in the Ghost', () => {
     const left = catalogGhostSpec('shadowKick|standard|full|left|k6');
     const right = catalogGhostSpec('shadowKick|standard|full|right|k6');
-    const kneeX = (spec, side) => ghostPose(spec, 0.5, lpOk).landmarks[side === 'left' ? 25 : 26].x;
-    // the working knee is forward (+x) at the strike, the support knee stays over the foot
-    expect(kneeX(left, 'left')).toBeGreaterThan(kneeX(left, 'right'));
-    expect(kneeX(right, 'right')).toBeGreaterThan(kneeX(right, 'left'));
+    // facing the camera, "forward" is toward the camera (more negative depth z)
+    const kneeZ = (spec, side) => ghostPose(spec, 0.5, lpOk).landmarks[side === 'left' ? 25 : 26].z;
+    // the working knee is forward at the strike, the support knee stays over the foot
+    expect(kneeZ(left, 'left')).toBeLessThan(kneeZ(left, 'right'));
+    expect(kneeZ(right, 'right')).toBeLessThan(kneeZ(right, 'left'));
   });
 
   it('ids round-trip; invalid ids are rejected', () => {

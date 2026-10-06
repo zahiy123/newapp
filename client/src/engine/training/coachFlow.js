@@ -17,8 +17,8 @@ import { repProgress } from '../exercise/profileEvaluator.js';
 
 export const START_HOLD_MS = 600;      // in the start position this long → the gate opens
 const START_DROP_MS = 400;             // out of it this long → the gate closes again
-export const MIN_TO_PEAK_MS = 250;     // a rep's way to the peak cannot be faster (jitter guard)
-export const MIN_RETURN_MS = 200;      // …nor its way back
+export const MIN_TO_PEAK_MS = 180;     // a rep's way to the peak cannot be faster (jitter guard)
+export const MIN_RETURN_MS = 80;       // …nor the first part of its way back (counted mid-return)
 const CYCLIC_WORK_WINDOW_MS = 1500;    // running / skipping: a stride or landing this recently = working
 
 /** Is the trainee in the exercise's start position? (metrics = profile metrics of the frame) */
@@ -56,9 +56,9 @@ export function updateStartGate(g, { positioned, confident, inStart }, now) {
   return g.open;
 }
 
-/** A rep event (motionFeatures) that is a real repetition. */
+/** A fast-count event (motionFeatures 'repCount') that is a real repetition. */
 export function isValidRep(ev) {
-  return ev?.type === 'rep'
+  return ev?.type === 'repCount'
     && typeof ev.toPeakMs === 'number' && ev.toPeakMs >= MIN_TO_PEAK_MS
     && typeof ev.returnMs === 'number' && ev.returnMs >= MIN_RETURN_MS;
 }
@@ -148,16 +148,28 @@ export function legLabel(side, lp = {}, isHe = true) {
 /** The working (lifted) leg of the Ghost when standing on `support`. */
 export const liftedLeg = (support) => (support === 'left' ? 'right' : 'left');
 
-export function splitStartText(lp, isHe) {
+/** What the current half of a split set does: 'stand' = stand / work on that leg; 'kick' = kick with it. */
+const action = (mode, isHe) => (mode === 'kick'
+  ? (isHe ? 'בעיטות ב' : 'kicks with your ')
+  : (isHe ? 'עמידה על ' : 'stand on your '));
+
+export function splitStartText(lp, isHe, mode = 'stand') {
   const { first } = splitLegOrder(lp);
   return isHe
-    ? `מתחילים: עמידה על ${legLabel(first, lp, true)}. באמצע הסט נחליף רגל.`
-    : `Start standing on your ${legLabel(first, lp, false)}. We switch legs halfway through the set.`;
+    ? `מתחילים: ${action(mode, true)}${legLabel(first, lp, true)}. באמצע הסט נחליף רגל.`
+    : `Start: ${action(mode, false)}${legLabel(first, lp, false)}. We switch legs halfway through the set.`;
 }
 
-export function splitSwitchText(lp, isHe) {
+export function splitSwitchText(lp, isHe, mode = 'stand') {
   const { second } = splitLegOrder(lp);
   return isHe
-    ? `החלף רגל! עכשיו עמידה על ${legLabel(second, lp, true)}. יאללה, יציב!`
-    : `Switch legs! Now stand on your ${legLabel(second, lp, false)}. Steady — let's go!`;
+    ? `החלף רגל! עכשיו ${action(mode, true)}${legLabel(second, lp, true)}. יאללה!`
+    : `Switch legs! Now ${action(mode, false)}${legLabel(second, lp, false)}. Let's go!`;
+}
+
+/** The Ghost's working leg for this half: kicks → the kicking leg; stand → the other (lifted / free) leg. */
+export function splitWorkingSide(lp, half, mode = 'stand') {
+  const { first, second } = splitLegOrder(lp);
+  const current = half === 1 ? first : second;
+  return mode === 'kick' ? current : liftedLeg(current);
 }

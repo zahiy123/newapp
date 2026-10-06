@@ -21,7 +21,7 @@ import { showsRangeGauge } from '../engine/training/rangeGauge';
 import { demoGhostFor } from '../engine/training/demoGhost';
 import { makeTimedAnalyzer } from '../engine/training/timedAnalyzer';
 import { makeProfileRepAnalyzer } from '../engine/training/profileRepAnalyzer';
-import { READY_DRIVE, withDrive, splitLegOrder, legLabel, liftedLeg, splitStartText, splitSwitchText } from '../engine/training/coachFlow';
+import { READY_DRIVE, withDrive, splitLegOrder, legLabel, splitStartText, splitSwitchText, splitWorkingSide } from '../engine/training/coachFlow';
 import { exerciseNeedsSetup } from '../engine/training/exerciseSetup';
 import DailyCheckIn from '../components/DailyCheckIn';
 import { applyCheckIn } from '../engine/training/dailyCheckIn';
@@ -739,10 +739,11 @@ export default function Training() {
     const cid = currentExercise?.catalogId;
     let spec = cid ? catalogGhostSpec(cid, demoProfile?.catalogId === cid ? demoProfile : null) : demoGhostFor(demoProfile, exerciseCueKey);
     if (spec?.profile && currentExercise?.sideSwitch) {
-      spec = { profile: { ...spec.profile, ghost: { ...spec.profile.ghost, workingSide: liftedLeg(splitSupport) } } };
+      // this half's working leg: the kicking leg (kicks) or the free leg while standing on the other
+      spec = { profile: { ...spec.profile, ghost: { ...spec.profile.ghost, workingSide: splitWorkingSide(limbProfile, splitHalf, currentExercise.splitMode) } } };
     }
     return spec;
-  }, [demoGhostPhase, demoProfile, exerciseCueKey, currentExercise?.catalogId, currentExercise?.sideSwitch, splitSupport]);
+  }, [demoGhostPhase, demoProfile, exerciseCueKey, currentExercise?.catalogId, currentExercise?.sideSwitch, currentExercise?.splitMode, splitHalf, limbProfile]);
   const showDemoGhost = exerciseGhostOn && !!demoGhostSpec;
   // ROM gauge only for dynamic range-of-motion exercises (never static holds / ball drills / kicks / running)
   const showRomGauge = useMemo(() => {
@@ -752,9 +753,10 @@ export default function Training() {
     return showsRangeGauge({ analyzerType: a.type, profileKind: kind, exerciseName: currentExercise.name });
   }, [currentExercise?.name, limbProfile, sportContexts]);
   const workPhase = phase === PHASE.EXERCISING || phase === PHASE.CALIBRATING;
-  const demoOnBody = overlayActive && (demoProfile?.posture === 'standing' || !!demoGhostSpec?.move) && workPhase;
-  // "Ghost: big" for floor exercises — a large figure beside the trainee (the body overlay needs standing)
-  const demoLarge = overlayActive && workPhase && !demoOnBody;
+  // "Ghost: big" = full size ON the body in every exercise (standing or on the floor): its size
+  // follows the trainee's body / distance from the camera, its hips sit on the trainee's hips
+  const demoOnBody = overlayActive && workPhase;
+  const demoLarge = false;
   const demoLabel = demoProfile?.precision === 'expert'
     ? (isHe ? `הדגמה: ${demoProfile.name.he}` : `Demo: ${demoProfile.name.en}`)
     : (isHe ? `הדגמה: ${currentExercise?.name || ''}` : `Demo: ${currentExercise?.nameEn || currentExercise?.name || ''}`);
@@ -790,7 +792,7 @@ export default function Training() {
   useEffect(() => {
     if (phase !== PHASE.EXERCISING || !currentExercise?.sideSwitch) return undefined;
     setSplitHalf(1);
-    const tm = setTimeout(() => speakPriority(splitStartText(limbProfile, isHe), { rate: 1.05 }), 1200);
+    const tm = setTimeout(() => speakPriority(splitStartText(limbProfile, isHe, currentExercise.splitMode), { rate: 1.05 }), 1200);
     return () => clearTimeout(tm);
   }, [phase, currentSet, currentIdx]);
 
@@ -799,7 +801,7 @@ export default function Training() {
     const target = parseInt(currentExercise.reps, 10) || 0;
     if (target > 1 && displayReps >= Math.ceil(target / 2)) {
       setSplitHalf(2);
-      speakPriority(splitSwitchText(limbProfile, isHe), { rate: 1.1 });
+      speakPriority(splitSwitchText(limbProfile, isHe, currentExercise.splitMode), { rate: 1.1 });
       setFeedback({ type: 'info', text: isHe ? '🔄 החלף רגל!' : '🔄 Switch legs!' });
     }
   }, [displayReps, phase, splitHalf]);
@@ -2724,7 +2726,9 @@ export default function Training() {
         {(phase === PHASE.EXERCISING || phase === PHASE.CALIBRATING) && <ExecutionHud execution={execution} isHe={isHe} />}
         {phase === PHASE.EXERCISING && currentExercise?.sideSwitch && (
           <div className={`absolute top-2 left-1/2 -translate-x-1/2 z-20 pointer-events-none rounded-full text-white text-sm font-bold px-3 py-1 shadow ${splitHalf === 1 ? 'bg-sky-700/90' : 'bg-orange-600/90'}`}>
-            {'🦵'} {isHe ? `עמידה על ${legLabel(splitSupport, limbProfile, true)} · חצי ${splitHalf}/2` : `Standing on your ${legLabel(splitSupport, limbProfile, false)} · half ${splitHalf}/2`}
+            {'🦵'} {currentExercise.splitMode === 'kick'
+              ? (isHe ? `בעיטות ב${legLabel(splitSupport, limbProfile, true)} · חצי ${splitHalf}/2` : `Kicking with your ${legLabel(splitSupport, limbProfile, false)} · half ${splitHalf}/2`)
+              : (isHe ? `עמידה על ${legLabel(splitSupport, limbProfile, true)} · חצי ${splitHalf}/2` : `Standing on your ${legLabel(splitSupport, limbProfile, false)} · half ${splitHalf}/2`)}
           </div>
         )}
         {phase === PHASE.EXERCISING && validationMode && execution.active && (

@@ -50,12 +50,12 @@ const t = (he, en) => ({ he, en });
 // The sport's professional language (the Hebrew name keeps the movement's own word first)
 export const SPORT_LABELS = Object.freeze({
   footballAmputee: {
-    plank: { name: t('פלאנק — ליבה לבעיטה ולקביים', 'Plank — core for the kick and the crutches'), cue: t('גוף אחד ישר — הליבה מחזיקה אותך על הקביים', 'One straight line — your core holds you on the crutches') },
+    plank: { name: t('פלאנק — ליבה לבעיטה', 'Plank — core for the kick'), cue: t('גוף אחד ישר — ליבה חזקה היא הבסיס של כל בעיטה', 'One straight line — a strong core is the base of every kick') },
     gluteBridge: { name: t('גשר ישבן — יציבות אגן', 'Glute bridge — pelvic stability'), cue: t('דחוף את הרצפה עם העקב והרם את האגן — אגן יציב = בעיטה יציבה', 'Drive the floor with the heel, hips up — a stable pelvis = a stable kick') },
     trunkRotation: { name: t('רוטציות גו — כוח סיבובי לבעיטה', 'Trunk rotations — rotational power for the kick'), cue: t('הסתובב מהבטן, האגן יציב — מכאן מגיע הכוח לבעיטה', 'Turn from the middle, hips still — that is where the kick gets its power') },
     kneeUpBalance: { name: t('יציבות על רגל אחת — בסיס לבעיטה', 'Single-leg stability — the base of the kick'), cue: t('על הרגל העומדת, ברך למעלה, גו זקוף — כמו רגע לפני בעיטה', 'On the standing leg, knee up, tall trunk — like the moment before a kick') },
-    pushUp: { name: t('שכיבות סמיכה — כוח לקביים', 'Push-ups — strength for the crutches'), cue: t('דחוף את הרצפה הרחק ממך — אותו כוח שדוחף אותך על הקביים', 'Push the floor away — the same push that drives you on the crutches') },
-    shoulderPress: { name: t('לחיצת כתפיים — דחיפה על הקביים', 'Shoulder press — pushing on the crutches'), cue: t('דחוף את התקרה — כתפיים חזקות נושאות אותך במגרש', 'Push the ceiling — strong shoulders carry you on the pitch') },
+    pushUp: { name: t('שכיבות סמיכה — כוח פלג גוף עליון', 'Push-ups — upper-body strength'), cue: t('דחוף את הרצפה הרחק ממך — גוף ישר', 'Push the floor away — body straight') },
+    shoulderPress: { name: t('לחיצת כתפיים — כוח כתפיים', 'Shoulder press — shoulder strength'), cue: t('דחוף את התקרה — כתפיים חזקות ויציבות', 'Push the ceiling — strong, stable shoulders') },
     shadowKick: { name: t('בעיטה בצל — טכניקת בעיטה', 'Shadow kick — kicking technique'), cue: t('הירך מובילה, הרגל מצליפה, החזה מעל הכדור הדמיוני', 'The hip leads, the leg whips through, chest over the imaginary ball') },
     shadowPass: { name: t('מסירה בצל — פנים כף הרגל', 'Shadow pass — inside of the foot'), cue: t('כף רגל פתוחה, תנופה קצרה ומדויקת — כמו מסירה לחבר', 'Foot open, a short accurate swing — like a pass to a teammate') },
     singleLegSquat: { name: t('סקוואט על רגל אחת — כוח לרגל הבעיטה', 'Single-leg squat — strength for the kicking leg'), cue: t('רד לאט על הרגל המתפקדת והתרומם בכוח', 'Lower slowly on the working leg, drive back up') },
@@ -97,8 +97,12 @@ export const SPORT_SKILL_BLOCK = Object.freeze({
   football: { n: 2, want: ['technique', 'sportSkill'] },
 });
 
-// On crutches (no prosthesis): the working leg only, crutch support allowed — said explicitly
+// On crutches (no prosthesis): the working leg only, crutch support allowed — said explicitly.
+// The crutch wording lives ONLY here: a trainee with a prosthesis never hears "crutches".
 const CRUTCH_LABELS = {
+  plank: { name: t('פלאנק — ליבה לבעיטה ולקביים', 'Plank — core for the kick and the crutches'), cue: t('גוף אחד ישר — הליבה מחזיקה אותך על הקביים', 'One straight line — your core holds you on the crutches') },
+  pushUp: { name: t('שכיבות סמיכה — כוח לקביים', 'Push-ups — strength for the crutches'), cue: t('דחוף את הרצפה הרחק ממך — אותו כוח שדוחף אותך על הקביים', 'Push the floor away — the same push that drives you on the crutches') },
+  shoulderPress: { name: t('לחיצת כתפיים — דחיפה על הקביים', 'Shoulder press — pushing on the crutches'), cue: t('דחוף את התקרה — כתפיים חזקות נושאות אותך על הקביים', 'Push the ceiling — strong shoulders carry you on the crutches') },
   kneeUpBalance: { name: t('עמידה על הרגל המתפקדת — יציבות', 'Standing on the working leg — stability'), cue: t('עמוד על הרגל המתפקדת, אפשר להיעזר בקביים — גו זקוף ויציב', 'Stand on your working leg, crutch support allowed — tall and steady') },
   shadowKick: { name: t('בעיטה בצל על הקביים', 'Shadow kick on the crutches'), cue: t('משקל מעל הקביים, הרגל המתפקדת מצליפה מהירך', 'Weight over the crutches, the working leg whips from the hip') },
   shadowPass: { name: t('מסירה בצל על הקביים — פנים כף הרגל', 'Shadow pass on the crutches — inside of the foot'), cue: t('משקל מעל הקביים, תנופה קצרה ומדויקת', 'Weight over the crutches, a short accurate swing') },

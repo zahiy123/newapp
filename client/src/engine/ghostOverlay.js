@@ -49,7 +49,9 @@ export function bodyAnchor(landmarks, prev = null, alpha = 0.25, aspect = 4 / 3)
   if (!shoulders.length) return prev;
   const mid = (pts) => ({ x: pts.reduce((a, p) => a + p.x, 0) / pts.length, y: pts.reduce((a, p) => a + p.y, 0) / pts.length });
   const sh = mid(shoulders);
-  const len = (a, b) => Math.hypot((a.x - b.x) * aspect, a.y - b.y);      // in y-normalized units
+  // in y-normalized units; with depth (MediaPipe z is in x units) so bending toward the camera
+  // does not shrink the Ghost — its size follows the body size / the distance only
+  const len = (a, b) => Math.hypot((a.x - b.x) * aspect, a.y - b.y, ((a.z ?? 0) - (b.z ?? 0)) * aspect);
   // torso from the best visible same-side pair (works side-on), else from the midpoints
   const sidePairs = [[ls, lh], [rs, rh]].filter(([s, h]) => ok(s) && ok(h)).map(([s, h]) => len(s, h));
   const hips = [lh, rh].filter(ok);

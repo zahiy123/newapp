@@ -193,19 +193,31 @@ describe('Kick volume, working-leg kicks, split balance sets', () => {
   const days = (profile, lp) => rebuildPlanFromCatalog(plan, planContext(profile, lp, 's')).weeks.flatMap(w => w.days);
   const KICKS = new Set(['shadowKick', 'shadowPass']);
 
-  it('amputee football: every session carries ≥3 kick / pass exercises, only with the working leg', () => {
+  it('amputee football with an ACTIVE prosthesis: ≥3 kick / pass exercises, each ONE exercise split base leg → prosthesis', () => {
     for (const profile of [{ sport: 'rehab', trainingTrack: 'rehab_sport', rehabSport: 'footballAmputee' }, { sport: 'footballAmputee' }]) {
       for (const d of days(profile, lpBK)) {
-        const kicks = d.exercises.map(e => parseCatalogId(e.catalogId)).filter(v => KICKS.has(v.pattern));
+        const kicks = d.exercises.filter(e => KICKS.has(parseCatalogId(e.catalogId).pattern));
         expect(kicks.length, `${d.goal}`).toBeGreaterThanOrEqual(3);
-        for (const v of kicks) expect(v.side, 'kick with the working (right) leg only').toBe('right');
+        for (const e of kicks) {
+          expect(parseCatalogId(e.catalogId).side).toBe('bothSides');
+          expect(e.sideSwitch).toBe(true);
+          expect(e.splitMode).toBe('kick');
+        }
+        // all kicks / passes of the session form one consecutive run
+        const idx = d.exercises.map((e, i) => (KICKS.has(parseCatalogId(e.catalogId).pattern) ? i : -1)).filter(i => i >= 0);
+        expect(idx[idx.length - 1] - idx[0] + 1, `${d.goal}: kicks not consecutive`).toBe(idx.length);
       }
     }
   });
 
-  it('a healthy footballer kicks with both feet (left / right / alternating)', () => {
-    const sides = new Set(days({ sport: 'football' }, lpOk).flatMap(d => d.exercises.map(e => parseCatalogId(e.catalogId)).filter(v => KICKS.has(v.pattern)).map(v => v.side)));
-    expect(sides.size).toBeGreaterThan(1);
+  it('a healthy footballer: unilateral work is never shown for one side only — each exercise is split between the legs', () => {
+    for (const d of days({ sport: 'football' }, lpOk)) {
+      for (const e of d.exercises) {
+        const v = parseCatalogId(e.catalogId);
+        expect(['left', 'right', 'alternating'].includes(v.side), `${e.name}`).toBe(false);
+        if (v.side === 'bothSides') expect(e.sideSwitch).toBe(true);
+      }
+    }
   });
 
   it('single-leg balance is split between both legs (below-knee prosthesis included), each leg gets the full dose', () => {
@@ -223,5 +235,17 @@ describe('Kick volume, working-leg kicks, split balance sets', () => {
     const balance = days({ sport: 'rehab', trainingTrack: 'rehab_sport', rehabSport: 'footballAmputee' }, lpAK)
       .flatMap(d => d.exercises).filter(e => parseCatalogId(e.catalogId).pattern === 'kneeUpBalance');
     for (const e of balance) expect(e.sideSwitch).toBe(false);
+  });
+});
+
+describe('No crutch wording for a trainee with a prosthesis', () => {
+  it('prosthesis user (no crutches): no "קביים" in any exercise name / description / tip', () => {
+    const plan2 = { weeks: Array.from({ length: 4 }, () => ({ days: [{}, {}, {}] })) };
+    for (const profile of [{ sport: 'rehab', trainingTrack: 'rehab_sport', rehabSport: 'footballAmputee' }, { sport: 'footballAmputee' }]) {
+      const exs = rebuildPlanFromCatalog(plan2, planContext(profile, lpBK, 's')).weeks.flatMap(w => w.days.flatMap(d => d.exercises));
+      for (const e of exs) {
+        expect(`${e.name} ${e.description} ${e.tips}`, e.name).not.toContain('קביים');
+      }
+    }
   });
 });

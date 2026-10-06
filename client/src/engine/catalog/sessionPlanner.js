@@ -157,7 +157,29 @@ export function buildSession({ goal, family, sportFamily = null, lp = {}, seed, 
   }
   const SESSION_ORDER = ['prep', 'main', 'support', 'sport', 'cooldown'];
   items.sort((a, b) => SESSION_ORDER.indexOf(a.role) - SESSION_ORDER.indexOf(b.role));
-  return { goal: g, items, coherence: coherenceReport(items, g) };
+  return { goal: g, items: groupSimilar(items), coherence: coherenceReport(items, g) };
+}
+
+// Similar movements belong together (owner): every kick / pass of the session forms one run, placed
+// where the first of them stands, in a teaching progression; repeats of any movement sit side by side
+const SKILL_ORDER = ['shadowPass', 'shadowKick'];
+const isKickSkill = (x) => SKILL_ORDER.includes(x.item.patternId);
+export function groupSimilar(items) {
+  const skills = items.filter(isKickSkill).sort((a, b) =>
+    SKILL_ORDER.indexOf(a.item.patternId) - SKILL_ORDER.indexOf(b.item.patternId)
+    || (a.item.variation.dose === 'k10' ? -1 : 1) - (b.item.variation.dose === 'k10' ? -1 : 1));
+  const out = [];
+  let placed = false;
+  for (const x of items) {
+    if (isKickSkill(x)) {
+      if (!placed) { out.push(...skills); placed = true; }
+      continue;
+    }
+    // a repeat of a movement already in the list goes right after its twin
+    const twin = out.map(o => o.item.patternId).lastIndexOf(x.item.patternId);
+    if (twin >= 0) out.splice(twin + 1, 0, x); else out.push(x);
+  }
+  return out;
 }
 
 /** Share of main + support exercises that serve the goal (100 = fully coherent). */

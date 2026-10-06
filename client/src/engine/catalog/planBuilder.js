@@ -9,18 +9,11 @@
 // ============================================================
 
 import { buildSession, inferGoal, familyOf, GOALS } from './sessionPlanner.js';
-import { toExercise } from './catalog.js';
+import { toExercise, canSplitLegs } from './catalog.js';
 import { trackOf, sportFamilyOf, selectedSessionGoals, patternsFor, sportOf } from './trackGoals.js';
 import { sportLabel, SPORT_SKILL_BLOCK, crutchLabel, ballLabel } from './relevance.js';
 
-/** Can this trainee stand on EACH leg (split balance sets)? A below-knee prosthesis can; absent / above-knee cannot. */
-export function canSplitLegs(lp = {}) {
-  const ok = (s) => {
-    const l = lp[`${s}_leg`];
-    return !(l?.state === 'absent' || (l?.state === 'prosthetic' && l?.level !== 'below_knee'));
-  };
-  return ok('left') && ok('right') && !lp.wheelchair && !lp.crutches;
-}
+export { canSplitLegs };
 
 /** Contexts for the builder from the profile. */
 export function planContext(userProfile, lp = {}, seedBase = null) {

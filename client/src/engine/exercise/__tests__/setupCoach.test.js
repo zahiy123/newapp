@@ -11,7 +11,7 @@ const squat = EXPERT_PROFILES.squat;
 const press = EXPERT_PROFILES.shoulderPress;
 
 const frame = (p, t = 0) => profileGhostPose(p, t, lpOk).landmarks
-  .map(q => (q.visibility ? { ...q, x: 0.5 + q.x * 0.17, y: 0.5 + q.y * 0.17, visibility: 0.95 } : q));
+  .map(q => (q.visibility ? { ...q, x: 0.5 + q.x * 0.17, y: 0.5 + q.y * 0.17, z: (q.z ?? 0) * 0.17, visibility: 0.95 } : q));
 const shift = (lm, dx, dy) => lm.map(p => (p.visibility ? { ...p, x: p.x + dx, y: p.y + dy } : p));
 const zoom = (lm, k, cx = 0.5, cy = 0.5) => lm.map(p => (p.visibility ? { ...p, x: cx + (p.x - cx) * k, y: cy + (p.y - cy) * k } : p));
 const code = (lm, p = squat, lp = lpOk) => assessSetup(lm, p, lp).issue?.code ?? 'ok';
@@ -55,15 +55,12 @@ describe('Setup coach — tells the trainee exactly how to stand', () => {
     expect(code(zoom(frame(squat), 0.4))).toBe('step_closer');
   });
 
-  it('wrong orientation for the measurement → turn side-on / face the camera', () => {
-    const facing = frame(squat).map((p, i) => {
-      if (!p.visibility) return p;
-      if ([11, 13, 15, 23, 25, 27].includes(i)) return { ...p, x: p.x + 0.07 };
-      if ([12, 14, 16, 24, 26, 28].includes(i)) return { ...p, x: p.x - 0.07 };
-      return p;
-    });
-    expect(code(facing, squat)).toBe('turn_side');
-    expect(code(frame(squat), press)).toBe('turn_front');
+  it('standing exercises are done FACING the camera: side-on → "face the camera"; floor exercises: any view', () => {
+    // side-on: the left and right sides overlap
+    const sideOn = frame(squat).map(p => (p.visibility ? { ...p, x: 0.5 + (p.z ?? 0) } : p));
+    expect(code(sideOn, squat)).toBe('turn_front');
+    expect(code(frame(squat), squat)).toBe('ok');
+    expect(code(frame(EXPERT_PROFILES.pushUp), EXPERT_PROFILES.pushUp)).toBe('ok');
   });
 
   it('unclear tracking → add light / remove what hides you', () => {

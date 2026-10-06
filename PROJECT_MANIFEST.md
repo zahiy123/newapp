@@ -801,6 +801,37 @@ Two critical corrections to the existing onboarding (Stages 1B/1C), completed **
     - Arm-amputee goalkeeper: no push-ups / planks, goalkeeper work present.
     - The 3 new patterns pass the all-sports Ghost sweep and the variation sweep.
     - Client 658 pass, 0 new failures.
+- **Six owner fixes, 2026-10-06 (backup tag `backup-2026-10-06-pre-front-view` = `fdd9278`):**
+  1. **Instant rep count.**
+     - Before: the count fired only after the full return to the start, so it was heard after the rep.
+     - Now a fast-count event (`repCount`) fires **mid-return** of a real rep (after reaching ≥ 80% of the way to the peak, when the return passes 40%), re-arms at rest, and keeps a jitter guard (≥ 180 ms to the peak).
+     - The full-cycle `rep` event keeps the tempo rules.
+     - Test: the count fires before the trainee is back at the start.
+  2. **The big Ghost follows the body size / distance in EVERY exercise.**
+     - "צללית: גדולה" draws the Ghost on the body for standing AND floor exercises.
+     - Its hips are aligned to the trainee's hips (`drawGhostOverlay` aligns the profile Ghost's hip).
+     - Its size comes from the trainee's torso in 3D (`bodyAnchor` with depth), so it scales with the distance and does not shrink when bending toward the camera (test).
+  3. **Real left / right split.**
+     - A unilateral movement (kick, pass, single-leg squat / lunge, lunge, balance) is ONE exercise whose sets are split between the legs. It is never shown for one side alone.
+     - Base leg first, then the other leg or the prosthesis, with each leg getting the full dose.
+     - The coach speaks the right action: "מתחילים: בעיטות ברגל ימין … החלף רגל! עכשיו בעיטות ברגל שמאל — הפרוטזה" for kicks, "עמידה על …" for stance work.
+     - The Ghost switches the working leg (`splitWorkingSide`), and the chip shows "בעיטות ב… / עמידה על … · חצי 1/2".
+     - Trainees who cannot switch (crutches / above-knee / wheelchair) get the working-leg-only version (`sideFitsBody`, `canSplitLegs`).
+  4. **No crutch wording for prosthesis users.**
+     - Every crutch phrase ("כוח לקביים", "דחיפה על הקביים", "ליבה … ולקביים") now lives only in the crutch labels, used only on a crutches day.
+     - With a prosthesis: "שכיבות סמיכה — כוח פלג גוף עליון", "לחיצת כתפיים — כוח כתפיים", "פלאנק — ליבה לבעיטה".
+     - Test: no "קביים" in any name / description / tip of a prosthesis user's 4-week plan.
+  5. **Similar movements together.**
+     - All kicks / passes of a session form one consecutive run, placed where the first stands, in a teaching progression (pass accuracy → pass power → kick accuracy → kick power).
+     - A repeated movement sits next to its twin (`groupSimilar`). Tested.
+  6. **Front view.**
+     - Standing exercises are shown and measured **facing the camera**. The profile Ghost is built in 3D and drawn from the front (`toFront`): the sagittal movement goes into depth, so every angle is exactly the profile's.
+     - Hip and shoulder angles are measured against the **trunk axis** (shoulders wider than hips would otherwise add 5-9°).
+     - Trunk lean and the torso scale use depth: from the front a forward lean is in z, and a 2D torso would read bending as "too far".
+     - The setup coach asks a standing trainee who stands side-on to **face the camera**.
+     - Floor exercises (push-up, plank, bridge) accept any view and keep their lying Ghost.
+     - Tests were rewritten for the front view (side-on → "face the camera", lean in depth).
+  - *Verification:* client 661 pass (+ new tests), 0 new failures; server 10/10; build passes.
    3. **Profile-based rep counting with a quality score per rep** (replacing the per-exercise analyzers step by step), including the correction hierarchy, timing and external-focus cues.
    4. **Special sport libraries:** leg amputees (amputee football: crutch kick / crutch sprint / balance / header / goalkeeper), wheelchair (push stroke, seated throws, shoulder protection), running (opened for selection), then tennis / martial arts (trunk-rotation metric) and basketball.
    - Following (already in the roadmap): velocity-based fatigue detection (stop the set at ~20% rep-speed loss or form decay), automatic progression / regression, Pain Traffic Light integration, two-way voice ("why?"), best vs. weakest rep clips with the Ghost in the Stage 4 report.
@@ -1064,3 +1095,4 @@ Two critical corrections to the existing onboarding (Stages 1B/1C), completed **
 - **2026-10-06:** **SAFETY: crutches without a prosthesis.** `trainingLimbs` (on crutches the prosthesis is not worn) used by the training screen, the plan and the warm-up; no split sets, no two-leg standing (`twoLegs` / new `bilateralStance`) on crutches; split only with an active prosthesis; balance Ghost only on a weight-bearing leg; crutch wording; no knee raise of the only leg in the warm-up. +7 safety tests; client 651 pass, 0 new failures. Not yet committed (together with the kick / big Ghost / split work).
 - **2026-10-06:** **Daily check-in + one-leg crutch work + today's technique + arm amputees (owner).** A pre-workout check-in (where / ball / prosthesis or crutches today, prefilled) rebuilds the day from today's reality and overrides the profile (`applyCheckIn`, `trainingLimbs(lp, todayMobility)`); single-leg squat / lunge patterns (crutch-supported wording); ball-day kicks / passes as real wall / goal work by location; arm amputees get no two-arm floor work, plus the goalkeeper ready stance and goalkeeper language. +7 tests; client 658 pass, 0 new failures. Not yet committed.
 - **2026-10-06:** Committed and pushed `a4947f5` (includes `30377e7`) → deployed, verified in the served bundle (check-in, crutch-only option, crutch-supported one-leg work, goalkeeper stance, ball wall work, leg switch). Restore point `checkpoint-2026-10-06-checkin` (#11).
+- **2026-10-06:** **Six owner fixes.** Instant mid-return rep count; the big Ghost on the body for every exercise, sized by the 3D torso (distance) and hip-aligned; unilateral work = one exercise split between both legs (kick / stand wording, Ghost switches leg; working leg only on crutches); no crutch wording for prosthesis users; kicks / passes grouped in one run; standing exercises measured and demonstrated FACING the camera (3D front Ghost, trunk-axis hip / shoulder angles, 3D trunk lean and torso). Client 661 pass, server 10/10, 0 new failures. Not yet committed.

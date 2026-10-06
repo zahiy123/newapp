@@ -8,14 +8,12 @@ import { createClipRecorder, recordFrame, encodeFrame, decodeFrame, KEEP_POINTS 
 import { replayClip, agreementReport, tuneRule, candidatesAround, withThreshold } from '../agreement.js';
 
 const frameOf = (p, t) => profileGhostPose(p, t, {}).landmarks
-  .map(q => (q.visibility ? { ...q, x: 0.5 + q.x * 0.17, y: 0.5 + q.y * 0.17, visibility: 0.95 } : q));
+  .map(q => (q.visibility ? { ...q, x: 0.5 + q.x * 0.17, y: 0.5 + q.y * 0.17, z: (q.z ?? 0) * 0.17, visibility: 0.95 } : q));
 
 /** Rotate a side-view frame so the trainee faces the camera: spread left/right sides apart. */
-function facingCamera(lm) {
-  const out = lm.map(p => ({ ...p }));
-  for (const i of [11, 13, 15, 23, 25, 27]) out[i].x += 0.07;
-  for (const i of [12, 14, 16, 24, 26, 28]) out[i].x -= 0.07;
-  return out;
+/** The same frame filmed SIDE-ON: left and right overlap, the depth becomes the image x. */
+function sideOn(lm) {
+  return lm.map(p => (p.visibility ? { ...p, x: 0.5 + (p.z ?? 0), z: (p.x - 0.5) } : { ...p }));
 }
 
 /** Record `cycles` Ghost cycles of a profile; `mutate(lm, ms)` may distort frames. */
@@ -35,30 +33,25 @@ describe('Confidence gate — silence when unsure', () => {
   const squat = EXPERT_PROFILES.squat;
 
   it('detects the camera view', () => {
-    expect(detectView(frameOf(squat, 0))).toBe('side');
+    expect(detectView(frameOf(squat, 0))).toBe('front');                // standing exercises: facing the camera
     expect(detectView(frameOf(EXPERT_PROFILES.shoulderPress, 0))).toBe('front');
-    expect(detectView(facingCamera(frameOf(squat, 0)))).toBe('front');
-    expect(viewSuits('side', 'front')).toBe(false);
-    expect(viewSuits('side', 'oblique')).toBe(true);
+    expect(detectView(sideOn(frameOf(squat, 0)))).toBe('side');
     expect(viewSuits('front', 'side')).toBe(false);
+    expect(viewSuits('front', 'oblique')).toBe(true);
+    expect(viewSuits('any', 'side')).toBe(true);
   });
 
-  it('a side-view exercise filmed from the front is never corrected — the coach says to turn side-on', () => {
+  it('a standing exercise filmed side-on is never corrected — the coach says to face the camera', () => {
     const tr = createExecutionTracker(squat, {});
     let r; const issues = new Set(); const setups = new Set();
     for (let ms = 0; ms <= 2 * 3200; ms += 50) {
-      // a deep forward collapse that WOULD be a danger from the side
-      const lm = facingCamera(frameOf(squat, (ms % 3200) / 3200));
-      for (const k of [11, 12]) lm[k] = { ...lm[k], y: lm[23].y - 0.02 };
-      r = updateExecution(tr, lm, ms);
+      r = updateExecution(tr, sideOn(frameOf(squat, (ms % 3200) / 3200)), ms);
       r.issues.forEach(i => issues.add(i.id));
-      if (r.setup) setups.add(r.setup.code);
-      if (ms === 0) r = updateExecution(tr, facingCamera(frameOf(squat, 0)), ms);   // upright: orientation is checked
       if (r.setup) setups.add(r.setup.code);
     }
     expect([...issues]).toEqual([]);
     expect(r.inView).toBe(false);
-    expect(setups.has('turn_side')).toBe(true);     // the coach says exactly how to stand
+    expect(setups.has('turn_front')).toBe(true);     // the coach says exactly how to stand
     expect(r.danger).toBeNull();
   });
 
@@ -77,7 +70,7 @@ describe('Confidence gate — silence when unsure', () => {
   it('one bad frame does not silence a confident measurement (hysteresis)', () => {
     const tr = createExecutionTracker(squat, {});
     for (let ms = 0; ms < 500; ms += 50) updateExecution(tr, frameOf(squat, 0), ms);
-    const r = updateExecution(tr, facingCamera(frameOf(squat, 0)), 500);
+    const r = updateExecution(tr, sideOn(frameOf(squat, 0)), 500);
     expect(r.quality.confident).toBe(true);
   });
 });
@@ -114,7 +107,7 @@ describe('Clip recorder — validation dataset', () => {
   });
 
   it('untrustworthy stretches produce no clip', () => {
-    const clips = recordGhost(EXPERT_PROFILES.squat, 4, lm => facingCamera(lm));
+    const clips = recordGhost(EXPERT_PROFILES.squat, 4, lm => sideOn(lm));
     expect(clips).toEqual([]);
   });
 });
@@ -123,13 +116,15 @@ describe('Agreement — thresholds from data, not guesses', () => {
   const squat = applySportContext(EXPERT_PROFILES.squat, ['fitness']);
   /** Squat clips with the trunk pitched forward by `lean` degrees at the bottom of the rep. */
   function leaningClips(lean, n = 3) {
+    // facing the camera: the forward lean is in depth (z)
     return recordGhost(squat, n + 1, (lm) => {
       const hip = lm[23];
-      const L = Math.hypot(lm[11].x - hip.x, lm[11].y - hip.y);
-      const cur = Math.atan2(lm[11].x - hip.x, hip.y - lm[11].y) * 180 / Math.PI;
+      const dz = (lm[11].z ?? 0) - (hip.z ?? 0);
+      const L = Math.hypot(dz, lm[11].y - hip.y);
+      const cur = Math.atan2(-dz, hip.y - lm[11].y) * 180 / Math.PI;
       if (cur < 30) return lm;                      // only near the bottom
       const a = Math.max(cur, lean) * Math.PI / 180;
-      return lm.map((p, i) => ([11, 12].includes(i) ? { ...p, x: hip.x + Math.sin(a) * L, y: hip.y - Math.cos(a) * L } : p));
+      return lm.map((p, i) => ([11, 12].includes(i) ? { ...p, z: (hip.z ?? 0) - Math.sin(a) * L, y: hip.y - Math.cos(a) * L } : p));
     });
   }
 

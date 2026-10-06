@@ -5,6 +5,8 @@
 // how a movement FLOWS; this module follows the movement over time and emits events
 // that profiles and the sport library judge:
 //
+//   repCount — the FAST rep count: fires mid-return of a real rep (reached ≥ 80% of the way to the
+//              peak), so the count is heard immediately; re-arms only after returning to rest
 //   rep      — a full rest → peak → rest cycle of the primary joint:
 //              toPeakMs / peakHoldMs / returnMs (tempo), primaryPeak (depth reached), pelvisDropMax (hip stability),
 //              swayRatio (center-of-mass wobble), trunkRange (trunk control)
@@ -29,6 +31,11 @@ const CADENCE_WINDOW_MS = 6000;
 // Rep tempo thresholds on rep progress (0 = rest, 1 = peak)
 const LEAVE = 0.1;
 const ARRIVE = 0.9;
+// Fast counting (the count is heard while the rep is still finishing, not after it):
+// a rep counts the moment the return passes COUNT_AT after the movement reached COUNT_PEAK
+const COUNT_ARM = 0.15;
+const COUNT_PEAK = 0.8;
+const COUNT_AT = 0.4;
 // Foot contact (relative to torso length)
 const FOOT_UP = 0.08;       // ankle this much above the floor line → foot in the air
 const FOOT_DOWN = 0.03;     // back within this of the floor line → contact
@@ -124,6 +131,17 @@ export function updateMotion(ms, landmarks, metrics, t) {
   // ---- 1. Rep tempo + per-rep control ----
   const prog = progressOf(ms.profile, metrics?.[ms.profile?.primary]);
   if (prog !== null) {
+    // 1a. Fast count: 'repCount' fires mid-return (the full-cycle 'rep' below keeps the tempo)
+    const c = ms.count || (ms.count = { stage: 'ready', leaveAt: null, peakAt: null, departAt: null });
+    if (c.stage === 'ready' && prog > COUNT_ARM) { c.stage = 'going'; c.leaveAt = t; }
+    else if (c.stage === 'going' && prog >= COUNT_PEAK) { c.stage = 'peak'; c.peakAt = t; }
+    else if (c.stage === 'going' && prog <= COUNT_ARM * 0.5) { c.stage = 'ready'; }          // aborted
+    else if (c.stage === 'peak' && prog < COUNT_PEAK) { c.stage = 'returning'; c.departAt = t; }
+    else if (c.stage === 'returning' && prog >= COUNT_PEAK) { c.stage = 'peak'; }            // still at the bottom
+    else if (c.stage === 'returning' && prog <= COUNT_AT) {
+      events.push({ type: 'repCount', toPeakMs: c.peakAt - c.leaveAt, returnMs: t - c.departAt });
+      c.stage = 'counted';
+    } else if (c.stage === 'counted' && prog <= COUNT_ARM) { c.stage = 'ready'; }
     const r = ms.rep;
     if (r.stage === 'rest' && prog > LEAVE) { r.stage = 'going'; r.leaveAt = t; }
     else if (r.stage === 'going' && prog >= ARRIVE) { r.stage = 'peak'; r.arriveAt = t; }

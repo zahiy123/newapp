@@ -46,7 +46,7 @@ const RAW_EXPERT = {
   // ---------------- Lower body ----------------
   squat: {
     id: 'squat', name: msg('סקוואט', 'Squat'), precision: 'expert', kind: 'reps',
-    posture: 'standing', cameraView: 'side', require: ['legs', 'torso'], primary: 'knee',
+    posture: 'standing', cameraView: 'front', require: ['legs', 'torso'], primary: 'knee',
     joints: {
       knee: { rest: [155, 180], peak: [65, 105] },
       hip: { rest: [150, 180], peak: [55, 110] },
@@ -69,7 +69,7 @@ const RAW_EXPERT = {
 
   miniSquat: {
     id: 'miniSquat', name: msg('מיני סקוואט', 'Mini squat'), precision: 'expert', kind: 'reps',
-    posture: 'standing', cameraView: 'side', require: ['legs', 'torso'], primary: 'knee',
+    posture: 'standing', cameraView: 'front', require: ['legs', 'torso'], primary: 'knee',
     joints: {
       knee: { rest: [160, 180], peak: [120, 150] },
       hip: { rest: [155, 180], peak: [120, 155] },
@@ -88,7 +88,7 @@ const RAW_EXPERT = {
 
   lunge: {
     id: 'lunge', name: msg("לאנג'", 'Lunge'), precision: 'expert', kind: 'reps',
-    posture: 'standing', cameraView: 'side', require: ['legs', 'torso'], primary: 'knee',
+    posture: 'standing', cameraView: 'front', require: ['legs', 'torso'], primary: 'knee',
     joints: {
       knee: { rest: [140, 180], peak: [75, 110] },
     },
@@ -108,7 +108,7 @@ const RAW_EXPERT = {
 
   wallSit: {
     id: 'wallSit', name: msg('ישיבה על הקיר', 'Wall sit'), precision: 'expert', kind: 'hold',
-    posture: 'standing', cameraView: 'side', require: ['legs', 'torso'], primary: 'knee',
+    posture: 'standing', cameraView: 'front', require: ['legs', 'torso'], primary: 'knee',
     joints: {
       knee: { rest: [75, 110] },
       hip: { rest: [75, 115] },
@@ -126,7 +126,7 @@ const RAW_EXPERT = {
 
   hipHinge: {
     id: 'hipHinge', name: msg('הטיית אגן (דדליפט)', 'Hip hinge (deadlift)'), precision: 'expert', kind: 'reps',
-    posture: 'standing', cameraView: 'side', require: ['legs', 'torso'], primary: 'hip',
+    posture: 'standing', cameraView: 'front', require: ['legs', 'torso'], primary: 'hip',
     joints: {
       hip: { rest: [155, 180], peak: [70, 115] },
       knee: { rest: [145, 180], peak: [135, 180] },
@@ -147,7 +147,7 @@ const RAW_EXPERT = {
   // ---------------- Floor ----------------
   pushUp: {
     id: 'pushUp', name: msg('שכיבות סמיכה', 'Push-up'), precision: 'expert', kind: 'reps',
-    posture: 'prone', cameraView: 'side', require: ['arms', 'body'], primary: 'elbow',
+    posture: 'prone', cameraView: 'any', require: ['arms', 'body'], primary: 'elbow',
     joints: {
       elbow: { rest: [150, 180], peak: [70, 105] },
       bodyLine: { rest: [160, 180], peak: [160, 180] },
@@ -169,7 +169,7 @@ const RAW_EXPERT = {
 
   plank: {
     id: 'plank', name: msg('פלאנק', 'Plank'), precision: 'expert', kind: 'hold',
-    posture: 'prone', cameraView: 'side', require: ['body'], primary: 'bodyLine',
+    posture: 'prone', cameraView: 'any', require: ['body'], primary: 'bodyLine',
     joints: {
       bodyLine: { rest: [160, 180] },
     },
@@ -187,7 +187,7 @@ const RAW_EXPERT = {
 
   gluteBridge: {
     id: 'gluteBridge', name: msg('גשר ישבן', 'Glute bridge'), precision: 'expert', kind: 'reps',
-    posture: 'supine', cameraView: 'side', require: ['legs', 'torso'], primary: 'hip',
+    posture: 'supine', cameraView: 'any', require: ['legs', 'torso'], primary: 'hip',
     joints: {
       hip: { rest: [105, 145], peak: [160, 180] },
     },
@@ -245,7 +245,7 @@ const RAW_EXPERT = {
 
   frontRaise: {
     id: 'frontRaise', name: msg('הרמה קדמית', 'Front raise'), precision: 'expert', kind: 'reps',
-    posture: 'standing', cameraView: 'side', require: ['arms', 'torso'], primary: 'shoulder',
+    posture: 'standing', cameraView: 'front', require: ['arms', 'torso'], primary: 'shoulder',
     joints: {
       shoulder: { rest: [0, 35], peak: [75, 105], combine: 'max' },
       elbow: { rest: [140, 180], peak: [140, 180] },
@@ -264,7 +264,7 @@ const RAW_EXPERT = {
 
   rehabFrontRaise: {
     id: 'rehabFrontRaise', name: msg('הרמת יד קדמית מבוקרת', 'Controlled front raise'), precision: 'expert', kind: 'reps',
-    posture: 'standing', cameraView: 'side', require: ['arms', 'torso'], primary: 'shoulder',
+    posture: 'standing', cameraView: 'front', require: ['arms', 'torso'], primary: 'shoulder',
     joints: {
       shoulder: { rest: [0, 35], peak: [65, 100], combine: 'max' },
     },
@@ -282,7 +282,7 @@ const RAW_EXPERT = {
 
   bicepCurl: {
     id: 'bicepCurl', name: msg('כפיפת מרפק (ביספס)', 'Bicep curl'), precision: 'expert', kind: 'reps',
-    posture: 'standing', cameraView: 'side', require: ['arms', 'torso'], primary: 'elbow',
+    posture: 'standing', cameraView: 'front', require: ['arms', 'torso'], primary: 'elbow',
     joints: {
       elbow: { rest: [145, 180], peak: [30, 75] },
       shoulder: { rest: [0, 35], peak: [0, 35], combine: 'max' },
@@ -301,7 +301,7 @@ const RAW_EXPERT = {
 
   rehabElbowFlex: {
     id: 'rehabElbowFlex', name: msg('כיפוף מרפק אקטיבי', 'Active elbow flexion'), precision: 'expert', kind: 'reps',
-    posture: 'standing', cameraView: 'side', require: ['arms'], primary: 'elbow',
+    posture: 'standing', cameraView: 'front', require: ['arms'], primary: 'elbow',
     joints: {
       elbow: { rest: [140, 180], peak: [30, 85] },
     },
@@ -316,7 +316,7 @@ const RAW_EXPERT = {
   // ---------------- Dynamic / sport movements ----------------
   runInPlace: {
     id: 'runInPlace', name: msg('ריצה במקום', 'Running in place'), precision: 'expert', kind: 'cyclic',
-    posture: 'standing', cameraView: 'side', require: ['legs', 'torso'], primary: 'hip',
+    posture: 'standing', cameraView: 'front', require: ['legs', 'torso'], primary: 'hip',
     joints: {
       hip: { rest: [158, 180], peak: [95, 130] },
       elbow: { rest: [60, 125], peak: [60, 125] },
@@ -352,7 +352,7 @@ const RAW_EXPERT = {
 
   footballKick: {
     id: 'footballKick', name: msg('בעיטה', 'Kick'), precision: 'expert', kind: 'strike',
-    posture: 'standing', cameraView: 'side', require: ['legs', 'torso'], primary: 'knee',
+    posture: 'standing', cameraView: 'front', require: ['legs', 'torso'], primary: 'knee',
     joints: {
       knee: { rest: [60, 180] },
     },
@@ -390,7 +390,7 @@ const STRIDE_ARMS = { armA: 5, armB: 5, elbow: 90, trunk: 5 };
 
 RAW_EXPERT.buttKicks = {
   id: 'buttKicks', name: msg('בעיטות ישבן', 'Butt kicks'), precision: 'expert', kind: 'cyclic',
-  posture: 'standing', cameraView: 'side', require: ['legs', 'torso'], primary: 'knee',
+  posture: 'standing', cameraView: 'front', require: ['legs', 'torso'], primary: 'knee',
   joints: { knee: { rest: [150, 180], peak: [30, 75] } },
   rules: [
     { id: 'heel_low', metric: 'knee', op: '>', value: 95, severity: 'error', when: 'peak',
@@ -438,7 +438,7 @@ RAW_EXPERT.aSkip = {
 
 RAW_EXPERT.accelMarch = {
   id: 'accelMarch', name: msg('האצה בהטיה — צעדת קיר', 'Acceleration lean — wall march'), precision: 'expert', kind: 'cyclic',
-  posture: 'standing', cameraView: 'side', require: ['legs', 'torso'], primary: 'hip',
+  posture: 'standing', cameraView: 'front', require: ['legs', 'torso'], primary: 'hip',
   joints: { hip: { rest: [150, 180], peak: [75, 115] } },
   rules: [
     { id: 'lean_more', metric: 'trunkLean', op: '<', value: 25, severity: 'error', when: 'any',
@@ -463,7 +463,7 @@ RAW_EXPERT.accelMarch = {
 
 RAW_EXPERT.kneeUpBalance = {
   id: 'kneeUpBalance', name: msg('עמידה על רגל אחת — ברך למעלה', 'Single-leg balance — knee up'), precision: 'expert', kind: 'hold',
-  posture: 'standing', cameraView: 'side', require: ['legs', 'torso'], primary: 'hip',
+  posture: 'standing', cameraView: 'front', require: ['legs', 'torso'], primary: 'hip',
   joints: { hip: { rest: [75, 115] } },
   rules: [
     { id: 'knee_drop', metric: 'hip', op: '>', value: 130, severity: 'error', when: 'any',
@@ -486,7 +486,7 @@ RAW_EXPERT.kneeUpBalance = {
 
 RAW_EXPERT.jumpSquat = {
   id: 'jumpSquat', name: msg('קפיצת סקוואט', 'Squat jump'), precision: 'expert', kind: 'reps',
-  posture: 'standing', cameraView: 'side', require: ['legs', 'torso'], primary: 'knee',
+  posture: 'standing', cameraView: 'front', require: ['legs', 'torso'], primary: 'knee',
   joints: { knee: { rest: [165, 180], peak: [80, 115] } },   // rest includes the full extension of the take-off / flight
   rules: [
     UPRIGHT_TORSO(60),
@@ -529,7 +529,7 @@ RAW_EXPERT.shadowPass = {
 // ---------------- One-leg strength (crutch-supported for a one-legged trainee) ----------------
 RAW_EXPERT.singleLegSquat = {
   id: 'singleLegSquat', name: msg('סקוואט על רגל אחת', 'Single-leg squat'), precision: 'expert', kind: 'reps',
-  posture: 'standing', cameraView: 'side', require: ['legs', 'torso'], primary: 'knee',
+  posture: 'standing', cameraView: 'front', require: ['legs', 'torso'], primary: 'knee',
   joints: { knee: { rest: [150, 180], peak: [85, 125] } },
   rules: [
     { id: 'too_shallow', metric: 'knee', op: '>', value: 140, severity: 'error', when: 'peak',
@@ -549,7 +549,7 @@ RAW_EXPERT.singleLegSquat = {
 
 RAW_EXPERT.singleLegLunge = {
   id: 'singleLegLunge', name: msg("לאנג' על רגל אחת", 'Single-leg lunge'), precision: 'expert', kind: 'reps',
-  posture: 'standing', cameraView: 'side', require: ['legs', 'torso'], primary: 'knee',
+  posture: 'standing', cameraView: 'front', require: ['legs', 'torso'], primary: 'knee',
   joints: { knee: { rest: [150, 180], peak: [80, 120] } },
   rules: [
     { id: 'too_shallow', metric: 'knee', op: '>', value: 135, severity: 'error', when: 'peak',
@@ -570,7 +570,7 @@ RAW_EXPERT.singleLegLunge = {
 // ---------------- Goalkeeper (incl. arm-amputee keepers) ----------------
 RAW_EXPERT.gkStance = {
   id: 'gkStance', name: msg('עמידת מוכנות שוער', 'Goalkeeper ready stance'), precision: 'expert', kind: 'hold',
-  posture: 'standing', cameraView: 'side', require: ['legs', 'torso'], primary: 'knee',
+  posture: 'standing', cameraView: 'front', require: ['legs', 'torso'], primary: 'knee',
   joints: { knee: { rest: [115, 150] }, hip: { rest: [95, 140] } },
   rules: [
     { id: 'too_high', metric: 'knee', op: '>', value: 158, severity: 'error', when: 'any',

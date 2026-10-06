@@ -83,7 +83,9 @@ export function variationAxes(patternId) {
   return {
     tempos: prof && prof.kind === 'reps' ? Object.keys(TEMPOS) : ['standard'],
     ranges: repsWithPeak ? Object.keys(RANGES) : ['full'],
-    sides: p.splitSides ? ['bothSides'] : p.unilateral ? ['left', 'right', 'alternating'] : ['both'],
+    // a unilateral movement is ONE exercise whose sets are split between the legs ('bothSides');
+    // a trainee who cannot switch (crutches / above-knee) gets the working-leg-only version
+    sides: p.unilateral || p.splitSides ? ['bothSides', 'left', 'right'] : ['both'],
     doses: Object.keys(DOSES[doseKind(patternId)]),
   };
 }
@@ -172,16 +174,29 @@ export function catalogItem(id) {
   };
 }
 
-const KICK_PATTERNS = new Set(['shadowKick', 'shadowPass']);
+export const KICK_PATTERNS = new Set(['shadowKick', 'shadowPass']);
 const legAffectedSide = (lp, s) => ['prosthetic', 'absent'].includes(lp?.[`${s}_leg`]?.state);
 
-/** Variation-level body fit: a leg amputee kicks / passes ONLY with the working leg (never the prosthesis). */
+/** Can this trainee work on EACH leg (split sets)? An active below-knee prosthesis can; absent / above-knee / crutches / wheelchair cannot. */
+export function canSplitLegs(lp = {}) {
+  const ok = (s) => {
+    const l = lp[`${s}_leg`];
+    return !(l?.state === 'absent' || (l?.state === 'prosthetic' && l?.level !== 'below_knee'));
+  };
+  return ok('left') && ok('right') && !lp.wheelchair && !lp.crutches;
+}
+
+/**
+ * Variation-level body fit for unilateral movements:
+ *   can switch legs → ONLY the split version (both legs, half the set each — never one side shown alone)
+ *   cannot switch   → ONLY the working leg (never the absent / prosthetic side)
+ */
 export function sideFitsBody(patternId, side, lp = {}) {
-  if (!KICK_PATTERNS.has(patternId)) return true;
+  if (side === 'both') return true;
+  if (canSplitLegs(lp)) return side === 'bothSides';
+  if (side === 'bothSides' || side === 'alternating') return false;
   const affected = ['left', 'right'].filter(s => legAffectedSide(lp, s));
-  if (!affected.length) return true;
-  if (side === 'alternating') return false;
-  return !affected.includes(side);
+  return affected.length ? !affected.includes(side) : side === 'right';
 }
 
 /** Every catalog item of a sport family that this trainee's body allows. */
@@ -207,8 +222,10 @@ export function toExercise(item, isHe = true, label = null, { canSplit = true } 
   const variant = (lang) => item.name[lang].split(' — ').slice(PATTERNS[item.patternId].name[lang].split(' — ').length).join(' — ');
   const name = label ? { he: [label.name.he, variant('he')].filter(Boolean).join(' · '), en: [label.name.en, variant('en')].filter(Boolean).join(' · ') } : item.name;
   const cue = label?.cue || item.cue;
-  // Split sets: the target covers BOTH legs (each leg gets the full dose → the set is twice as long)
+  // Split sets: the target covers BOTH legs (each leg gets the full dose → the set is twice as long).
+  // splitMode: 'kick' = the working (kicking) leg alternates; 'stand' = the leg you stand / work on
   const split = item.variation.side === 'bothSides' && canSplit;
+  const splitMode = KICK_PATTERNS.has(item.patternId) ? 'kick' : 'stand';
   const reps = split ? String(Number(d.reps) * 2) : d.reps;
   return {
     name: name.he,
@@ -218,6 +235,7 @@ export function toExercise(item, isHe = true, label = null, { canSplit = true } 
     sets: d.sets,
     reps,
     sideSwitch: split,
+    splitMode: split ? splitMode : null,
     restSeconds: d.rest,
     tips: isHe ? cue.he : cue.en,
     catalogId: item.id,

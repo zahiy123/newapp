@@ -400,7 +400,11 @@ export function drawGhostOverlay(ctx, spec, lp, nowMs, origin, scale, alpha = 0.
   if (!spec || !origin || !(scale > 0)) return;
   const t = phaseOf(nowMs, periodOf(spec));
   const pose = ghostPose(spec, t, lp);
-  const P = (p) => ({ x: origin.x + p.x * scale, y: origin.y + p.y * scale });
+  // An exercise Ghost's hips sit exactly on the trainee's hips (standing, squatting or lying down)
+  let hx = 0, hy = 0;
+  const lh = pose.landmarks?.[23], rh = pose.landmarks?.[24];
+  if (lh?.visibility && rh?.visibility) { hx = (lh.x + rh.x) / 2; hy = (lh.y + rh.y) / 2; }
+  const P = (p) => ({ x: origin.x + (p.x - hx) * scale, y: origin.y + (p.y - hy) * scale });
   ctx.save();
   ctx.globalAlpha = alpha;
   drawFigure(ctx, pose, P, scale, { floorShadow: false, glow: true });

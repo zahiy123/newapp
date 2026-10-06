@@ -232,7 +232,7 @@ function standFront(a) {
     const shoulder = { x: out * B.shoulderX, y: B.shoulderY };
     const hip = { x: out * B.hipX, y: 0 };
     const fdir = (phi) => ({ x: out * Math.sin(rad(phi)), y: Math.cos(rad(phi)) });   // 0 = down, 90 = out, 180 = up
-    const phiHip = Math.atan2(out * (hip.x - shoulder.x), hip.y - shoulder.y) * 180 / Math.PI;
+    const phiHip = 0;     // the trunk axis is vertical when standing facing the camera (shoulder angle = vs. the trunk axis)
     const phiUpper = phiHip + S;
     const du = fdir(phiUpper);
     const elbow = { x: shoulder.x + du.x * B.upperArm, y: shoulder.y + du.y * B.upperArm };
@@ -390,9 +390,64 @@ function buildPose(profile, t, lp = {}) {
   const neck = { x: shoulder.x + up.x * 0.05, y: shoulder.y + up.y * 0.05 };
   const headC = { x: shoulder.x + up.x * 0.4 + fwd.x * 0.06, y: shoulder.y + up.y * 0.4 + fwd.y * 0.06 };
   put(NOSE, { x: headC.x + fwd.x * 0.15, y: headC.y + fwd.y * 0.15 });
-  return {
+  const sidePose = {
     segments, landmarks: lm, floorY: FLOOR_Y + 0.05, neck,
     head: { x: headC.x, y: headC.y, r: B.headR },
     torso: { ls: off(shoulder, 0.16), rs: off(shoulder, -0.14), lw: off(waist, 0.13), rw: off(waist, -0.15), lh: off(hip, 0.14), rh: off(hip, -0.16) },
+  };
+  // Standing exercises are shown and measured FACING the camera (owner, 2026-10-06): the sagittal
+  // movement goes into depth (z), so every joint angle stays exactly the profile's
+  return profile.posture === 'standing' ? toFront(sidePose) : sidePose;
+}
+
+// Lateral position (body units, the figure's LEFT at +x) of each landmark in the front view
+const LATERAL = {
+  [P.LEFT_SHOULDER]: B.shoulderX, [P.RIGHT_SHOULDER]: -B.shoulderX,
+  // each limb stays in its own sagittal plane, so every angle is exactly the side view's
+  [P.LEFT_ELBOW]: B.shoulderX, [P.RIGHT_ELBOW]: -B.shoulderX,
+  [P.LEFT_WRIST]: B.shoulderX, [P.RIGHT_WRIST]: -B.shoulderX,
+  [P.LEFT_HIP]: B.hipX, [P.RIGHT_HIP]: -B.hipX,
+  [P.LEFT_KNEE]: B.hipX, [P.RIGHT_KNEE]: -B.hipX,
+  [P.LEFT_ANKLE]: B.hipX, [P.RIGHT_ANKLE]: -B.hipX,
+  0: 0,
+};
+const SEG_POINTS = {
+  left_leg: { thigh: [P.LEFT_HIP, P.LEFT_KNEE], shin: [P.LEFT_KNEE, P.LEFT_ANKLE] },
+  right_leg: { thigh: [P.RIGHT_HIP, P.RIGHT_KNEE], shin: [P.RIGHT_KNEE, P.RIGHT_ANKLE] },
+  left_arm: { upperArm: [P.LEFT_SHOULDER, P.LEFT_ELBOW], forearm: [P.LEFT_ELBOW, P.LEFT_WRIST] },
+  right_arm: { upperArm: [P.RIGHT_SHOULDER, P.RIGHT_ELBOW], forearm: [P.RIGHT_ELBOW, P.RIGHT_WRIST] },
+};
+
+/**
+ * Side-view pose → the same pose seen from the FRONT: lateral x per body side, the same height y,
+ * and the side view's forward axis as depth z (toward the camera = negative z, like MediaPipe).
+ */
+function toFront(pose) {
+  // the figure stands where its hips are (the side view's forward offset is depth now)
+  const hipX = (pose.landmarks[P.LEFT_HIP].x + pose.landmarks[P.RIGHT_HIP].x) / 2;
+  const lm = pose.landmarks.map((p, i) => (p.visibility
+    ? { x: LATERAL[i] ?? 0, y: p.y, z: -(p.x - hipX), visibility: 1 }
+    : p));
+  const pt = (i) => ({ x: lm[i].x, y: lm[i].y });
+  const segments = pose.segments.map((sg) => {
+    const idx = SEG_POINTS[sg.limb]?.[sg.part];
+    return idx ? { ...sg, from: pt(idx[0]), to: pt(idx[1]) } : sg;
+  });
+  const sh = (lm[P.LEFT_SHOULDER].y + lm[P.RIGHT_SHOULDER].y) / 2;
+  const hp = (lm[P.LEFT_HIP].y + lm[P.RIGHT_HIP].y) / 2;
+  const waistY = hp + (sh - hp) * 0.4;
+  const headY = pose.head.y;
+  lm[0] = { x: 0, y: headY + 0.12, z: -0.15, visibility: 1 };
+  return {
+    ...pose,
+    landmarks: lm,
+    segments,
+    view: 'front',
+    neck: { x: 0, y: sh - 0.05 },
+    head: { x: 0, y: headY, r: pose.head.r },
+    torso: {
+      ls: pt(P.LEFT_SHOULDER), rs: pt(P.RIGHT_SHOULDER), lh: pt(P.LEFT_HIP), rh: pt(P.RIGHT_HIP),
+      lw: { x: B.waistX, y: waistY }, rw: { x: -B.waistX, y: waistY },
+    },
   };
 }

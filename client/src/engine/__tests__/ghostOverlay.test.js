@@ -110,6 +110,18 @@ describe('Ghost overlay placement', () => {
     expect(bodyAnchor(side).torso).toBeCloseTo(0.3, 2);
   });
 
+  it('bending toward the camera does not shrink the Ghost (the size uses depth too)', () => {
+    const upright = Array.from({ length: 33 }, () => ({ x: 0.5, y: 0.5, z: 0, visibility: 0.9 }));
+    upright[23] = { x: 0.55, y: 0.65, z: 0, visibility: 0.9 }; upright[24] = { x: 0.45, y: 0.65, z: 0, visibility: 0.9 };
+    upright[11] = { x: 0.58, y: 0.35, z: 0, visibility: 0.9 }; upright[12] = { x: 0.42, y: 0.35, z: 0, visibility: 0.9 };
+    const a0 = bodyAnchor(upright, null, 1, 1);
+    // leaning 60° forward: the shoulders come toward the camera (z) and down — the 2D torso halves
+    const bent = upright.map(p => ({ ...p }));
+    for (const i of [11, 12]) bent[i] = { ...bent[i], y: 0.65 - 0.3 * Math.cos(Math.PI / 3), z: -0.3 * Math.sin(Math.PI / 3) };
+    const a1 = bodyAnchor(bent, null, 1, 1);
+    expect(a1.torso / a0.torso).toBeGreaterThan(0.95);
+  });
+
   it('the size changes gradually and never below a clear minimum', () => {
     const prev = { hipX: 0.5, hipY: 0.6, torso: 0.3 };
     const tiny = Array.from({ length: 33 }, () => ({ x: 0.5, y: 0.5, visibility: 0.9 }));

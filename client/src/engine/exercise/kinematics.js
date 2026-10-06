@@ -51,11 +51,17 @@ export function midOf(landmarks, indices) {
   return { x: pts.reduce((s, p) => s + p.x, 0) / pts.length, y: pts.reduce((s, p) => s + p.y, 0) / pts.length };
 }
 
-/** Torso length (shoulder mid ↔ hip mid): the body scale that makes features distance-independent. */
+/**
+ * Torso length (shoulder mid ↔ hip mid) in 3D: the body scale that makes features
+ * distance-independent. 3D because, facing the camera, bending forward shortens the torso in
+ * the image (it goes into depth) — a 2D length would read that as "too far from the camera".
+ */
 export function torsoLength(landmarks) {
   const sh = midOf(landmarks, [P.LEFT_SHOULDER, P.RIGHT_SHOULDER]);
   const hp = midOf(landmarks, [P.LEFT_HIP, P.RIGHT_HIP]);
-  return sh && hp ? Math.hypot(sh.x - hp.x, sh.y - hp.y) : null;
+  if (!sh || !hp) return null;
+  const z = (l, r) => { const v = [landmarks[l], landmarks[r]].filter(ok).map(p => p.z ?? 0); return v.length ? v.reduce((a, b) => a + b, 0) / v.length : 0; };
+  return Math.hypot(sh.x - hp.x, sh.y - hp.y, z(P.LEFT_SHOULDER, P.RIGHT_SHOULDER) - z(P.LEFT_HIP, P.RIGHT_HIP));
 }
 
 // Approximate segment mass shares (Dempster-style, lumped on landmarks)
@@ -115,6 +121,27 @@ export function jointAngleSide(landmarks, joint, side) {
   if (!def || !landmarks) return null;
   const [a, b, c] = def.points[side].map(i => landmarks[i]);
   if (!ok(a) || !ok(b) || !ok(c)) return null;
+  // Hip and shoulder are measured against the TRUNK AXIS (mid-shoulders ↔ mid-hips), not the
+  // same-side point: facing the camera the shoulders are wider than the hips, which would add
+  // ~5-9° to every hip / shoulder angle. The axis is the same from the side and from the front.
+  if (joint === 'hip' || joint === 'shoulder') {
+    const sh = midOf(landmarks, [P.LEFT_SHOULDER, P.RIGHT_SHOULDER]);
+    const hp = midOf(landmarks, [P.LEFT_HIP, P.RIGHT_HIP]);
+    const zMid = (l, r) => { const v = [landmarks[l], landmarks[r]].filter(ok).map(p => p.z ?? 0); return v.length ? v.reduce((x, y) => x + y, 0) / v.length : 0; };
+    if (sh && hp) {
+      const shz = zMid(P.LEFT_SHOULDER, P.RIGHT_SHOULDER), hpz = zMid(P.LEFT_HIP, P.RIGHT_HIP);
+      const axis = joint === 'hip'
+        ? { x: sh.x - hp.x, y: sh.y - hp.y, z: shz - hpz }      // from the hip up the trunk
+        : { x: hp.x - sh.x, y: hp.y - sh.y, z: hpz - shz };     // from the shoulder down the trunk
+      const limb = { x: c.x - b.x, y: c.y - b.y, z: (c.z ?? 0) - (b.z ?? 0) };
+      if (joint === 'shoulder') { limb.x = a.x - b.x; limb.y = a.y - b.y; limb.z = (a.z ?? 0) - (b.z ?? 0); }
+      const n1 = Math.hypot(axis.x, axis.y, axis.z), n2 = Math.hypot(limb.x, limb.y, limb.z);
+      if (n1 > 1e-6 && n2 > 1e-6) {
+        const cos = (axis.x * limb.x + axis.y * limb.y + axis.z * limb.z) / (n1 * n2);
+        return Math.acos(Math.max(-1, Math.min(1, cos))) * 180 / Math.PI;
+      }
+    }
+  }
   return angleCosine(a, b, c);
 }
 
@@ -129,8 +156,11 @@ export function trunkLean(landmarks) {
   if (!sh || !hp) return null;
   const dx = sh.x - hp.x;
   const dy = sh.y - hp.y;           // image y grows downward → upright trunk has dy < 0
-  if (Math.hypot(dx, dy) < 1e-6) return null;
-  return Math.atan2(Math.abs(dx), -dy) * 180 / Math.PI;
+  // depth too: facing the camera, a forward lean is in z (MediaPipe depth), not in x
+  const zOf = (l, r) => { const v = [landmarks[l], landmarks[r]].filter(ok).map(p => p.z).filter(z => typeof z === 'number'); return v.length ? v.reduce((a, b) => a + b, 0) / v.length : 0; };
+  const dz = zOf(P.LEFT_SHOULDER, P.RIGHT_SHOULDER) - zOf(P.LEFT_HIP, P.RIGHT_HIP);
+  if (Math.hypot(dx, dy, dz) < 1e-6) return null;
+  return Math.atan2(Math.hypot(dx, dz), -dy) * 180 / Math.PI;
 }
 
 /**

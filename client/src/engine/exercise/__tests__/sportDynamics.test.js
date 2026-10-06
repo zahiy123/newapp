@@ -13,7 +13,7 @@ const lpLeftAK = getLimbProfile({ scanData: { classification: 'TRANSFEMORAL_AMPU
 function frameAt(ghostProfile, ms, lp = lpOk, periodMs = ghostProfile.ghost.periodMs) {
   const t = (ms % periodMs) / periodMs;
   return profileGhostPose(ghostProfile, t, lp).landmarks
-    .map(p => (p.visibility ? { ...p, x: 0.5 + p.x * 0.17, y: 0.5 + p.y * 0.17 } : p));
+    .map(p => (p.visibility ? { ...p, x: 0.5 + p.x * 0.17, y: 0.5 + p.y * 0.17, z: (p.z ?? 0) * 0.17 } : p));
 }
 
 /** Evaluate `profile` on frames from `frameFn(ms)` for `totalMs` at 20 Hz. */

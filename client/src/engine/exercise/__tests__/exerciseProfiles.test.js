@@ -22,7 +22,7 @@ const inRange = (v, r) => v >= r[0] - 0.5 && v <= r[1] + 0.5;
 /** Ghost landmarks mapped into the camera frame (uniform scale → same angles). */
 function ghostFrame(profile, t, lp = lpOk) {
   const pose = profileGhostPose(profile, t, lp);
-  return pose.landmarks.map(p => (p.visibility ? { ...p, x: 0.5 + p.x * 0.17, y: 0.5 + p.y * 0.17 } : p));
+  return pose.landmarks.map(p => (p.visibility ? { ...p, x: 0.5 + p.x * 0.17, y: 0.5 + p.y * 0.17, z: (p.z ?? 0) * 0.17 } : p));
 }
 
 /** Run the evaluator on the Ghost for `cycles` animation cycles at 20 Hz. */
@@ -245,12 +245,13 @@ describe('Required limbs in view', () => {
 
 describe('Errors and danger', () => {
   /** Squat frame with the trunk pitched forward by `lean` degrees (around the hips). */
+  // Facing the camera: a forward lean moves the shoulders toward the camera (depth z) and down
   function leaning(lean) {
     const lm = ghostFrame(EXPERT_PROFILES.squat, 0.5);
     const hip = lm[23];
-    const L = Math.hypot(lm[11].x - hip.x, lm[11].y - hip.y);
+    const L = Math.hypot(lm[11].y - hip.y, (lm[11].z ?? 0) - (hip.z ?? 0));
     const a = lean * Math.PI / 180;
-    for (const k of [11, 12]) lm[k] = { ...lm[k], x: hip.x + Math.sin(a) * L, y: hip.y - Math.cos(a) * L };
+    for (const k of [11, 12]) lm[k] = { ...lm[k], z: (hip.z ?? 0) - Math.sin(a) * L, y: hip.y - Math.cos(a) * L };
     return lm;
   }
 

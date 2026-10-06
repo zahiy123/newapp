@@ -7,7 +7,7 @@ import { profileGhostPose } from '../../exercise/profileGhost.js';
 import { createExecutionTracker, updateExecution, measureProfile } from '../../exercise/profileEvaluator.js';
 
 const frame = (p, t) => profileGhostPose(p, t, {}).landmarks
-  .map(q => (q.visibility ? { ...q, x: 0.5 + q.x * 0.17, y: 0.5 + q.y * 0.17, visibility: 0.95 } : q));
+  .map(q => (q.visibility ? { ...q, x: 0.5 + q.x * 0.17, y: 0.5 + q.y * 0.17, z: (q.z ?? 0) * 0.17, visibility: 0.95 } : q));
 
 describe('Start position', () => {
   it('squat: standing tall = start; the bottom of the squat is not', () => {
@@ -71,8 +71,26 @@ describe('Exact rep counting', () => {
     }
   });
   it('a twitch (too fast to be a rep) does not count', () => {
-    expect(isValidRep({ type: 'rep', toPeakMs: 100, returnMs: 100 })).toBe(false);
-    expect(isValidRep({ type: 'rep', toPeakMs: 600, returnMs: 500 })).toBe(true);
+    expect(isValidRep({ type: 'repCount', toPeakMs: 100, returnMs: 100 })).toBe(false);
+    expect(isValidRep({ type: 'repCount', toPeakMs: 600, returnMs: 300 })).toBe(true);
+    expect(isValidRep({ type: 'rep', toPeakMs: 600, returnMs: 500 })).toBe(false);      // the tempo event is not the count
+  });
+});
+
+describe('Instant counting', () => {
+  it('the count fires mid-return — before the trainee is back at rest', () => {
+    const p = EXPERT_PROFILES.squat;
+    const tr = createExecutionTracker(p, {});
+    let countAt = null; let restAt = null;
+    for (let ms = 0; ms <= 3200; ms += 50) {
+      for (const ev of updateExecution(tr, frame(p, (ms % 3200) / 3200), ms).events) {
+        if (isValidRep(ev) && countAt === null) countAt = ms;
+        if (ev.type === 'rep' && restAt === null) restAt = ms;
+      }
+    }
+    expect(countAt).not.toBeNull();
+    expect(countAt).toBeLessThan(2900);           // well before the end of the 3.2 s rep
+    expect(restAt === null || countAt < restAt).toBe(true);
   });
 });
 
