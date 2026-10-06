@@ -106,10 +106,12 @@ Readiness Rating (1-5 emoji, 3 seconds)
 
 | 8 | `checkpoint-2026-10-06-locked-chain` | `66c98bf` | yes | + the locked chain track → goals → day goal → exercises → Ghost (goals per track, rehab session goals, unrelated sports removed) |
 
-| 9 | `checkpoint-2026-10-06-start-gate` | `1f714d0` | **yes — the current production (2026-10-06)** | + start gate (no false start), exact rep counting, steady Ghost size, functional exercises per sport / limitation, drive voice |
+| 9 | `checkpoint-2026-10-06-start-gate` | `1f714d0` | yes | + start gate (no false start), exact rep counting, steady Ghost size, functional exercises per sport / limitation, drive voice |
+
+| 10 | `checkpoint-2026-10-06-functional` | `5a9761f` | **yes — the current production (2026-10-06)** | + no generic filler in sport / rehab tracks, amputee football = 4 functional categories in the sport's language, equipment set-up only where used |
 
 **How to return to a checkpoint:**
-- **To a deployed point (#1, #2, #3, #5, #8, #9): instant rollback with no code change** — Vercel → Deployments → the deployment of that commit → "Promote to Production".
+- **To a deployed point (#1, #2, #3, #5, #8, #9, #10): instant rollback with no code change** — Vercel → Deployments → the deployment of that commit → "Promote to Production".
 - **To any point in the code:** `git checkout <tag>` to look at it, or create a branch from it (`git checkout -b restore-<n> <tag>`) and deploy that branch / merge it into `main` after approval.
 - Look at it without changing anything: `git checkout checkpoint-stage2-stable` (then `git checkout main` to come back).
 - Undo later work on `main` safely (keeps history): `git revert <commits after the checkpoint>`, then push → Vercel redeploys.
@@ -981,3 +983,4 @@ Two critical corrections to the existing onboarding (Stages 1B/1C), completed **
 - **2026-10-06:** **Owner fix cluster.** Backup tag `backup-2026-10-06-pre-detection-fixes` (`7b9a017`). (1) A hard start gate replaces the 5 s calibration timer: positioned + reliable + in the start position for 600 ms before anything starts, honest start line. (2) Exact rep counting from the profile detector (full cycles with real durations; idle / sitting / noise = 0), and timed exercises count only real work. (3) The overlay Ghost keeps its size side-on (same-side torso, no shoulder-width shrink, ±6% per update, minimum ~45% of the view). (4) Functional patterns per sport / limitation (amputee football: balance, core, crutch upper body, the kick — no isolated arm raises), adapted sport goals, honest goal feasibility, quality fixes (tempo no longer inflates qualities, main block first, per-side technique, goals rotate over the whole plan). (5) Positioning prompts with rotating drive lines and the name. Client 634 pass, 0 new failures. Not yet committed.
 - **2026-10-06:** Committed and pushed `1f714d0` → deployed to production, verified in the served bundle (start-position wait, honest start line, drive lines, balance & core goal present; the old "תפסתי את הטווח" line is still in the bundle only as the fallback when the expert module is off). New restore point `checkpoint-2026-10-06-start-gate` (#9).
 - **2026-10-06:** **Hard rule: no generic filler in sport / rehab tracks (owner device report: arm circles + "two chairs" first in rehab + amputee football).** Amputee football = only core / single-leg balance / crutch upper body / kicks, named in the sport's language; arm circles and knee-lift marches removed from every sport / rehab track (warm-up → functional push activation; prep → plank / balance holds; ROM → trunk rotation / hinge / lunge); equipment set-up only for drills that use equipment; drive in idle prods. Client 638 pass, 0 new failures. Not yet committed.
+- **2026-10-06:** Committed and pushed `5a9761f` → deployed, verified in the served bundle (push activation, amputee-football labels, drive prods present). Restore point `checkpoint-2026-10-06-functional` (#10).
