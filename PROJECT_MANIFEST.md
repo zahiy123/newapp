@@ -114,6 +114,7 @@ Readiness Rating (1-5 emoji, 3 seconds)
 
 | 12 | `checkpoint-2026-10-06-front-view` | `73ee592` | yes | + instant counting, distance-sized Ghost on the body for every exercise, true left / right splits, no crutch wording with a prosthesis, grouped kicks, front-view measurement |
 | 13 | `checkpoint-2026-10-06-pro-ghost` | `ad47b25` | **yes — the current production (2026-10-06)** | + early start with an immediate count, steady feet-anchored 3/4-view Ghost, a full set per leg for kicks, shadow ball, wide camera |
+
 **How to return to a checkpoint:**
 - **To a deployed point (#1, #2, #3, #5, #8, #9, #10, #11, #12, #13): instant rollback with no code change** — Vercel → Deployments → the deployment of that commit → "Promote to Production".
 - **To any point in the code:** `git checkout <tag>` to look at it, or create a branch from it (`git checkout -b restore-<n> <tag>`) and deploy that branch / merge it into `main` after approval.
