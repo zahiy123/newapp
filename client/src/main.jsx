@@ -34,9 +34,14 @@ import React, { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import './index.css'
 import App from './App.jsx'
+import { prewarmMediapipe } from './config/mediapipe'
 
 createRoot(document.getElementById('root')).render(
   <StrictMode>
     <App />
   </StrictMode>,
 )
+
+// Load the MediaPipe runtime + pose model into the browser cache while the app is idle,
+// so the training screen starts instantly (local, immutable-cached assets)
+prewarmMediapipe()

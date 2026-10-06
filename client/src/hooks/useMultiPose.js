@@ -1,5 +1,6 @@
 import { useRef, useState, useCallback, useEffect } from 'react';
 import { PoseLandmarker, FilesetResolver, DrawingUtils } from '@mediapipe/tasks-vision';
+import { MEDIAPIPE_WASM_PATH, MEDIAPIPE_MODELS } from '../config/mediapipe';
 
 // Colors for different detected players
 const PLAYER_COLORS = ['#FF0000', '#0000FF', '#00FF00', '#FFFF00', '#FF00FF', '#00FFFF', '#FFA500', '#800080'];
@@ -17,12 +18,12 @@ export function useMultiPose(canvasRef) {
     async function init() {
       try {
         const vision = await FilesetResolver.forVisionTasks(
-          'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@latest/wasm'
+          MEDIAPIPE_WASM_PATH
         );
         if (cancelled) return;
         const landmarker = await PoseLandmarker.createFromOptions(vision, {
           baseOptions: {
-            modelAssetPath: 'https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_full/float16/1/pose_landmarker_full.task',
+            modelAssetPath: MEDIAPIPE_MODELS.poseFull,
             delegate: 'GPU'
           },
           runningMode: 'VIDEO',

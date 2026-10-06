@@ -1,5 +1,6 @@
 import { useRef, useState, useCallback, useEffect } from 'react';
 import { ObjectDetector, FilesetResolver } from '@mediapipe/tasks-vision';
+import { MEDIAPIPE_WASM_PATH, MEDIAPIPE_MODELS } from '../config/mediapipe';
 
 // COCO labels we care about for training equipment
 const EQUIPMENT_LABELS = ['chair', 'bottle', 'cup', 'sports ball'];
@@ -40,12 +41,12 @@ export function useObjectDetection(enabled = true) {
     async function init() {
       try {
         const vision = await FilesetResolver.forVisionTasks(
-          'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@latest/wasm'
+          MEDIAPIPE_WASM_PATH
         );
         if (cancelled) return;
         const detector = await ObjectDetector.createFromOptions(vision, {
           baseOptions: {
-            modelAssetPath: 'https://storage.googleapis.com/mediapipe-models/object_detector/efficientdet_lite0/int8/1/efficientdet_lite0.tflite',
+            modelAssetPath: MEDIAPIPE_MODELS.objectDetector,
             delegate: 'GPU'
           },
           runningMode: 'VIDEO',

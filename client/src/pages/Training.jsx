@@ -17,7 +17,8 @@ import WarmupGhostPanel from '../components/WarmupGhostPanel';
 import GhostOverlay from '../components/GhostOverlay';
 import ExecutionHud from '../components/ExecutionHud';
 import { viewPromptText } from '../engine/training/viewPrompts';
-import { useExpertExecution } from '../hooks/training/useExpertExecution';
+import { useExpertExecution, buildExecutionProfile } from '../hooks/training/useExpertExecution';
+import { showsRangeGauge } from '../engine/training/rangeGauge';
 import { sportContextsFor } from '../engine/sports/sportLibrary';
 import ValidationPanel from '../components/ValidationPanel';
 import { readValidationMode, saveLabelledClip } from '../services/validationStore';
@@ -648,6 +649,36 @@ export default function Training() {
     onClips: handleValidationClips,
   });
   const executionInViewRef = execution.inViewRef;
+
+  // Demo Ghost of the exercise: from the briefing right after the warm-up, through the
+  // calibration, and during the exercise — generated from the SAME execution profile that is
+  // measured. On by default (remembered per device).
+  const [exerciseGhostOn, setExerciseGhostOn] = useState(() => {
+    try { return localStorage.getItem('exerciseGhostOn') !== '0'; } catch { return true; }
+  });
+  const toggleExerciseGhost = useCallback(() => setExerciseGhostOn((v) => {
+    try { localStorage.setItem('exerciseGhostOn', v ? '0' : '1'); } catch { /* storage unavailable */ }
+    return !v;
+  }), []);
+  const demoGhostPhase = phase === PHASE.BRIEFING || phase === PHASE.CHECKING_EQUIPMENT
+    || phase === PHASE.CALIBRATING || phase === PHASE.EXERCISING;
+  const demoProfile = useMemo(
+    () => (FEATURES.EXPERT_PROFILE && demoGhostPhase
+      ? (execution.profile || buildExecutionProfile(exerciseCueKey, currentExercise?.name, limbProfile, sportContexts))
+      : null),
+    [demoGhostPhase, execution.profile, exerciseCueKey, currentExercise?.name, limbProfile, sportContexts],
+  );
+  const demoGhostSpec = useMemo(() => (demoProfile?.ghost ? { profile: demoProfile } : null), [demoProfile]);
+  const showDemoGhost = exerciseGhostOn && !!demoGhostSpec;
+  // ROM gauge only for dynamic range-of-motion exercises (never static holds / ball drills / kicks / running)
+  const showRomGauge = useMemo(() => {
+    if (!currentExercise) return false;
+    const a = getAnalyzer(currentExercise.name);
+    const kind = buildExecutionProfile(a.cueKey, currentExercise.name, limbProfile, sportContexts)?.kind;
+    return showsRangeGauge({ analyzerType: a.type, profileKind: kind, exerciseName: currentExercise.name });
+  }, [currentExercise?.name, limbProfile, sportContexts]);
+  const demoOnBody = overlayActive && demoProfile?.posture === 'standing'
+    && (phase === PHASE.EXERCISING || phase === PHASE.CALIBRATING);
   const expertGhostRef = useRef(null);
   expertGhostRef.current = execution.ghostSpec;
 
@@ -2549,13 +2580,18 @@ export default function Training() {
             {'\uD83C\uDFAF'} {isHe ? `יעד טווח: ${rangeTarget}°` : `Range target: ${rangeTarget}°`}{rangeFlash ? ' (+5°)' : ''}
           </div>
         )}
-        {/* Exercise Ghost generated from the Expert Execution Profile (Stage 3.1) — panel, or the full
-            overlay for standing exercises (floor exercises always use the panel) */}
-        {phase === PHASE.EXERCISING && ghostEnabled && execution.ghostSpec && !(overlayActive && execution.profile.posture === 'standing') && (
-          <WarmupGhostPanel spec={execution.ghostSpec} limbProfile={limbProfile} isHe={isHe} />
+        {/* Exercise Ghost generated from the Expert Execution Profile (Stage 3.1): shown from the
+            briefing (top, above the instructions card) through calibration and the exercise —
+            the panel, or the full overlay on the body for standing exercises */}
+        {demoGhostPhase && showDemoGhost && !demoOnBody && (
+          <WarmupGhostPanel
+            spec={demoGhostSpec} limbProfile={limbProfile} isHe={isHe}
+            placement={phase === PHASE.BRIEFING || phase === PHASE.CHECKING_EQUIPMENT ? 'top' : 'middle'}
+            label={isHe ? `הדגמה: ${demoProfile.name.he}` : `Demo: ${demoProfile.name.en}`}
+          />
         )}
-        {phase === PHASE.EXERCISING && ghostEnabled && execution.ghostSpec && overlayActive && execution.profile.posture === 'standing' && (
-          <GhostOverlay spec={execution.ghostSpec} limbProfile={limbProfile} landmarksRef={poseLandmarksRef} videoRef={videoRef} onError={handleOverlayError} />
+        {demoGhostPhase && showDemoGhost && demoOnBody && (
+          <GhostOverlay spec={demoGhostSpec} limbProfile={limbProfile} landmarksRef={poseLandmarksRef} videoRef={videoRef} onError={handleOverlayError} />
         )}
         {phase === PHASE.EXERCISING && <ExecutionHud execution={execution} isHe={isHe} />}
         {phase === PHASE.EXERCISING && validationMode && execution.active && (
@@ -2620,7 +2656,7 @@ export default function Training() {
         )}
 
         {/* ROM Gauge overlay */}
-        {phase === PHASE.EXERCISING && cameraActive && (
+        {phase === PHASE.EXERCISING && cameraActive && showRomGauge && (
           <div className="absolute bottom-3 right-3 z-20 pointer-events-none">
             <ROMGauge ref={romGaugeRef} isHe={isHe} />
           </div>
@@ -3052,11 +3088,11 @@ export default function Training() {
         )}
 
         {/* Ghost skeleton toggle (exercises) / warm-up ghost toggle (on by default) */}
-        {(phase === PHASE.EXERCISING || phase === PHASE.WARM_UP) && (
+        {(phase === PHASE.EXERCISING || phase === PHASE.WARM_UP || (demoGhostPhase && demoGhostSpec)) && (
           <button
-            onClick={phase === PHASE.WARM_UP ? () => setWarmUpGhostOn(v => !v) : toggleGhost}
+            onClick={phase === PHASE.WARM_UP ? () => setWarmUpGhostOn(v => !v) : demoGhostSpec ? toggleExerciseGhost : toggleGhost}
             className={`absolute top-14 left-4 px-3 py-2 rounded-xl text-sm font-bold z-10 transition ${
-              (phase === PHASE.WARM_UP ? warmUpGhostOn : ghostEnabled) ? 'bg-blue-500/90 text-white' : 'bg-black/50 text-white/70'
+              (phase === PHASE.WARM_UP ? warmUpGhostOn : demoGhostSpec ? exerciseGhostOn : ghostEnabled) ? 'bg-blue-500/90 text-white' : 'bg-black/50 text-white/70'
             }`}
             title={isHe ? 'הצג/הסתר שלד מנחה' : 'Toggle ghost guide'}
           >
@@ -3064,7 +3100,7 @@ export default function Training() {
           </button>
         )}
         {FEATURES.GHOST_OVERLAY && ((phase === PHASE.WARM_UP && warmUpGhostOn) ||
-          (phase === PHASE.EXERCISING && ghostEnabled && execution.profile?.posture === 'standing' && execution.ghostSpec)) && (
+          ((phase === PHASE.EXERCISING || phase === PHASE.CALIBRATING) && showDemoGhost && demoProfile?.posture === 'standing')) && (
           <button
             onClick={() => setGhostModeSaved(overlayActive ? 'panel' : 'overlay')}
             className={`absolute top-28 left-4 px-3 py-2 rounded-xl text-xs font-bold z-10 transition ${

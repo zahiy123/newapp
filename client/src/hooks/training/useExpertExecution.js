@@ -38,13 +38,22 @@ const ACCURACY_EVERY_MS = 1000;
 const COACH_VOICE_GAP_MS = 8000;           // a coaching explanation never follows another / a danger alert within this
 const UNSURE_NOTICE_MS = 2000;             // low confidence this long → show / say what to fix
 
+/**
+ * The execution profile of an exercise for this trainee: exercise profile → personalized
+ * (scanned ranges) → layered with the sport contexts. Shared by the live evaluation and the
+ * demo Ghost shown before the exercise, so both are exactly the same profile.
+ */
+export function buildExecutionProfile(cueKey, exerciseName, limbProfile, sportContexts) {
+  if (!cueKey) return null;
+  const ctx = sportContexts?.length ? sportContexts : ['fitness'];
+  return applySportContext(personalizeProfile(getExerciseProfile(cueKey, exerciseName), limbProfile || {}), ctx);
+}
+
 export function useExpertExecution({ enabled, cueKey, exerciseName, sportContexts, limbProfile, landmarksRef, isHe, speakPriority, recordClips = false, onClips }) {
   const [failed, setFailed] = useState(false);
   const contextsKey = (sportContexts || []).join('+');
   const profile = useMemo(
-    () => (enabled && cueKey
-      ? applySportContext(personalizeProfile(getExerciseProfile(cueKey, exerciseName), limbProfile || {}), contextsKey ? contextsKey.split('+') : ['fitness'])
-      : null),
+    () => (enabled ? buildExecutionProfile(cueKey, exerciseName, limbProfile, contextsKey ? contextsKey.split('+') : null) : null),
     [enabled, cueKey, exerciseName, contextsKey, limbProfile],
   );
   const active = !!profile && !failed;

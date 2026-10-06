@@ -1,5 +1,6 @@
 import { useRef, useState, useCallback, useEffect } from 'react';
 import { PoseLandmarker, FilesetResolver, DrawingUtils } from '@mediapipe/tasks-vision';
+import { MEDIAPIPE_WASM_PATH, MEDIAPIPE_MODELS } from '../config/mediapipe';
 import { angleCosine } from '../utils/motionEngine';
 
 // Key landmark indices
@@ -68,12 +69,12 @@ export function usePose(canvasRef, beforeDrawRef, amputationProfile, enabled = t
     let cancelled = false;
     async function init() {
       const vision = await FilesetResolver.forVisionTasks(
-        'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@latest/wasm'
+        MEDIAPIPE_WASM_PATH
       );
       if (cancelled) return;
       const landmarker = await PoseLandmarker.createFromOptions(vision, {
         baseOptions: {
-          modelAssetPath: 'https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_lite/float16/1/pose_landmarker_lite.task',
+          modelAssetPath: MEDIAPIPE_MODELS.poseLite,
           delegate: 'GPU'
         },
         runningMode: 'VIDEO',

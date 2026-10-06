@@ -484,6 +484,30 @@ Two critical corrections to the existing onboarding (Stages 1B/1C), completed **
         - Tests: 15 (`setupCoach.test.js`): every instruction, from shifted / zoomed / turned / dimmed Ghost frames, the prosthesis and upper-body cases, and the evaluator gate guiding and then opening. The confidence tests now check that the coach says how to stand.
         - Client: 552 pass, 0 new failures.
         - *Follow-up:* run the same positioning check before the calibration countdown (today it starts at the exercise phase).
+- **Owner fixes, 2026-10-06 (backup tag `backup-2026-10-06-pre-local-mediapipe` = commit `9f08c08`, pushed before the changes):**
+  1. **Local MediaPipe (performance, root fix).**
+     - *Problem:* the first launch of the day was slow, with QUIC protocol errors and "fallback to ArrayBuffer". The Wasm runtime came from jsDelivr at `@latest` (not even the installed 0.10.32) and the models from storage.googleapis.com.
+     - *Fix:* everything is served from our own origin:
+       - `client/public/mediapipe/0.10.32/wasm/` holds the SIMD + no-SIMD runtimes (copied from the installed package by `npm run sync:mediapipe`).
+       - `client/public/mediapipe/models/` holds `pose_landmarker_lite_f16_v1.task`, `pose_landmarker_full_f16_v1.task` and `efficientdet_lite0_int8_v1.tflite`.
+       - One config, `src/config/mediapipe.js`, is used by `usePose`, `useMultiPose` and `useObjectDetection`.
+       - `@mediapipe/tasks-vision` is pinned to exactly `0.10.32`, so the Wasm always matches the JS API.
+     - **Caching:** `client/vercel.json` serves `/mediapipe/*` with `Cache-Control: public, max-age=31536000, immutable` (the versions are in the paths) and `.wasm` as `application/wasm`, which enables streaming compilation with no ArrayBuffer fallback.
+     - **Prewarm:** right after the app opens, during idle time, the exact runtime MediaPipe will choose (same SIMD check) and the pose model are fetched into the browser cache, so the training screen starts immediately.
+     - *Verified:*
+       - Tests (5, `src/config/__tests__/mediapipe.test.js`): version = installed = pinned; local Wasm identical to the package; models present; no CDN URLs left in the code; immutable cache header.
+       - Local server: Wasm 200 `application/wasm`.
+       - **Real headless Chromium:** FilesetResolver + PoseLandmarker created from the local files only (runtime 49 ms, model 241 ms, detection runs), with zero external MediaPipe requests.
+  2. **Exercise demo Ghost before and during the exercise.**
+     - *Root cause:* the profile Ghost was tied to the old 👻 skeleton toggle, which starts **off**, and it existed only in the exercise phase.
+     - *Fix:*
+       - A separate exercise Ghost switch, **on by default** (remembered per device).
+       - The Ghost of the same execution profile (`buildExecutionProfile`, shared with the live evaluation) is shown right after the warm-up: in the **briefing** (top, above the instructions card, labelled "Demo: <exercise>"), the equipment check, the **calibration** and the **exercise** (panel, or the full overlay for standing exercises).
+       - Exercises with only a family profile (no expert model yet) keep the old skeleton toggle.
+  3. **ROM gauge only where range is really measured.**
+     - The gauge is shown only for dynamic repetition exercises (analyzer type `reps` and profile kind `reps`). It is never shown for static holds / stops (plank, wall sit, "static ball stop against the wall", isometric…), technique / ball drills, kicks or running.
+     - Rule in `engine/training/rangeGauge.js`; 3 tests.
+  - *Verification:* client build passes; client 560 pass, 0 new failures (23 long-standing scan-module failures unchanged).
    3. **Profile-based rep counting with a quality score per rep** (replacing the per-exercise analyzers step by step), including the correction hierarchy, timing and external-focus cues.
    4. **Special sport libraries:** leg amputees (amputee football: crutch kick / crutch sprint / balance / header / goalkeeper), wheelchair (push stroke, seated throws, shoulder protection), running (opened for selection), then tennis / martial arts (trunk-rotation metric) and basketball.
    - Following (already in the roadmap): velocity-based fatigue detection (stop the set at ~20% rep-speed loss or form decay), automatic progression / regression, Pain Traffic Light integration, two-way voice ("why?"), best vs. weakest rep clips with the Ghost in the Stage 4 report.
@@ -644,6 +668,9 @@ Two critical corrections to the existing onboarding (Stages 1B/1C), completed **
 | `client/src/engine/exercise/profileGhost.js` | Ghost generated from a profile (FK/IK), drawn by the warm-up Ghost drawers |
 | `client/src/engine/exercise/kinematics.js` | Shared joint-angle definitions (evaluator + Ghost) |
 | `client/src/engine/exercise/motionFeatures.js` | Temporal analysis: CoM / weight transfer, tempo, landing absorption, cadence, kinetic-chain sequencing, pelvic drop, sway |
+| `client/src/config/mediapipe.js` | MediaPipe runtime + model paths (local, versioned, immutable-cached) + idle prewarm |
+| `client/public/mediapipe/` | Local MediaPipe Wasm (per version) + pose / object models — never loaded from a CDN |
+| `client/src/engine/training/rangeGauge.js` | When the ROM gauge is shown (dynamic rep exercises only) |
 | `client/src/engine/exercise/confidence.js` | Silence when unsure: camera-view detection + tracking confidence with hysteresis |
 | `client/src/engine/validation/clipRecorder.js` / `agreement.js` | Validation dataset: per-rep clips (landmarks only) + agreement / false alarms / misses / threshold tuning by replay |
 | `client/src/pages/ValidationReport.jsx` | `/validation` page: coach vs. human agreement per exercise, threshold check |
@@ -715,3 +742,4 @@ Two critical corrections to the existing onboarding (Stages 1B/1C), completed **
 - **2026-10-05:** Owner approved the coaching principles (validation dataset with good/fault labels + silence when unsure; correction hierarchy safety → foundation → precision, one at a time, between reps only except danger; external-focus cues) and the order of the next 3.1 steps (device check → validation + confidence gate → profile-based rep counting with quality scores → special sport libraries: amputees, wheelchair, running…). Recorded inside Stage 3.1. New restore point `checkpoint-stage3.1-profiles` (`273d096`, tag pushed). Started step 2 (validation dataset + confidence gate).
 - **2026-10-05:** **3.1 step 2 implemented: validation dataset + confidence gate.** Silence when unsure (camera-view detection, tracking confidence, hysteresis; no corrections, only "fix the camera" guidance), per-rep clip recorder (landmarks only) in validation mode (`?validate=1`), "good / fault" labelling after each set saved to Firestore, and the `/validation` page with agreement, false alarms, misses and data-driven threshold checks by replay. 12 tests; client 537 pass, 0 new failures. Not yet committed.
 - **2026-10-05:** **Owner UX directive: trainees never label or rate; the coach positions them like a human coach.** New positioning coach (`setupCoach.js`): one precise spoken + on-screen instruction at a time (step back / tilt the camera down or up / move left or right / come closer / turn side-on / face the camera / add light), nothing counts until positioned right, then "Great, now I can see you — let's start!". The validation labelling stays an internal tool for the owner / clinicians (`?validate=1`). Principles updated in Stage 3.1. 15 tests; client 552 pass, 0 new failures. Not yet committed.
+- **2026-10-06:** Backup tag `backup-2026-10-06-pre-local-mediapipe` (`9f08c08`: positioning coach + validation work, committed). **Local MediaPipe:** Wasm + models served from `public/mediapipe` (versioned, immutable cache, application/wasm, exact version pin, idle prewarm), no CDN; verified in headless Chromium (runtime 49 ms + model 241 ms locally, zero external requests). **Exercise demo Ghost** on by default from the briefing through the calibration and the exercise (same profile as the evaluation). **ROM gauge** only for dynamic repetition exercises (never static holds / ball drills). +8 tests; client 560 pass, 0 new failures. Ready to deploy — awaiting the owner.
