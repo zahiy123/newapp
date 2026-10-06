@@ -508,6 +508,46 @@ Two critical corrections to the existing onboarding (Stages 1B/1C), completed **
      - The gauge is shown only for dynamic repetition exercises (analyzer type `reps` and profile kind `reps`). It is never shown for static holds / stops (plank, wall sit, "static ball stop against the wall", isometric…), technique / ball drills, kicks or running.
      - Rule in `engine/training/rangeGauge.js`; 3 tests.
   - *Verification:* client build passes; client 560 pass, 0 new failures (23 long-standing scan-module failures unchanged).
+- **Critical owner fixes, 2026-10-06 (backup tag `backup-2026-10-06-pre-ghost-equipment-fix` = `39a1a74`, pushed before the changes):**
+  1. **The Ghost is on by default in the warm-up and through the whole exercise. No old switch hides it.**
+     - *Root cause:*
+       - Exercises without an expert profile fell back to the old skeleton Ghost (`useGhostSkeleton`), which starts **off** and supports only a few exercises.
+       - "Ball stop against the wall", for example, had no demo at all.
+     - *Fix:*
+       - The old skeleton Ghost is **retired** from the exercise flow, and the 👻 button controls only the new Ghost (on by default, remembered per device).
+       - The demo Ghost is shown in the briefing, equipment check, calibration, **every set of the exercise** and the **rest between sets** (top, so the next set is demonstrated).
+       - Which Ghost (`engine/training/demoGhost.js`):
+         - The expert profile's Ghost.
+         - Otherwise an animated movement only when it truly is the exercise's movement: side steps for footwork / defensive slides / agility, the chest-pass motion for passes, trunk rotation for racket strokes.
+         - Otherwise none. A misleading demo of a different movement is never shown.
+       - The full overlay is clearer (55% instead of 42% opacity).
+     - *Coverage today:* **31 of 99 exercise types** have a correct demo. The rest get theirs as their expert profiles are built (the special sport libraries, the next 3.1 step).
+     - Owner option: restrict the AI coach to exercises that have a demo until then.
+  2. **Hard equipment match (the ball case and all equipment).**
+     - *Root cause:*
+       - "Do I have a ball?" was never a profile fact. The profile equipment is only none / dumbbells / bands.
+       - The ball question was asked only before the warm-up in the rehab + sport track and affected only the warm-up. The plan, generated in advance, kept ball drills such as "ball stop against the wall".
+     - *Fix — one rule applied at every point where exercises reach the trainee:*
+       - **Ball is a profile fact (`hasBall`):** a fixed "⚽ Do you have a ball? Yes / No" on the dashboard, next to the equipment.
+         - If it is unknown and today's workout contains a ball drill, the coach asks before the workout. An explicit tap is saved to the profile and never asked again.
+         - No answer within 10 s means no ball for this session only.
+       - **`engine/exercise/equipmentFit.js`:**
+         - Detects what each exercise needs: a ball (by analyzer + name, excluding look-alikes such as flutter kicks, butt kicks and "balls of the feet"), dumbbells or bands.
+         - Replaces an exercise whose equipment is missing with the **same movement pattern without it**, keeping sets, reps and rest and recording what was replaced and why:
+           - Ball drills: a kick → shadow kick (which keeps the expert kick profile and its Ghost); dribbling / ball stops → footwork; shooting → shadow shooting; passes → shadow chest pass; strokes / serves → shadow stroke / serve; headers → tuck jumps; goalkeeper ball drills → ready stance.
+           - Load equipment: weights / bands → the bodyweight version (goblet squat → bodyweight squat, curls → active elbow flexion, press → push-ups…).
+         - The substitute names avoid the word "כדור", because the analyzer map files any name containing it under dribbling (a test caught this).
+       - **Applied in:** the plan shown on the dashboard, the training screen (load + after the ball answer) and live plan adaptation.
+       - **Server:**
+         - The plan prompt states the ball rule ("NO ball → absolutely no ball drills, use shadow drills").
+         - A post-generation guard (`server/services/equipmentFit.js`) replaces any ball drill that slipped through when `hasBall === false`.
+         - The dashboard sends `hasBall` with the plan request.
+  - *Tests:*
+    - Client +13: `equipmentFit.test.js` (9: ball and look-alikes, weights / bands, availability, the owner's case, substitutes map to the right analyzer of the same pattern with no missing equipment, shadow kick keeps the kick Ghost, bodyweight versions) and `demoGhost.test.js` (4).
+    - Server +2 (10/10).
+    - Client 573 pass, 0 new failures.
+  - *Server redeploy needed* for the server-side ball guard. The client already enforces the rule on its own.
+  - *Found (pre-existing debt):* in the analyzer map the generic keyword "זריקה" comes before the wheelchair entries, so "זריקה כיסא גלגלים" is analysed as standing shooting. The keyword order must be fixed in the special sport libraries step.
    3. **Profile-based rep counting with a quality score per rep** (replacing the per-exercise analyzers step by step), including the correction hierarchy, timing and external-focus cues.
    4. **Special sport libraries:** leg amputees (amputee football: crutch kick / crutch sprint / balance / header / goalkeeper), wheelchair (push stroke, seated throws, shoulder protection), running (opened for selection), then tennis / martial arts (trunk-rotation metric) and basketball.
    - Following (already in the roadmap): velocity-based fatigue detection (stop the set at ~20% rep-speed loss or form decay), automatic progression / regression, Pain Traffic Light integration, two-way voice ("why?"), best vs. weakest rep clips with the Ghost in the Stage 4 report.
@@ -670,6 +710,9 @@ Two critical corrections to the existing onboarding (Stages 1B/1C), completed **
 | `client/src/engine/exercise/motionFeatures.js` | Temporal analysis: CoM / weight transfer, tempo, landing absorption, cadence, kinetic-chain sequencing, pelvic drop, sway |
 | `client/src/config/mediapipe.js` | MediaPipe runtime + model paths (local, versioned, immutable-cached) + idle prewarm |
 | `client/public/mediapipe/` | Local MediaPipe Wasm (per version) + pose / object models — never loaded from a CDN |
+| `client/src/engine/exercise/equipmentFit.js` | Hard equipment match: what an exercise needs, what the trainee has (ball / weights / bands), substitution by movement pattern |
+| `server/services/equipmentFit.js` | Server-side guard: no ball → no ball drill survives plan generation |
+| `client/src/engine/training/demoGhost.js` | Which demo Ghost an exercise gets (expert profile Ghost or a truly matching movement, never a misleading one) |
 | `client/src/engine/training/rangeGauge.js` | When the ROM gauge is shown (dynamic rep exercises only) |
 | `client/src/engine/exercise/confidence.js` | Silence when unsure: camera-view detection + tracking confidence with hysteresis |
 | `client/src/engine/validation/clipRecorder.js` / `agreement.js` | Validation dataset: per-rep clips (landmarks only) + agreement / false alarms / misses / threshold tuning by replay |
@@ -743,3 +786,4 @@ Two critical corrections to the existing onboarding (Stages 1B/1C), completed **
 - **2026-10-05:** **3.1 step 2 implemented: validation dataset + confidence gate.** Silence when unsure (camera-view detection, tracking confidence, hysteresis; no corrections, only "fix the camera" guidance), per-rep clip recorder (landmarks only) in validation mode (`?validate=1`), "good / fault" labelling after each set saved to Firestore, and the `/validation` page with agreement, false alarms, misses and data-driven threshold checks by replay. 12 tests; client 537 pass, 0 new failures. Not yet committed.
 - **2026-10-05:** **Owner UX directive: trainees never label or rate; the coach positions them like a human coach.** New positioning coach (`setupCoach.js`): one precise spoken + on-screen instruction at a time (step back / tilt the camera down or up / move left or right / come closer / turn side-on / face the camera / add light), nothing counts until positioned right, then "Great, now I can see you — let's start!". The validation labelling stays an internal tool for the owner / clinicians (`?validate=1`). Principles updated in Stage 3.1. 15 tests; client 552 pass, 0 new failures. Not yet committed.
 - **2026-10-06:** Backup tag `backup-2026-10-06-pre-local-mediapipe` (`9f08c08`: positioning coach + validation work, committed). **Local MediaPipe:** Wasm + models served from `public/mediapipe` (versioned, immutable cache, application/wasm, exact version pin, idle prewarm), no CDN; verified in headless Chromium (runtime 49 ms + model 241 ms locally, zero external requests). **Exercise demo Ghost** on by default from the briefing through the calibration and the exercise (same profile as the evaluation). **ROM gauge** only for dynamic repetition exercises (never static holds / ball drills). +8 tests; client 560 pass, 0 new failures. Ready to deploy — awaiting the owner.
+- **2026-10-06:** Backup tag `backup-2026-10-06-pre-ghost-equipment-fix` (`39a1a74`). **Ghost on by default** in the warm-up and from the briefing through every set and rest of the exercise; the old skeleton Ghost retired; demo = expert profile Ghost or a truly matching movement (31/99 exercise types today); clearer overlay. **Hard equipment match:** `hasBall` profile fact (dashboard Yes / No, asked before a workout with ball drills, saved on an explicit tap), `equipmentFit` substitutes by movement pattern everywhere exercises are shown (dashboard, training, live adaptation) + server prompt rule + server post-generation guard. +13 client / +2 server tests; client 573 pass, server 10/10, 0 new failures. Not yet committed — server redeploy needed for the server guard.

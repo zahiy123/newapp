@@ -9,7 +9,6 @@ import { useBallDetection } from '../hooks/useBallDetection';
 import { useEquipmentDetection } from '../hooks/useEquipmentDetection';
 import { useAICoach } from '../hooks/useAICoach';
 import { useHaikuVision } from '../hooks/useHaikuVision';
-import { useGhostSkeleton } from '../hooks/useGhostSkeleton';
 import { findObstacles, obstacleMessage, LABEL_HE } from '../engine/environmentHazards';
 import { planWarmUp, needsBallQuestion } from '../engine/warmupPlanner';
 import { getLimbProfile } from '../engine/limbProfile';
@@ -19,6 +18,8 @@ import ExecutionHud from '../components/ExecutionHud';
 import { viewPromptText } from '../engine/training/viewPrompts';
 import { useExpertExecution, buildExecutionProfile } from '../hooks/training/useExpertExecution';
 import { showsRangeGauge } from '../engine/training/rangeGauge';
+import { demoGhostFor } from '../engine/training/demoGhost';
+import { availableEquipment, fitExercises, needsBall } from '../engine/exercise/equipmentFit';
 import { sportContextsFor } from '../engine/sports/sportLibrary';
 import ValidationPanel from '../components/ValidationPanel';
 import { readValidationMode, saveLabelledClip } from '../services/validationStore';
@@ -129,7 +130,6 @@ export default function Training() {
   }), [userProfile?.disability, userProfile?.amputationSide, userProfile?.amputationLevel]);
   const { videoRef, active: cameraActive, error: cameraError, start: startCamera, stop: stopCamera } = useCamera();
   const { ready: poseReady, landmarks, landmarksRef: poseLandmarksRef, startLoop, stopLoop } = usePose(canvasRef, beforeDrawRef, amputationProfile);
-  const { drawGhost, toggle: toggleGhost, isEnabled: ghostEnabled } = useGhostSkeleton();
   const { ready: objReady, detectedObjects, startLoop: startObjLoop, stopLoop: stopObjLoop, hasEquipment, scanEnvironment, captureFrame } = useObjectDetection();
   const { ready: ballReady, getBallData, startLoop: startBallLoop, stopLoop: stopBallLoop } = useBallDetection(userProfile?.sport);
   const { ready: equipReady, getEquipmentData, getBallData: getEquipBallData, startLoop: startEquipLoop, stopLoop: stopEquipLoop } = useEquipmentDetection(userProfile?.sport);
@@ -390,7 +390,7 @@ export default function Training() {
   const [showBallQuestion, setShowBallQuestion] = useState(false);
   const [warmUpGhostOn, setWarmUpGhostOn] = useState(true);    // ghost shown by default in the warm-up
   const limbProfile = useMemo(() => getLimbProfile(userProfile), [userProfile]);
-  const warmUpExercises = useMemo(() => planWarmUp(userProfile, { hasBall: ballAnswer === true }), [userProfile, ballAnswer]);
+  const warmUpExercises = useMemo(() => planWarmUp(userProfile, { hasBall: typeof ballAnswer === 'boolean' ? ballAnswer : userProfile?.hasBall === true }), [userProfile, ballAnswer]);
 
   // Ghost Overlay & Progressive Range Challenge (opt-in, behind FEATURES.GHOST_OVERLAY).
   // 'panel' = the stable demo panel (checkpoint-stage2-stable) and the default; 'overlay' = full-size on the body.
@@ -515,6 +515,7 @@ export default function Training() {
     warmUpCompleted: false,
   });
   const sessionSavedRef = useRef(false);
+  const rawExercisesRef = useRef([]);      // the day's exercises before the equipment fit
   const aiSummaryRef = useRef(null);
 
   // Load exercises
@@ -536,7 +537,9 @@ export default function Training() {
       const sport = data.sport || plan.sport || 'fitness';
       const sanitized = sanitizePlan({ weeks: [{ days: [{ exercises: week.days[dayIdx].exercises || [] }] }] }, sport, data.age || userProfile?.age);
       const loadedExercises = sanitized.weeks[0].days[0].exercises || [];
-      setExercises(loadedExercises);
+      // HARD equipment fit: never offer an exercise the trainee can't do (e.g. a ball drill without a ball)
+      rawExercisesRef.current = loadedExercises;
+      setExercises(fitExercises(loadedExercises, availableEquipment(data)).exercises);
       resetVisionSession();
 
       // Load per-exercise score history from Firestore (last 5 workouts)
@@ -661,14 +664,15 @@ export default function Training() {
     return !v;
   }), []);
   const demoGhostPhase = phase === PHASE.BRIEFING || phase === PHASE.CHECKING_EQUIPMENT
-    || phase === PHASE.CALIBRATING || phase === PHASE.EXERCISING;
+    || phase === PHASE.CALIBRATING || phase === PHASE.EXERCISING || phase === PHASE.RESTING;
   const demoProfile = useMemo(
     () => (FEATURES.EXPERT_PROFILE && demoGhostPhase
       ? (execution.profile || buildExecutionProfile(exerciseCueKey, currentExercise?.name, limbProfile, sportContexts))
       : null),
     [demoGhostPhase, execution.profile, exerciseCueKey, currentExercise?.name, limbProfile, sportContexts],
   );
-  const demoGhostSpec = useMemo(() => (demoProfile?.ghost ? { profile: demoProfile } : null), [demoProfile]);
+  // The profile's Ghost, or the matching animated movement for exercises without an expert model yet
+  const demoGhostSpec = useMemo(() => (demoGhostPhase ? demoGhostFor(demoProfile, exerciseCueKey) : null), [demoGhostPhase, demoProfile, exerciseCueKey]);
   const showDemoGhost = exerciseGhostOn && !!demoGhostSpec;
   // ROM gauge only for dynamic range-of-motion exercises (never static holds / ball drills / kicks / running)
   const showRomGauge = useMemo(() => {
@@ -677,10 +681,11 @@ export default function Training() {
     const kind = buildExecutionProfile(a.cueKey, currentExercise.name, limbProfile, sportContexts)?.kind;
     return showsRangeGauge({ analyzerType: a.type, profileKind: kind, exerciseName: currentExercise.name });
   }, [currentExercise?.name, limbProfile, sportContexts]);
-  const demoOnBody = overlayActive && demoProfile?.posture === 'standing'
+  const demoOnBody = overlayActive && (demoProfile?.posture === 'standing' || !!demoGhostSpec?.move)
     && (phase === PHASE.EXERCISING || phase === PHASE.CALIBRATING);
-  const expertGhostRef = useRef(null);
-  expertGhostRef.current = execution.ghostSpec;
+  const demoLabel = demoProfile?.precision === 'expert'
+    ? (isHe ? `הדגמה: ${demoProfile.name.he}` : `Demo: ${demoProfile.name.en}`)
+    : (isHe ? `הדגמה: ${currentExercise?.name || ''}` : `Demo: ${currentExercise?.nameEn || currentExercise?.name || ''}`);
 
   // Set up analyzer when exercise changes
   useEffect(() => {
@@ -703,21 +708,19 @@ export default function Training() {
     }
   }, [currentIdx, currentExercise]);
 
-  // Ghost skeleton + form correction arcs: set beforeDrawRef during EXERCISING phase
+  // Form correction arcs on the pose canvas during the exercise. (The exercise Ghost is the demo
+  // panel / overlay, on by default — the old skeleton Ghost is retired.)
   useEffect(() => {
     if (phase === PHASE.EXERCISING && analyzerRef.current) {
       const cueKey = analyzerRef.current.cueKey;
-      const sportKey = userProfile?.sport || 'fitness';
       beforeDrawRef.current = (ctx, lm, w, h) => {
-        // An exercise with an expert profile has its own Ghost (panel / overlay) — not the old skeleton
-        if (ghostEnabled && !expertGhostRef.current) drawGhost(ctx, sportKey, cueKey, lm, w, h);
         drawFormCorrection(ctx, lm, w, h, cueKey);
       };
     } else {
       // (The warm-up ghost has its own panel — WarmupGhostPanel — not the pose canvas)
       beforeDrawRef.current = null;
     }
-  }, [phase, ghostEnabled, drawGhost, userProfile?.sport]);
+  }, [phase]);
 
   // === CALIBRATION PHASE — 5-second ROM measurement ===
   const calibrationIntervalRef = useRef(null);
@@ -1370,7 +1373,9 @@ export default function Training() {
     };
     setEnvCountdown(null);
     // Rehab + sport track: a short "do you have a ball?" question before the warm-up
-    if (!warmUpDone && currentIdx === 0 && ballAnswer === null && needsBallQuestion(userProfile)) {
+    const ballUnknown = typeof userProfile?.hasBall !== 'boolean';
+    const dayNeedsBall = ballUnknown && needsBall(rawExercisesRef.current);
+    if (!warmUpDone && currentIdx === 0 && ballAnswer === null && (needsBallQuestion(userProfile) || dayNeedsBall)) {
       setShowBallQuestion(true);
       speakPriority(isHe ? 'יש לך כדור זמין עכשיו?' : 'Do you have a ball available right now?', { rate: 1.0 });
       return;
@@ -1389,18 +1394,26 @@ export default function Training() {
     }
   }
 
-  // Ball answer → warm-up (with ball drills, or air drills without a ball)
-  function answerBall(hasBall) {
+  // Ball answer → warm-up (with ball drills, or air drills without a ball) AND the day's exercises
+  // are re-fitted (no ball → every ball drill becomes its no-ball version). An explicit tap is saved
+  // to the profile, so the trainee is not asked again and future plans respect it.
+  function answerBall(hasBall, { explicit = true } = {}) {
     setBallAnswer(hasBall);
     setShowBallQuestion(false);
     sessionDataRef.current.ballAvailable = hasBall;
+    const fitted = fitExercises(rawExercisesRef.current, availableEquipment(userProfile, { hasBall }));
+    if (fitted.exercises.length) setExercises(fitted.exercises);
+    if (fitted.substitutions.length) sessionDataRef.current.equipmentSubstitutions = fitted.substitutions;
+    if (explicit && user?.uid) {
+      updateDoc(doc(db, 'users', user.uid), { hasBall }).catch(err => console.error('[Ball] save failed:', err));
+    }
     startWarmUpOrBriefing();
   }
 
-  // No answer within 10 s → no ball (air drills); never blocks
+  // No answer within 10 s → no ball for THIS session only (never saved, never blocks)
   useEffect(() => {
     if (!showBallQuestion) return;
-    const t = setTimeout(() => answerBall(false), 10000);
+    const t = setTimeout(() => answerBall(false, { explicit: false }), 10000);
     return () => clearTimeout(t);
   }, [showBallQuestion]);
 
@@ -2492,7 +2505,8 @@ export default function Training() {
             if (result.adapted && result.plan?.length > 0) {
               const sport = userProfile?.sport || 'fitness';
               const sanitizedAdapt = sanitizePlan({ weeks: [{ days: [{ exercises: result.plan }] }] }, sport, userProfile?.age);
-              const cleanPlan = sanitizedAdapt.weeks[0].days[0].exercises || [];
+              const cleanPlan = fitExercises(sanitizedAdapt.weeks[0].days[0].exercises || [],
+                availableEquipment(userProfile, { hasBall: typeof ballAnswer === 'boolean' ? ballAnswer : undefined })).exercises;
               const newExercises = [...exercises.slice(0, currentIdx + 1), ...cleanPlan];
               setExercises(newExercises);
               lastAdaptationRef.current = now;
@@ -2586,8 +2600,8 @@ export default function Training() {
         {demoGhostPhase && showDemoGhost && !demoOnBody && (
           <WarmupGhostPanel
             spec={demoGhostSpec} limbProfile={limbProfile} isHe={isHe}
-            placement={phase === PHASE.BRIEFING || phase === PHASE.CHECKING_EQUIPMENT ? 'top' : 'middle'}
-            label={isHe ? `הדגמה: ${demoProfile.name.he}` : `Demo: ${demoProfile.name.en}`}
+            placement={phase === PHASE.BRIEFING || phase === PHASE.CHECKING_EQUIPMENT || phase === PHASE.RESTING ? 'top' : 'middle'}
+            label={demoLabel}
           />
         )}
         {demoGhostPhase && showDemoGhost && demoOnBody && (
@@ -3090,9 +3104,9 @@ export default function Training() {
         {/* Ghost skeleton toggle (exercises) / warm-up ghost toggle (on by default) */}
         {(phase === PHASE.EXERCISING || phase === PHASE.WARM_UP || (demoGhostPhase && demoGhostSpec)) && (
           <button
-            onClick={phase === PHASE.WARM_UP ? () => setWarmUpGhostOn(v => !v) : demoGhostSpec ? toggleExerciseGhost : toggleGhost}
+            onClick={phase === PHASE.WARM_UP ? () => setWarmUpGhostOn(v => !v) : toggleExerciseGhost}
             className={`absolute top-14 left-4 px-3 py-2 rounded-xl text-sm font-bold z-10 transition ${
-              (phase === PHASE.WARM_UP ? warmUpGhostOn : demoGhostSpec ? exerciseGhostOn : ghostEnabled) ? 'bg-blue-500/90 text-white' : 'bg-black/50 text-white/70'
+              (phase === PHASE.WARM_UP ? warmUpGhostOn : exerciseGhostOn) ? 'bg-blue-500/90 text-white' : 'bg-black/50 text-white/70'
             }`}
             title={isHe ? 'הצג/הסתר שלד מנחה' : 'Toggle ghost guide'}
           >
@@ -3100,7 +3114,7 @@ export default function Training() {
           </button>
         )}
         {FEATURES.GHOST_OVERLAY && ((phase === PHASE.WARM_UP && warmUpGhostOn) ||
-          ((phase === PHASE.EXERCISING || phase === PHASE.CALIBRATING) && showDemoGhost && demoProfile?.posture === 'standing')) && (
+          ((phase === PHASE.EXERCISING || phase === PHASE.CALIBRATING) && showDemoGhost && (demoProfile?.posture === 'standing' || !!demoGhostSpec?.move))) && (
           <button
             onClick={() => setGhostModeSaved(overlayActive ? 'panel' : 'overlay')}
             className={`absolute top-28 left-4 px-3 py-2 rounded-xl text-xs font-bold z-10 transition ${

@@ -388,7 +388,7 @@ export function drawWarmupGhost(ctx, spec, lp, nowMs, w, h, opts = {}) {
  * @param {number} scale - canvas px per Ghost body unit (from the trainee's torso length)
  * @param {number} [alpha=0.42] - transparency so the trainee stays visible through the Ghost
  */
-export function drawGhostOverlay(ctx, spec, lp, nowMs, origin, scale, alpha = 0.42) {
+export function drawGhostOverlay(ctx, spec, lp, nowMs, origin, scale, alpha = 0.55) {
   if (!spec || !origin || !(scale > 0)) return;
   const t = phaseOf(nowMs, periodOf(spec));
   const pose = ghostPose(spec, t, lp);

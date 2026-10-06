@@ -4,6 +4,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import dotenv from 'dotenv';
 import { normalizeAnatomyDiagnosis } from './anatomyDiagnosis.js';
+import { fitWeekToEquipment } from './equipmentFit.js';
 
 // Load .env from the server directory (works regardless of cwd)
 const __filename_claude = fileURLToPath(import.meta.url);
@@ -1670,7 +1671,7 @@ const MUSCLE_FOCUS_MAP = {
   shoulders_arms: { label: 'Shoulders & Arms', directive: 'MUSCLE FOCUS: 60% of exercises must target SHOULDERS & ARMS (deltoids, biceps, triceps, forearms, rotator cuff). Remaining 40% can target other groups.' },
 };
 
-function buildWeekPrompt({ profile, sport, goals, daysPerWeek, location, weekNumber, equipment, muscleGroupFocus, scanData, trainingTrack, rehabSport }) {
+function buildWeekPrompt({ profile, sport, goals, daysPerWeek, location, weekNumber, equipment, muscleGroupFocus, scanData, trainingTrack, rehabSport, hasBall }) {
   const skillLevel = profile.skillLevel || 'beginner';
   const mobilityAid = profile.mobilityAid || 'none';
   const topGoals = goals.slice(0, 3).join(', ');
@@ -1964,6 +1965,7 @@ Level: ${skillLevel} — ${levelDirective}
 ${ageRule}
 Sport: ${sport}. Goals: ${topGoals}. Days/week: ${daysPerWeek}.
 Equipment available: ${eq === 'none' ? 'NONE — bodyweight only, absolutely no weights or equipment exercises' : eq === 'dumbbells' ? 'Dumbbells' : 'Resistance bands'}.
+${hasBall === false ? 'BALL: the athlete has NO ball. ABSOLUTELY NO exercise that uses a ball (no dribbling, passing, kicking a ball, ball stops, juggling, shooting, headers, wall-ball drills). Train the same skills as SHADOW / no-ball movement drills (e.g. shadow kick, footwork, shadow shooting motion).' : hasBall === true ? 'BALL: the athlete HAS a ball — ball drills are allowed.' : ''}
 
 ${trackBlock ? `${trackBlock}
 ` : ''}${muscleFocus.directive}
@@ -2913,7 +2915,8 @@ export async function generateWeek(params) {
   // Rehab combined with a sport: filter with the combined sport's rules (rehab's own list bans all ball/sport words)
   const filterSport = params.sport === 'rehab' && params.trainingTrack === 'rehab_sport' && params.rehabSport
     ? params.rehabSport : params.sport;
-  return filterCrossSportLeakage(parsed, filterSport);
+  // Hard equipment guard: no ball → no ball drill survives (the prompt alone is not trusted)
+  return fitWeekToEquipment(filterCrossSportLeakage(parsed, filterSport), { hasBall: params.hasBall });
 }
 
 // Generate tips

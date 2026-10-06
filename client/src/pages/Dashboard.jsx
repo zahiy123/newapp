@@ -12,6 +12,7 @@ import {
   loadPendingSessions, removePendingSession
 } from '../utils/workoutStorage';
 import { loadWeeklyProgress, checkWeeklyReminder } from '../utils/weeklyGoals';
+import { availableEquipment, fitPlan } from '../engine/exercise/equipmentFit';
 
 
 const LOCATIONS = [
@@ -40,6 +41,8 @@ export default function Dashboard() {
   const [activeWeek, setActiveWeek] = useState(0);
   const [currentLocation, setCurrentLocation] = useState('field');
   const [currentEquipment, setCurrentEquipment] = useState('none');
+  // Ball: a profile fact (true / false / unknown) — the plan shown never contains a drill the trainee can't do
+  const [hasBall, setHasBall] = useState(null);
   const [workoutCount, setWorkoutCount] = useState(0);
   const [progress, setProgress] = useState({ completedDays: [] });
   const [expandedExercises, setExpandedExercises] = useState({});
@@ -76,6 +79,7 @@ export default function Dashboard() {
   useEffect(() => {
     if (userProfile?.trainingLocation) setCurrentLocation(userProfile.trainingLocation);
     if (userProfile?.equipment) setCurrentEquipment(userProfile.equipment);
+    if (typeof userProfile?.hasBall === 'boolean') setHasBall(userProfile.hasBall);
   }, [userProfile]);
 
   // Early server warm-up: wake Render instance while user browses dashboard
@@ -255,6 +259,7 @@ export default function Dashboard() {
       daysPerWeek: userProfile.trainingDays || 3,
       location: loc || currentLocation,
       equipment: currentEquipment,
+      hasBall,
       // Muscle group focus applies only to the strength track
       muscleGroupFocus: userProfile.goals?.includes('strength')
         ? (userProfile.muscleGroupFocus || 'full_body')
@@ -401,6 +406,12 @@ export default function Dashboard() {
     // Don't regenerate plan — just save preference for next plan generation
   }
 
+  async function handleBallChange(value) {
+    if (value === hasBall) return;
+    setHasBall(value);
+    await setDoc(doc(db, 'users', user.uid), { hasBall: value }, { merge: true });
+  }
+
   async function handleEquipmentChange(eq) {
     if (eq === currentEquipment || generatingRef.current) return;
     setCurrentEquipment(eq);
@@ -408,7 +419,12 @@ export default function Dashboard() {
     // Don't regenerate plan — just save preference for next plan generation
   }
 
-  const weeks = trainingPlan?.weeks || [];
+  // Hard equipment fit of the plan shown (no ball → no ball drills; no weights → bodyweight versions)
+  const fittedPlan = useMemo(
+    () => fitPlan(trainingPlan, availableEquipment({ ...userProfile, equipment: currentEquipment, hasBall })),
+    [trainingPlan, userProfile, currentEquipment, hasBall],
+  );
+  const weeks = fittedPlan?.weeks || [];
   const currentWeek = weeks[activeWeek];
   const allComplete = trainingPlan && areAllWeeksComplete(trainingPlan);
   const nextWorkout = trainingPlan ? getNextWorkoutDay(trainingPlan) : null;
@@ -498,6 +514,18 @@ export default function Dashboard() {
                 </div>
               </button>
             ))}
+          </div>
+          {/* Ball — every ball drill depends on this answer */}
+          <div className="flex items-center justify-between mt-3 pt-3 border-t border-gray-100">
+            <span className="text-sm font-medium text-gray-700">{'⚽'} {isHe ? 'יש לך כדור?' : 'Do you have a ball?'}</span>
+            <div className="flex gap-2">
+              {[true, false].map(v => (
+                <button key={String(v)} onClick={() => handleBallChange(v)}
+                  className={`px-4 py-1.5 rounded-lg text-sm border-2 transition ${hasBall === v ? 'border-green-500 bg-green-50 font-semibold' : 'border-gray-200 bg-gray-50'}`}>
+                  {v ? (isHe ? 'כן' : 'Yes') : (isHe ? 'לא' : 'No')}
+                </button>
+              ))}
+            </div>
           </div>
         </div>
       )}
