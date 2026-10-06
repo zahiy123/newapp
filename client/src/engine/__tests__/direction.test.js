@@ -22,10 +22,19 @@ function signedArea(spec, reverse = false) {
 
 describe('direction swapping (arm circles)', () => {
   it('arm circles are directional in the plan (forward first, switch halfway)', () => {
-    const circles = planWarmUp({ disability: 'none', scanData: { classification: 'NATURAL' }, sport: 'rehab', trainingTrack: 'rehab_only' })
+    // arm circles exist only in general fitness (and as ROM work for a limited arm) — owner rule 2026-10-06
+    const circles = planWarmUp({ disability: 'none', scanData: { classification: 'NATURAL' }, sport: 'fitness' })
       .find(e => e.ghost.move === 'arm_circles');
     expect(circles.ghost.directional).toBe(true);
     expect(circles.spokenSteps.he.join(' ')).toContain('אחורה');
+  });
+
+  it('sport and rehab tracks get a functional push activation instead of generic arm circles', () => {
+    for (const p of [{ sport: 'football' }, { sport: 'rehab', trainingTrack: 'rehab_only' }, { sport: 'rehab', trainingTrack: 'rehab_sport', rehabSport: 'footballAmputee' }]) {
+      const plan = planWarmUp({ disability: 'none', scanData: { classification: 'NATURAL' }, ...p });
+      expect(plan.some(e => e.ghost.move === 'arm_circles'), JSON.stringify(p)).toBe(false);
+      expect(plan.some(e => e.id === 'push_activation'), JSON.stringify(p)).toBe(true);
+    }
   });
 
   it('the Ghost hand traces an ellipse (not a line), so the rotation direction is visible', () => {

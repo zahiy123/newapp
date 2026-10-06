@@ -85,6 +85,7 @@ export function sportOf(profile) {
 
 /** Functional pattern ids for this trainee (null = unrestricted). */
 export function patternsFor(profile, lp = {}) {
+  // (relevance.js: functional patterns only — never generic filler in sport / rehab tracks)
   return relevantPatterns({ track: trackOf(profile), sport: sportOf(profile), lp });
 }
 

@@ -698,6 +698,33 @@ Two critical corrections to the existing onboarding (Stages 1B/1C), completed **
      - The ready lines are energetic: "מעולה! עכשיו אני רואה אותך — יאללה, תן בראש!".
      - The warm-up "step into the frame" prompt carries the same drive.
   - *Verification:* client build passes; client 634 pass (+ coach-flow, rep-analyzer, overlay and relevance / chain tests), 0 new failures; server unchanged (10/10).
+- **Hard rule: no generic filler in sport / rehab tracks (owner, 2026-10-06, after the device check).**
+  - *Owner report:* in "rehab + amputee football" the first exercise was "arm circles", with an instruction to "stand by two chairs" — no relation to amputee football or real sports rehab.
+  - *Root causes:*
+    1. The **warm-up** opened with arm circles in every track.
+    2. The catalog's generic mobility group (arm circles, knee-lift march) was in every sport's list as prep / cooldown.
+    3. The coach's opening (`speakBriefing`), the re-explain, the idle prods and the exercise cards added the location's equipment set-up ("place two chairs 2 m apart" for ball sports at home) to **every** exercise.
+  - *Fix:*
+    - **Amputee football** (rehab + sport and sport) is built ONLY from four categories (`AMPUTEE_FOOTBALL_CATEGORIES`):
+      - **core:** plank, glute bridge, trunk rotations;
+      - **single-leg balance:** knee-up balance;
+      - **upper-body strength for the crutches:** push-ups, shoulder press;
+      - **kicks:** shadow kick.
+      - Every exercise is **named in the sport's language** (`SPORT_LABELS`), e.g. "שכיבות סמיכה — כוח לקביים", "יציבות על רגל אחת — בסיס לבעיטה", "רוטציות גו — כוח סיבובי לבעיטה", with a matching cue.
+      - Its goals: targeted strengthening, stability, sport tools in rehab. Range of motion is outside its four categories, so it is not offered.
+    - **Arm circles / knee-lift marches are removed from every sport and rehab track.** They remain only in general fitness, and as real range-of-motion work for a limited arm in rehab only.
+      - Warm-up: the arm circles are replaced by a functional **push activation** ("דחיפות מתפרצות — הפעלת פלג גוף עליון"; "דחיפות קביים באוויר" only for a crutch user — the owner's earlier rule: no crutch instructions to a prosthesis user).
+      - Prep: short plank / single-leg balance holds are real athletic activation.
+      - Rehab-only range of motion uses functional ROM work (trunk rotations, hip hinge, lunge).
+      - Wheelchair upper-body sessions use pull strength (curls) in support.
+    - **Equipment set-up only where equipment is used** (`engine/training/exerciseSetup.js`): marker / ball / cone drills get it; catalog bodyweight / shadow exercises never do. This applies to the briefing, the re-explain, the idle prods and the exercise cards.
+    - The idle prods were rewritten with drive (no more "take your time").
+  - *Tests:* client 638 pass, 0 new failures. New / updated tests:
+    - Amputee football (BK / AK, rehab + sport and sport): every exercise of 4 weeks belongs to the 4 categories and carries the sport's name.
+    - No arm circles / knee-lift marches in 10 sport / rehab cases.
+    - Sport / rehab warm-ups get the push activation, never arm circles.
+    - No equipment set-up for catalog exercises.
+    - The crutch / prosthesis wording rule still holds.
    3. **Profile-based rep counting with a quality score per rep** (replacing the per-exercise analyzers step by step), including the correction hierarchy, timing and external-focus cues.
    4. **Special sport libraries:** leg amputees (amputee football: crutch kick / crutch sprint / balance / header / goalkeeper), wheelchair (push stroke, seated throws, shoulder protection), running (opened for selection), then tennis / martial arts (trunk-rotation metric) and basketball.
    - Following (already in the roadmap): velocity-based fatigue detection (stop the set at ~20% rep-speed loss or form decay), automatic progression / regression, Pain Traffic Light integration, two-way voice ("why?"), best vs. weakest rep clips with the Ghost in the Stage 4 report.
@@ -868,7 +895,8 @@ Two critical corrections to the existing onboarding (Stages 1B/1C), completed **
 | `client/src/engine/catalog/sessionPlanner.js` | Coherent goal-based sessions (prep / main / support / cooldown) + coherence report + day-goal inference |
 | `client/src/engine/training/coachFlow.js` | Start gate (no false start), exact rep validity, real-work monitor, drive voice lines |
 | `client/src/engine/training/profileRepAnalyzer.js` | The rep count comes from the profile detector; the analyzer keeps form / posture feedback |
-| `client/src/engine/catalog/relevance.js` | Functional patterns per sport / limitation (no generic filler) |
+| `client/src/engine/catalog/relevance.js` | Functional patterns per sport / limitation (no generic filler), amputee-football categories, sport-language labels |
+| `client/src/engine/training/exerciseSetup.js` | Equipment set-up instructions only for drills that really use equipment |
 | `client/src/engine/catalog/trackGoals.js` | Single source of truth: goals per track (rehab / sport / rehab + sport), the trainee's valid goals, legacy mapping |
 | `client/src/engine/catalog/planBuilder.js` | Rebuilds the AI week plan's days from the catalog (deterministic, shared by dashboard + training) |
 | `client/src/engine/training/timedAnalyzer.js` | Timed exercises: seconds of work, paused when out of position |
@@ -952,3 +980,4 @@ Two critical corrections to the existing onboarding (Stages 1B/1C), completed **
 - **2026-10-06:** Committed and pushed `66c98bf` (catalog + coherent sessions + locked chain + Ghost / equipment fixes) → deployed to production, verified in the served bundle (rehab goals, "sport tools in rehab", shadow kick, session goal line, ball question present; martial-arts patterns absent). New restore point `checkpoint-2026-10-06-locked-chain` (#8). **The server must be redeployed** for the server-side parts (ball guard, one goal per day from the trainee's goals); the client enforces both without it.
 - **2026-10-06:** **Owner fix cluster.** Backup tag `backup-2026-10-06-pre-detection-fixes` (`7b9a017`). (1) A hard start gate replaces the 5 s calibration timer: positioned + reliable + in the start position for 600 ms before anything starts, honest start line. (2) Exact rep counting from the profile detector (full cycles with real durations; idle / sitting / noise = 0), and timed exercises count only real work. (3) The overlay Ghost keeps its size side-on (same-side torso, no shoulder-width shrink, ±6% per update, minimum ~45% of the view). (4) Functional patterns per sport / limitation (amputee football: balance, core, crutch upper body, the kick — no isolated arm raises), adapted sport goals, honest goal feasibility, quality fixes (tempo no longer inflates qualities, main block first, per-side technique, goals rotate over the whole plan). (5) Positioning prompts with rotating drive lines and the name. Client 634 pass, 0 new failures. Not yet committed.
 - **2026-10-06:** Committed and pushed `1f714d0` → deployed to production, verified in the served bundle (start-position wait, honest start line, drive lines, balance & core goal present; the old "תפסתי את הטווח" line is still in the bundle only as the fallback when the expert module is off). New restore point `checkpoint-2026-10-06-start-gate` (#9).
+- **2026-10-06:** **Hard rule: no generic filler in sport / rehab tracks (owner device report: arm circles + "two chairs" first in rehab + amputee football).** Amputee football = only core / single-leg balance / crutch upper body / kicks, named in the sport's language; arm circles and knee-lift marches removed from every sport / rehab track (warm-up → functional push activation; prep → plank / balance holds; ROM → trunk rotation / hinge / lunge); equipment set-up only for drills that use equipment; drive in idle prods. Client 638 pass, 0 new failures. Not yet committed.

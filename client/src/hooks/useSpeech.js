@@ -580,23 +580,24 @@ export function useSpeech(lang = 'he-IL', age) {
     const name = playerName || (isHe ? 'אלוף' : 'champ');
     const equipment = locationProps?.markers || (isHe ? 'הציוד' : 'the equipment');
 
+    // Drive like a real sports coach; the equipment line only when the exercise uses equipment
     const phrasesHe = [
-      `${name}, אני פה, קח את הזמן שלך.`,
-      `${name}, תנסה להגדיל את טווח התנועה כדי שאוכל לעקוב אחריך.`,
-      `${name}, אני מאמין בך! כשתהיה מוכן, תתחיל לזוז.`,
-      `${name}, אולי תסדר את ${equipment} ותתחיל כשנוח לך? ${exerciseDesc || ''}`,
-      `${name}, אני רואה אותך! תתחיל לאט ותגביר בהדרגה.`,
-      `${name}, בוא נעשה את זה ביחד! אתה לא לבד.`,
-      `${name}, קח נשימה עמוקה, ויאללה. אני עוקב.`,
+      `יאללה ${name}, קום ותן בראש!`,
+      `${name}, תגדיל את טווח התנועה — אני רוצה לראות עבודה אמיתית!`,
+      `${name}, אני מחכה לך — בוא נעלה הילוך!`,
+      locationProps ? `${name}, סדר את ${equipment} ויאללה לעבודה! ${exerciseDesc || ''}` : `${name}, ${exerciseDesc || 'תסתכל על הצללית ותתחיל לעבוד'} — יאללה!`,
+      `קדימה ${name}, תראה לי שאתה רעב!`,
+      `${name}, כל שנייה חשובה — בוא בוא בוא!`,
+      `${name}, נשימה עמוקה ויאללה — אני עוקב אחריך!`,
     ];
     const phrasesEn = [
-      `${name}, I'm here, take your time.`,
-      `${name}, try to increase your range of motion so I can follow along.`,
-      `${name}, I believe in you! Start moving when you're ready.`,
-      `${name}, maybe set up your ${equipment} and start when comfortable? ${exerciseDesc || ''}`,
-      `${name}, I can see you! Start slow and build up gradually.`,
-      `${name}, let's do this together! You're not alone.`,
-      `${name}, take a deep breath, and let's go. I'm watching.`,
+      `Come on ${name}, let's go all out!`,
+      `${name}, bigger range — I want to see real work!`,
+      `${name}, I'm waiting for you — let's step it up!`,
+      locationProps ? `${name}, set up your ${equipment} and get to work! ${exerciseDesc || ''}` : `${name}, ${exerciseDesc || 'watch the Ghost and get to work'} — let's go!`,
+      `Come on ${name}, show me you want it!`,
+      `${name}, every second counts — come on!`,
+      `${name}, deep breath and go — I'm watching you!`,
     ];
 
     const phrases = isHe ? phrasesHe : phrasesEn;
@@ -620,9 +621,9 @@ export function useSpeech(lang = 'he-IL', age) {
     const intro = isHe
       ? `${name}, אולי לא ברור לך איך להתחיל? בוא נסביר מהר.`
       : `${name}, maybe you're not sure how to start? Let me explain quickly.`;
-    const howTo = isHe
-      ? `${desc} סדר את ${equipment}. ${setup}. יאללה, עכשיו!`
-      : `${desc} Set up your ${equipment}. ${setup}. Now let's go!`;
+    const howTo = locationProps
+      ? (isHe ? `${desc} סדר את ${equipment}. ${setup}. יאללה, עכשיו!` : `${desc} Set up your ${equipment}. ${setup}. Now let's go!`)
+      : (isHe ? `${desc} יאללה, עכשיו!` : `${desc} Now let's go!`);
 
     // Chunk the howTo for stability
     const chunks = splitToChunks(howTo);

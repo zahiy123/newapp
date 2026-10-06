@@ -22,6 +22,7 @@ import { demoGhostFor } from '../engine/training/demoGhost';
 import { makeTimedAnalyzer } from '../engine/training/timedAnalyzer';
 import { makeProfileRepAnalyzer } from '../engine/training/profileRepAnalyzer';
 import { READY_DRIVE, withDrive } from '../engine/training/coachFlow';
+import { exerciseNeedsSetup } from '../engine/training/exerciseSetup';
 import { catalogGhostSpec } from '../engine/catalog/catalog';
 import { rebuildPlanFromCatalog, planContext } from '../engine/catalog/planBuilder';
 import { availableEquipment, fitExercises, needsBall } from '../engine/exercise/equipmentFit';
@@ -1310,7 +1311,7 @@ export default function Training() {
       if (firstRepStarted) {
         if (elapsed >= 10 && timeSinceLastNudge >= 10) {
           lastNudgeTimeRef.current = now;
-          const prodText = speakActiveProd(playerName, prodIndexRef.current, locationProps, currentExercise?.description);
+          const prodText = speakActiveProd(playerName, prodIndexRef.current, exerciseNeedsSetup(currentExercise) ? locationProps : null, currentExercise?.description);
           prodIndexRef.current++;
           setFeedback({ type: 'info', text: prodText });
         }
@@ -1322,7 +1323,7 @@ export default function Training() {
         reExplainedRef.current = true;
         lastNudgeTimeRef.current = now;
         prodIndexRef.current = 0;
-        speakQuickReExplain(playerName, currentExercise?.name, currentExercise?.description, locationProps);
+        speakQuickReExplain(playerName, currentExercise?.name, currentExercise?.description, exerciseNeedsSetup(currentExercise) ? locationProps : null);
         setFeedback({
           type: 'info',
           text: isHe
@@ -1336,7 +1337,7 @@ export default function Training() {
       const nudgeCooldown = lastNudgeTimeRef.current === 0 ? 8 : 10;
       if (elapsed >= 8 && timeSinceLastNudge >= nudgeCooldown) {
         lastNudgeTimeRef.current = now;
-        const prodText = speakActiveProd(playerName, prodIndexRef.current, locationProps, currentExercise?.description);
+        const prodText = speakActiveProd(playerName, prodIndexRef.current, exerciseNeedsSetup(currentExercise) ? locationProps : null, currentExercise?.description);
         prodIndexRef.current++;
         setFeedback({ type: 'info', text: prodText });
       }
@@ -2250,7 +2251,8 @@ export default function Training() {
     const instr = getExerciseInstruction(exercise.name, getAnalyzer(exercise.name)?.cueKey);
     const voiceText = instr ? instr.steps.join('. ') : (exercise.voicePrompt || exercise.description);
     const safetyText = instr?.safety || exercise.tips;
-    speakBriefing(instr?.name || exercise.name, voiceText, safetyText, locationProps, playerName);
+    // Equipment set-up only for drills that really use it (never "two chairs" for a plank)
+    speakBriefing(instr?.name || exercise.name, voiceText, safetyText, exerciseNeedsSetup(exercise) ? locationProps : null, playerName);
   }
 
   function handleStartBriefing() {
@@ -2822,11 +2824,13 @@ export default function Training() {
                 </div>
               )}
 
-              {/* Setup hint */}
-              <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-2.5 text-sm text-yellow-800">
-                <span className="font-bold">{LOCATION_ICONS[currentLocation]} {isHe ? 'הכנה' : 'Setup'}:</span>{' '}
-                {locationProps.setup}
-              </div>
+              {/* Setup hint — only for drills that really use equipment */}
+              {exerciseNeedsSetup(currentExercise) && (
+                <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-2.5 text-sm text-yellow-800">
+                  <span className="font-bold">{LOCATION_ICONS[currentLocation]} {isHe ? 'הכנה' : 'Setup'}:</span>{' '}
+                  {locationProps.setup}
+                </div>
+              )}
 
               {/* Safety tip */}
               {safetyTip && (
@@ -3603,9 +3607,11 @@ export default function Training() {
                   </div>
                   <h2 className="text-lg font-bold text-gray-800">{currentExercise.name}</h2>
                   <p className="text-sm text-gray-500">{currentExercise.description}</p>
-                  <div className="text-xs text-yellow-700 bg-yellow-50 rounded-lg px-3 py-2">
-                    {LOCATION_ICONS[currentLocation]} {locationProps.setup}
-                  </div>
+                  {exerciseNeedsSetup(currentExercise) && (
+                    <div className="text-xs text-yellow-700 bg-yellow-50 rounded-lg px-3 py-2">
+                      {LOCATION_ICONS[currentLocation]} {locationProps.setup}
+                    </div>
+                  )}
                   {currentExercise.tips && <p className="text-xs text-blue-500">{currentExercise.tips}</p>}
                   {setsPerformance.length > 0 && (
                     <div className="flex items-center gap-2">

@@ -185,18 +185,22 @@ export function buildCatalog(family, lp = {}) {
 }
 
 /** Catalog item → an exercise object for the training screen / plan views. */
-export function toExercise(item, isHe = true) {
+export function toExercise(item, isHe = true, label = null) {
   const d = item.dose;
   const timed = doseKind(item.patternId) !== 'reps' && doseKind(item.patternId) !== 'strike';
+  // a sport label renames the movement in the sport's language; the variation part is kept
+  const variant = (lang) => item.name[lang].split(' — ').slice(PATTERNS[item.patternId].name[lang].split(' — ').length).join(' — ');
+  const name = label ? { he: [label.name.he, variant('he')].filter(Boolean).join(' · '), en: [label.name.en, variant('en')].filter(Boolean).join(' · ') } : item.name;
+  const cue = label?.cue || item.cue;
   return {
-    name: item.name.he,
-    nameEn: item.name.en,
-    description: `${item.cue.he}. ${d.label.he}${timed ? '' : ''}`,
-    descriptionEn: `${item.cue.en}. ${d.label.en}`,
+    name: name.he,
+    nameEn: name.en,
+    description: `${cue.he}. ${d.label.he}`,
+    descriptionEn: `${cue.en}. ${d.label.en}`,
     sets: d.sets,
     reps: d.reps,
     restSeconds: d.rest,
-    tips: isHe ? item.cue.he : item.cue.en,
+    tips: isHe ? cue.he : cue.en,
     catalogId: item.id,
     timed,
   };

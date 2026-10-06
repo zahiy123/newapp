@@ -35,7 +35,7 @@ export const GOALS = Object.freeze({
   // Adapted sport goals (amputee / wheelchair sports)
   // dose: the prescriptions that train the goal (when the goal's own qualities are not dose labels)
   balanceCore: { name: t('שיווי משקל וליבה', 'Balance & core'), main: ['balance', 'stability', 'core'], support: ['strength', 'technique', 'mobility'], dose: ['stability', 'balance', 'core', 'strength'] },
-  upperBody: { name: t('כוח פלג גוף עליון', 'Upper-body strength'), main: ['upperBody'], support: ['core', 'stability', 'mobility'], dose: ['strength', 'power'] },
+  upperBody: { name: t('כוח פלג גוף עליון', 'Upper-body strength'), main: ['upperBody'], support: ['core', 'stability', 'upperBody', 'mobility'], dose: ['strength', 'power'] },
   // Rehab goals: every main exercise is rehab work (rehab pattern, controlled tempo or partial range)
   rehabStrength: { name: t('חיזוק שרירים ממוקד', 'Targeted strengthening'), main: ['strength'], mainAlso: ['rehab'], support: ['stability', 'core', 'balance', 'rehab'] },
   rehabStability: { name: t('יציבות ושיווי משקל', 'Stability & balance'), main: ['stability', 'balance'], mainAlso: ['rehab'], support: ['core', 'strength', 'rehab'] },

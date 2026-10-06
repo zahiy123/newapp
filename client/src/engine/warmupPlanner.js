@@ -93,6 +93,22 @@ function armMobility(lp) {
   return null;
 }
 
+// Functional upper-body activation for sport / rehab tracks (owner rule: no generic arm circles
+// there): a forward PUSH — the crutch push / the push-up / the pass — demonstrated by the Ghost.
+function upperActivation(lp, crutchSport) {
+  const arms = lp.trainableArms;
+  if (!arms.length) return null;
+  const one = arms.length === 1;
+  return make(WARM_UP_ARM_PUNCHES, {
+    id: 'push_activation',
+    nameHe: crutchSport ? 'דחיפות קביים באוויר — הפעלת כתפיים' : 'דחיפות מתפרצות — הפעלת פלג גוף עליון',
+    nameEn: crutchSport ? 'Crutch pushes in the air — shoulder activation' : 'Explosive pushes — upper-body activation',
+    stepsHe: ['עמידה יציבה', one ? 'יד מול החזה' : 'ידיים מול החזה', crutchSport ? 'דחוף קדימה בכוח, כמו דחיפה על הקביים, והחזר בשליטה' : 'דחוף קדימה בכוח והחזר בשליטה'],
+    stepsEn: ['Stable stance', one ? 'Hand in front of the chest' : 'Hands in front of the chest', crutchSport ? 'Push forward hard, like pushing on the crutches, return with control' : 'Push forward hard, return with control'],
+    ghost: { move: 'chest_pass', romCapDeg: capOf(lp, arms) },
+  });
+}
+
 function coreTwists(lp) {
   const seated = lp.wheelchair;
   return make(WARM_UP_CORE_TWISTS, {
@@ -233,8 +249,14 @@ export function planWarmUp(profile, { hasBall = false } = {}) {
   const track = resolveTrack(profile);
   const rehab = track !== 'sport_only';
 
+  // Generic arm circles only in general fitness, or as real range-of-motion work for a limited arm
+  const sport = track === 'rehab_sport' ? profile?.rehabSport : profile?.sport;
+  const armLimitedNow = lp.trainableArms.some(k => lp[k].state === 'limited');
+  const genericOk = (track === 'sport_only' && sport === 'fitness') || (track === 'rehab_only' && armLimitedNow);
+  // crutch wording only for a trainee who really uses crutches (owner rule: no crutch instructions to a prosthesis user)
+  const crutchSport = !!lp.crutches;
   const candidates = [
-    armMobility(lp),
+    genericOk ? armMobility(lp) : upperActivation(lp, crutchSport),
     legMobility(lp, rehab),
     activationSport(profile, track) ? sportActivation(activationSport(profile, track), lp, hasBall) : null,
     // fallbacks (in order) when a slot above is not possible for this body

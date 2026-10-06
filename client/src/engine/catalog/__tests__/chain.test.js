@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { goalOptions, selectedSessionGoals, trackOf, sportFamilyOf, PROFILE_GOALS, patternsFor } from '../trackGoals.js';
-import { SPORT_PATTERNS, ARM_ISOLATION } from '../relevance.js';
+import { SPORT_PATTERNS, ARM_ISOLATION, GENERIC_DRILLS, AMPUTEE_FOOTBALL_CATEGORIES, SPORT_LABELS } from '../relevance.js';
 import { rebuildPlanFromCatalog, planContext } from '../planBuilder.js';
 import { catalogGhostSpec, parseCatalogId } from '../catalog.js';
 import { PATTERNS } from '../patterns.js';
@@ -137,10 +137,10 @@ describe('Every rehab goal is always deliverable', () => {
       expect(goalOptions({ sport: 'rehab', trainingTrack: 'rehab_only' }, lp)).toEqual(['rehabStrength', 'rehabStability', 'rehabMobility']);
     }
   });
-  it('rehab + amputee football offers the three rehab goals + the sport tools', () => {
+  it('rehab + amputee football offers strengthening, stability and the sport tools (its four categories have no ROM goal)', () => {
     for (const lp of [lpBK, lpAK]) {
       expect(goalOptions({ sport: 'rehab', trainingTrack: 'rehab_sport', rehabSport: 'footballAmputee' }, lp))
-        .toEqual(['rehabStrength', 'rehabStability', 'rehabMobility', 'rehabSport']);
+        .toEqual(['rehabStrength', 'rehabStability', 'rehabSport']);
     }
   });
 });
@@ -150,6 +150,40 @@ describe('Goal rotation over the plan', () => {
     const plan = { weeks: Array.from({ length: 4 }, () => ({ days: [{}, {}, {}] })) };
     const built = rebuildPlanFromCatalog(plan, planContext({ sport: 'rehab', trainingTrack: 'rehab_sport', rehabSport: 'footballAmputee' }, lpBK, 's'));
     const goals = new Set(built.weeks.flatMap(w => w.days.map(d => d.goal)));
-    expect([...goals].sort()).toEqual(['rehabMobility', 'rehabSport', 'rehabStability', 'rehabStrength']);
+    expect([...goals].sort()).toEqual(['rehabSport', 'rehabStability', 'rehabStrength']);     // amputee football: no ROM goal (its 4 categories)
+  });
+});
+
+describe('No generic filler anywhere in sport / rehab tracks (owner rule)', () => {
+  const plan = { weeks: Array.from({ length: 4 }, () => ({ days: [{}, {}, {}] })) };
+  const built = (profile, lp) => rebuildPlanFromCatalog(plan, planContext(profile, lp, 's'));
+
+  it('amputee football (rehab + sport and sport): ONLY core, single-leg balance, crutch upper body, kicks — in the sport language', () => {
+    const allowed = new Set(Object.values(AMPUTEE_FOOTBALL_CATEGORIES).flat());
+    const labels = Object.values(SPORT_LABELS.footballAmputee).map(l => l.name.he);
+    for (const profile of [{ sport: 'rehab', trainingTrack: 'rehab_sport', rehabSport: 'footballAmputee' }, { sport: 'footballAmputee' }]) {
+      for (const lp of [lpBK, lpAK]) {
+        for (const w of built(profile, lp).weeks) for (const d of w.days) for (const e of d.exercises) {
+          const pid = parseCatalogId(e.catalogId).pattern;
+          expect(allowed.has(pid), `${JSON.stringify(profile)}: ${pid}`).toBe(true);
+          expect(labels.some(l => e.name.startsWith(l)), e.name).toBe(true);
+        }
+      }
+    }
+  });
+
+  it('no arm circles / knee-lift marches in any sport or rehab track (only general fitness, or ROM for a limited arm)', () => {
+    const cases = [
+      ...['football', 'basketball', 'tennis', 'footballAmputee', 'footballAmputeeGK'].map(sport => [{ sport }, lpOk]),
+      ...['basketballWheelchair', 'tennisWheelchair'].map(sport => [{ sport }, lpChair]),
+      [{ sport: 'rehab', trainingTrack: 'rehab_only' }, lpOk],
+      [{ sport: 'rehab', trainingTrack: 'rehab_only' }, lpBK],
+      [{ sport: 'rehab', trainingTrack: 'rehab_sport', rehabSport: 'football' }, lpOk],
+    ];
+    for (const [profile, lp] of cases) {
+      for (const w of built(profile, lp).weeks) for (const d of w.days) for (const e of d.exercises) {
+        expect(GENERIC_DRILLS.includes(parseCatalogId(e.catalogId).pattern), `${JSON.stringify(profile)}: ${e.name}`).toBe(false);
+      }
+    }
   });
 });
