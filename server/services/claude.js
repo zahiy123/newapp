@@ -1671,7 +1671,7 @@ const MUSCLE_FOCUS_MAP = {
   shoulders_arms: { label: 'Shoulders & Arms', directive: 'MUSCLE FOCUS: 60% of exercises must target SHOULDERS & ARMS (deltoids, biceps, triceps, forearms, rotator cuff). Remaining 40% can target other groups.' },
 };
 
-function buildWeekPrompt({ profile, sport, goals, daysPerWeek, location, weekNumber, equipment, muscleGroupFocus, scanData, trainingTrack, rehabSport, hasBall }) {
+function buildWeekPrompt({ profile, sport, goals, daysPerWeek, location, weekNumber, equipment, muscleGroupFocus, scanData, trainingTrack, rehabSport, hasBall, sessionGoals }) {
   const skillLevel = profile.skillLevel || 'beginner';
   const mobilityAid = profile.mobilityAid || 'none';
   const topGoals = goals.slice(0, 3).join(', ');
@@ -1965,7 +1965,7 @@ Level: ${skillLevel} — ${levelDirective}
 ${ageRule}
 Sport: ${sport}. Goals: ${topGoals}. Days/week: ${daysPerWeek}.
 Equipment available: ${eq === 'none' ? 'NONE — bodyweight only, absolutely no weights or equipment exercises' : eq === 'dumbbells' ? 'Dumbbells' : 'Resistance bands'}.
-SESSION GOAL (mandatory): every day has ONE clear goal, written at the start of its "focus" with one of these words: מהירות / זריזות / כוח מתפרץ / כוח / סיבולת / טכניקה / ניידות / שיקום. Every exercise of the day serves that goal (prepare → main goal work → support → cooldown). Rehab tracks: the goal is שיקום first.
+SESSION GOAL (mandatory): every day has ONE clear goal, written at the start of its "focus", chosen ONLY from the athlete's goals: ${Array.isArray(sessionGoals) && sessionGoals.length ? sessionGoals.map(g => String(g).slice(0, 40)).join(' / ') : 'מהירות / כוח מתפרץ / טכניקה / זריזות'}. Never use a goal outside this list. Every exercise of the day serves that goal (prepare → main goal work → support → cooldown).
 ${hasBall === false ? 'BALL: the athlete has NO ball. ABSOLUTELY NO exercise that uses a ball (no dribbling, passing, kicking a ball, ball stops, juggling, shooting, headers, wall-ball drills). Train the same skills as SHADOW / no-ball movement drills (e.g. shadow kick, footwork, shadow shooting motion).' : hasBall === true ? 'BALL: the athlete HAS a ball — ball drills are allowed.' : ''}
 
 ${trackBlock ? `${trackBlock}

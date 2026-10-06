@@ -32,18 +32,21 @@ export const GOALS = Object.freeze({
   endurance: { name: t('סיבולת', 'Endurance'), main: ['endurance', 'conditioning'], support: ['core', 'strength', 'stability'] },
   technique: { name: t('טכניקה וענף', 'Sport technique'), main: ['technique', 'sportSkill'], support: ['balance', 'power', 'coordination', 'agility', 'core'] },
   mobility: { name: t('ניידות והתאוששות', 'Mobility & recovery'), main: ['mobility', 'stability'], support: ['core', 'balance', 'activation'] },
+  // Rehab goals: every main exercise is rehab work (rehab pattern, controlled tempo or partial range)
+  rehabStrength: { name: t('חיזוק שרירים ממוקד', 'Targeted strengthening'), main: ['strength'], mainAlso: ['rehab'], support: ['stability', 'core', 'balance', 'rehab'] },
+  rehabStability: { name: t('יציבות ושיווי משקל', 'Stability & balance'), main: ['stability', 'balance'], mainAlso: ['rehab'], support: ['core', 'strength', 'rehab'] },
+  rehabMobility: { name: t('טווח תנועה', 'Range of motion'), main: ['mobility'], support: ['stability', 'activation', 'rehab'] },
   rehab: { name: t('שיקום', 'Rehab'), main: ['rehab', 'stability'], support: ['core', 'balance', 'mobility', 'activation'] },
-  rehabSport: { name: t('שיקום משולב ענף', 'Rehab + sport'), main: ['rehab', 'stability'], support: ['technique', 'sportSkill', 'balance', 'core'] },
+  rehabSport: { name: t('שילוב כלי הענף בשיקום', 'Sport tools in rehab'), main: ['rehab', 'stability'], support: ['technique', 'sportSkill', 'balance', 'core'] },
 });
 
 // Block sizes and the qualities each block looks for (in order of preference)
 const TEMPLATE = (goal) => {
   const g = GOALS[goal];
-  const prep = goal === 'rehab' || goal === 'rehabSport' || goal === 'mobility'
-    ? ['mobility', 'activation'] : ['activation', 'coordination', 'mobility'];
+  const prep = SAFE_GOALS.has(goal) ? ['mobility', 'activation'] : ['activation', 'coordination', 'mobility'];
   return [
     { role: 'prep', n: 2, want: prep },
-    { role: 'main', n: goal === 'speed' || goal === 'power' ? 4 : 3, want: g.main },
+    { role: 'main', n: goal === 'speed' || goal === 'power' ? 4 : 3, want: g.main, requireAll: g.mainAlso || [] },
     { role: 'support', n: 2, want: g.support },
     { role: 'cooldown', n: 1, want: ['mobility'] },
   ];
@@ -52,7 +55,7 @@ const TEMPLATE = (goal) => {
 // Doses per block role (the main block uses the goal-fitting dose)
 const PREP_DOSES = new Set(['s2r15', 'i20', 'i30', 'h20', 'k10']);
 const COOL_DOSES = new Set(['i30', 'i45', 'h30', 's2r15']);
-const SAFE_GOALS = new Set(['rehab', 'rehabSport', 'mobility']);
+const SAFE_GOALS = new Set(['rehab', 'rehabSport', 'mobility', 'rehabStrength', 'rehabStability', 'rehabMobility']);
 const RISKY = new Set(['plyometric']);
 
 function hashSeed(str) {
@@ -83,13 +86,14 @@ function allowedInGoal(item, goal) {
   return true;
 }
 
-function pick(candidates, want, rand, usedPatterns, avoid) {
+function pick(candidates, want, rand, usedPatterns, avoid, requireAll = []) {
   // preference: earlier `want` quality first; then not used this week; then random
   const score = (it) => {
     const idx = want.findIndex(q => it.qualities.includes(q));
     return (idx < 0 ? 99 : idx) * 10 + (avoid.has(it.id) ? 5 : 0) + rand();
   };
-  const matching = candidates.filter(it => !usedPatterns.has(it.patternId) && want.some(q => it.qualities.includes(q)));
+  const matching = candidates.filter(it => !usedPatterns.has(it.patternId) && want.some(q => it.qualities.includes(q))
+    && requireAll.every(q => it.qualities.includes(q)));
   // never repeat an exercise of this week when there is any alternative
   const fresh = matching.filter(it => !avoid.has(it.id));
   const pool = fresh.length ? fresh : matching;
@@ -121,7 +125,7 @@ export function buildSession({ goal, family, sportFamily = null, lp = {}, seed, 
     // rehab + sport: the support block uses the SPORT's technique patterns, gently (no explosive)
     if (g === 'rehabSport' && block.role === 'support') cands = cands.filter(it => it.variation.tempo !== 'explosive');
     for (let k = 0; k < block.n; k++) {
-      const it = pick(cands, block.want, rand, usedPatterns, avoid);
+      const it = pick(cands, block.want, rand, usedPatterns, avoid, block.requireAll);
       if (!it) break;
       usedPatterns.add(it.patternId);
       items.push({ item: it, role: block.role });
@@ -134,19 +138,19 @@ export function buildSession({ goal, family, sportFamily = null, lp = {}, seed, 
 export function coherenceReport(items, goal) {
   const g = GOALS[goal];
   const core = items.filter(x => x.role === 'main' || x.role === 'support');
-  const onGoal = core.filter(x => {
-    const want = x.role === 'main' ? g.main : [...g.main, ...g.support];
-    return x.item.qualities.some(q => want.includes(q));
-  });
+  const mainOk = (x) => x.item.qualities.some(q => g.main.includes(q)) && (g.mainAlso || []).every(q => x.item.qualities.includes(q));
+  const onGoal = core.filter(x => (x.role === 'main' ? mainOk(x) : x.item.qualities.some(q => [...g.main, ...g.support].includes(q))));
   const offGoal = core.filter(x => !onGoal.includes(x)).map(x => x.item.id);
-  const mainOnGoal = items.filter(x => x.role === 'main').every(x => x.item.qualities.some(q => g.main.includes(q)));
+  const mainOnGoal = items.filter(x => x.role === 'main').every(mainOk);
   return { pct: core.length ? Math.round((100 * onGoal.length) / core.length) : 100, mainOnGoal, offGoal };
 }
 
-// ---- Day goal from the plan's day (AI focus text) + the track ----
+// ---- Day goal: ALWAYS one of the trainee's selected goals (the AI focus only picks among them) ----
 const GOAL_WORDS = [
-  ['rehabSport', ['שיקום משולב', 'rehab + sport', 'rehab and sport']],
-  ['rehab', ['שיקום', 'rehab', 'מניעת פציעות', 'injury prevention', 'פיזיותרפ']],
+  ['rehabSport', ['שיקום משולב', 'שילוב כלי הענף', 'rehab + sport', 'rehab and sport', 'sport tools']],
+  ['rehabStability', ['יציבות', 'שיווי משקל', 'stability', 'balance']],
+  ['rehabMobility', ['טווח תנועה', 'range of motion']],
+  ['rehabStrength', ['חיזוק', 'strengthening']],
   ['speed', ['מהירות', 'ספרינט', 'האצה', 'speed', 'sprint', 'acceleration']],
   ['agility', ['זריזות', 'שינויי כיוון', 'agility', 'change of direction', 'קואורדינציה', 'coordination']],
   ['power', ['כוח מתפרץ', 'פליאומטר', 'קפיצ', 'power', 'plyo', 'explosive', 'נפיצות']],
@@ -156,30 +160,25 @@ const GOAL_WORDS = [
   ['strength', ['כוח', 'חיזוק', 'strength', 'שריר']],
 ];
 
+// Words → a goal family member (rehab words resolve to the rehab goals, generic ones to the sport goals)
+const ALIASES = { mobility: ['rehabMobility'], strength: ['rehabStrength'], rehabMobility: ['mobility'], rehabStrength: ['strength'] };
+
 /**
+ * The day's goal — guaranteed to be one of `allowed` (the trainee's selected goals of their track).
+ * The AI day focus picks among them when it names one; otherwise the allowed goals rotate by day.
  * @param {Object} day - plan day ({ focus, name, theme, ... })
- * @param {{ track: string, sportFamily: string, dayIndex: number }} ctx
+ * @param {{ allowed: string[], dayIndex: number }} ctx
  */
-export function inferGoal(day, { track, sportFamily, dayIndex = 0 } = {}) {
+export function inferGoal(day, { allowed, dayIndex = 0 } = {}) {
+  const goals = allowed?.length ? allowed : ['strength'];
   const text = [day?.focus, day?.name, day?.title, day?.theme].filter(Boolean).join(' ').toLowerCase();
-  let goal = GOAL_WORDS.find(([, words]) => words.some(w => text.includes(w)))?.[0] || null;
-  if (track === 'rehab_only') {
-    // Rehab only: rehab / mobility sessions only
-    return goal === 'mobility' ? 'mobility' : 'rehab';
+  const said = GOAL_WORDS.filter(([, words]) => words.some(w => text.includes(w))).map(([g]) => g);
+  for (const g of said) {
+    if (goals.includes(g)) return g;
+    const alias = (ALIASES[g] || []).find(a => goals.includes(a));
+    if (alias) return alias;
   }
-  if (track === 'rehab_sport') {
-    // Rehab first: every session is rehab + sport (or pure rehab / mobility), never a hard sport session
-    if (goal === 'rehab' || goal === 'mobility') return goal;
-    return 'rehabSport';
-  }
-  if (goal === 'rehabSport') goal = 'rehab';
-  if (goal === 'technique' && !['field', 'court', 'racket', 'combat', 'seated'].includes(sportFamily)) goal = null;
-  if (goal) return goal;
-  const rotation = sportFamily === 'strength' ? ['strength', 'endurance', 'power', 'strength', 'mobility']
-    : sportFamily === 'endurance' ? ['endurance', 'speed', 'strength', 'endurance', 'mobility']
-      : sportFamily === 'seated' ? ['technique', 'strength', 'endurance', 'mobility']
-        : ['technique', 'speed', 'strength', 'agility', 'endurance', 'power'];
-  return rotation[dayIndex % rotation.length];
+  return goals[dayIndex % goals.length];
 }
 
 /** Pattern name for reports. */

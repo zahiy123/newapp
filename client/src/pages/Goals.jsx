@@ -5,17 +5,10 @@ import { useLanguage } from '../context/LanguageContext';
 import { db } from '../services/firebase';
 import { doc, setDoc, getDoc } from 'firebase/firestore';
 import { useNavigate } from 'react-router-dom';
-import { getAvailableGoals, getAvailableMuscleGroups } from '../utils/sportLogic';
+import { getAvailableMuscleGroups } from '../utils/sportLogic';
+import { goalOptions, validProfileGoals, trackOf, PROFILE_GOALS } from '../engine/catalog/trackGoals';
 import OnboardingProgress from '../components/OnboardingProgress';
 
-const GOAL_ICONS = {
-  technique: '\uD83C\uDFAF',
-  aerobic: '\uD83D\uDCAA',
-  strength: '\uD83C\uDFCB\uFE0F',
-  weightLoss: '\u2696\uFE0F',
-  speed: '\u26A1',
-  flexibility: '\uD83E\uDDD8',
-};
 
 const MUSCLE_ICONS = {
   full_body: '\uD83E\uDDD1\u200D\uD83E\uDD1D\u200D\uD83E\uDDD1',
@@ -35,6 +28,8 @@ export default function Goals() {
   const [storedGoals, setStoredGoals] = useState([]);
   const [muscleGroupFocus, setMuscleGroupFocus] = useState('full_body');
   const [scanData, setScanData] = useState(null);
+  // The track decides which goals exist (rehab / sport / rehab + sport) — one source: trackGoals
+  const [profileData, setProfileData] = useState(null);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
 
@@ -44,8 +39,10 @@ export default function Goals() {
       const profileDoc = await getDoc(doc(db, 'users', user.uid));
       if (profileDoc.exists()) {
         const data = profileDoc.data();
+        setProfileData(data);
         if (data.goals) {
-          setSelectedGoals(data.goals);
+          // keep only goals of the current track (older goal ids are mapped to today's)
+          setSelectedGoals(validProfileGoals(data));
           setStoredGoals(data.goals);
         }
         if (data.muscleGroupFocus) {
@@ -59,12 +56,13 @@ export default function Goals() {
     load();
   }, [user]);
 
-  // Iron Rule: filter goals and muscle groups based on scanData
-  const availableGoals = getAvailableGoals(scanData);
+  // Only the goals of the trainee's track (and of what their sport family can really train)
+  const availableGoals = profileData ? goalOptions(profileData).map(key => ({ key, blocked: false })) : [];
+  const track = profileData ? trackOf(profileData) : null;
   const availableMuscleGroups = getAvailableMuscleGroups(scanData);
 
-  // Muscle group focus exists only on the strength track — any other choice is full_body
-  const isStrengthTrack = selectedGoals.includes('strength');
+  // Muscle group focus exists only for strengthening goals — any other choice is full_body
+  const isStrengthTrack = selectedGoals.includes('strength') || selectedGoals.includes('rehabStrength');
 
   useEffect(() => {
     if (!isStrengthTrack && muscleGroupFocus !== 'full_body') {
@@ -126,7 +124,11 @@ export default function Goals() {
     <div className="max-w-lg mx-auto" dir={isRTL ? 'rtl' : 'ltr'}>
       <OnboardingProgress currentStep="goals" isHe={isRTL} />
       <h1 className="text-2xl font-bold text-gray-800 mb-2">{t('goals.title')}</h1>
-      <p className="text-gray-500 mb-6">{t('goals.subtitle')}</p>
+      <p className="text-gray-500 mb-6">
+        {track === 'rehab_only' ? (isRTL ? 'מטרות השיקום שלך — בחר את מה שהכי חשוב לך עכשיו' : 'Your rehab goals — choose what matters most now')
+          : track === 'rehab_sport' ? (isRTL ? 'שיקום קודם, עם כלי הענף שלך — בחר מטרות' : 'Rehab first, with your sport\'s tools — choose goals')
+            : t('goals.subtitle')}
+      </p>
 
       {error && (
         <div className="bg-red-50 text-red-600 p-3 rounded-lg mb-4 text-sm">{error}</div>
@@ -146,8 +148,9 @@ export default function Goals() {
                   : 'border-gray-200 bg-white hover:border-gray-300 hover:shadow-lg'
             }`}
           >
-            <div className="text-3xl mb-2">{GOAL_ICONS[key]}</div>
-            <div className="font-medium text-gray-800 text-sm">{t(`goals.${key}`)}</div>
+            <div className="text-3xl mb-2">{PROFILE_GOALS[key].icon}</div>
+            <div className="font-medium text-gray-800 text-sm">{isRTL ? PROFILE_GOALS[key].name.he : PROFILE_GOALS[key].name.en}</div>
+            <div className="text-xs text-gray-500 mt-1">{isRTL ? PROFILE_GOALS[key].desc.he : PROFILE_GOALS[key].desc.en}</div>
             {blocked && (
               <div className="text-xs text-red-400 mt-1">{t('goals.blocked')}</div>
             )}

@@ -618,6 +618,40 @@ Two critical corrections to the existing onboarding (Stages 1B/1C), completed **
     - New Ghost patterns per sport: football — lateral bound, deceleration stop, crossover step, crutch kick / crutch sprint; basketball — shooting form, defensive stance, rebound jump; tennis — split step, lunge recovery; running — wall drill variants, bounding, ankling; martial arts — roundhouse, guard stance, sprawl; wheelchair — push stroke, seated rotations; floor core — dead bug, bird dog, side plank, mountain climber (prone stride base).
     - Each new pattern multiplies into every family it serves.
     - The server prompt moves from free exercises to day goals only (saves AI tokens).
+- **The locked chain: track → goals → day goal → exercises → Ghost (owner fix, 2026-10-06; restore point `backup-2026-10-06-catalog-v1` = `7cbcc68`):**
+  - *Owner requirements:*
+    1. Only the sports relevant to the user — no unrelated sports (e.g. martial arts) unless requested.
+    2. The track chosen in the profile decides which goals are shown: rehab → rehab goals (targeted strengthening, stability, range of motion); sport → sport goals (speed, explosive power, technique, agility); rehab + sport → both. Never a goal or exercise unrelated to the track.
+    3. From the profile and track to the last exercise with its Ghost, everything locked and 100% matched to the session's goal, with no random exercises.
+  - *Root causes found:*
+    - The Goals page offered one fixed list to everyone (technique, aerobic, strength, weight loss, speed, flexibility), so a rehab-only trainee was offered speed / weight loss.
+    - The sport library and the catalog contained martial arts and a standalone endurance sport, which are not app sports.
+    - The day goal could be any goal, not necessarily one the trainee chose.
+  - *Fix — one source of truth:* `engine/catalog/trackGoals.js`.
+    - **Goals per track:**
+      - Rehab only: **targeted strengthening / stability & balance / range of motion**.
+      - Sport: **speed / explosive power / technique / agility**, limited to what the sport family can really train. Wheelchair sports today: technique + power. Fitness: strength / endurance / power / mobility.
+      - **Rehab + sport:** the three rehab goals + "sport tools in rehab".
+    - **The Goals page** shows only the track's goals, with a description and a track-specific subtitle. Goals saved earlier are mapped to today's ids or dropped if they are outside the track.
+    - **Selected goals** = the trainee's choices within the track (all the track's goals if none is selected).
+    - **Day goal** (`inferGoal`): **always one of the selected goals.** The AI focus only picks among them; otherwise they rotate by day.
+    - **Server:** the AI may write a day focus only from the trainee's goals (the dashboard sends their names). The client enforces this anyway.
+    - **New rehab session goals:**
+      - Targeted strengthening: every main exercise is strength AND rehab (rehab pattern / controlled tempo / partial range).
+      - Stability & balance: stability or balance AND rehab.
+      - Range of motion: mobility.
+      - All rehab goals: no plyometrics and no explosive tempo.
+    - The muscle-group focus also applies to targeted strengthening.
+    - **Unrelated sports removed:** martial arts and the standalone endurance sport (library entries, explanations, patterns). The library holds the app sports + rehab + fitness + running (the owner named running as relevant; not selectable yet).
+  - *Tests:* `engine/catalog/__tests__/chain.test.js` (+23):
+    - Only the app sports; no pattern of a foreign family; goals per track; legacy mapping; out-of-track goals dropped.
+    - **The full chain for 17 track × sport × body cases** (every app sport, rehab-only healthy / below-knee / above-knee / wheelchair, rehab + 4 sports), with and without selected goals, over a 4-week plan:
+      - Every offered goal belongs to the track.
+      - **Every day goal is one of the selected goals.**
+      - Every day is **100% coherent**, with an on-goal main block and ≥ 5 exercises.
+      - Every exercise is a valid catalog id **with a Ghost**, of the trainee's sport family only.
+      - Rehab tracks have no explosive tempo or plyometrics.
+    - Client 611 pass, server 10/10, 0 new failures.
    3. **Profile-based rep counting with a quality score per rep** (replacing the per-exercise analyzers step by step), including the correction hierarchy, timing and external-focus cues.
    4. **Special sport libraries:** leg amputees (amputee football: crutch kick / crutch sprint / balance / header / goalkeeper), wheelchair (push stroke, seated throws, shoulder protection), running (opened for selection), then tennis / martial arts (trunk-rotation metric) and basketball.
    - Following (already in the roadmap): velocity-based fatigue detection (stop the set at ~20% rep-speed loss or form decay), automatic progression / regression, Pain Traffic Light integration, two-way voice ("why?"), best vs. weakest rep clips with the Ghost in the Stage 4 report.
@@ -786,6 +820,7 @@ Two critical corrections to the existing onboarding (Stages 1B/1C), completed **
 | `client/src/engine/catalog/patterns.js` | Movement patterns of the catalog (Ghost source, qualities, sports, body needs, external-focus cue) |
 | `client/src/engine/catalog/catalog.js` | Catalog = pattern × variation (tempo / range / side / dose), each with its Ghost + profile; ~350+ per sport family |
 | `client/src/engine/catalog/sessionPlanner.js` | Coherent goal-based sessions (prep / main / support / cooldown) + coherence report + day-goal inference |
+| `client/src/engine/catalog/trackGoals.js` | Single source of truth: goals per track (rehab / sport / rehab + sport), the trainee's valid goals, legacy mapping |
 | `client/src/engine/catalog/planBuilder.js` | Rebuilds the AI week plan's days from the catalog (deterministic, shared by dashboard + training) |
 | `client/src/engine/training/timedAnalyzer.js` | Timed exercises: seconds of work, paused when out of position |
 | `client/src/engine/training/rangeGauge.js` | When the ROM gauge is shown (dynamic rep exercises only) |
@@ -864,3 +899,4 @@ Two critical corrections to the existing onboarding (Stages 1B/1C), completed **
 - **2026-10-06:** Backup tag `backup-2026-10-06-pre-ghost-equipment-fix` (`39a1a74`). **Ghost on by default** in the warm-up and from the briefing through every set and rest of the exercise; the old skeleton Ghost retired; demo = expert profile Ghost or a truly matching movement (31/99 exercise types today); clearer overlay. **Hard equipment match:** `hasBall` profile fact (dashboard Yes / No, asked before a workout with ball drills, saved on an explicit tap), `equipmentFit` substitutes by movement pattern everywhere exercises are shown (dashboard, training, live adaptation) + server prompt rule + server post-generation guard. +13 client / +2 server tests; client 573 pass, server 10/10, 0 new failures. Not yet committed — server redeploy needed for the server guard.
 - **2026-10-06:** **Exercise catalog + coherent sessions (owner requirement: 300+ exercises per sport, a Ghost for every exercise, absolute session coherence).** Commit `90e4dc3` (Ghost / equipment fixes) + backup tag `backup-2026-10-06-pre-catalog`. Exercise = movement pattern × variation (tempo incl. asymmetric explosive, partial range, side, dose); 30 patterns incl. 5 new Ghost patterns (butt kicks, A-skip, acceleration lean, single-leg balance, squat jump with real flight / landing); 351-367 exercises per sport family, every one with a verified Ghost. Goal-based session templates (9 goals; prep → main → support → cooldown), 100% coherence in tests (football speed = all speed / acceleration; rehab + sport = rehab first, no plyometrics); the AI keeps the week structure, each day is filled from the catalog (dashboard and training identical); timed exercises count seconds of work; server prompt: one goal per day. +18 tests; client 590 pass, server 10/10, 0 new failures. Flag `CATALOG_PLANS`. Not yet committed.
 - **2026-10-06:** Restore point `backup-2026-10-06-catalog-v1` (`7cbcc68`, the catalog work committed locally, tag pushed, not deployed) before the owner's track / goal lock fixes. The Stable Checkpoints section now lists **every** restore point (1-7) with its commit, deploy status, what it contains and how to return to it.
+- **2026-10-06:** **Locked chain (owner fix): track → goals → day goal → exercises → Ghost.** The Goals page offers only the track's goals (rehab: targeted strengthening / stability & balance / range of motion; sport: speed / explosive power / technique / agility; rehab + sport: both; fitness: strength / endurance / power / mobility); every day's goal is one of the trainee's selected goals; new rehab session goals with rehab-only main blocks; the server may only use the trainee's goals; martial arts and the standalone endurance sport removed. +23 chain tests over 17 track × sport × body cases; client 611 pass, server 10/10, 0 new failures. Not yet committed — awaiting the owner.

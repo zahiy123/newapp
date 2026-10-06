@@ -15,7 +15,7 @@ const lpOk = getLimbProfile({ disability: 'none', scanData: { classification: 'N
 const lpLeftAK = getLimbProfile({ scanData: { classification: 'TRANSFEMORAL_AMPUTEE', prostheticSide: 'left' } });
 const lpLeftBK = getLimbProfile({ scanData: { classification: 'TRANSTIBIAL_AMPUTEE', prostheticSide: 'left' } });
 const lpChair = { ...lpOk, wheelchair: true };
-const FAMILIES = ['field', 'court', 'racket', 'combat', 'endurance', 'rehab', 'strength', 'seated'];
+const FAMILIES = ['field', 'court', 'racket', 'endurance', 'rehab', 'strength', 'seated'];
 
 const frame = (p, t) => profileGhostPose(p, t, lpOk).landmarks
   .map(q => (q.visibility ? { ...q, x: 0.5 + q.x * 0.17, y: 0.5 + q.y * 0.17 } : q));
@@ -33,7 +33,7 @@ describe('Catalog — every exercise has a live Ghost', () => {
 
   it('every variation Ghost of a measured pattern is a clean, ≥85% demonstration (tempo / range / side)', () => {
     const seen = new Set();
-    for (const it of buildCatalog('field', lpOk).concat(buildCatalog('combat', lpOk), buildCatalog('racket', lpOk))) {
+    for (const it of buildCatalog('field', lpOk).concat(buildCatalog('court', lpOk), buildCatalog('racket', lpOk))) {
       const v = it.variation;
       const key = [v.pattern, v.tempo, v.range, v.side].join('|');
       if (seen.has(key)) continue;
@@ -73,7 +73,7 @@ describe('Catalog — every exercise has a live Ghost', () => {
     const sizes = Object.fromEntries(FAMILIES.map(f => [f, buildCatalog(f, lpOk).length]));
     const patterns = Object.fromEntries(FAMILIES.map(f => [f, new Set(buildCatalog(f, lpOk).map(i => i.patternId)).size]));
     console.log('catalog sizes', JSON.stringify(sizes), 'patterns', JSON.stringify(patterns));
-    for (const f of ['field', 'court', 'racket', 'combat', 'strength', 'endurance', 'rehab']) expect(sizes[f], f).toBeGreaterThanOrEqual(300);
+    for (const f of ['field', 'court', 'racket', 'strength', 'endurance', 'rehab']) expect(sizes[f], f).toBeGreaterThanOrEqual(300);
   });
 });
 
@@ -113,7 +113,7 @@ describe('Coherent sessions — one goal, every exercise serves it', () => {
   });
 
   it('every goal in every family is 100% coherent', () => {
-    for (const fam of ['field', 'court', 'racket', 'combat', 'strength', 'endurance']) {
+    for (const fam of ['field', 'court', 'racket', 'strength', 'endurance']) {
       for (const goal of Object.keys(GOALS)) {
         if (goal === 'technique' && ['strength', 'endurance'].includes(fam)) continue;
         const s = buildSession({ goal, family: fam, sportFamily: fam, lp: lpOk, seed: 'x' });
@@ -158,12 +158,14 @@ describe('Coherent sessions — one goal, every exercise serves it', () => {
 });
 
 describe('Day goal + plan rebuild', () => {
-  it('reads the goal from the AI day focus, rehab tracks stay rehab-first', () => {
-    expect(inferGoal({ focus: 'אימון מהירות והאצות' }, { track: 'sport_only', sportFamily: 'field' })).toBe('speed');
-    expect(inferGoal({ focus: 'Explosive power' }, { track: 'sport_only', sportFamily: 'field' })).toBe('power');
-    expect(inferGoal({ focus: 'אימון מהירות' }, { track: 'rehab_sport', sportFamily: 'field' })).toBe('rehabSport');
-    expect(inferGoal({ focus: 'אימון מהירות' }, { track: 'rehab_only', sportFamily: 'rehab' })).toBe('rehab');
-    expect(inferGoal({}, { track: 'sport_only', sportFamily: 'field', dayIndex: 1 })).toBe('speed');
+  it('the day goal is always one of the allowed goals (the AI focus only picks among them)', () => {
+    const sport = ['speed', 'power', 'technique', 'agility'];
+    expect(inferGoal({ focus: 'אימון מהירות והאצות' }, { allowed: sport })).toBe('speed');
+    expect(inferGoal({ focus: 'Explosive power' }, { allowed: sport })).toBe('power');
+    expect(inferGoal({ focus: 'אימון מהירות' }, { allowed: ['rehabStrength', 'rehabStability'] })).toBe('rehabStrength');
+    expect(inferGoal({ focus: 'יציבות' }, { allowed: ['rehabStrength', 'rehabStability'] })).toBe('rehabStability');
+    expect(inferGoal({ focus: 'כוח' }, { allowed: ['rehabStrength', 'rehabMobility'] })).toBe('rehabStrength');
+    expect(inferGoal({}, { allowed: sport, dayIndex: 1 })).toBe('power');
   });
 
   it('a whole plan: each day coherent, each exercise with a catalog id (Ghost), training parameters set', () => {

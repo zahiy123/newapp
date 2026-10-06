@@ -4,7 +4,7 @@
 // PURE DATA + composition. The same exercise is coached differently per sport: a squat for
 // a rehab trainee is about slow control and a level pelvis; for a footballer about single-leg
 // hip stability; a landing for a basketball player is about soft knees. Each sport defines:
-//   family    — field / court / racket / combat / endurance / rehab / strength / seated
+//   family    — field / court / racket / endurance (running) / rehab / strength / seated
 //   emphasis  — the sport's coaching priorities, with WHY (the coach explains, not only corrects)
 //   tempoScale— tempo of strength reps / holds in this sport (the Ghost demonstrates it:
 //               period × tempoScale); cyclic and strike movements keep their technical rhythm
@@ -91,10 +91,6 @@ const WHY = {
     'The knee is the shock absorber on every step — landing on a straight leg sends 2-3× body weight into the knee, hip and back'),
   runPelvis: msg('ירידת אגן בריצה = גלוטאוס מדיוס חלש → עומס על הברך ועל רצועת ה-IT',
     'Pelvic drop while running = a weak gluteus medius → stress on the knee and the IT band'),
-  combatChain: msg('באומנויות לחימה העוצמה נולדת מהקרקע ומהירך ועוברת לגפה — בעיטה או אגרוף מהגפה לבד חלשים ופותחים אותך',
-    'In martial arts power starts from the ground and the hip and travels to the limb — a limb-only strike is weak and leaves you open'),
-  combatBalance: msg('אחרי כל בעיטה צריך לחזור לעמידה יציבה — משקל מחוץ לבסיס = פגיעות לנגד',
-    'After every kick you must return to a stable stance — weight outside the base means vulnerability to the opponent'),
   seatedTrunk: msg('בכיסא, הליבה היא הבסיס לכל זריקה ודחיפה — נדנוד גו מבזבז כוח ומסכן את הכתפיים',
     'In a wheelchair the core is the base of every throw and push — rocking wastes power and stresses the shoulders'),
   enduranceForm: msg('בסיבולת, שמירה על טכניקה תחת עייפות היא מה שמונע פציעות עומס',
@@ -166,7 +162,7 @@ export const SPORT_LIBRARY = Object.freeze({
     emphasis: [E('trunk', 'סיבוב גו מבוקר במכה', 'Controlled trunk rotation in the stroke'), E('shoulder', 'כתפיים בריאות', 'Healthy shoulders')],
     rules: [...loweringTempo(600, WHY.eccentric), trunkControlSeated(WHY.seatedTrunk)],
   },
-  // ---- Library-ready sports (not selectable in the app yet — added in the sports-library step) ----
+  // ---- Library-ready (not selectable in the app yet; the owner named it as a relevant sport) ----
   running: {
     id: 'running', family: 'endurance', name: msg('ריצה', 'Running'), tempoScale: 1,
     emphasis: [E('cadence', 'קצב צעדים 170-180 בדקה', 'Cadence 170-180 steps/min', ['gait']), E('landing', 'נחיתה רכה מתחת לגוף', 'Soft landing under the body', ['gait', 'landing']),
@@ -175,19 +171,6 @@ export const SPORT_LIBRARY = Object.freeze({
       { id: 'cadence', on: 'landing', feature: 'cadence', op: '<', value: 155, severity: 'error', appliesTo: ['gait'],
         msg: msg('צעדים קצרים ומהירים יותר', 'Shorter, quicker steps'), why: WHY.runCadence },
       softLanding(8, ['gait', 'landing'], WHY.runLanding), pelvisLevel(8, ['gait', 'singleLeg', 'lowerBody'], WHY.runPelvis)],
-  },
-  martialArts: {
-    id: 'martialArts', family: 'combat', name: msg('אומנויות לחימה', 'Martial arts'), tempoScale: 1,
-    emphasis: [E('chain', 'עוצמה מהקרקע והירך אל הגפה', 'Power from the ground and hip into the limb', ['strike']),
-      E('balance', 'חזרה מיידית לעמידה יציבה', 'Instant return to a stable stance', ['strike', 'singleLeg']), E('guard', 'שמירה על הגנה', 'Keep the guard up')],
-    rules: [...loweringTempo(600, WHY.eccentric), strikeChain(WHY.combatChain), strikeBalance(WHY.combatBalance),
-      pelvisLevel(10, ['lowerBody', 'singleLeg'], WHY.fieldPelvis), softLanding(10, ['landing'], WHY.courtLanding)],
-  },
-  endurance: {
-    id: 'endurance', family: 'endurance', name: msg('סיבולת', 'Endurance'), tempoScale: 1,
-    emphasis: [E('form', 'טכניקה יציבה גם בעייפות', 'Steady technique under fatigue'), E('rhythm', 'קצב ונשימה אחידים', 'Even rhythm and breathing')],
-    rules: [...loweringTempo(600, WHY.enduranceForm), softLanding(8, ['gait', 'landing'], WHY.runLanding),
-      pelvisLevel(8, ['gait', 'lowerBody'], WHY.runPelvis), holdSteady(WHY.holdBreath)],
   },
 });
 

@@ -79,10 +79,6 @@ export const PATTERNS = Object.freeze({
     name: t('תנועת מסירת חזה בצל', 'Shadow chest pass'), cue: t('דחוף את הכדור הדמיוני אל חזה השותף', "Push the imaginary ball to your partner's chest") },
   shadowStroke: { source: { move: 'twist' }, qualities: ['technique', 'sportSkill', 'core'], sports: ['racket', 'seated'], needs: [],
     name: t('פורהנד בצל — תנועת מכה באוויר', 'Shadow forehand — stroke in the air'), cue: t('הכתפיים מסתובבות, הזרוע עוקבת', 'The shoulders turn, the arm follows') },
-  shadowBoxing: { source: { move: 'punches' }, qualities: ['conditioning', 'technique', 'speed', 'sportSkill'], sports: ['combat'], needs: ['arms'],
-    name: t('אגרופי צל', 'Shadow punches'), cue: t('האגרוף יוצא מהירך וחוזר להגנה', 'The punch starts from the hip and returns to guard') },
-  frontKick: { source: { move: 'kick' }, qualities: ['technique', 'balance', 'sportSkill'], sports: ['combat'], needs: ['standing'], unilateral: true,
-    name: t('בעיטה קדמית', 'Front kick'), cue: t('ברך למעלה, הצלף, החזר', 'Knee up, snap, recoil') },
 });
 
 /** Pattern ids usable for a sport family (+ the generic 'all' patterns). */

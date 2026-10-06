@@ -15,6 +15,7 @@ import { loadWeeklyProgress, checkWeeklyReminder } from '../utils/weeklyGoals';
 import { availableEquipment, fitPlan } from '../engine/exercise/equipmentFit';
 import { FEATURES } from '../config/features';
 import { rebuildPlanFromCatalog, planContext } from '../engine/catalog/planBuilder';
+import { selectedSessionGoals, PROFILE_GOALS } from '../engine/catalog/trackGoals';
 import { getLimbProfile } from '../engine/limbProfile';
 
 
@@ -263,8 +264,10 @@ export default function Dashboard() {
       location: loc || currentLocation,
       equipment: currentEquipment,
       hasBall,
+      // The locked chain: the AI may only use the trainee's selected goals of their track as day goals
+      sessionGoals: selectedSessionGoals(userProfile).map(id => PROFILE_GOALS[id].name.he),
       // Muscle group focus applies only to the strength track
-      muscleGroupFocus: userProfile.goals?.includes('strength')
+      muscleGroupFocus: (userProfile.goals?.includes('strength') || userProfile.goals?.includes('rehabStrength'))
         ? (userProfile.muscleGroupFocus || 'full_body')
         : 'full_body',
       scanData: userProfile.scanData || null,

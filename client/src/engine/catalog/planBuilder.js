@@ -10,17 +10,18 @@
 
 import { buildSession, inferGoal, familyOf, GOALS } from './sessionPlanner.js';
 import { toExercise } from './catalog.js';
-import { sportContextsFor } from '../sports/sportLibrary.js';
+import { trackOf, sportFamilyOf, selectedSessionGoals } from './trackGoals.js';
 
 /** Contexts for the builder from the profile. */
 export function planContext(userProfile, lp = {}, seedBase = null) {
-  const contexts = sportContextsFor(userProfile);
-  const track = userProfile?.trainingTrack || (userProfile?.sport === 'rehab' ? 'rehab_only' : 'sport_only');
-  const sportId = contexts[contexts.length - 1];
+  const track = trackOf(userProfile);
+  const sportFamily = sportFamilyOf(userProfile);
   return {
     track,
-    family: familyOf(sportId === 'rehab' ? 'rehab' : sportId),
-    sportFamily: familyOf(sportId),
+    // rehab tracks build from the generic (rehab) family; the sport family feeds rehab + sport's support
+    family: track === 'sport_only' ? sportFamily : familyOf('rehab'),
+    sportFamily: track === 'rehab_only' ? familyOf('rehab') : sportFamily,
+    allowed: selectedSessionGoals(userProfile),     // the locked chain: only the trainee's goals
     lp,
     seedBase: seedBase || userProfile?.uid || userProfile?.email || userProfile?.name || 'trainee',
   };
@@ -40,7 +41,7 @@ export function rebuildPlanFromCatalog(plan, ctx, isHe = true) {
         ...w,
         days: (w?.days || []).map((d, di) => {
           if (!d) return d;
-          const goal = inferGoal(d, { track: ctx.track, sportFamily: ctx.sportFamily, dayIndex: di });
+          const goal = inferGoal(d, { allowed: ctx.allowed, dayIndex: di });
           const s = buildSession({ goal, family: ctx.family, sportFamily: ctx.sportFamily, lp: ctx.lp, seed: `${ctx.seedBase}|w${wi}|d${di}`, avoid });
           s.items.forEach(x => avoid.add(x.item.id));
           return {
