@@ -768,10 +768,10 @@ export default function Training() {
     const kind = buildExecutionProfile(a.cueKey, currentExercise.name, limbProfile, sportContexts, currentExercise.catalogId || null)?.kind;
     return showsRangeGauge({ analyzerType: a.type, profileKind: kind, exerciseName: currentExercise.name });
   }, [currentExercise?.name, limbProfile, sportContexts]);
-  const workPhase = phase === PHASE.EXERCISING || phase === PHASE.CALIBRATING;
   // "Ghost: big" = full size ON the body in every exercise (standing or on the floor): its size
   // follows the trainee's body / distance from the camera, its hips sit on the trainee's hips
-  const demoOnBody = overlayActive && workPhase;
+  // shown on the body from the briefing on (no waiting for the exercise phase)
+  const demoOnBody = overlayActive && demoGhostPhase;
   const demoLarge = false;
   const demoLabel = demoProfile?.precision === 'expert'
     ? (isHe ? `הדגמה: ${demoProfile.name.he}` : `Demo: ${demoProfile.name.en}`)

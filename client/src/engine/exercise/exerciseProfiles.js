@@ -371,15 +371,22 @@ const RAW_EXPERT = {
         why: msg('בלי משקל מעל רגל התמיכה הבעיטה לא מדויקת והגוף נופל', 'Without weight over the support foot the kick is inaccurate and you lose balance') },
     ],
     ghost: {
-      view: 'side', base: 'stride', periodMs: 2000, restT: 0,
-      // A = support leg (the prosthetic side if there is one), B = kicking leg
+      view: 'side', base: 'stride', periodMs: 2000, restT: 0, contactT: 0.48, foot: 'laces',
+      // A = support leg (the prosthetic side if there is one), B = kicking leg.
+      // A real instep drive: plant (support knee soft) -> cocking (hip back, heel to the seat) ->
+      // the THIGH drives first while the knee stays bent -> contact with the foot low, laces through
+      // the ball's middle, chest over the ball -> the knee snaps straight -> a high follow-through.
+      // The arm on the support side opens for balance, the other swings back. Timing like a real
+      // kick: a slow, loaded backswing, then an EXPLOSIVE drive -> contact -> snap (~0.2 s).
       keyframes: [
         { t: 0, a: { 'A.knee': 168, 'B.thigh': 0, 'B.knee': 168, trunk: 4, armA: 10, armB: 10, elbow: 160 } },
-        { t: 0.3, a: { 'A.knee': 160, 'B.thigh': -30, 'B.knee': 75, trunk: 3, armA: 35, armB: -20, elbow: 150 } },
-        { t: 0.42, a: { 'A.knee': 156, 'B.thigh': 25, 'B.knee': 85, trunk: 5, armA: 40, armB: -25, elbow: 150 } },
-        { t: 0.5, a: { 'A.knee': 152, 'B.thigh': 45, 'B.knee': 162, trunk: 6, armA: 45, armB: -25, elbow: 150 } },
-        { t: 0.62, a: { 'A.knee': 158, 'B.thigh': 60, 'B.knee': 170, trunk: 6, armA: 30, armB: -15, elbow: 155 } },
-        { t: 0.85, a: { 'A.knee': 166, 'B.thigh': 10, 'B.knee': 160, trunk: 4, armA: 12, armB: 8, elbow: 160 } },
+        { t: 0.16, a: { 'A.knee': 162, 'B.thigh': -12, 'B.knee': 128, trunk: 5, armA: 30, armB: -8, elbow: 152 } },
+        { t: 0.36, a: { 'A.knee': 154, 'B.thigh': -32, 'B.knee': 72, trunk: 3, armA: 62, armB: -30, elbow: 145 } },
+        { t: 0.43, a: { 'A.knee': 152, 'B.thigh': 10, 'B.knee': 84, trunk: 8, armA: 58, armB: -26, elbow: 145 } },
+        { t: 0.48, a: { 'A.knee': 152, 'B.thigh': 26, 'B.knee': 130, trunk: 9, armA: 52, armB: -20, elbow: 148 } },
+        { t: 0.53, a: { 'A.knee': 156, 'B.thigh': 46, 'B.knee': 166, trunk: 7, armA: 40, armB: -6, elbow: 152 } },
+        { t: 0.64, a: { 'A.knee': 162, 'B.thigh': 64, 'B.knee': 172, trunk: 5, armA: 26, armB: 6, elbow: 156 } },
+        { t: 0.84, a: { 'A.knee': 166, 'B.thigh': 12, 'B.knee': 152, trunk: 4, armA: 12, armB: 8, elbow: 160 } },
       ],
     },
   },
@@ -514,14 +521,19 @@ RAW_EXPERT.shadowPass = {
   ...RAW_EXPERT.footballKick,
   id: 'shadowPass', name: msg('מסירה בצל', 'Shadow pass'),
   ghost: {
-    view: 'side', base: 'stride', periodMs: 1800, restT: 0,
+    view: 'side', base: 'stride', periodMs: 1800, restT: 0, contactT: 0.48, foot: 'inside',
+    // A real side-foot pass: the leg turns out from the hip so the INSIDE of the foot faces the
+    // target, a short backswing, the foot low and the ankle locked, the chest over the ball, and a
+    // short follow-through toward the target (accuracy, not power).
     keyframes: [
       { t: 0, a: { 'A.knee': 168, 'B.thigh': 0, 'B.knee': 168, trunk: 4, armA: 10, armB: 10, elbow: 160 } },
-      { t: 0.3, a: { 'A.knee': 162, 'B.thigh': -20, 'B.knee': 95, trunk: 4, armA: 25, armB: -15, elbow: 155 } },
-      { t: 0.42, a: { 'A.knee': 160, 'B.thigh': 15, 'B.knee': 100, trunk: 5, armA: 30, armB: -15, elbow: 155 } },
-      { t: 0.5, a: { 'A.knee': 158, 'B.thigh': 28, 'B.knee': 160, trunk: 5, armA: 30, armB: -15, elbow: 155 } },
-      { t: 0.62, a: { 'A.knee': 162, 'B.thigh': 30, 'B.knee': 166, trunk: 5, armA: 20, armB: -8, elbow: 158 } },
-      { t: 0.85, a: { 'A.knee': 166, 'B.thigh': 8, 'B.knee': 162, trunk: 4, armA: 12, armB: 8, elbow: 160 } },
+      { t: 0.18, a: { 'A.knee': 162, 'B.thigh': -8, 'B.knee': 142, trunk: 5, armA: 24, armB: -8, elbow: 155 } },
+      { t: 0.34, a: { 'A.knee': 158, 'B.thigh': -22, 'B.knee': 112, trunk: 6, armA: 34, armB: -14, elbow: 152 } },
+      { t: 0.43, a: { 'A.knee': 156, 'B.thigh': 4, 'B.knee': 118, trunk: 7, armA: 32, armB: -12, elbow: 152 } },
+      { t: 0.48, a: { 'A.knee': 156, 'B.thigh': 14, 'B.knee': 152, trunk: 7, armA: 30, armB: -10, elbow: 154 } },
+      { t: 0.56, a: { 'A.knee': 158, 'B.thigh': 30, 'B.knee': 166, trunk: 6, armA: 24, armB: -4, elbow: 156 } },
+      { t: 0.7, a: { 'A.knee': 162, 'B.thigh': 22, 'B.knee': 164, trunk: 5, armA: 18, armB: 2, elbow: 158 } },
+      { t: 0.86, a: { 'A.knee': 166, 'B.thigh': 6, 'B.knee': 162, trunk: 4, armA: 12, armB: 8, elbow: 160 } },
     ],
   },
 };

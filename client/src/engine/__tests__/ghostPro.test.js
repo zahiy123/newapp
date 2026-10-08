@@ -75,14 +75,15 @@ describe('Professional Ghost motion', () => {
   });
 
   it('standing profile Ghosts are drawn in a 3/4 view; a kick turns toward the kicking leg', () => {
-    const kick = profileGhostPose(EXPERT_PROFILES.footballKick, 0.5, lpBK);
+    const kick = profileGhostPose(EXPERT_PROFILES.footballKick, 0.62, lpBK);    // follow-through
     expect(kick.depth).toBe(true);
     expect(kick.yaw).toBeGreaterThan(30);
     // left prosthesis → kicks with the right leg (figure's right = -x) → turns toward -x
     expect(kick.yawOut).toBe(-1);
     const { proj } = figureProjection(kick);
     const ankleR = kick.landmarks[28];
-    expect(proj(ankleR).x).toBeLessThan(ankleR.x);       // the forward swing shows on the screen
+    // the forward swing shows on the screen (beyond the turned lateral position)
+    expect(proj(ankleR).x).toBeLessThan(ankleR.x * Math.cos((kick.yaw * Math.PI) / 180) - 0.2);
     // floor exercises: unchanged side view
     expect(profileGhostPose(EXPERT_PROFILES.pushUp, 0, lpOk).depth).toBeUndefined();
   });

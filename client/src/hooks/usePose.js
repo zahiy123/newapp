@@ -2,6 +2,12 @@ import { useRef, useState, useCallback, useEffect } from 'react';
 import { PoseLandmarker, FilesetResolver, DrawingUtils } from '@mediapipe/tasks-vision';
 import { MEDIAPIPE_WASM_PATH, MEDIAPIPE_MODELS } from '../config/mediapipe';
 import { angleCosine } from '../utils/motionEngine';
+import { createLandmarkFilter, filterLandmarks } from '../engine/landmarkFilter';
+
+// Pose input size: the model works on a 256 px crop anyway — feeding it a downscaled frame (same
+// aspect, so normalized landmarks are unchanged) instead of the full camera frame keeps every
+// detection fast on a phone (no dropped frames / skipped movements)
+const DETECT_MAX_SIDE = 640;
 
 // Key landmark indices
 const LM = {
@@ -62,6 +68,10 @@ export function usePose(canvasRef, beforeDrawRef, amputationProfile, enabled = t
   const ANALYSIS_INTERVAL_MS = 50; // Push to React state at ~20fps (every 50ms)
   // Offscreen canvas for MediaPipe input — sets explicit IMAGE_DIMENSIONS
   const mpCanvasRef = useRef(null);
+  // One Euro smoothing + short-gap bridging (steady skeleton, no trembling, no flicker)
+  const filterRef = useRef(createLandmarkFilter());
+  const lastVideoTimeRef = useRef(-1);
+  const drawingUtilsRef = useRef(null);
 
   // Hard Initialization: only load MediaPipe WASM after component mount + camera approved
   useEffect(() => {
@@ -113,12 +123,18 @@ export function usePose(canvasRef, beforeDrawRef, amputationProfile, enabled = t
     if (!mpCanvasRef.current) {
       mpCanvasRef.current = document.createElement('canvas');
     }
+    // Only a NEW camera frame is analysed (rAF runs faster than the camera: re-detecting the same
+    // frame wasted the phone's time and made the next real frame late)
+    if (videoEl.currentTime === lastVideoTimeRef.current) return;
+    lastVideoTimeRef.current = videoEl.currentTime;
     const mpCanvas = mpCanvasRef.current;
-    if (mpCanvas.width !== videoEl.videoWidth || mpCanvas.height !== videoEl.videoHeight) {
-      mpCanvas.width = videoEl.videoWidth;
-      mpCanvas.height = videoEl.videoHeight;
+    const k = Math.min(1, DETECT_MAX_SIDE / Math.max(videoEl.videoWidth, videoEl.videoHeight));
+    const iw = Math.round(videoEl.videoWidth * k), ih = Math.round(videoEl.videoHeight * k);
+    if (mpCanvas.width !== iw || mpCanvas.height !== ih) {
+      mpCanvas.width = iw;
+      mpCanvas.height = ih;
     }
-    mpCanvas.getContext('2d').drawImage(videoEl, 0, 0, mpCanvas.width, mpCanvas.height);
+    mpCanvas.getContext('2d').drawImage(videoEl, 0, 0, iw, ih);
 
     // Ensure monotonically increasing timestamps to avoid MediaPipe errors
     let timestamp = performance.now();
@@ -128,7 +144,8 @@ export function usePose(canvasRef, beforeDrawRef, amputationProfile, enabled = t
     lastTimestampRef.current = timestamp;
 
     const result = landmarkerRef.current.detectForVideo(mpCanvas, timestamp);
-    const lm = result.landmarks?.[0] || null;
+    // Steady and continuous: One Euro filtered, a missed frame bridged
+    const lm = filterLandmarks(filterRef.current, result.landmarks?.[0] || null, timestamp);
 
     // Always update ref immediately (60fps — for canvas drawing)
     landmarksRef.current = lm;
@@ -141,16 +158,22 @@ export function usePose(canvasRef, beforeDrawRef, amputationProfile, enabled = t
     }
 
     // Draw on canvas at full 60fps — uses ref, not state
-    if (canvasRef?.current && lm) {
+    if (canvasRef?.current) {
       const canvas = canvasRef.current;
-      canvas.width = videoEl.videoWidth;
-      canvas.height = videoEl.videoHeight;
+      // resizing a canvas reallocates it — only when the camera size really changes
+      if (canvas.width !== videoEl.videoWidth || canvas.height !== videoEl.videoHeight) {
+        canvas.width = videoEl.videoWidth;
+        canvas.height = videoEl.videoHeight;
+        drawingUtilsRef.current = null;
+      }
       const ctx = canvas.getContext('2d');
       ctx.clearRect(0, 0, canvas.width, canvas.height);
+      if (!lm) return;
       if (beforeDrawRef?.current) {
         beforeDrawRef.current(ctx, lm, canvas.width, canvas.height);
       }
-      const drawingUtils = new DrawingUtils(ctx);
+      if (!drawingUtilsRef.current) drawingUtilsRef.current = new DrawingUtils(ctx);
+      const drawingUtils = drawingUtilsRef.current;
       const hiddenIndices = getAmputatedIndices(amputationProfile);
       if (hiddenIndices.size === 0) {
         drawingUtils.drawLandmarks(lm, { radius: 4, color: '#00FF00' });

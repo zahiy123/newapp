@@ -49,6 +49,7 @@ const SIZE_TAU_MS = 650;             // the size changes slower still
 const POS_DEADBAND = 0.012;          // hip noise below ~1% of the frame is not followed (soft)
 const SIZE_DEADBAND = 0.04;          // relative torso noise below 4% is not followed (soft)
 const FOOT_KEEP_UPDATES = 30;        // ~0.5 s of frames
+const LEG_PER_TORSO = 1.78 / 1.4;     // Ghost hip→ankle vs. shoulder→hip
 const follow = (prev, target, a, band) => {
   const d = target - prev;
   const k = band > 0 ? Math.min(1, Math.abs(d) / band) : 1;   // quadratic below the band → no tremble
@@ -83,12 +84,22 @@ export function bodyAnchor(landmarks, prev = null, alpha = 0.25, aspect = 4 / 3,
     hipX = sh.x; hipY = sh.y + torso;
   }
   if (!(torso > 0.03)) return prev;
-  // Feet line (the lower ankle = the standing foot); kept ~0.5 s when the ankles flicker
-  const ankles = [landmarks?.[27], landmarks?.[28]].filter(ok);
-  const footSeen = ankles.length ? Math.max(...ankles.map(a => a.y)) : null;
-  const footMiss = footSeen === null ? (prev?.footMiss ?? 0) + 1 : 0;
-  const keepFoot = footSeen === null && prev?.footY != null && footMiss <= FOOT_KEEP_UPDATES;
-  if (!prev) return { hipX, hipY, torso, footY: footSeen, footMiss };
+  // Feet line (the lower ankle = the standing foot) — only a REAL one: inside the frame and at a
+  // plausible leg length below the hips. MediaPipe also "guesses" ankles below the picture when the
+  // feet are out of view; a Ghost stood on those was drawn off-screen (it seemed not to load).
+  // Otherwise the feet are predicted from the hips + torso, so the feet line always exists and
+  // changes smoothly between the two sources.
+  const legLen = torso * LEG_PER_TORSO;
+  const ankles = [landmarks?.[27], landmarks?.[28]]
+    .filter(a => ok(a) && a.y >= 0 && a.y <= 1 && a.y - hipY > legLen * 0.55 && a.y - hipY < legLen * 1.6);
+  const footReal = ankles.length ? Math.max(...ankles.map(a => a.y)) : null;
+  const footSeen = footReal ?? (hipY + legLen);
+  const footMiss = footReal === null ? (prev?.footMiss ?? 0) + 1 : 0;
+  // a real feet line flickering out briefly is kept (no jump to the prediction and back)
+  const keepFoot = footReal === null && prev?.footY != null && footMiss <= FOOT_KEEP_UPDATES && prev.footReal;
+  const footTarget = keepFoot ? prev.footY : footSeen;
+  const footIsReal = footReal !== null || keepFoot;
+  if (!prev) return { hipX, hipY, torso, footY: footSeen, footMiss, footReal: footIsReal };
   // no sudden shrink / growth (turning, a dropped landmark)
   const bounded = Math.min(prev.torso * (1 + MAX_SIZE_STEP), Math.max(prev.torso * (1 - MAX_SIZE_STEP), torso));
   if (typeof dtMs === 'number' && dtMs > 0) {
@@ -99,18 +110,18 @@ export function bodyAnchor(landmarks, prev = null, alpha = 0.25, aspect = 4 / 3,
       hipX: follow(prev.hipX, hipX, aPos, POS_DEADBAND),
       hipY: follow(prev.hipY, hipY, aPos, POS_DEADBAND),
       torso: follow(prev.torso, bounded, aSize, SIZE_DEADBAND * prev.torso),
-      footY: footSeen === null ? (keepFoot ? prev.footY : null)
-        : prev.footY == null ? footSeen : follow(prev.footY, footSeen, aPos, POS_DEADBAND),
+      footY: prev.footY == null ? footTarget : follow(prev.footY, footTarget, aPos, POS_DEADBAND),
       footMiss,
+      footReal: footIsReal,
     };
   }
   return {
     hipX: prev.hipX + alpha * (hipX - prev.hipX),
     hipY: prev.hipY + alpha * (hipY - prev.hipY),
     torso: prev.torso + alpha * (bounded - prev.torso),
-    footY: footSeen === null ? (keepFoot ? prev.footY : null)
-      : prev.footY == null ? footSeen : prev.footY + alpha * (footSeen - prev.footY),
+    footY: prev.footY == null ? footTarget : prev.footY + alpha * (footTarget - prev.footY),
     footMiss,
+    footReal: footIsReal,
   };
 }
 

@@ -423,9 +423,86 @@ function buildPose(profile, t, lp = {}) {
   // Drawn in a 3/4 view (the measurement stays frontal): the depth of the movement — the kick's
   // swing, the squat's hips back / knees forward — is visible. A kick turns toward the kicking leg.
   let out = 1;
-  if (ghost.base === 'stride' && !ghost.alternate) out = legPairs[1][0] === 'left' ? 1 : -1;
+  let feet = {};
+  let armAbd = {};
+  if (ghost.base === 'stride' && !ghost.alternate) {
+    const kickSide = legPairs[1][0];
+    out = kickSide === 'left' ? 1 : -1;
+    if (ghost.foot) feet = { [kickSide]: strikingFoot(ghost.foot, t, ghost.contactT ?? 0.5) };
+    // a kicker's balance arm: the arm on the support side opens out to the side through the swing
+    if (ghost.foot) armAbd = { [kickSide === 'left' ? 'right' : 'left']: 38 * bump(t, 0.12, 0.84, 0.14) };
+  }
   // depth is measured from the planted feet, so the feet stay put and the hips move (squat: back)
-  return toFront(sidePose, { yaw: profile.kind === 'strike' ? 38 : 26, out, refX: ghost.base === 'lunge' ? -0.2 : 0 });
+  return toFront(sidePose, { yaw: profile.kind === 'strike' ? 55 : 26, out, refX: ghost.base === 'lunge' ? -0.2 : 0, feet, armAbd });
+}
+
+/** Smooth 0 -> 1 -> 0 window over [a, b] with ramps of r (phase units). */
+function bump(t, a, b, r = 0.08) {
+  const u = ((t % 1) + 1) % 1;
+  if (u <= a || u >= b) return 0;
+  const x = Math.min(1, (u - a) / r, (b - u) / r);
+  return x * x * (3 - 2 * x);
+}
+
+/**
+ * The kicking foot through the swing, as a real player does it:
+ *   laces (instep drive): the ankle locked with the toes pointed (plantar flexion) through the
+ *     swing — the LACES strike the ball;
+ *   inside (side-foot pass): the leg turned out from the hip (the foot ~80° outward), the ankle
+ *     locked with the toes up — the INSIDE of the foot faces the target and strikes.
+ * glow: the striking surface is always marked, and flashes at the moment of contact.
+ */
+function strikingFoot(style, t, contactT) {
+  const swing = style === 'inside' ? bump(t, 0.2, 0.78) : bump(t, 0.26, 0.72);
+  const u = ((t % 1) + 1) % 1;
+  const flash = Math.exp(-(((u - contactT) / 0.045) ** 2));
+  return {
+    style,
+    plantar: style === 'inside' ? -8 * swing : 32 * swing,
+    turnout: style === 'inside' ? 80 * swing : 0,
+    glow: 0.4 + 0.6 * flash,
+    contact: flash,
+  };
+}
+
+const FOOT_LEN = 0.46;        // heel -> toe, body units (~ a 26 cm boot)
+
+/**
+ * 3D foot of a leg (front-view coords: x lateral, y down, z depth; forward = -z) from its knee and
+ * ankle: perpendicular to the shin (neutral), pointed by `plantar` degrees, turned out by
+ * `turnout` degrees. The STRIKING SURFACE (laces / inside) and its normal (where the ball sits).
+ */
+export function footGeometry(knee, ankle, side, opts = {}) {
+  const out = side === 'left' ? 1 : -1;
+  const sx = ankle.x - knee.x, sy = ankle.y - knee.y, sz = (ankle.z ?? 0) - (knee.z ?? 0);
+  const L = Math.hypot(sx, sy, sz) || 1;
+  const sf = -sz / L, sv = sy / L;                 // shin direction in the sagittal plane (forward, down)
+  const phi = ((opts.plantar ?? 0) * Math.PI) / 180;
+  // in the air: perpendicular to the shin, pointing forward (plantar flexion turns it toward the
+  // shin); on the floor: FLAT (the ankle bends, the sole stays on the ground) — blended by height
+  const air = Math.min(1, Math.max(0, (FLOOR_Y - ankle.y) / 0.22));
+  let df = (Math.cos(phi) * sv + Math.sin(phi) * sf) * air + (1 - air);
+  let dv = (Math.cos(phi) * -sf + Math.sin(phi) * sv) * air;
+  const n = Math.hypot(df, dv) || 1; df /= n; dv /= n;
+  const psi = ((opts.turnout ?? 0) * Math.PI) / 180;
+  const dir = { x: out * Math.sin(psi) * Math.abs(df), y: dv, z: -df * Math.cos(psi) };
+  const at = (k, e = { x: 0, y: 0, z: 0 }) => ({
+    x: ankle.x + dir.x * k + e.x, y: ankle.y + dir.y * k + e.y, z: (ankle.z ?? 0) + dir.z * k + e.z,
+  });
+  const toe = at(FOOT_LEN, { x: 0, y: 0.03, z: 0 });
+  const heel = at(-0.1, { x: 0, y: 0.05, z: 0 });
+  let patch = null, normal = null;
+  if (opts.style === 'inside') {
+    // the medial face: toward the body midline, facing forward when the foot is turned out
+    normal = { x: -out * Math.cos(psi), y: 0, z: -Math.sin(psi) };
+    patch = at(FOOT_LEN * 0.42, { x: normal.x * 0.06, y: 0.01, z: normal.z * 0.06 });
+  } else if (opts.style === 'laces') {
+    // the top of the foot (the laces): away from the sole, i.e. against the shin direction
+    const top = { x: -sx / L, y: -sv, z: -sz / L };
+    patch = at(FOOT_LEN * 0.5, { x: top.x * 0.05, y: top.y * 0.05, z: top.z * 0.05 });
+    normal = { x: 0, y: 0, z: -1 };               // the ball is struck forward
+  }
+  return { ankle, heel, toe, dir, patch, normal, style: opts.style || null, glow: opts.glow ?? 0, contact: opts.contact ?? 0 };
 }
 
 // Lateral position (body units, the figure's LEFT at +x) of each landmark in the front view
@@ -456,12 +533,33 @@ function toFront(pose, view = {}) {
   const lm = pose.landmarks.map((p, i) => (p.visibility
     ? { x: LATERAL[i] ?? 0, y: p.y, z: -(p.x - hipX), visibility: 1 }
     : p));
+  // Arm abduction (out to the side, about the shoulder's front-back axis) — drawn only
+  for (const side of ['left', 'right']) {
+    const abd = view.armAbd?.[side];
+    if (!abd) continue;
+    const s = lm[side === 'left' ? P.LEFT_SHOULDER : P.RIGHT_SHOULDER];
+    const outX = side === 'left' ? 1 : -1;
+    const a = (abd * Math.PI) / 180;
+    for (const i of side === 'left' ? [P.LEFT_ELBOW, P.LEFT_WRIST] : [P.RIGHT_ELBOW, P.RIGHT_WRIST]) {
+      const q = lm[i];
+      if (!q?.visibility) continue;
+      const dy = q.y - s.y;
+      lm[i] = { ...q, x: q.x + outX * dy * Math.sin(a), y: s.y + dy * Math.cos(a) };
+    }
+  }
   const pt = (i) => ({ x: lm[i].x, y: lm[i].y, z: lm[i].z });
   const zOf = (p) => -(p.x - hipX);
   const segments = pose.segments.map((sg) => {
     const idx = SEG_POINTS[sg.limb]?.[sg.part];
     return idx ? { ...sg, from: pt(idx[0]), to: pt(idx[1]) } : sg;
   });
+  // Feet with a direction (a boot, not a blob) — and the striking surface of a kick / pass
+  const feet = {};
+  for (const side of ['left', 'right']) {
+    const kn = lm[side === 'left' ? P.LEFT_KNEE : P.RIGHT_KNEE];
+    const an = lm[side === 'left' ? P.LEFT_ANKLE : P.RIGHT_ANKLE];
+    if (kn?.visibility && an?.visibility) feet[side] = footGeometry(kn, an, side, view.feet?.[side] || {});
+  }
   const sh = (lm[P.LEFT_SHOULDER].y + lm[P.RIGHT_SHOULDER].y) / 2;
   const hp = (lm[P.LEFT_HIP].y + lm[P.RIGHT_HIP].y) / 2;
   const shZ = lm[P.LEFT_SHOULDER].z, hpZ = lm[P.LEFT_HIP].z;
@@ -476,6 +574,7 @@ function toFront(pose, view = {}) {
     segments,
     view: 'front',
     depth: true,                                  // points carry z → drawn in a 3/4 view
+    feet,
     yaw: view.yaw ?? 0,
     yawOut: view.out ?? 1,
     neck: { x: 0, y: sh - 0.05, z: zOf(pose.neck) },

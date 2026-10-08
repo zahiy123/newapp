@@ -285,7 +285,11 @@ function drawFigure(ctx, pose, P0, scale, { floorShadow = true, glow = true } = 
       }
       if (far) { taperPath(ctx, a, b, w1 * scale, w2 * scale); ctx.fillStyle = PALETTE.far; ctx.fill(); }
     }
-    if (seg.part === 'shin') {
+    const side = seg.limb === 'left_leg' ? 'left' : seg.limb === 'right_leg' ? 'right' : null;
+    const foot = seg.part === 'shin' && side ? pose.feet?.[side] : null;
+    if (foot) {
+      drawBoot(foot, seg.dashed);
+    } else if (seg.part === 'shin') {
       // boot: along the foot (forward in depth shows on the screen in the 3/4 view)
       const toe = P({ x: seg.to.x, y: seg.to.y + 0.04, z: (seg.to.z ?? 0) - 0.2 });
       const ang = yaw ? Math.atan2(toe.y - b.y, toe.x - b.x) : 0;
@@ -305,6 +309,23 @@ function drawFigure(ctx, pose, P0, scale, { floorShadow = true, glow = true } = 
       ctx.lineWidth = ow; ctx.strokeStyle = PALETTE.outline; ctx.stroke();
     }
   };
+
+  // ---- a boot from the heel to the toe; the striking surface (laces / inside) glows ----
+  function drawBoot(foot, prosthetic) {
+    const h = P(foot.heel), tt = P(foot.toe);
+    const minLen = 0.11 * scale;
+    let toe = tt;
+    const len = Math.hypot(tt.x - h.x, tt.y - h.y);
+    if (len < minLen) {
+      // pointing at the viewer: foreshortened, but still a visible boot
+      const k = minLen / Math.max(len, 1e-6);
+      toe = len < 1e-6 ? { x: h.x + minLen, y: h.y } : { x: h.x + (tt.x - h.x) * k, y: h.y + (tt.y - h.y) * k };
+    }
+    taperPath(ctx, h, toe, 0.15 * scale, 0.1 * scale);
+    ctx.fillStyle = prosthetic ? '#cbd5e1' : PALETTE.boot;
+    ctx.fill();
+    ctx.lineWidth = ow; ctx.strokeStyle = 'rgba(148, 163, 184, 0.9)'; ctx.stroke();
+  }
 
   // ---- torso: a jersey, tapered shoulders → waist → hips ----
   const drawTorso = () => {
@@ -377,18 +398,26 @@ const FLIGHT_T = 0.36;                            // share of the cycle the ball
 export function shadowBallAt(spec, t, lp = {}) {
   const kind = spec?.ball;
   if (!kind || !spec?.profile?.ghost) return null;
-  const contact = profileGhostPose(spec.profile, CONTACT_T, lp);
+  const contactT = spec.profile.ghost.contactT ?? CONTACT_T;
+  const contact = profileGhostPose(spec.profile, contactT, lp);
   if (!contact?.landmarks) return null;
-  // the kicking foot = the ankle furthest forward at contact
-  const ank = [contact.landmarks[27], contact.landmarks[28]].filter(a => a?.visibility)
-    .sort((a, b) => (a.z ?? 0) - (b.z ?? 0))[0];
-  if (!ank) return null;
   const floor = FLOOR_ANKLE_Y + 0.06;
-  const rest = { x: ank.x, y: floor - BALL_R, z: (ank.z ?? 0) - 0.12 };
+  // the ball sits exactly where the striking surface (laces / inside of the foot) meets it
+  const foot = Object.values(contact.feet || {}).find(f => f.patch);
+  let rest;
+  if (foot) {
+    rest = { x: foot.patch.x + foot.normal.x * BALL_R * 0.95, y: floor - BALL_R, z: foot.patch.z + foot.normal.z * BALL_R * 0.95 };
+  } else {
+    // the kicking foot = the ankle furthest forward at contact
+    const ank = [contact.landmarks[27], contact.landmarks[28]].filter(a => a?.visibility)
+      .sort((a, b) => (a.z ?? 0) - (b.z ?? 0))[0];
+    if (!ank) return null;
+    rest = { x: ank.x, y: floor - BALL_R, z: (ank.z ?? 0) - 0.12 };
+  }
   const tc = ((t % 1) + 1) % 1;
   const appear = Math.min(1, tc / 0.12);           // fades in at the start of the cycle
-  if (tc < CONTACT_T) return { ...rest, r: BALL_R, alpha: appear, spin: 0, floorY: floor };
-  const u = (tc - CONTACT_T) / FLIGHT_T;
+  if (tc < contactT) return { ...rest, r: BALL_R, alpha: appear, spin: 0, floorY: floor };
+  const u = (tc - contactT) / FLIGHT_T;
   if (u >= 1) return null;
   const travel = kind === 'pass' ? 2.6 : 3.4;
   const lift = kind === 'pass' ? 0 : Math.sin(Math.PI * Math.min(1, u * 1.1)) * 1.3;
@@ -401,6 +430,49 @@ export function shadowBallAt(spec, t, lp = {}) {
     spin: u * (kind === 'pass' ? 9 : 14),
     floorY: floor,
   };
+}
+
+/**
+ * The STRIKING SURFACE of a kick / pass (laces / inside of the foot): an amber patch on the boot,
+ * with a burst ring at the moment of contact. Drawn LAST (over the ball) so the trainee always
+ * sees exactly which part of the foot meets the ball.
+ */
+function drawStrikeSurface(ctx, pose, P0, scale) {
+  const feet = Object.values(pose?.feet || {}).filter(f => f.patch);
+  if (!feet.length) return;
+  const { proj } = figureProjection(pose);
+  const P = (p) => P0(proj(p));
+  for (const foot of feet) {
+    const p = P(foot.patch);
+    const h = P(foot.heel), toe = P(foot.toe);
+    const ang = Math.atan2(toe.y - h.y, toe.x - h.x);
+    const r = 0.08 * scale;
+    ctx.save();
+    ctx.globalAlpha *= Math.min(1, foot.glow);
+    ctx.shadowColor = 'rgba(251, 191, 36, 0.95)';
+    ctx.shadowBlur = Math.max(4, scale * 0.14 * foot.glow);
+    ctx.fillStyle = '#fbbf24';
+    ctx.strokeStyle = 'rgba(120, 53, 15, 0.85)';
+    ctx.lineWidth = Math.max(1, scale * 0.015);
+    ctx.beginPath();
+    ctx.ellipse(p.x, p.y, r * 1.5, r * 0.8, ang, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.shadowBlur = 0;
+    ctx.stroke();
+    ctx.restore();
+    if (foot.contact > 0.12) {
+      ctx.save();
+      ctx.globalAlpha *= foot.contact;
+      ctx.strokeStyle = 'rgba(253, 230, 138, 0.95)';
+      ctx.lineWidth = Math.max(1.5, scale * 0.028);
+      for (const k of [1, 1.7]) {
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, r * k * (1.4 + 1.8 * (1 - foot.contact)), 0, Math.PI * 2);
+        ctx.stroke();
+      }
+      ctx.restore();
+    }
+  }
 }
 
 /** Draw the shadow ball (+ its shadow on the floor) with the figure's projection. */
@@ -538,6 +610,7 @@ export function drawWarmupGhost(ctx, spec, lp, nowMs, w, h, opts = {}) {
     ctx.globalAlpha = 0.85;
     drawFigure(ctx, pose, P, scale, { floorShadow: true, glow: true });
     drawShadowBall(ctx, ball, pose, P, scale);
+    drawStrikeSurface(ctx, pose, P, scale);
     ctx.restore();
     return;
   }
@@ -558,6 +631,7 @@ export function drawWarmupGhost(ctx, spec, lp, nowMs, w, h, opts = {}) {
 
   drawFigure(ctx, pose, P, scale);
   drawShadowBall(ctx, ball, pose, P, scale);
+  drawStrikeSurface(ctx, pose, P, scale);
   if (spec.directional) drawMotionTrail(ctx, spec, lp, nowMs, P, scale);
 }
 
@@ -589,6 +663,7 @@ export function drawGhostOverlay(ctx, spec, lp, nowMs, origin, scale, alpha = 0.
   ctx.globalAlpha = alpha;
   drawFigure(ctx, pose, P, scale, { floorShadow: false, glow: true });
   drawShadowBall(ctx, shadowBallAt(spec, t, lp), pose, P, scale);
+  drawStrikeSurface(ctx, pose, P, scale);
   ctx.restore();
   if (spec.directional) {
     ctx.save();

@@ -8,8 +8,8 @@ import { useRef, useState, useCallback } from 'react';
 // down. Fallbacks: the wide request fails on some devices → the previous plain request.
 const WIDE_VIDEO = {
   facingMode: 'user',
-  width: { ideal: 1440 },
-  height: { ideal: 1080 },
+  width: { ideal: 1280 },
+  height: { ideal: 960 },
   aspectRatio: { ideal: 4 / 3 },
   resizeMode: { ideal: 'none' },
 };

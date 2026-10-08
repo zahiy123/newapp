@@ -14,6 +14,7 @@ export default function GhostOverlay({ spec, limbProfile, landmarksRef, videoRef
   const canvasRef = useRef(null);
   const anchorRef = useRef(null);
   const lastAnchorAt = useRef(null);
+  const shownAtRef = useRef(null);       // fade-in start (the Ghost appears softly, at once)
   // Animation clock that runs backward for a "backward" direction — continuous, no jump on the switch
   const clockRef = useRef({ last: null, ms: 0 });
 
@@ -25,7 +26,7 @@ export default function GhostOverlay({ spec, limbProfile, landmarksRef, videoRef
       try {
         const c = canvasRef.current;
         const v = videoRef?.current;
-        if (c && v && v.videoWidth) {
+        if (c) {
           const dpr = window.devicePixelRatio || 1;
           const w = Math.round(c.clientWidth * dpr);
           const h = Math.round(c.clientHeight * dpr);
@@ -36,17 +37,20 @@ export default function GhostOverlay({ spec, limbProfile, landmarksRef, videoRef
           const tNow = performance.now();
           const dt = lastAnchorAt.current === null ? null : tNow - lastAnchorAt.current;
           lastAnchorAt.current = tNow;
-          anchorRef.current = bodyAnchor(landmarksRef?.current, anchorRef.current, 0.25, v.videoWidth / v.videoHeight, dt);
-          // On the trainee's body when seen (hips, or estimated from the shoulders when seated);
-          // centered at full height before a body has been seen — the big Ghost is always visible
-          const { origin, scale, feetY = null } = anchorRef.current
+          // Drawn from the very first frame: centered at full height until the camera / a body is
+          // there, then on the trainee's body
+          const camReady = !!(v && v.videoWidth && v.videoHeight);
+          if (camReady) anchorRef.current = bodyAnchor(landmarksRef?.current, anchorRef.current, 0.25, v.videoWidth / v.videoHeight, dt);
+          const { origin, scale, feetY = null } = camReady && anchorRef.current
             ? overlayPlacement(anchorRef.current, v.videoWidth, v.videoHeight, w, h)
             : defaultPlacement(w, h);
+          if (shownAtRef.current === null) shownAtRef.current = tNow;
+          const fade = Math.min(1, (tNow - shownAtRef.current) / 250);
           const now = performance.now();
           const clk = clockRef.current;
           if (clk.last !== null) clk.ms += (now - clk.last) * (spec?.direction === 'backward' ? -1 : 1);
           clk.last = now;
-          drawGhostOverlay(ctx, spec, limbProfile, clk.ms, origin, scale, 0.55, feetY);
+          drawGhostOverlay(ctx, spec, limbProfile, clk.ms, origin, scale, 0.55 * fade, feetY);
         }
       } catch (err) {
         stopped = true;

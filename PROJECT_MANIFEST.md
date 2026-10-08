@@ -862,6 +862,29 @@ Two critical corrections to the existing onboarding (Stages 1B/1C), completed **
      - The camera request is 4:3 (the full phone sensor; 16:9 modes crop the body), 1440×1080, `resizeMode: none`, with zoom set to its minimum (widest) where supported.
      - If the device refuses the wide request, the previous request is used as a fallback.
   - *Verification:* new tests in `engine/__tests__/ghostPro.test.js`; client 673 pass, 0 new failures (the 23 baseline scan failures are unchanged); server 10/10; build passes. Rendered in Chromium and checked visually.
+- **Four owner fixes from the field test, 2026-10-06 (backup = restore point #13, `ad47b25`):**
+  1. **The big Ghost loads at once.**
+     - Cause 1: in the briefing only the small panel was shown. The big Ghost now shows on the body in every demo phase (briefing, equipment check, countdown, exercise, rest).
+     - It is drawn from the very first frame (centred until the camera / a body is there) and fades in over 0.25 s.
+     - Cause 2: MediaPipe also "guesses" ankles below the picture when the feet are out of view, and the feet-anchored Ghost was drawn there, off-screen. Now only REAL feet (inside the frame, at a plausible leg length) are used. Otherwise the feet line is predicted from the hips + torso, so it always exists and changes smoothly.
+  2. **The striking part of the foot.**
+     - The standing Ghost has real 3D feet (`footGeometry`): flat on the floor when planted, perpendicular to the shin in the air.
+     - Kick (`foot: 'laces'`): the ankle is locked with the toes pointed through the swing, and the **laces** strike.
+     - Pass (`foot: 'inside'`): the leg is turned out about 80° from the hip with the ankle locked, and the **inside of the foot** faces the target.
+     - The striking surface is an amber patch on the boot, with a burst ring at the moment of contact. It is drawn over the ball so it is always visible.
+     - The shadow ball rests exactly where that surface meets it at contact (`contactT`).
+  3. **Steady skeleton and Ghost (from the root).**
+     - Every landmark goes through a **One Euro filter** (`engine/landmarkFilter.js`): heavy smoothing when still, almost none in fast moves.
+     - A missed detection is bridged for 280 ms. A whole-body jump restarts the filter.
+     - Detection runs only on a NEW camera frame (no re-detecting the same frame), on a frame downscaled to 640 px (same aspect, so the landmarks are unchanged). This keeps every detection fast on a phone, so no movements are skipped.
+     - The pose canvas is not reallocated every frame; the drawing helper is reused.
+     - The camera request is 1280×960 (4:3, full field of view).
+  4. **Human, realistic kick and pass.**
+     - Kick: plant (support knee soft) → loaded backswing (hip back, heel to the seat) → the THIGH drives first with the knee bent → contact with the foot low, chest over the ball → the knee snaps straight → a high follow-through. The timing is real: a slow backswing, then an explosive drive → contact → snap.
+     - Pass: a short backswing, the foot low and turned out, a short follow-through toward the target.
+     - The support-side arm opens out for balance (arm abduction, drawn only).
+     - Kicks / passes are shown in a near-side view (55°), the way technique is taught. The measurement is unchanged.
+  - *Verification:* new tests in `engine/__tests__/steadyRealism.test.js` (filter steadiness / lag / gap / jump; off-screen feet; laces / inside geometry; flat planted feet; the ball touching the striking surface). Kick dynamics tests: hip-first chain and balance on the new Ghost; the knee-first test was retimed. Client 682 pass, 0 new failures; server 10/10; build passes. Rendered in Chromium and checked frame by frame.
    3. **Profile-based rep counting with a quality score per rep** (replacing the per-exercise analyzers step by step), including the correction hierarchy, timing and external-focus cues.
    4. **Special sport libraries:** leg amputees (amputee football: crutch kick / crutch sprint / balance / header / goalkeeper), wheelchair (push stroke, seated throws, shoulder protection), running (opened for selection), then tennis / martial arts (trunk-rotation metric) and basketball.
    - Following (already in the roadmap): velocity-based fatigue detection (stop the set at ~20% rep-speed loss or form decay), automatic progression / regression, Pain Traffic Light integration, two-way voice ("why?"), best vs. weakest rep clips with the Ghost in the Stage 4 report.
@@ -1129,3 +1152,4 @@ Two critical corrections to the existing onboarding (Stages 1B/1C), completed **
 - **2026-10-06:** Committed and pushed `73ee592` → deployed, verified in the served bundle. Restore point `checkpoint-2026-10-06-front-view` (#12). Awaiting the owner's device check (front-view measurement relies on MediaPipe depth — thresholds may need per-exercise tuning).
 - **2026-10-06:** **Six owner upgrades.** Early start with an immediate count (counts from the briefing; the number is said at the rep); steady Ghost (time-based smoothing, feet-anchored, smooth keyframes); kicks and passes as a full set per leg with a spoken leg change; professional 3/4-view Ghost (tapered limbs, jersey, boots, depth order); shadow ball in shadow kicks / passes; wide 4:3 camera with minimum zoom. Client 673 pass, server 10/10, 0 new failures. Committed as `ad47b25`.
 - **2026-10-06:** Pushed `ad47b25` → deployed, verified in the served bundle. Restore point `checkpoint-2026-10-06-pro-ghost` (#13). Awaiting the owner's device check.
+- **2026-10-06:** **Four field-test fixes.** Instant big Ghost (all demo phases, first-frame draw, fade-in, off-screen feet ignored); laces / inside-of-foot striking surface with a contact flash and the ball at the contact point; One Euro landmark filter + gap bridging + new-frame-only downscaled detection; realistic kick / pass timing and mechanics with a balance arm and a near-side view. Client 682 pass, server 10/10, 0 new failures. Not yet committed.

@@ -176,8 +176,9 @@ describe('Kick — kinetic chain and weight transfer', () => {
 
   it('a knee-first kick (no hip drive) is flagged and scores low', () => {
     const kneeFirst = withKeyframes(EXPERT_PROFILES.footballKick, (k) => {
-      if (k.t === 0.42) return { ...k, a: { ...k.a, 'B.thigh': -28, 'B.knee': 160 } };
-      if (k.t === 0.5) return { ...k, a: { ...k.a, 'B.thigh': -20, 'B.knee': 168 } };
+      // the drive keyframe (knee still bent) and the contact keyframe: knee straightens, no hip drive
+      if (k.t === 0.43) return { ...k, a: { ...k.a, 'B.thigh': -28, 'B.knee': 160 } };
+      if (k.t === 0.48) return { ...k, a: { ...k.a, 'B.thigh': -20, 'B.knee': 168 } };
       return k;
     });
     const res = run(kick, ms => frameAt(kneeFirst, ms), 4 * 2000);
