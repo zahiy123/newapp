@@ -23,6 +23,8 @@ import { makeTimedAnalyzer } from '../engine/training/timedAnalyzer';
 import { makeProfileRepAnalyzer, withRepOffset } from '../engine/training/profileRepAnalyzer';
 import CoachAvatar, { CoachPreview } from '../components/CoachAvatar';
 import TrainingViewControls from '../components/TrainingViewControls';
+import CoachVoicePicker from '../components/CoachVoicePicker';
+import { pickCoachVoice } from '../engine/voicePick';
 import { coachMode, COACH_IDS } from '../engine/coachAvatar';
 import { setCoachVoice } from '../hooks/useSpeech';
 import { useVoiceCommand } from '../hooks/useVoiceCommand';
@@ -403,14 +405,26 @@ export default function Training() {
     try { const c = localStorage.getItem('coachChoice'); return c === 'male' || c === 'female' ? c : 'none'; } catch { return 'none'; }
   });
   const [coachCheer, setCoachCheer] = useState(false);
+  const [voicePickerOpen, setVoicePickerOpen] = useState(false);
   const [coachPicked, setCoachPicked] = useState(() => {
     try { return localStorage.getItem('coachChoice') !== null; } catch { return false; }
   });
+  // No voice of the coach's gender on this device → open the voice screen once (it explains how to add one)
+  const offerCoachVoice = (c) => {
+    if (!COACH_IDS.includes(c) || !window.speechSynthesis) return;
+    try { if (localStorage.getItem(`coachVoiceOffered.${c}`)) return; } catch { /* storage unavailable */ }
+    const { confident } = pickCoachVoice(window.speechSynthesis.getVoices(), c, isHe ? 'he-IL' : 'en-US',
+      (() => { try { return localStorage.getItem(`coachVoiceURI.${c}`); } catch { return null; } })());
+    if (confident) return;
+    try { localStorage.setItem(`coachVoiceOffered.${c}`, '1'); } catch { /* storage unavailable */ }
+    setVoicePickerOpen(true);
+  };
   const chooseCoach = (c) => {
     const v = COACH_IDS.includes(c) ? c : 'none';
     setCoachChoice(v);
     setCoachPicked(true);
     try { localStorage.setItem('coachChoice', v); } catch { /* storage unavailable */ }
+    offerCoachVoice(v);
   };
   const warmUpStateRef = useRef({});
   const warmUpTimerRef = useRef(null);
@@ -586,6 +600,7 @@ export default function Training() {
     setCheckIn(status);
     setCoachChoice(COACH_IDS.includes(status.coach) ? status.coach : 'none');
     setCoachPicked(true);
+    offerCoachVoice(status.coach);
     sessionDataRef.current.checkIn = status;
     if (typeof status.hasBall === 'boolean') setBallAnswer(status.hasBall);   // no separate ball question
     if (planSourceRef.current) setExercises(buildTodayExercises(planSourceRef.current, status));
@@ -608,7 +623,8 @@ export default function Training() {
       if (!week?.days?.[dayIdx]) return;
 
       planSourceRef.current = { plan, data, weekIdx, dayIdx };
-      setExercises(buildTodayExercises(planSourceRef.current, null));
+      const loadedExercises = buildTodayExercises(planSourceRef.current, null);
+      setExercises(loadedExercises);
       resetVisionSession();
 
       // Load per-exercise score history from Firestore (last 5 workouts)
@@ -755,8 +771,10 @@ export default function Training() {
   const [exerciseGhostOn, setExerciseGhostOn] = useState(() => {
     try { return localStorage.getItem('exerciseGhostOn') !== '0'; } catch { return true; }
   });
+  // the opening screen (camera on, check-in done): a preview of what comes first
+  const idlePreview = phase === PHASE.IDLE && cameraActive && (!!checkIn || currentIdx > 0);
   const demoGhostPhase = phase === PHASE.BRIEFING || phase === PHASE.CHECKING_EQUIPMENT
-    || phase === PHASE.CALIBRATING || phase === PHASE.EXERCISING || phase === PHASE.RESTING;
+    || phase === PHASE.CALIBRATING || phase === PHASE.EXERCISING || phase === PHASE.RESTING || idlePreview;
   const demoProfile = useMemo(
     () => (FEATURES.EXPERT_PROFILE && demoGhostPhase
       ? (execution.profile || buildExecutionProfile(exerciseCueKey, currentExercise?.name, limbProfile, sportContexts, currentExercise?.catalogId || null))
@@ -779,7 +797,10 @@ export default function Training() {
     }
     return spec;
   }, [demoGhostPhase, demoProfile, exerciseCueKey, currentExercise?.catalogId, currentExercise?.sideSwitch, currentExercise?.splitMode, splitHalf, limbProfile]);
-  const showDemoGhost = exerciseGhostOn && !!demoGhostSpec;
+  // before the warm-up, the opening screen previews the first warm-up move
+  const demoSpecShown = idlePreview && !warmUpDone && currentIdx === 0 && warmUpExercises[0]?.ghost
+    ? warmUpExercises[0].ghost : demoGhostSpec;
+  const showDemoGhost = exerciseGhostOn && !!demoSpecShown;
   // ROM gauge only for dynamic range-of-motion exercises (never static holds / ball drills / kicks / running)
   const showRomGauge = useMemo(() => {
     if (!currentExercise) return false;
@@ -2827,14 +2848,14 @@ export default function Training() {
             the panel, or the full overlay on the body for standing exercises */}
         {demoGhostPhase && showDemoGhost && !demoOnBody && (
           <WarmupGhostPanel
-            spec={demoGhostSpec} limbProfile={limbProfile} isHe={isHe}
+            spec={demoSpecShown} limbProfile={limbProfile} isHe={isHe}
             placement={phase === PHASE.BRIEFING || phase === PHASE.CHECKING_EQUIPMENT || phase === PHASE.RESTING ? 'top' : 'middle'}
             size={demoLarge ? 'large' : 'small'}
             label={demoLabel}
           />
         )}
         {demoGhostPhase && showDemoGhost && demoOnBody && (
-          <GhostOverlay spec={demoGhostSpec} limbProfile={limbProfile} landmarksRef={poseLandmarksRef} videoRef={videoRef} onError={handleOverlayError} />
+          <GhostOverlay spec={demoSpecShown} limbProfile={limbProfile} landmarksRef={poseLandmarksRef} videoRef={videoRef} onError={handleOverlayError} />
         )}
         {(phase === PHASE.EXERCISING || phase === PHASE.CALIBRATING) && <ExecutionHud execution={execution} isHe={isHe} />}
         {/* The virtual coach (chosen in the check-in): demonstrates with the Ghost, talks, claps */}
@@ -3205,8 +3226,8 @@ export default function Training() {
         {/* START TRAINING — readiness rating + start button when IDLE and camera ready */}
         {/* TODAY's check-in: where / ball / prosthesis or crutches — the workout is built from it */}
         {phase === PHASE.IDLE && exercises.length > 0 && currentIdx === 0 && !checkIn && userProfile && (
-          <div className="absolute inset-0 flex items-center justify-center z-[30] bg-black/40 p-3 overflow-y-auto">
-            <div className="w-full max-w-md">
+          <div className="fixed inset-0 flex items-start sm:items-center justify-center z-[60] bg-black/70 p-3 overflow-y-auto">
+            <div className="w-full max-w-md my-auto">
               <DailyCheckIn profile={userProfile} isHe={isHe} onDone={handleCheckInDone} />
             </div>
           </div>
@@ -3432,7 +3453,22 @@ export default function Training() {
           }}
           coach={coachChoice}
           onCoach={chooseCoach}
+          onVoice={() => setVoicePickerOpen(true)}
+          status={(() => {
+            const on = phase === PHASE.WARM_UP ? warmUpGhostOn : exerciseGhostOn;
+            if (!on) return null;
+            const bigShown = (phase === PHASE.WARM_UP && warmUpGhostOn && ghostSpec && overlayActive) || (demoGhostPhase && showDemoGhost && demoOnBody);
+            const smallShown = (phase === PHASE.WARM_UP && warmUpGhostOn && ghostSpec && !overlayActive) || (demoGhostPhase && showDemoGhost && !demoOnBody);
+            if (bigShown) return isHe ? '✓ הצללית הגדולה מוצגת עכשיו על הגוף שלך' : '✓ The big Ghost is on your body now';
+            if (smallShown) return isHe ? '✓ הצללית הקטנה מוצגת בצד המסך' : '✓ The small Ghost is shown at the side';
+            if (phase === PHASE.IDLE && !checkIn && currentIdx === 0) return isHe ? 'הצללית תופיע אחרי הצ\'ק-אין' : 'The Ghost appears after the check-in';
+            return isHe ? 'הצללית תופיע עם תחילת החימום / התרגיל' : 'The Ghost appears when the warm-up / exercise starts';
+          })()}
         />
+      )}
+
+      {voicePickerOpen && COACH_IDS.includes(coachChoice) && (
+        <CoachVoicePicker coach={coachChoice} isHe={isHe} lang={isHe ? 'he-IL' : 'en-US'} onClose={() => setVoicePickerOpen(false)} />
       )}
 
       {/* Coach selection at the start of the training (once per device; changeable any time in the strip) */}

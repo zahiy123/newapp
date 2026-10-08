@@ -1,5 +1,6 @@
 import { useCallback, useRef, useEffect } from 'react';
 import { genderizeCoachText } from '../engine/coachVoiceText';
+import { pickCoachVoice, fallbackPitch } from '../engine/voicePick';
 import { getCoachingRate, getCoachingPitch, getLifeStage } from '../utils/ageAdaptive';
 
 // The chosen virtual coach's voice (owner, 2026-10-08): a male coach speaks lower, a female coach
@@ -7,14 +8,12 @@ import { getCoachingRate, getCoachingPitch, getLifeStage } from '../utils/ageAda
 let coachVoice = null;
 export function getCoachVoice() { return coachVoice; }
 export function setCoachVoice(gender) { coachVoice = gender === 'male' || gender === 'female' ? gender : null; }
-const FEMALE_VOICE = /female|woman|hila|carmit|zira|samantha|karen|victoria|susan|tessa|moira/i;
-const MALE_VOICE = /male|man|asaf|david|mark|daniel|alex|fred|guy|james|george/i;
+/** The coach's chosen / best device voice (explicit — from getVoices()), and whether it is surely of its gender. */
 function coachDeviceVoice(lang) {
-  if (!coachVoice || !window.speechSynthesis) return null;
-  const pre = String(lang || '').slice(0, 2).toLowerCase();
-  const voices = window.speechSynthesis.getVoices().filter(v => String(v.lang || '').toLowerCase().startsWith(pre));
-  if (coachVoice === 'female') return voices.find(v => FEMALE_VOICE.test(v.name)) || null;
-  return voices.find(v => !FEMALE_VOICE.test(v.name) && MALE_VOICE.test(v.name)) || null;
+  if (!coachVoice || !window.speechSynthesis) return { voice: null, confident: false };
+  let saved = null;
+  try { saved = localStorage.getItem(`coachVoiceURI.${coachVoice}`); } catch { /* storage unavailable */ }
+  return pickCoachVoice(window.speechSynthesis.getVoices(), coachVoice, lang, saved);
 }
 
 export function useSpeech(lang = 'he-IL', age) {
@@ -157,13 +156,14 @@ export function useSpeech(lang = 'he-IL', age) {
     }
     // Use preferred voice if available — or the chosen coach's own voice
     const coachDev = coachDeviceVoice(effectiveLangRef.current);
-    if (coachDev) {
-      utterance.voice = coachDev;
+    if (coachDev.voice) {
+      utterance.voice = coachDev.voice;
+      utterance.lang = coachDev.voice.lang || utterance.lang;
     } else if (preferredVoiceRef.current) {
       utterance.voice = preferredVoiceRef.current;
     }
-    // without a matching device voice, the pitch tells the coach apart
-    if (coachVoice && !coachDev) utterance.pitch = Math.min(2, utterance.pitch * (coachVoice === 'male' ? 0.82 : 1.18));
+    // no voice of the coach's gender on this device → a clearly different pitch
+    if (coachVoice && !coachDev.confident) utterance.pitch = Math.min(2, utterance.pitch * fallbackPitch(coachVoice));
 
     speaking.current = true;
     speechStartedAtRef.current = Date.now();

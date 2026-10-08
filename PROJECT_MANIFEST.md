@@ -938,6 +938,28 @@ Two critical corrections to the existing onboarding (Stages 1B/1C), completed **
      - No other automatic exercise change exists in the code (checked every `setCurrentIdx` / `setWarmUpIdx` / timer).
   4. **The coach speaks in its own gender** (`engine/coachVoiceText.js`): with the female coach, every first-person form the coach says about itself becomes feminine ("אני סופרת איתך", "אני עוקבת אחריך", "אני לא מצליחה לראות", "אני מוכנה"…), in the voice and the speech bubble. Words addressed to the trainee are unchanged.
   - *Verification:* a Playwright run on a phone screen with a BRIGHT fake camera (big Ghost clearly visible); coaches rendered and checked; new tests (explicit phrase only, the mic session rule, feminine forms). Client 693 pass, 0 new failures; build passes.
+- **Field test #3, 2026-10-08 — "the female coach speaks with a man's voice; tapping 'big' does nothing" (backup = restore point #17, `ddbb81f`):**
+  - **Method: the REAL training screen was run end to end.** A Vite harness (kept outside the repo, in the session scratchpad) mounts the real `Training.jsx`:
+    - stand-ins replace Firebase / auth / the server-side detectors;
+    - a phone viewport with an Android user agent and a bright fake camera;
+    - Playwright REAL taps (actionability-checked), screenshots at each step.
+  - **Findings:**
+    - In the real screen, "גדולה" did switch the state and showed the big Ghost — but only once a warm-up / exercise was running. Before that (the opening screen / during the check-in) no Ghost of any size is drawn, so the tap had no visible effect.
+    - The check-in card was squeezed into the 40%-high camera view on a phone; its build button was below the fold, so the workout could seem not to start.
+    - The only Hebrew voice on many devices is male (e.g. "Microsoft Asaf"; on Android the system default voice), and the old name test found no female voice → the default male voice was used, with only a small pitch change.
+    - The resume path referenced an undefined `loadedExercises` (a crash when continuing a saved workout).
+  - **Fix:**
+    1. **The Ghost shows from the moment the camera is on.** The opening screen previews the first warm-up move / exercise, so "big / small" always has a visible effect.
+    2. **A status line under the strip** says what the Ghost is doing ("✓ הצללית הגדולה מוצגת עכשיו על הגוף שלך" / "תופיע אחרי הצ'ק-אין" / "תופיע עם תחילת החימום / התרגיל").
+    3. **The check-in is a full-screen card** on the phone.
+    4. **Explicit voice choice** (`engine/voicePick.js` + `components/CoachVoicePicker.jsx`):
+       - The device voices (`speechSynthesis.getVoices()`) are filtered to the language (he / iw).
+       - Each voice is scored for the coach's gender by name (Carmit / Hila female; Asaf / Avri male), and the trainee's own choice wins (saved per coach).
+       - If no voice of the coach's gender exists, the pitch is raised clearly (×1.45 female / ×0.8 male).
+       - A "🔊 קול" screen (in the strip, and opened automatically once when the device has no voice of the chosen coach's gender) lists every Hebrew voice with play / choose, and explains how to install a female Hebrew voice on Android (Google TTS voice data) and iPhone (Carmit).
+    5. Kick / pass names now say "סט נפרד לכל רגל" (they still said "half a set").
+    6. The resume crash was fixed.
+  - *Verification:* the real-screen end-to-end run on a phone viewport: check-in completed with real taps, voice screen opened (it found only "Microsoft Asaf — male" on the test machine and showed the install guide), the camera started, the big Ghost was on the body with "✓" in the status line, and the voice screen opened from the strip. New `voicePick.test.js` (iPhone / Edge / Windows / Android voice lists). Client 699 pass, 0 new failures; build passes.
    3. **Profile-based rep counting with a quality score per rep** (replacing the per-exercise analyzers step by step), including the correction hierarchy, timing and external-focus cues.
    4. **Special sport libraries:** leg amputees (amputee football: crutch kick / crutch sprint / balance / header / goalkeeper), wheelchair (push stroke, seated throws, shoulder protection), running (opened for selection), then tennis / martial arts (trunk-rotation metric) and basketball.
    - Following (already in the roadmap): velocity-based fatigue detection (stop the set at ~20% rep-speed loss or form decay), automatic progression / regression, Pain Traffic Light integration, two-way voice ("why?"), best vs. weakest rep clips with the Ghost in the Stage 4 report.
@@ -1213,3 +1235,4 @@ Two critical corrections to the existing onboarding (Stages 1B/1C), completed **
 - **2026-10-08:** Pushed `72802e3` → deployed, verified in the served bundle. Restore point `checkpoint-2026-10-08-controls` (#16). Awaiting the owner's device check.
 - **2026-10-08:** **Field test #2.** Big Ghost invisible on a bright picture → high-contrast look (dark thick outline, strong cyan, 72%) + fixed inward limb caps; professional athletic coach silhouettes (body type per coach, accent tracksuit, sound wave when talking); auto skip = the app heard its own 'הבא' → explicit 'תרגיל הבא' only, mic off while the coach speaks (+1.5 s), on-screen notice; the female coach speaks in the feminine. Client 693 pass, 0 new failures. Committed as `ddbb81f`.
 - **2026-10-08:** Pushed `ddbb81f` → deployed, verified in the served bundle. Restore point `checkpoint-2026-10-08-pro-coach` (#17). Awaiting the owner's device check.
+- **2026-10-08:** **Field test #3.** Verified on the REAL training screen (harness + real taps): the Ghost was hidden before the warm-up starts → shown from camera-on with a status line; check-in full-screen on phones; explicit coach voice choice from getVoices (gender by name, saved choice, clear pitch fallback, voice screen with install guide); per-leg kick names; resume crash fixed. Client 699 pass, 0 new failures. Not yet committed.

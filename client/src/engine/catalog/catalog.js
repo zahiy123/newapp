@@ -236,9 +236,10 @@ export function toExercise(item, isHe = true, label = null, { canSplit = true } 
   const perSet = split && splitMode === 'kick';
   const reps = split && !perSet ? String(Number(d.reps) * 2) : d.reps;
   const sets = perSet ? Number(d.sets) * 2 : d.sets;
+  const perSetName = (s, he) => (perSet ? s.replace(he ? 'חצי סט לכל רגל' : 'half a set each', he ? 'סט נפרד לכל רגל' : 'a separate set per leg') : s);
   return {
-    name: name.he,
-    nameEn: name.en,
+    name: perSetName(name.he, true),
+    nameEn: perSetName(name.en, false),
     description: `${cue.he}. ${d.label.he}${perSet ? ' — סט נפרד לכל רגל' : split ? ' — לכל רגל' : ''}`,
     descriptionEn: `${cue.en}. ${d.label.en}${perSet ? ' — a separate set for each leg' : split ? ' — each leg' : ''}`,
     sets,

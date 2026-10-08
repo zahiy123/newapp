@@ -20,9 +20,10 @@ function Seg({ active, onClick, children, tone = 'blue' }) {
  * @param {'off'|'small'|'big'} ghost
  * @param {'male'|'female'|'none'} coach
  */
-export default function TrainingViewControls({ ghost, onGhost, coach, onCoach, isHe, bigAvailable = true, floating = false }) {
+export default function TrainingViewControls({ ghost, onGhost, coach, onCoach, isHe, bigAvailable = true, floating = false, status = null, onVoice = null }) {
   return (
-    <div className={`${floating ? 'fixed inset-x-0 bottom-0 z-[45] pb-[env(safe-area-inset-bottom)]' : 'flex-shrink-0'} bg-gray-950 border-t border-white/10 px-2 py-1.5 flex flex-wrap items-center justify-center gap-x-2 gap-y-1`} dir={isHe ? 'rtl' : 'ltr'}>
+    <div className={floating ? 'fixed inset-x-0 bottom-0 z-[45] pb-[env(safe-area-inset-bottom)]' : 'flex-shrink-0'}>
+    <div className={`bg-gray-950 border-t border-white/10 px-2 py-1.5 flex flex-wrap items-center justify-center gap-x-2 gap-y-1`} dir={isHe ? 'rtl' : 'ltr'}>
       <span className="text-white/60 text-xs font-semibold whitespace-nowrap">{'👻'} {isHe ? 'צללית' : 'Ghost'}</span>
       <div className="flex rounded-lg overflow-hidden border border-white/15 flex-shrink-0">
         <Seg active={ghost === 'off'} onClick={() => onGhost('off')}>{isHe ? 'כבויה' : 'Off'}</Seg>
@@ -38,6 +39,16 @@ export default function TrainingViewControls({ ghost, onGhost, coach, onCoach, i
         ))}
         <Seg active={coach === 'none'} onClick={() => onCoach('none')}>{isHe ? 'ללא' : 'None'}</Seg>
       </div>
+      {onVoice && coach !== 'none' && (
+        <button type="button" onClick={onVoice}
+          className="px-2.5 py-1.5 rounded-lg text-xs font-bold bg-gray-800 text-white/80 border border-white/15 whitespace-nowrap">
+          {'🔊'} {isHe ? 'קול' : 'Voice'}
+        </button>
+      )}
+    </div>
+    {status && (
+      <div className="bg-gray-950 text-center text-[11px] text-white/60 pb-1" dir={isHe ? 'rtl' : 'ltr'}>{status}</div>
+    )}
     </div>
   );
 }
