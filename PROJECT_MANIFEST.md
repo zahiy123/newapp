@@ -961,6 +961,17 @@ Two critical corrections to the existing onboarding (Stages 1B/1C), completed **
     5. Kick / pass names now say "סט נפרד לכל רגל" (they still said "half a set").
     6. The resume crash was fixed.
   - *Verification:* the real-screen end-to-end run on a phone viewport: check-in completed with real taps, voice screen opened (it found only "Microsoft Asaf — male" on the test machine and showed the install guide), the camera started, the big Ghost was on the body with "✓" in the status line, and the voice screen opened from the strip. New `voicePick.test.js` (iPhone / Edge / Windows / Android voice lists). Client 699 pass, 0 new failures; build passes.
+- **Field test #4, 2026-10-08 — "the big Ghost sits low on the screen, I must tilt the phone to see it" (backup = restore point #18, `d43af71`):**
+  - **Root cause:** close to the phone the camera sees the upper body only, and MediaPipe still reports hips / knees / ankles BELOW the picture (y > 1) with high confidence. The anchor took those guessed hips (only the ankles were checked) → the Ghost's hip / feet line was placed far below the view, so it was drawn low and half outside it.
+  - Two size errors added to it:
+    - With the hips out of view the torso was estimated from the shoulder width with the Ghost's own proportions (1.4 / 0.84), not a real body's (~1.3) → ~30% too big.
+    - A minimum size (45% of the view height) enlarged the Ghost beyond the trainee when standing far.
+  - **Fix (`engine/ghostOverlay.js`):**
+    - **Every landmark must be IN THE PICTURE** (0 ≤ y ≤ 0.97, x inside) to be used.
+    - The torso / shoulder-width ratio uses real body proportions.
+    - **Shoulder lock:** the Ghost's standing shoulders may never be further than 0.6 torso from the trainee's shoulders (which are almost always in view); if the lower-body landmarks say otherwise, the Ghost is re-anchored on the shoulders.
+    - The size matches the body exactly (only a microscopic Ghost is prevented).
+  - *Verification:* new `ghostFrameLock.test.js` (close-up with hips guessed at 1.25 and ankles at 2.0 → the Ghost's shoulders on the trainee's; the full body → feet on the feet; the placement inside the cropped view). A visual run with a close-up camera picture: the Ghost sits on the upper body inside the view. Client 702 pass, 0 new failures; build passes.
    3. **Profile-based rep counting with a quality score per rep** (replacing the per-exercise analyzers step by step), including the correction hierarchy, timing and external-focus cues.
    4. **Special sport libraries:** leg amputees (amputee football: crutch kick / crutch sprint / balance / header / goalkeeper), wheelchair (push stroke, seated throws, shoulder protection), running (opened for selection), then tennis / martial arts (trunk-rotation metric) and basketball.
    - Following (already in the roadmap): velocity-based fatigue detection (stop the set at ~20% rep-speed loss or form decay), automatic progression / regression, Pain Traffic Light integration, two-way voice ("why?"), best vs. weakest rep clips with the Ghost in the Stage 4 report.
@@ -1238,3 +1249,4 @@ Two critical corrections to the existing onboarding (Stages 1B/1C), completed **
 - **2026-10-08:** Pushed `ddbb81f` → deployed, verified in the served bundle. Restore point `checkpoint-2026-10-08-pro-coach` (#17). Awaiting the owner's device check.
 - **2026-10-08:** **Field test #3.** Verified on the REAL training screen (harness + real taps): the Ghost was hidden before the warm-up starts → shown from camera-on with a status line; check-in full-screen on phones; explicit coach voice choice from getVoices (gender by name, saved choice, clear pitch fallback, voice screen with install guide); per-leg kick names; resume crash fixed. Client 699 pass, 0 new failures. Committed as `d43af71`.
 - **2026-10-08:** Pushed `d43af71` → deployed, verified in the served bundle. Restore point `checkpoint-2026-10-08-voice` (#18). Awaiting the owner's device check.
+- **2026-10-08:** **Field test #4.** The big Ghost sat low: guessed off-picture hips / feet (close-up) anchored it below the view → only in-picture landmarks, real torso / shoulder-width ratio, a shoulder lock, exact size. Client 702 pass, 0 new failures. Not yet committed.

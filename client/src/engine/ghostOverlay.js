@@ -26,8 +26,11 @@ export function coverTransform(videoW, videoH, viewW, viewH) {
   return map;
 }
 
-// Ghost shoulders are 0.84 body units wide vs. a 1.4-unit torso
-const TORSO_PER_SHOULDER_WIDTH = 1.4 / 0.84;
+// Torso length (shoulder joints → hip joints) per shoulder-joint width of a REAL body (~0.5 m / ~0.38 m).
+// (The Ghost's own figure is narrower — using its 1.4 / 0.84 made the Ghost ~30% too big whenever the
+// hips were out of the picture.)
+const TORSO_PER_SHOULDER_WIDTH = 1.3;
+const SHOULDER_TO_ANKLE_PER_TORSO = (1.4 + 1.78) / 1.4;   // Ghost shoulder → ankle, in torso lengths
 
 /**
  * Hip center + torso length from landmarks (normalized), smoothed with the previous anchor.
@@ -50,13 +53,19 @@ const POS_DEADBAND = 0.012;          // hip noise below ~1% of the frame is not 
 const SIZE_DEADBAND = 0.04;          // relative torso noise below 4% is not followed (soft)
 const FOOT_KEEP_UPDATES = 30;        // ~0.5 s of frames
 const LEG_PER_TORSO = 1.78 / 1.4;     // Ghost hip→ankle vs. shoulder→hip
+const IN_FRAME_MAX_Y = 0.97;          // a landmark below this is a guess outside the picture
+const SHOULDER_LOCK = 0.6;            // the Ghost's shoulders may not be further than this (× torso) from the trainee's
 const follow = (prev, target, a, band) => {
   const d = target - prev;
   const k = band > 0 ? Math.min(1, Math.abs(d) / band) : 1;   // quadratic below the band → no tremble
   return prev + d * a * k;
 };
 export function bodyAnchor(landmarks, prev = null, alpha = 0.25, aspect = 4 / 3, dtMs = null) {
-  const ok = (p) => p && (p.visibility ?? 1) >= 0.5;
+  // Locked to the camera picture (owner, field test: "the big Ghost sits low, I must tilt the phone
+  // to see it"): a landmark counts only if it is really IN THE PICTURE. Close to the phone the
+  // camera sees the upper body only, and MediaPipe still "guesses" hips / knees / ankles BELOW the
+  // picture with high confidence — anchoring on those drew the Ghost low, half outside the view.
+  const ok = (p) => p && (p.visibility ?? 1) >= 0.5 && p.x >= -0.02 && p.x <= 1.02 && p.y >= 0 && p.y <= IN_FRAME_MAX_Y;
   const ls = landmarks?.[11], rs = landmarks?.[12], lh = landmarks?.[23], rh = landmarks?.[24];
   const shoulders = [ls, rs].filter(ok);
   if (!shoulders.length) return prev;
@@ -97,8 +106,15 @@ export function bodyAnchor(landmarks, prev = null, alpha = 0.25, aspect = 4 / 3,
   const footMiss = footReal === null ? (prev?.footMiss ?? 0) + 1 : 0;
   // a real feet line flickering out briefly is kept (no jump to the prediction and back)
   const keepFoot = footReal === null && prev?.footY != null && footMiss <= FOOT_KEEP_UPDATES && prev.footReal;
-  const footTarget = keepFoot ? prev.footY : footSeen;
+  let footTarget = keepFoot ? prev.footY : footSeen;
   const footIsReal = footReal !== null || keepFoot;
+  // Shoulder lock: the trainee's shoulders are (almost) always in the picture — the Ghost's standing
+  // shoulders may never be far from them, whatever the lower body landmarks say
+  const ghostShoulderY = footTarget - SHOULDER_TO_ANKLE_PER_TORSO * torso;
+  if (Math.abs(ghostShoulderY - sh.y) > SHOULDER_LOCK * torso) {
+    footTarget = sh.y + SHOULDER_TO_ANKLE_PER_TORSO * torso;
+    hipY = sh.y + torso;
+  }
   if (!prev) return { hipX, hipY, torso, footY: footSeen, footMiss, footReal: footIsReal };
   // no sudden shrink / growth (turning, a dropped landmark)
   const bounded = Math.min(prev.torso * (1 + MAX_SIZE_STEP), Math.max(prev.torso * (1 - MAX_SIZE_STEP), torso));
@@ -136,8 +152,8 @@ export function defaultPlacement(viewW, viewH) {
  */
 export function overlayPlacement(anchor, videoW, videoH, viewW, viewH) {
   const map = coverTransform(videoW, videoH, viewW, viewH);
-  // Always clearly visible: never smaller than ~45% of the view height (body ≈ 3.8 units)
-  const minScale = viewH / 8.5;
+  // Exactly the trainee's size (only a microscopic Ghost is prevented)
+  const minScale = viewH / 18;
   return {
     origin: map(anchor.hipX, anchor.hipY),
     scale: Math.max(minScale, (anchor.torso * map.scaleY) / GHOST_TORSO_UNITS),

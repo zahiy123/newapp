@@ -122,13 +122,14 @@ describe('Ghost overlay placement', () => {
     expect(a1.torso / a0.torso).toBeGreaterThan(0.95);
   });
 
-  it('the size changes gradually and never below a clear minimum', () => {
+  it('the size changes gradually and never collapses to a microscopic Ghost', () => {
     const prev = { hipX: 0.5, hipY: 0.6, torso: 0.3 };
     const tiny = Array.from({ length: 33 }, () => ({ x: 0.5, y: 0.5, visibility: 0.9 }));
     tiny[11] = { x: 0.5, y: 0.55, visibility: 0.9 }; tiny[23] = { x: 0.5, y: 0.6, visibility: 0.9 };
     tiny[12] = { x: 0.5, y: 0.55, visibility: 0.9 }; tiny[24] = { x: 0.5, y: 0.6, visibility: 0.9 };
     expect(bodyAnchor(tiny, prev).torso).toBeGreaterThan(0.29);        // one update: at most a few % change
-    expect(overlayPlacement({ hipX: 0.5, hipY: 0.6, torso: 0.02 }, 640, 480, 640, 480).scale).toBeGreaterThanOrEqual(480 / 8.5 - 0.01);
+    // the size matches the trainee's body (owner: locked to the picture) — only a microscopic Ghost is prevented
+    expect(overlayPlacement({ hipX: 0.5, hipY: 0.6, torso: 0.02 }, 640, 480, 640, 480).scale).toBeGreaterThanOrEqual(480 / 18 - 0.01);
   });
 
   it('keeps the previous anchor when the body is not visible, and smooths movement', () => {
