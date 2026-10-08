@@ -113,10 +113,11 @@ Readiness Rating (1-5 emoji, 3 seconds)
 | 15 | `checkpoint-2026-10-08-coach` | `2036591` | yes | + big Ghost performance fix (no blur, 1.5x density), virtual male / female coach, no automatic moves between exercises + voice 'next' |
 | 16 | `checkpoint-2026-10-08-controls` | `72802e3` | yes | + Ghost / coach control strip below the camera, fresh Ghost mode key, coach selection screen |
 | 17 | `checkpoint-2026-10-08-pro-coach` | `ddbb81f` | yes | + high-contrast big Ghost, professional coach silhouettes, voice next only on the explicit phrase (mic off while the coach speaks), the female coach speaks in the feminine |
-| 18 | `checkpoint-2026-10-08-voice` | `d43af71` | **yes — the current production (2026-10-08)** | + Ghost shown from camera-on with a status line, full-screen check-in, explicit coach voice choice, per-leg kick names, resume crash fix |
+| 18 | `checkpoint-2026-10-08-voice` | `d43af71` | yes | + Ghost shown from camera-on with a status line, full-screen check-in, explicit coach voice choice, per-leg kick names, resume crash fix |
+| 19 | `checkpoint-2026-10-08-frame-lock` | `acbc956` | **yes — the current production (2026-10-08)** | + big Ghost locked to the camera picture (in-picture landmarks, shoulder lock, exact size) |
 
 **How to return to a checkpoint:**
-- **To a deployed point (#1, #2, #3, #5, #8, #9, #10, #11, #12, #13, #14, #15, #16, #17, #18): instant rollback with no code change** — Vercel → Deployments → the deployment of that commit → "Promote to Production".
+- **To a deployed point (#1, #2, #3, #5, #8, #9, #10, #11, #12, #13, #14, #15, #16, #17, #18, #19): instant rollback with no code change** — Vercel → Deployments → the deployment of that commit → "Promote to Production".
 - **To any point in the code:** `git checkout <tag>` to look at it, or create a branch from it (`git checkout -b restore-<n> <tag>`) and deploy that branch / merge it into `main` after approval.
 - Look at it without changing anything: `git checkout checkpoint-stage2-stable` (then `git checkout main` to come back).
 - Undo later work on `main` safely (keeps history): `git revert <commits after the checkpoint>`, then push → Vercel redeploys.
@@ -1249,4 +1250,5 @@ Two critical corrections to the existing onboarding (Stages 1B/1C), completed **
 - **2026-10-08:** Pushed `ddbb81f` → deployed, verified in the served bundle. Restore point `checkpoint-2026-10-08-pro-coach` (#17). Awaiting the owner's device check.
 - **2026-10-08:** **Field test #3.** Verified on the REAL training screen (harness + real taps): the Ghost was hidden before the warm-up starts → shown from camera-on with a status line; check-in full-screen on phones; explicit coach voice choice from getVoices (gender by name, saved choice, clear pitch fallback, voice screen with install guide); per-leg kick names; resume crash fixed. Client 699 pass, 0 new failures. Committed as `d43af71`.
 - **2026-10-08:** Pushed `d43af71` → deployed, verified in the served bundle. Restore point `checkpoint-2026-10-08-voice` (#18). Awaiting the owner's device check.
-- **2026-10-08:** **Field test #4.** The big Ghost sat low: guessed off-picture hips / feet (close-up) anchored it below the view → only in-picture landmarks, real torso / shoulder-width ratio, a shoulder lock, exact size. Client 702 pass, 0 new failures. Not yet committed.
+- **2026-10-08:** **Field test #4.** The big Ghost sat low: guessed off-picture hips / feet (close-up) anchored it below the view → only in-picture landmarks, real torso / shoulder-width ratio, a shoulder lock, exact size. Client 702 pass, 0 new failures. Committed as `acbc956`.
+- **2026-10-08:** Pushed `acbc956` → deployed, verified in the served bundle. Restore point `checkpoint-2026-10-08-frame-lock` (#19). Awaiting the owner's device check.
