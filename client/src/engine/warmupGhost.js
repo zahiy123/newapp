@@ -24,7 +24,7 @@ const TRAIL_MS = 420;
 const TRAIL_STEPS = 7;
 
 /** Animation period: an exercise profile sets its own tempo. */
-function periodOf(spec) {
+export function periodOf(spec) {
   return spec?.profile?.ghost?.periodMs || PERIOD_MS;
 }
 
@@ -34,7 +34,7 @@ export function directionSign(spec) {
 }
 
 /** Animation phase 0..1 for an animation time in ms (may be negative when running backward). */
-function phaseOf(animMs, period = PERIOD_MS) {
+export function phaseOf(animMs, period = PERIOD_MS) {
   const t = (animMs % period) / period;
   return t < 0 ? t + 1 : t;
 }
@@ -232,7 +232,12 @@ function taperPath(ctx, a, b, w1, w2) {
  * Shared by the demo panel and the full-size overlay.
  * @private
  */
-function drawFigure(ctx, pose, P0, scale, { floorShadow = true, glow = true } = {}) {
+export function drawFigure(ctx, pose, P0, scale, { floorShadow = true, glow = true, look = null } = {}) {
+  // `look`: a character (the virtual coach) instead of the Ghost — its palette, tracksuit pants,
+  // sleeves, hair / face / whistle drawn by the look's own hooks
+  const pal = look ? { ...PALETTE, ...look.palette } : PALETTE;
+  const fillFor = (part, skinFill) => (look?.pants && (part === 'thigh' || part === 'shin') ? pal.pants
+    : look?.sleeves && part === 'upperArm' ? pal.jersey[1] : skinFill);
   const { proj, depthOf, yaw } = figureProjection(pose);
   const P = (p) => P0(proj(p));
   const ow = Math.max(1, scale * 0.022);          // outline width
@@ -251,8 +256,8 @@ function drawFigure(ctx, pose, P0, scale, { floorShadow = true, glow = true } = 
   const top = P0({ x: 0, y: B.headY - B.headR }).y;
   const bottom = P0({ x: 0, y: FLOOR_ANKLE_Y }).y;
   const skin = ctx.createLinearGradient(0, top, 0, bottom);
-  skin.addColorStop(0, PALETTE.skin[0]);
-  skin.addColorStop(1, PALETTE.skin[1]);
+  skin.addColorStop(0, pal.skin[0]);
+  skin.addColorStop(1, pal.skin[1]);
   const glowOn = () => {
     if (!glow) return;
     ctx.shadowColor = 'rgba(56, 189, 248, 0.5)';
@@ -268,22 +273,27 @@ function drawFigure(ctx, pose, P0, scale, { floorShadow = true, glow = true } = 
       const socketEnd = { x: a.x + (b.x - a.x) * 0.3, y: a.y + (b.y - a.y) * 0.3 };
       taperPath(ctx, a, b, 0.075 * scale, 0.06 * scale);
       ctx.fillStyle = '#cbd5e1'; ctx.fill();
-      ctx.lineWidth = ow; ctx.strokeStyle = PALETTE.outline; ctx.stroke();
+      ctx.lineWidth = ow; ctx.strokeStyle = pal.outline; ctx.stroke();
       taperPath(ctx, a, socketEnd, 0.22 * scale, 0.17 * scale);
       ctx.fillStyle = '#94a3b8'; ctx.fill(); ctx.stroke();
     } else {
       const [w1, w2] = TAPER[seg.part] || [0.15, 0.12];
       taperPath(ctx, a, b, w1 * scale, w2 * scale);
-      ctx.fillStyle = skin;
+      ctx.fillStyle = fillFor(seg.part, skin);
       glowOn(); ctx.fill(); glowOff();
-      ctx.lineWidth = ow; ctx.strokeStyle = PALETTE.outline; ctx.stroke();
+      ctx.lineWidth = ow; ctx.strokeStyle = pal.outline; ctx.stroke();
+      if (look?.pants && (seg.part === 'thigh' || seg.part === 'shin') && pal.stripe) {
+        // the tracksuit's side stripe
+        ctx.strokeStyle = pal.stripe; ctx.lineWidth = Math.max(1, scale * 0.025);
+        ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke();
+      }
       // shorts over the upper thigh
-      if (seg.part === 'thigh') {
+      if (seg.part === 'thigh' && !look?.pants) {
         const end = { x: a.x + (b.x - a.x) * 0.42, y: a.y + (b.y - a.y) * 0.42 };
         taperPath(ctx, a, end, w1 * scale * 1.08, (w1 * 0.6 + w2 * 0.4) * scale * 1.08);
-        ctx.fillStyle = PALETTE.shorts; ctx.fill(); ctx.stroke();
+        ctx.fillStyle = pal.shorts; ctx.fill(); ctx.stroke();
       }
-      if (far) { taperPath(ctx, a, b, w1 * scale, w2 * scale); ctx.fillStyle = PALETTE.far; ctx.fill(); }
+      if (far) { taperPath(ctx, a, b, w1 * scale, w2 * scale); ctx.fillStyle = pal.far; ctx.fill(); }
     }
     const side = seg.limb === 'left_leg' ? 'left' : seg.limb === 'right_leg' ? 'right' : null;
     const foot = seg.part === 'shin' && side ? pose.feet?.[side] : null;
@@ -298,15 +308,15 @@ function drawFigure(ctx, pose, P0, scale, { floorShadow = true, glow = true } = 
       const by = (yaw ? (b.y + toe.y) / 2 : b.y) + 0.02 * scale;
       ctx.beginPath();
       ctx.ellipse(bx, by, len, 0.065 * scale, ang, 0, Math.PI * 2);
-      ctx.fillStyle = seg.dashed ? '#cbd5e1' : PALETTE.boot;
+      ctx.fillStyle = seg.dashed ? '#cbd5e1' : pal.boot;
       ctx.fill();
       ctx.lineWidth = ow; ctx.strokeStyle = 'rgba(148, 163, 184, 0.9)'; ctx.stroke();
     }
     if (seg.part === 'forearm') {
       ctx.beginPath();
       ctx.arc(b.x, b.y, 0.085 * scale, 0, Math.PI * 2);
-      ctx.fillStyle = PALETTE.skin[0]; ctx.fill();
-      ctx.lineWidth = ow; ctx.strokeStyle = PALETTE.outline; ctx.stroke();
+      ctx.fillStyle = pal.skin[0]; ctx.fill();
+      ctx.lineWidth = ow; ctx.strokeStyle = pal.outline; ctx.stroke();
     }
   };
 
@@ -322,7 +332,7 @@ function drawFigure(ctx, pose, P0, scale, { floorShadow = true, glow = true } = 
       toe = len < 1e-6 ? { x: h.x + minLen, y: h.y } : { x: h.x + (tt.x - h.x) * k, y: h.y + (tt.y - h.y) * k };
     }
     taperPath(ctx, h, toe, 0.15 * scale, 0.1 * scale);
-    ctx.fillStyle = prosthetic ? '#cbd5e1' : PALETTE.boot;
+    ctx.fillStyle = prosthetic ? '#cbd5e1' : pal.boot;
     ctx.fill();
     ctx.lineWidth = ow; ctx.strokeStyle = 'rgba(148, 163, 184, 0.9)'; ctx.stroke();
   }
@@ -332,8 +342,8 @@ function drawFigure(ctx, pose, P0, scale, { floorShadow = true, glow = true } = 
     const { ls, rs, lh, rh, lw, rw } = pose.torso;
     const T = [P(ls), P(rs), P(rw), P(rh), P(lh), P(lw)];
     const jersey = ctx.createLinearGradient(0, Math.min(T[0].y, T[1].y), 0, Math.max(T[3].y, T[4].y) + 1);
-    jersey.addColorStop(0, PALETTE.jersey[0]);
-    jersey.addColorStop(1, PALETTE.jersey[1]);
+    jersey.addColorStop(0, pal.jersey[0]);
+    jersey.addColorStop(1, pal.jersey[1]);
     ctx.beginPath();
     ctx.moveTo(T[0].x, T[0].y);
     for (let i = 1; i < T.length; i++) ctx.lineTo(T[i].x, T[i].y);
@@ -345,13 +355,14 @@ function drawFigure(ctx, pose, P0, scale, { floorShadow = true, glow = true } = 
     // waistband of the shorts
     const hl = P(lh), hr = P(rh);
     ctx.lineWidth = 0.12 * scale;
-    ctx.strokeStyle = PALETTE.shorts;
+    ctx.strokeStyle = pal.shorts;
     ctx.beginPath(); ctx.moveTo(hl.x, hl.y); ctx.lineTo(hr.x, hr.y); ctx.stroke();
     // shoulder caps (sleeves) so the arm joins the jersey
     for (const sp of [T[0], T[1]]) {
       ctx.beginPath(); ctx.arc(sp.x, sp.y, 0.11 * scale, 0, Math.PI * 2);
-      ctx.fillStyle = PALETTE.jersey[0]; ctx.fill();
+      ctx.fillStyle = pal.jersey[0]; ctx.fill();
     }
+    look?.torsoExtras?.(ctx, { ls: T[0], rs: T[1], lh: hl, rh: hr, neck: P(pose.neck) }, scale);
   };
 
   const drawHead = () => {
@@ -359,11 +370,14 @@ function drawFigure(ctx, pose, P0, scale, { floorShadow = true, glow = true } = 
     const h = P(pose.head);
     taperPath(ctx, n, { x: h.x, y: h.y + pose.head.r * scale * 0.7 }, 0.15 * scale, 0.12 * scale);
     ctx.fillStyle = skin; ctx.fill();
+    const rx = pose.head.r * scale * 0.95, ry = pose.head.r * scale * 1.12;
+    look?.head?.(ctx, h, rx, ry, 'behind', yaw ? (pose.yawOut ?? 1) : 0);
     ctx.beginPath();
-    ctx.ellipse(h.x, h.y, pose.head.r * scale * 0.95, pose.head.r * scale * 1.12, 0, 0, Math.PI * 2);
-    ctx.fillStyle = PALETTE.skin[0];
+    ctx.ellipse(h.x, h.y, rx, ry, 0, 0, Math.PI * 2);
+    ctx.fillStyle = pal.skin[0];
     glowOn(); ctx.fill(); glowOff();
-    ctx.lineWidth = ow; ctx.strokeStyle = PALETTE.outline; ctx.stroke();
+    ctx.lineWidth = ow; ctx.strokeStyle = pal.outline; ctx.stroke();
+    look?.head?.(ctx, h, rx, ry, 'front', yaw ? (pose.yawOut ?? 1) : 0);
   };
 
   // ---- depth order: far limbs → torso → head → near limbs (no depth: legs, torso, arms, head) ----
@@ -437,7 +451,7 @@ export function shadowBallAt(spec, t, lp = {}) {
  * with a burst ring at the moment of contact. Drawn LAST (over the ball) so the trainee always
  * sees exactly which part of the foot meets the ball.
  */
-function drawStrikeSurface(ctx, pose, P0, scale) {
+export function drawStrikeSurface(ctx, pose, P0, scale, lite = false) {
   const feet = Object.values(pose?.feet || {}).filter(f => f.patch);
   if (!feet.length) return;
   const { proj } = figureProjection(pose);
@@ -450,7 +464,7 @@ function drawStrikeSurface(ctx, pose, P0, scale) {
     ctx.save();
     ctx.globalAlpha *= Math.min(1, foot.glow);
     ctx.shadowColor = 'rgba(251, 191, 36, 0.95)';
-    ctx.shadowBlur = Math.max(4, scale * 0.14 * foot.glow);
+    ctx.shadowBlur = lite ? 0 : Math.max(4, scale * 0.14 * foot.glow);
     ctx.fillStyle = '#fbbf24';
     ctx.strokeStyle = 'rgba(120, 53, 15, 0.85)';
     ctx.lineWidth = Math.max(1, scale * 0.015);
@@ -476,7 +490,7 @@ function drawStrikeSurface(ctx, pose, P0, scale) {
 }
 
 /** Draw the shadow ball (+ its shadow on the floor) with the figure's projection. */
-function drawShadowBall(ctx, ball, pose, P0, scale) {
+export function drawShadowBall(ctx, ball, pose, P0, scale, lite = false) {
   if (!ball || !(ball.alpha > 0.02)) return;
   const { proj } = figureProjection(pose);
   const c = P0(proj(ball));
@@ -495,7 +509,7 @@ function drawShadowBall(ctx, ball, pose, P0, scale) {
   ctx.save();
   ctx.globalAlpha *= ball.alpha * 0.92;
   ctx.shadowColor = 'rgba(186, 230, 253, 0.9)';
-  ctx.shadowBlur = Math.max(4, r * 0.6);
+  ctx.shadowBlur = lite ? 0 : Math.max(4, r * 0.6);
   const body = ctx.createRadialGradient(c.x - r * 0.35, c.y - r * 0.35, r * 0.1, c.x, c.y, r);
   body.addColorStop(0, '#ffffff');
   body.addColorStop(1, '#bae6fd');
@@ -661,9 +675,11 @@ export function drawGhostOverlay(ctx, spec, lp, nowMs, origin, scale, alpha = 0.
   }
   ctx.save();
   ctx.globalAlpha = alpha;
-  drawFigure(ctx, pose, P, scale, { floorShadow: false, glow: true });
-  drawShadowBall(ctx, shadowBallAt(spec, t, lp), pose, P, scale);
-  drawStrikeSurface(ctx, pose, P, scale);
+  // Full-screen on a phone: NO blur (a canvas blur per body part at this size cost ~40 ms a frame
+  // and starved the pose detection — the big Ghost seemed not to load / froze)
+  drawFigure(ctx, pose, P, scale, { floorShadow: false, glow: false });
+  drawShadowBall(ctx, shadowBallAt(spec, t, lp), pose, P, scale, true);
+  drawStrikeSurface(ctx, pose, P, scale, true);
   ctx.restore();
   if (spec.directional) {
     ctx.save();

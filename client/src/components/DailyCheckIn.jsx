@@ -3,6 +3,14 @@
 
 import { useState } from 'react';
 import { CHECKIN_LOCATIONS, CHECKIN_MOBILITY, checkInQuestions, checkInDefaults, checkInComplete } from '../engine/training/dailyCheckIn';
+import { COACH_IDS, COACH_INFO } from '../engine/coachAvatar';
+
+/** The last coach choice (this device first, then the last saved check-in). */
+function lastCoach(profile) {
+  try { const c = localStorage.getItem('coachChoice'); if (c === 'none' || COACH_IDS.includes(c)) return c; } catch { /* storage unavailable */ }
+  const c = profile?.lastCheckIn?.coach;
+  return c === 'none' || COACH_IDS.includes(c) ? c : 'none';
+}
 
 function Choice({ active, onClick, children }) {
   return (
@@ -16,7 +24,7 @@ function Choice({ active, onClick, children }) {
 
 export default function DailyCheckIn({ profile, isHe, onDone }) {
   const q = checkInQuestions(profile);
-  const [status, setStatus] = useState(() => checkInDefaults(profile));
+  const [status, setStatus] = useState(() => ({ ...checkInDefaults(profile), coach: lastCoach(profile) }));
   const set = (k, v) => setStatus(s => ({ ...s, [k]: v }));
   const ready = checkInComplete(profile, status);
 
@@ -67,7 +75,28 @@ export default function DailyCheckIn({ profile, isHe, onDone }) {
         </div>
       )}
 
-      <button type="button" disabled={!ready} onClick={() => onDone?.(status)}
+      <div className="space-y-2">
+        <div className="text-sm font-semibold text-gray-700">{'🎽'} {isHe ? 'מי מלווה אותך היום?' : 'Who coaches you today?'}</div>
+        <div className="flex flex-wrap gap-2">
+          {COACH_IDS.map(c => (
+            <Choice key={c} active={status.coach === c} onClick={() => set('coach', c)}>
+              {COACH_INFO[c].icon} {isHe ? COACH_INFO[c].choice.he : COACH_INFO[c].choice.en}
+            </Choice>
+          ))}
+          <Choice active={status.coach === 'none'} onClick={() => set('coach', 'none')}>
+            {isHe ? 'בלי דמות' : 'No character'}
+          </Choice>
+        </div>
+        <div className="text-xs text-gray-500">
+          {isHe ? 'הדמות עומדת בצד המסך, מדגימה כל תרגיל יחד עם הצללית ומדברת איתך לאורך האימון'
+            : 'The character stands at the side of the screen, demonstrates every exercise with the Ghost and talks you through the workout'}
+        </div>
+      </div>
+
+      <button type="button" disabled={!ready} onClick={() => {
+        try { localStorage.setItem('coachChoice', status.coach || 'none'); } catch { /* storage unavailable */ }
+        onDone?.(status);
+      }}
         className="w-full py-3 rounded-xl bg-green-600 text-white font-bold text-lg disabled:opacity-40 hover:bg-green-700 transition">
         {isHe ? 'יאללה, בונים את האימון של היום' : "Let's build today's workout"}
       </button>

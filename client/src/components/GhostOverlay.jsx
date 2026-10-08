@@ -27,7 +27,8 @@ export default function GhostOverlay({ spec, limbProfile, landmarksRef, videoRef
         const c = canvasRef.current;
         const v = videoRef?.current;
         if (c) {
-          const dpr = window.devicePixelRatio || 1;
+          // a full-screen canvas at 3x pixel density is ~9x the work — 1.5x is sharp enough for a Ghost
+          const dpr = Math.min(1.5, window.devicePixelRatio || 1);
           const w = Math.round(c.clientWidth * dpr);
           const h = Math.round(c.clientHeight * dpr);
           if (c.width !== w || c.height !== h) { c.width = w; c.height = h; }

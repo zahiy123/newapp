@@ -21,6 +21,10 @@ import { showsRangeGauge } from '../engine/training/rangeGauge';
 import { demoGhostFor } from '../engine/training/demoGhost';
 import { makeTimedAnalyzer } from '../engine/training/timedAnalyzer';
 import { makeProfileRepAnalyzer, withRepOffset } from '../engine/training/profileRepAnalyzer';
+import CoachAvatar from '../components/CoachAvatar';
+import { coachMode, COACH_IDS } from '../engine/coachAvatar';
+import { setCoachVoice } from '../hooks/useSpeech';
+import { useVoiceCommand } from '../hooks/useVoiceCommand';
 import { READY_DRIVE, withDrive, splitLegOrder, legLabel, splitStartText, splitSwitchText, splitWorkingSide, setLegHalf, legSetStartText, legSetNextText } from '../engine/training/coachFlow';
 import { exerciseNeedsSetup } from '../engine/training/exerciseSetup';
 import DailyCheckIn from '../components/DailyCheckIn';
@@ -391,6 +395,13 @@ export default function Training() {
   const [warmUpIdx, setWarmUpIdx] = useState(0);
   const [warmUpTimer, setWarmUpTimer] = useState(0);
   const [warmUpDone, setWarmUpDone] = useState(false);
+  // Manual moves only (owner): a finished warm-up move WAITS for the trainee ("next" tap / voice)
+  const [warmUpAwaitNext, setWarmUpAwaitNext] = useState(false);
+  // The virtual coach chosen in the check-in (male / female / none), remembered on this device
+  const [coachChoice, setCoachChoice] = useState(() => {
+    try { const c = localStorage.getItem('coachChoice'); return c === 'male' || c === 'female' ? c : 'none'; } catch { return 'none'; }
+  });
+  const [coachCheer, setCoachCheer] = useState(false);
   const warmUpStateRef = useRef({});
   const warmUpTimerRef = useRef(null);
   const lastWarmUpNudgeRef = useRef(0);
@@ -563,6 +574,7 @@ export default function Training() {
   // Check-in answered → rebuild today's workout from the answers, remember them for next time
   function handleCheckInDone(status) {
     setCheckIn(status);
+    setCoachChoice(COACH_IDS.includes(status.coach) ? status.coach : 'none');
     sessionDataRef.current.checkIn = status;
     if (typeof status.hasBall === 'boolean') setBallAnswer(status.hasBall);   // no separate ball question
     if (planSourceRef.current) setExercises(buildTodayExercises(planSourceRef.current, status));
@@ -827,6 +839,35 @@ export default function Training() {
       setFeedback({ type: 'info', text: isHe ? '🔄 החלף רגל!' : '🔄 Switch legs!' });
     }
   }, [displayReps, phase, splitHalf]);
+
+  // The coach's voice follows the chosen character
+  useEffect(() => { setCoachVoice(coachChoice); }, [coachChoice]);
+  // The coach claps for a finished set / exercise (3 s), then stands ready
+  useEffect(() => {
+    if (phase !== PHASE.RESTING && phase !== PHASE.EXERCISE_DONE) return undefined;
+    setCoachCheer(true);
+    const tm = setTimeout(() => setCoachCheer(false), 3000);
+    return () => { clearTimeout(tm); setCoachCheer(false); };
+  }, [phase, currentSet]);
+
+  // "Next" by voice — ONLY while waiting for the trainee's decision (a finished warm-up move or exercise)
+  const goNextWarmUp = () => {
+    clearInterval(warmUpTimerRef.current);
+    setWarmUpAwaitNext(false);
+    if (warmUpIdx < warmUpExercises.length - 1) setWarmUpIdx(warmUpIdx + 1);
+    else finishWarmUp();
+  };
+  const voiceNextAction = phase === PHASE.WARM_UP && warmUpAwaitNext ? 'warmup'
+    : phase === PHASE.EXERCISE_DONE ? 'exercise' : null;
+  const voiceNext = useVoiceCommand({
+    active: !!voiceNextAction,
+    lang: isHe ? 'he-IL' : 'en-US',
+    isSpeaking,
+    onNext: () => {
+      if (voiceNextAction === 'warmup') goNextWarmUp();
+      else if (voiceNextAction === 'exercise') handleNextExercise();
+    },
+  });
 
   // A new set / exercise counts from zero again
   useEffect(() => { if (displayReps === 0) spokenCountRef.current.n = 0; }, [displayReps, currentIdx, currentSet]);
@@ -1791,6 +1832,7 @@ export default function Training() {
 
     warmUpPausedRef.current = false;
     setWarmUpPaused(false);
+    setWarmUpAwaitNext(false);
 
     warmUpTimerRef.current = setInterval(() => {
       const now = Date.now();
@@ -1882,12 +1924,12 @@ export default function Training() {
       setWarmUpTimer(prev => {
         if (prev <= 1) {
           clearInterval(warmUpTimerRef.current);
-          // Move to next warm-up exercise or finish
-          if (warmUpIdx < warmUpExercises.length - 1) {
-            setWarmUpIdx(warmUpIdx + 1);
-          } else {
-            finishWarmUp();
-          }
+          // Done — but NEVER move on by itself (owner): the trainee taps "next" or says it
+          setWarmUpAwaitNext(true);
+          const last = warmUpIdx >= warmUpExercises.length - 1;
+          speakPriority(isHe
+            ? `כל הכבוד ${playerName}! ${last ? 'סיימנו את החימום.' : 'סיימת את התרגיל.'} כשאתה מוכן — לחץ "הבא" או תגיד "הבא".`
+            : `Well done ${playerName}! ${last ? 'Warm-up complete.' : 'Exercise done.'} When you're ready — tap "Next" or say "next".`, { rate: 1.1 });
           return 0;
         }
         return prev - 1;
@@ -2786,6 +2828,34 @@ export default function Training() {
           <GhostOverlay spec={demoGhostSpec} limbProfile={limbProfile} landmarksRef={poseLandmarksRef} videoRef={videoRef} onError={handleOverlayError} />
         )}
         {(phase === PHASE.EXERCISING || phase === PHASE.CALIBRATING) && <ExecutionHud execution={execution} isHe={isHe} />}
+        {/* The virtual coach (chosen in the check-in): demonstrates with the Ghost, talks, claps */}
+        {COACH_IDS.includes(coachChoice) && [PHASE.WARM_UP, PHASE.BRIEFING, PHASE.CHECKING_EQUIPMENT, PHASE.CALIBRATING,
+          PHASE.EXERCISING, PHASE.RESTING, PHASE.EXERCISE_DONE, PHASE.PAUSED].includes(phase) && (
+          <CoachAvatar
+            coach={coachChoice}
+            mode={coachMode({ phase, hasSpec: !!(phase === PHASE.WARM_UP ? ghostSpec : demoGhostSpec), justFinished: coachCheer })}
+            spec={phase === PHASE.WARM_UP ? ghostSpec : demoGhostSpec}
+            limbProfile={limbProfile}
+            isHe={isHe}
+            isSpeaking={isSpeaking}
+            bubble={feedback?.text || null}
+          />
+        )}
+        {/* A finished warm-up move waits for the trainee — never moves on by itself */}
+        {phase === PHASE.WARM_UP && warmUpAwaitNext && (
+          <div className="absolute inset-x-0 top-1/3 z-[26] flex justify-center px-4">
+            <div className="bg-white/95 rounded-2xl shadow-2xl px-5 py-4 text-center space-y-3 max-w-sm w-full" dir={isHe ? 'rtl' : 'ltr'}>
+              <div className="text-lg font-bold text-gray-800">{'✅'} {isHe ? 'כל הכבוד, סיימת!' : 'Well done!'}</div>
+              <button onClick={goNextWarmUp}
+                className="w-full py-3 rounded-xl bg-gradient-to-r from-blue-600 to-purple-600 text-white font-bold text-lg">
+                {warmUpIdx < warmUpExercises.length - 1 ? (isHe ? '▶ התרגיל הבא' : '▶ Next exercise') : (isHe ? '▶ לתרגילים' : '▶ To the exercises')}
+              </button>
+              {voiceNext.listening && (
+                <div className="text-xs text-gray-500">{'🎤'} {isHe ? 'או פשוט תגיד "הבא"' : 'or just say "next"'}</div>
+              )}
+            </div>
+          </div>
+        )}
         {phase === PHASE.EXERCISING && currentExercise?.sideSwitch && (
           <div className={`absolute top-2 left-1/2 -translate-x-1/2 z-20 pointer-events-none rounded-full text-white text-sm font-bold px-3 py-1 shadow ${splitHalf === 1 ? 'bg-sky-700/90' : 'bg-orange-600/90'}`}>
             {'🦵'} {currentExercise.splitMode === 'kick'
@@ -3223,6 +3293,11 @@ export default function Training() {
               <button onClick={handleNextExercise} className="px-8 py-3 bg-gradient-to-r from-blue-600 to-purple-600 text-white rounded-lg font-medium hover:opacity-90 transition">
                 {currentIdx < exercises.length - 1 ? t('training.nextExercise') : t('training.finishWorkout')}
               </button>
+              {/* the next exercise starts only when the trainee asks for it */}
+              <div className="text-white/70 text-xs">
+                {isHe ? 'ממשיכים רק כשאתה מוכן' : 'We move on only when you are ready'}
+                {voiceNext.listening && (isHe ? ' — לחץ או תגיד "הבא" 🎤' : ' — tap or say "next" 🎤')}
+              </div>
             </div>
           </div>
         )}
@@ -3316,7 +3391,7 @@ export default function Training() {
           </button>
         )}
         {FEATURES.GHOST_OVERLAY && ((phase === PHASE.WARM_UP && warmUpGhostOn) ||
-          ((phase === PHASE.EXERCISING || phase === PHASE.CALIBRATING) && showDemoGhost)) && (
+          (demoGhostPhase && showDemoGhost)) && (
           <button
             onClick={() => setGhostModeSaved(overlayActive ? 'panel' : 'overlay')}
             className={`absolute top-28 left-4 px-3 py-2 rounded-xl text-xs font-bold z-10 transition ${
@@ -3412,15 +3487,8 @@ export default function Training() {
                   {isHe ? 'השהה' : 'Pause'}
                 </button>
                 <button
-                  onClick={() => {
-                    clearInterval(warmUpTimerRef.current);
-                    if (warmUpIdx < warmUpExercises.length - 1) {
-                      setWarmUpIdx(warmUpIdx + 1);
-                    } else {
-                      finishWarmUp();
-                    }
-                  }}
-                  className="flex-1 py-2 min-h-[48px] bg-blue-600 text-white rounded-lg font-bold text-base"
+                  onClick={goNextWarmUp}
+                  className={`flex-1 py-2 min-h-[48px] bg-blue-600 text-white rounded-lg font-bold text-base ${warmUpAwaitNext ? 'ring-4 ring-green-400 animate-pulse' : ''}`}
                 >
                   {warmUpIdx < warmUpExercises.length - 1 ? (isHe ? 'הבא' : 'Next') : (isHe ? 'סיים חימום' : 'Finish warm-up')}
                 </button>

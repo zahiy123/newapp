@@ -881,6 +881,28 @@ Two critical corrections to the existing onboarding (Stages 1B/1C), completed **
      - The support-side arm opens out for balance (arm abduction, drawn only).
      - Kicks / passes are shown in a near-side view (55°), the way technique is taught. The measurement is unchanged.
   - *Verification:* new tests in `engine/__tests__/steadyRealism.test.js` (filter steadiness / lag / gap / jump; off-screen feet; laces / inside geometry; flat planted feet; the ball touching the striking surface). Kick dynamics tests: hip-first chain and balance on the new Ghost; the knee-first test was retimed. Client 682 pass, 0 new failures; server 10/10; build passes. Rendered in Chromium and checked frame by frame.
+- **Three owner items, 2026-10-08 (backup = restore point #14, `2ae70ef`):**
+  1. **The big Ghost — root cause found and fixed.**
+     - A strict canvas probe drew every catalog Ghost, at every phase, for healthy / below-knee / above-knee trainees: no drawing error.
+     - The cause was **cost**. The full-screen Ghost was drawn at the device pixel density (3× on a phone) with a canvas blur (`shadowBlur`) on every body part: ~40 ms per frame in Chromium, more than a whole frame. On a phone, with pose detection on the same thread, it loaded slowly, froze, or did not appear.
+     - Now there is no blur in the big Ghost and the canvas density is capped at 1.5×: **2.9 ms per frame**, measured.
+     - The "Ghost: big / small" toggle is available from the briefing on.
+     - Test: no blur, and no runtime error in any exercise.
+  2. **Virtual coach (male / female) at the side of the screen.**
+     - Chosen in the daily check-in ("מי מלווה אותך היום?": male coach / female coach / no character), remembered on the device and in `lastCheckIn.coach`.
+     - The coach (`engine/coachAvatar.js`, `components/CoachAvatar.jsx`) is a real character drawn with the Ghost's body engine: skin, a tracksuit (sleeves, long pants with a stripe), white shoes, hair (short / ponytail), a face that talks (the mouth opens while the coach's voice speaks) and a whistle on a lanyard.
+     - It stands at the right side of the screen, opposite the Ghost panel.
+     - Behaviour:
+       - It **demonstrates** the current warm-up move or exercise: exactly the Ghost's profile, the trainee's limbs (prosthesis included), the striking surface and the shadow ball.
+       - It **celebrates** for 3 s after a set or exercise (arms up).
+       - Otherwise it **stands ready**, breathing and nodding while it talks, with a speech bubble showing the current coaching line.
+     - The voice follows the coach: a matching device voice when one exists for the language, otherwise a lower pitch for the male coach and a higher pitch for the female coach.
+     - SAFETY: a runtime error hides only the coach.
+  3. **No automatic moves between exercises.**
+     - A finished warm-up move no longer jumps to the next one. The coach says "כל הכבוד! כשאתה מוכן — לחץ 'הבא' או תגיד 'הבא'", a "▶ התרגיל הבא" card appears and the Next button pulses.
+     - The main exercises already waited for a tap (the "done" screen); it now also says "ממשיכים רק כשאתה מוכן".
+     - **Voice "next"** (`useVoiceCommand` + `voiceCommands.js`): the app listens ONLY while waiting for that decision (a finished warm-up move / the exercise-done screen), for short commands ("הבא", "תרגיל הבא", "ממשיכים", "next"…). The coach's own voice is ignored (while it speaks, and 0.9 s after). On browsers without speech recognition the button works as before.
+  - *Verification:* `engine/__tests__/coachAndFlow.test.js` (strict-canvas run of every Ghost, no blur, coach modes / demo = Ghost / breathing + talking / drawing, voice commands + echo guard). Client 691 pass, 0 new failures; server 10/10; build passes. Coaches rendered in Chromium and checked.
    3. **Profile-based rep counting with a quality score per rep** (replacing the per-exercise analyzers step by step), including the correction hierarchy, timing and external-focus cues.
    4. **Special sport libraries:** leg amputees (amputee football: crutch kick / crutch sprint / balance / header / goalkeeper), wheelchair (push stroke, seated throws, shoulder protection), running (opened for selection), then tennis / martial arts (trunk-rotation metric) and basketball.
    - Following (already in the roadmap): velocity-based fatigue detection (stop the set at ~20% rep-speed loss or form decay), automatic progression / regression, Pain Traffic Light integration, two-way voice ("why?"), best vs. weakest rep clips with the Ghost in the Stage 4 report.
@@ -1150,3 +1172,4 @@ Two critical corrections to the existing onboarding (Stages 1B/1C), completed **
 - **2026-10-06:** Pushed `ad47b25` → deployed, verified in the served bundle. Restore point `checkpoint-2026-10-06-pro-ghost` (#13). Awaiting the owner's device check.
 - **2026-10-06:** **Four field-test fixes.** Instant big Ghost (all demo phases, first-frame draw, fade-in, off-screen feet ignored); laces / inside-of-foot striking surface with a contact flash and the ball at the contact point; One Euro landmark filter + gap bridging + new-frame-only downscaled detection; realistic kick / pass timing and mechanics with a balance arm and a near-side view. Client 682 pass, server 10/10, 0 new failures. Committed as `2ae70ef`.
 - **2026-10-08:** Pushed `2ae70ef` → deployed, verified in the served bundle. Restore point `checkpoint-2026-10-08-real-kick` (#14). Awaiting the owner's device check.
+- **2026-10-08:** **Three owner items.** Big Ghost root cause = per-frame canvas blur at 3x density (~40 ms/frame) → no blur + 1.5x cap (2.9 ms/frame), toggle from the briefing; virtual coach (male / female, chosen in the check-in) at the side — demonstrates with the Ghost, talks, celebrates, own voice; no automatic moves between exercises (warm-up waits for 'next'), with a voice 'next' command while waiting. Client 691 pass, server 10/10, 0 new failures. Not yet committed.
