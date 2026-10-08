@@ -103,20 +103,16 @@ Readiness Rating (1-5 emoji, 3 seconds)
 | 5 | `backup-2026-10-06-pre-ghost-equipment-fix` | `39a1a74` | yes | + local MediaPipe assets (fast first load), exercise demo Ghost from the briefing, ROM gauge only for dynamic reps |
 | 6 | `backup-2026-10-06-pre-catalog` | `90e4dc3` | deployed together with #8 | + Ghost on by default everywhere, old skeleton retired, hard equipment / ball match (dashboard ball question, substitutions, server guard) |
 | 7 | `backup-2026-10-06-catalog-v1` | `7cbcc68` | deployed together with #8 | + exercise catalog (pattern × variation, Ghost for every exercise, ~350 per family), coherent goal sessions, timed exercises — **before the track / goal lock fixes** |
-
 | 8 | `checkpoint-2026-10-06-locked-chain` | `66c98bf` | yes | + the locked chain track → goals → day goal → exercises → Ghost (goals per track, rehab session goals, unrelated sports removed) |
-
 | 9 | `checkpoint-2026-10-06-start-gate` | `1f714d0` | yes | + start gate (no false start), exact rep counting, steady Ghost size, functional exercises per sport / limitation, drive voice |
-
 | 10 | `checkpoint-2026-10-06-functional` | `5a9761f` | yes | + no generic filler in sport / rehab tracks, amputee football = 4 functional categories in the sport's language, equipment set-up only where used |
-
 | 11 | `checkpoint-2026-10-06-checkin` | `a4947f5` | yes | + kick volume, big Ghost, split balance sets, crutch safety, daily check-in, one-leg crutch work, ball-day technique, arm-amputee / goalkeeper adaptation |
-
 | 12 | `checkpoint-2026-10-06-front-view` | `73ee592` | yes | + instant counting, distance-sized Ghost on the body for every exercise, true left / right splits, no crutch wording with a prosthesis, grouped kicks, front-view measurement |
-| 13 | `checkpoint-2026-10-06-pro-ghost` | `ad47b25` | **yes — the current production (2026-10-06)** | + early start with an immediate count, steady feet-anchored 3/4-view Ghost, a full set per leg for kicks, shadow ball, wide camera |
+| 13 | `checkpoint-2026-10-06-pro-ghost` | `ad47b25` | yes | + early start with an immediate count, steady feet-anchored 3/4-view Ghost, a full set per leg for kicks, shadow ball, wide camera |
+| 14 | `checkpoint-2026-10-08-real-kick` | `2ae70ef` | **yes — the current production (2026-10-08)** | + instant big Ghost, laces / inside-of-foot striking surface, One Euro steady skeleton, realistic kick / pass |
 
 **How to return to a checkpoint:**
-- **To a deployed point (#1, #2, #3, #5, #8, #9, #10, #11, #12, #13): instant rollback with no code change** — Vercel → Deployments → the deployment of that commit → "Promote to Production".
+- **To a deployed point (#1, #2, #3, #5, #8, #9, #10, #11, #12, #13, #14): instant rollback with no code change** — Vercel → Deployments → the deployment of that commit → "Promote to Production".
 - **To any point in the code:** `git checkout <tag>` to look at it, or create a branch from it (`git checkout -b restore-<n> <tag>`) and deploy that branch / merge it into `main` after approval.
 - Look at it without changing anything: `git checkout checkpoint-stage2-stable` (then `git checkout main` to come back).
 - Undo later work on `main` safely (keeps history): `git revert <commits after the checkpoint>`, then push → Vercel redeploys.
@@ -1152,4 +1148,5 @@ Two critical corrections to the existing onboarding (Stages 1B/1C), completed **
 - **2026-10-06:** Committed and pushed `73ee592` → deployed, verified in the served bundle. Restore point `checkpoint-2026-10-06-front-view` (#12). Awaiting the owner's device check (front-view measurement relies on MediaPipe depth — thresholds may need per-exercise tuning).
 - **2026-10-06:** **Six owner upgrades.** Early start with an immediate count (counts from the briefing; the number is said at the rep); steady Ghost (time-based smoothing, feet-anchored, smooth keyframes); kicks and passes as a full set per leg with a spoken leg change; professional 3/4-view Ghost (tapered limbs, jersey, boots, depth order); shadow ball in shadow kicks / passes; wide 4:3 camera with minimum zoom. Client 673 pass, server 10/10, 0 new failures. Committed as `ad47b25`.
 - **2026-10-06:** Pushed `ad47b25` → deployed, verified in the served bundle. Restore point `checkpoint-2026-10-06-pro-ghost` (#13). Awaiting the owner's device check.
-- **2026-10-06:** **Four field-test fixes.** Instant big Ghost (all demo phases, first-frame draw, fade-in, off-screen feet ignored); laces / inside-of-foot striking surface with a contact flash and the ball at the contact point; One Euro landmark filter + gap bridging + new-frame-only downscaled detection; realistic kick / pass timing and mechanics with a balance arm and a near-side view. Client 682 pass, server 10/10, 0 new failures. Not yet committed.
+- **2026-10-06:** **Four field-test fixes.** Instant big Ghost (all demo phases, first-frame draw, fade-in, off-screen feet ignored); laces / inside-of-foot striking surface with a contact flash and the ball at the contact point; One Euro landmark filter + gap bridging + new-frame-only downscaled detection; realistic kick / pass timing and mechanics with a balance arm and a near-side view. Client 682 pass, server 10/10, 0 new failures. Committed as `2ae70ef`.
+- **2026-10-08:** Pushed `2ae70ef` → deployed, verified in the served bundle. Restore point `checkpoint-2026-10-08-real-kick` (#14). Awaiting the owner's device check.
