@@ -4,6 +4,7 @@
 import { useState } from 'react';
 import { CHECKIN_LOCATIONS, CHECKIN_MOBILITY, checkInQuestions, checkInDefaults, checkInComplete } from '../engine/training/dailyCheckIn';
 import { COACH_IDS, COACH_INFO } from '../engine/coachAvatar';
+import { CoachPreview } from './CoachAvatar';
 
 /** The last coach choice (this device first, then the last saved check-in). */
 function lastCoach(profile) {
@@ -33,6 +34,24 @@ export default function DailyCheckIn({ profile, isHe, onDone }) {
       <div>
         <div className="text-lg font-bold text-gray-800">{'📋'} {isHe ? 'צ\'ק-אין להיום' : "Today's check-in"}</div>
         <div className="text-xs text-gray-500">{isHe ? 'האימון של היום נבנה בדיוק לפי התשובות האלה' : "Today's workout is built exactly from these answers"}</div>
+      </div>
+
+      <div className="space-y-2">
+        <div className="text-sm font-semibold text-gray-700">{'🎽'} {isHe ? 'מי מאמן אותך היום?' : 'Who coaches you today?'}</div>
+        <div className="flex gap-2">
+          {COACH_IDS.map(c => (
+            <button key={c} type="button" onClick={() => set('coach', c)}
+              className={`flex-1 rounded-xl border-2 p-1.5 flex flex-col items-center transition ${
+                status.coach === c ? (c === 'female' ? 'border-pink-500 bg-pink-50' : 'border-blue-500 bg-blue-50') : 'border-gray-200 bg-white'}`}>
+              <CoachPreview coach={c} className="w-14 h-20" />
+              <span className="text-sm font-semibold text-gray-700">{isHe ? COACH_INFO[c].choice.he : COACH_INFO[c].choice.en}</span>
+            </button>
+          ))}
+          <button type="button" onClick={() => set('coach', 'none')}
+            className={`flex-1 rounded-xl border-2 p-1.5 text-sm font-semibold transition ${status.coach === 'none' ? 'border-green-500 bg-green-50 text-green-800' : 'border-gray-200 bg-white text-gray-700'}`}>
+            {isHe ? 'בלי דמות' : 'No character'}
+          </button>
+        </div>
       </div>
 
       <div className="space-y-2">
@@ -74,24 +93,6 @@ export default function DailyCheckIn({ profile, isHe, onDone }) {
           )}
         </div>
       )}
-
-      <div className="space-y-2">
-        <div className="text-sm font-semibold text-gray-700">{'🎽'} {isHe ? 'מי מלווה אותך היום?' : 'Who coaches you today?'}</div>
-        <div className="flex flex-wrap gap-2">
-          {COACH_IDS.map(c => (
-            <Choice key={c} active={status.coach === c} onClick={() => set('coach', c)}>
-              {COACH_INFO[c].icon} {isHe ? COACH_INFO[c].choice.he : COACH_INFO[c].choice.en}
-            </Choice>
-          ))}
-          <Choice active={status.coach === 'none'} onClick={() => set('coach', 'none')}>
-            {isHe ? 'בלי דמות' : 'No character'}
-          </Choice>
-        </div>
-        <div className="text-xs text-gray-500">
-          {isHe ? 'הדמות עומדת בצד המסך, מדגימה כל תרגיל יחד עם הצללית ומדברת איתך לאורך האימון'
-            : 'The character stands at the side of the screen, demonstrates every exercise with the Ghost and talks you through the workout'}
-        </div>
-      </div>
 
       <button type="button" disabled={!ready} onClick={() => {
         try { localStorage.setItem('coachChoice', status.coach || 'none'); } catch { /* storage unavailable */ }

@@ -65,3 +65,27 @@ export default function CoachAvatar({ coach, mode, spec, limbProfile, isHe, isSp
     </div>
   );
 }
+
+/** A small still preview of a coach (the selection screen). */
+export function CoachPreview({ coach, className = 'w-24 h-36' }) {
+  const ref = useRef(null);
+  useEffect(() => {
+    let raf;
+    const t0 = performance.now();
+    const draw = () => {
+      const c = ref.current;
+      if (c) {
+        const dpr = Math.min(2, window.devicePixelRatio || 1);
+        const w = Math.round(c.clientWidth * dpr), h = Math.round(c.clientHeight * dpr);
+        if (c.width !== w || c.height !== h) { c.width = w; c.height = h; }
+        const ctx = c.getContext('2d');
+        ctx.clearRect(0, 0, w, h);
+        try { drawCoach(ctx, coach, { mode: 'idle', spec: null, lp: {}, ms: performance.now() - t0, talk: 0 }, w, h); } catch { return; }
+      }
+      raf = requestAnimationFrame(draw);
+    };
+    raf = requestAnimationFrame(draw);
+    return () => cancelAnimationFrame(raf);
+  }, [coach]);
+  return <canvas ref={ref} className={`${className} rounded-xl`} />;
+}

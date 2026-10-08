@@ -21,7 +21,8 @@ import { showsRangeGauge } from '../engine/training/rangeGauge';
 import { demoGhostFor } from '../engine/training/demoGhost';
 import { makeTimedAnalyzer } from '../engine/training/timedAnalyzer';
 import { makeProfileRepAnalyzer, withRepOffset } from '../engine/training/profileRepAnalyzer';
-import CoachAvatar from '../components/CoachAvatar';
+import CoachAvatar, { CoachPreview } from '../components/CoachAvatar';
+import TrainingViewControls from '../components/TrainingViewControls';
 import { coachMode, COACH_IDS } from '../engine/coachAvatar';
 import { setCoachVoice } from '../hooks/useSpeech';
 import { useVoiceCommand } from '../hooks/useVoiceCommand';
@@ -402,6 +403,15 @@ export default function Training() {
     try { const c = localStorage.getItem('coachChoice'); return c === 'male' || c === 'female' ? c : 'none'; } catch { return 'none'; }
   });
   const [coachCheer, setCoachCheer] = useState(false);
+  const [coachPicked, setCoachPicked] = useState(() => {
+    try { return localStorage.getItem('coachChoice') !== null; } catch { return false; }
+  });
+  const chooseCoach = (c) => {
+    const v = COACH_IDS.includes(c) ? c : 'none';
+    setCoachChoice(v);
+    setCoachPicked(true);
+    try { localStorage.setItem('coachChoice', v); } catch { /* storage unavailable */ }
+  };
   const warmUpStateRef = useRef({});
   const warmUpTimerRef = useRef(null);
   const lastWarmUpNudgeRef = useRef(0);
@@ -420,7 +430,7 @@ export default function Training() {
   // 'panel' = the stable demo panel (checkpoint-stage2-stable) and the default; 'overlay' = full-size on the body.
   const [ghostMode, setGhostMode] = useState(() => {
     if (!FEATURES.GHOST_OVERLAY) return 'panel';
-    try { return localStorage.getItem('ghostModeV2') === 'panel' ? 'panel' : 'overlay'; }   // default: full overlay
+    try { return localStorage.getItem('ghostModeV3') === 'panel' ? 'panel' : 'overlay'; }   // default: full overlay
     catch { return 'overlay'; }
   });
   const overlayActive = FEATURES.GHOST_OVERLAY && ghostMode === 'overlay';
@@ -446,13 +456,13 @@ export default function Training() {
   const rangeFailedRef = useRef(false);                     // challenge disabled after a runtime error
   const setGhostModeSaved = useCallback((mode) => {
     setGhostMode(mode);
-    try { localStorage.setItem('ghostModeV2', mode); } catch { /* storage unavailable */ }
+    try { localStorage.setItem('ghostModeV3', mode); } catch { /* storage unavailable */ }
   }, []);
   // SAFETY: an overlay runtime error → back to the stable panel (and remembered)
-  const handleOverlayError = useCallback(() => {
-    setGhostModeSaved('panel');
-    setFeedback({ type: 'info', text: isHe ? 'שכבת הצללית כובתה — חוזרים לתצוגה הרגילה' : 'Ghost overlay turned off — back to the regular view' });
-  }, [setGhostModeSaved, isHe]);
+  const handleOverlayError = useCallback((err) => {
+    setGhostMode('panel');
+    setFeedback({ type: 'info', text: isHe ? `הצללית הגדולה נתקלה בשגיאה — מציג את הקטנה (${String(err?.message || err).slice(0, 60)})` : `Big Ghost error — showing the small one (${String(err?.message || err).slice(0, 60)})` });
+  }, [isHe]);
   // Ghost spec with the current challenge target (the Ghost peaks at the target)
   const ghostSpec = useMemo(() => {
     const g = warmUpExercises[warmUpIdx]?.ghost;
@@ -575,6 +585,7 @@ export default function Training() {
   function handleCheckInDone(status) {
     setCheckIn(status);
     setCoachChoice(COACH_IDS.includes(status.coach) ? status.coach : 'none');
+    setCoachPicked(true);
     sessionDataRef.current.checkIn = status;
     if (typeof status.hasBall === 'boolean') setBallAnswer(status.hasBall);   // no separate ball question
     if (planSourceRef.current) setExercises(buildTodayExercises(planSourceRef.current, status));
@@ -744,10 +755,6 @@ export default function Training() {
   const [exerciseGhostOn, setExerciseGhostOn] = useState(() => {
     try { return localStorage.getItem('exerciseGhostOn') !== '0'; } catch { return true; }
   });
-  const toggleExerciseGhost = useCallback(() => setExerciseGhostOn((v) => {
-    try { localStorage.setItem('exerciseGhostOn', v ? '0' : '1'); } catch { /* storage unavailable */ }
-    return !v;
-  }), []);
   const demoGhostPhase = phase === PHASE.BRIEFING || phase === PHASE.CHECKING_EQUIPMENT
     || phase === PHASE.CALIBRATING || phase === PHASE.EXERCISING || phase === PHASE.RESTING;
   const demoProfile = useMemo(
@@ -3378,30 +3385,7 @@ export default function Training() {
           </div>
         )}
 
-        {/* Ghost skeleton toggle (exercises) / warm-up ghost toggle (on by default) */}
-        {(phase === PHASE.EXERCISING || phase === PHASE.WARM_UP || (demoGhostPhase && demoGhostSpec)) && (
-          <button
-            onClick={phase === PHASE.WARM_UP ? () => setWarmUpGhostOn(v => !v) : toggleExerciseGhost}
-            className={`absolute top-14 left-4 px-3 py-2 rounded-xl text-sm font-bold z-10 transition ${
-              (phase === PHASE.WARM_UP ? warmUpGhostOn : exerciseGhostOn) ? 'bg-blue-500/90 text-white' : 'bg-black/50 text-white/70'
-            }`}
-            title={isHe ? 'הצג/הסתר שלד מנחה' : 'Toggle ghost guide'}
-          >
-            {'\uD83D\uDC7B'}
-          </button>
-        )}
-        {FEATURES.GHOST_OVERLAY && ((phase === PHASE.WARM_UP && warmUpGhostOn) ||
-          (demoGhostPhase && showDemoGhost)) && (
-          <button
-            onClick={() => setGhostModeSaved(overlayActive ? 'panel' : 'overlay')}
-            className={`absolute top-28 left-4 px-3 py-2 rounded-xl text-xs font-bold z-10 transition ${
-              overlayActive ? 'bg-purple-600/90 text-white' : 'bg-black/50 text-white/80'
-            }`}
-            title={isHe ? 'צללית מלאה על הגוף / פאנל הדגמה' : 'Full-body ghost / demo panel'}
-          >
-            {overlayActive ? (isHe ? 'צללית: גדולה' : 'Ghost: big') : (isHe ? 'צללית: קטנה' : 'Ghost: small')}
-          </button>
-        )}
+        {/* (The Ghost / coach controls are in the strip BELOW the camera view — nothing covers them) */}
 
         {/* Rep counter + analyzing indicator */}
         {phase === PHASE.EXERCISING && displayReps != null && (
@@ -3429,6 +3413,47 @@ export default function Training() {
           </div>
         )}
       </div>
+
+      {/* Ghost (off / small / big) + coach (male / female / none): always visible, never covered */}
+      {cameraActive && (
+        <TrainingViewControls
+          isHe={isHe}
+          floating={isFullscreen}
+          ghost={(phase === PHASE.WARM_UP ? warmUpGhostOn : exerciseGhostOn) ? (overlayActive ? 'big' : 'small') : 'off'}
+          bigAvailable={FEATURES.GHOST_OVERLAY}
+          onGhost={(v) => {
+            const on = v !== 'off';
+            setWarmUpGhostOn(on);
+            setExerciseGhostOn(on);
+            try { localStorage.setItem('exerciseGhostOn', on ? '1' : '0'); } catch { /* storage unavailable */ }
+            if (on) setGhostModeSaved(v === 'big' ? 'overlay' : 'panel');
+          }}
+          coach={coachChoice}
+          onCoach={chooseCoach}
+        />
+      )}
+
+      {/* Coach selection at the start of the training (once per device; changeable any time in the strip) */}
+      {cameraActive && !coachPicked && exercises.length > 0 && (phase === PHASE.IDLE || phase === PHASE.WARM_UP) && (checkIn || currentIdx > 0 || phase === PHASE.WARM_UP) && (
+        <div className="fixed inset-0 z-[60] bg-black/70 flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl shadow-2xl p-5 w-full max-w-sm space-y-4 text-center" dir={isHe ? 'rtl' : 'ltr'}>
+            <div className="text-lg font-bold text-gray-800">{'🎽'} {isHe ? 'מי יאמן אותך היום?' : 'Who coaches you today?'}</div>
+            <div className="text-xs text-gray-500">{isHe ? 'הדמות תעמוד בצד המסך, תדגים כל תרגיל ותלווה אותך לאורך האימון' : 'The coach stands at the side of the screen, demonstrates every exercise and talks you through the workout'}</div>
+            <div className="flex gap-3 justify-center">
+              {COACH_IDS.map(c => (
+                <button key={c} type="button" onClick={() => chooseCoach(c)}
+                  className={`flex-1 rounded-2xl border-2 p-2 flex flex-col items-center gap-1 transition ${c === 'female' ? 'border-pink-300 hover:bg-pink-50' : 'border-blue-300 hover:bg-blue-50'}`}>
+                  <CoachPreview coach={c} className="w-24 h-36" />
+                  <span className="font-bold text-gray-800">{c === 'female' ? (isHe ? 'מאמנת' : 'Female coach') : (isHe ? 'מאמן' : 'Male coach')}</span>
+                </button>
+              ))}
+            </div>
+            <button type="button" onClick={() => chooseCoach('none')} className="text-sm text-gray-500 underline">
+              {isHe ? 'בלי דמות מאמן' : 'No coach character'}
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* === MOBILE LAYOUT: 3-zone split (action buttons + exercise list below video) === */}
       {isMobile && !isFullscreen && exercises.length > 0 && (
