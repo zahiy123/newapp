@@ -51,7 +51,7 @@ export default function GhostOverlay({ spec, limbProfile, landmarksRef, videoRef
           const clk = clockRef.current;
           if (clk.last !== null) clk.ms += (now - clk.last) * (spec?.direction === 'backward' ? -1 : 1);
           clk.last = now;
-          drawGhostOverlay(ctx, spec, limbProfile, clk.ms, origin, scale, 0.55 * fade, feetY);
+          drawGhostOverlay(ctx, spec, limbProfile, clk.ms, origin, scale, 0.72 * fade, feetY);
         }
       } catch (err) {
         stopped = true;

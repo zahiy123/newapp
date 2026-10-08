@@ -2,10 +2,11 @@
 // coachAvatar — the virtual coach (male / female) standing at the side of the screen (owner, 2026-10-08)
 //
 // PURE pose logic + a canvas drawer. The coach is a real character (skin, tracksuit, hair, face,
-// whistle), drawn with the same body engine as the Ghost (warmupGhost.drawFigure), so when it
+// a clean athletic silhouette with the coach's body type), drawn with the same body engine as the
+// Ghost (warmupGhost.drawFigure), so when it
 // demonstrates it performs EXACTLY the Ghost's movement (the same profile, the same striking
-// surface and shadow ball). Between demonstrations it stands, breathes, talks (its mouth moves
-// and the head nods while the coach's voice speaks) and claps after a finished set.
+// surface and shadow ball). Between demonstrations it stands, breathes, nods while the coach's voice
+// speaks (a sound wave shows it talking) and celebrates a finished set.
 // ============================================================
 
 import { ghostPose, drawFigure, drawShadowBall, drawStrikeSurface, shadowBallAt, periodOf, phaseOf } from './warmupGhost.js';
@@ -18,92 +19,78 @@ export const COACH_INFO = Object.freeze({
   female: { label: t('המאמנת שלך', 'Your coach'), choice: t('מאמנת', 'Female coach'), icon: '👩' },
 });
 
+// A clean, professional look (owner, field test: "the cartoon coach looks like a joke"): an athletic
+// silhouette like the figures of professional training apps — no cartoon face, a monochrome
+// performance tracksuit with ONE accent colour, a real body type per coach (shoulders / waist /
+// hips, limb build) and a hair silhouette. Talking is shown outside the figure (a sound wave).
 const LOOKS = {
   male: {
     palette: {
-      skin: ['#f2c29b', '#d39a72'], jersey: ['#2563eb', '#1e3a8a'], pants: '#111827', stripe: 'rgba(255,255,255,0.85)',
-      boot: '#f8fafc', outline: 'rgba(15, 23, 42, 0.8)', far: 'rgba(15, 23, 42, 0.25)', shorts: '#111827',
+      skin: ['#475569', '#1e293b'], jersey: ['#334155', '#0f172a'], pants: '#111827', stripe: '#38bdf8',
+      boot: '#f8fafc', outline: 'rgba(2, 6, 23, 0.85)', far: 'rgba(148, 163, 184, 0.28)', shorts: '#111827',
     },
-    hair: '#3b2a1d',
+    accent: '#38bdf8',
+    hair: '#0b1220',
+    torsoShape: { shoulder: 1.08, waist: 0.96, hip: 0.94 },
+    limbScale: 1.36,
   },
   female: {
     palette: {
-      skin: ['#f6d0b1', '#dca27c'], jersey: ['#db2777', '#9d174d'], pants: '#1f2937', stripe: 'rgba(255,255,255,0.85)',
-      boot: '#f8fafc', outline: 'rgba(15, 23, 42, 0.8)', far: 'rgba(15, 23, 42, 0.25)', shorts: '#1f2937',
+      skin: ['#4b5563', '#1f2937'], jersey: ['#374151', '#111827'], pants: '#111827', stripe: '#fb7185',
+      boot: '#f8fafc', outline: 'rgba(2, 6, 23, 0.85)', far: 'rgba(148, 163, 184, 0.28)', shorts: '#111827',
     },
-    hair: '#5b3a29',
+    accent: '#fb7185',
+    hair: '#0b1220',
+    torsoShape: { shoulder: 0.9, waist: 0.8, hip: 1.1 },
+    limbScale: 1.18,
   },
 };
 
 /**
- * The coach's look for drawFigure: tracksuit (sleeves + long pants with a stripe), white shoes,
- * hair, a face that talks, and a whistle on a lanyard.
+ * The coach's look for drawFigure: a performance tracksuit (sleeves + long pants with an accent
+ * stripe), white shoes, a hair silhouette, the body type of the coach, and a zip line + collar.
  * @param {'male'|'female'} coach
- * @param {{ talk?: number }} [state] - talk 0..1 = how open the mouth is right now
  */
-export function coachLook(coach, state = {}) {
+export function coachLook(coach) {
   const L = LOOKS[coach] || LOOKS.male;
   const female = coach === 'female';
   return {
     palette: L.palette,
     pants: true,
     sleeves: true,
+    torsoShape: L.torsoShape,
+    limbScale: L.limbScale,
+    outlineScale: 0.6,
+    stripeSide: true,
     head(ctx, h, rx, ry, layer, turn) {
-      const side = turn || 0;                         // the face turns with a 3/4 view
+      const side = turn || 0;
+      ctx.fillStyle = L.hair;
       if (layer === 'behind') {
         if (!female) return;
-        // ponytail + volume behind the head
-        ctx.fillStyle = L.hair;
+        // a low bun / ponytail behind the head
         ctx.beginPath();
-        ctx.ellipse(h.x - side * rx * 0.55, h.y - ry * 0.1, rx * 1.12, ry * 1.08, 0, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.beginPath();
-        ctx.ellipse(h.x - (side || 1) * rx * 1.05, h.y + ry * 0.55, rx * 0.36, ry * 0.85, (side || 1) * -0.35, 0, Math.PI * 2);
+        ctx.ellipse(h.x - (side || 0.6) * rx * 0.85, h.y + ry * 0.2, rx * 0.42, ry * 0.5, 0, 0, Math.PI * 2);
         ctx.fill();
         return;
       }
-      // hair on top
-      ctx.fillStyle = L.hair;
+      // hair line: short for the coach, pulled back for the female coach (no face — a clean figure)
       ctx.beginPath();
-      ctx.ellipse(h.x, h.y - ry * (female ? 0.28 : 0.38), rx * (female ? 1.04 : 1.02), ry * (female ? 0.78 : 0.66), 0, Math.PI, Math.PI * 2);
+      ctx.ellipse(h.x - side * rx * 0.08, h.y - ry * (female ? 0.22 : 0.3), rx * 1.02, ry * (female ? 0.82 : 0.72), 0, Math.PI, Math.PI * 2);
       ctx.fill();
-      // face (turned with the body in a 3/4 view)
-      const fx = h.x + side * rx * 0.28;
-      const eyeY = h.y + ry * 0.02, eyeDx = rx * 0.34, eyeR = Math.max(1, rx * 0.09);
-      ctx.fillStyle = '#1f2937';
-      for (const k of [-1, 1]) {
-        ctx.beginPath(); ctx.arc(fx + k * eyeDx, eyeY, eyeR, 0, Math.PI * 2); ctx.fill();
-      }
-      ctx.strokeStyle = female ? 'rgba(91, 58, 41, 0.9)' : 'rgba(59, 42, 29, 0.95)';
-      ctx.lineWidth = Math.max(1, rx * 0.07);
-      for (const k of [-1, 1]) {
-        ctx.beginPath(); ctx.moveTo(fx + k * eyeDx - rx * 0.13, eyeY - ry * 0.2); ctx.lineTo(fx + k * eyeDx + rx * 0.13, eyeY - ry * 0.23); ctx.stroke();
-      }
-      // mouth: a smile at rest, opening while the coach talks
-      const talk = Math.max(0, Math.min(1, state.talk || 0));
-      const my = h.y + ry * 0.48;
-      ctx.fillStyle = '#7f1d1d';
-      ctx.strokeStyle = '#7f1d1d';
-      if (talk > 0.08) {
-        ctx.beginPath(); ctx.ellipse(fx, my, rx * 0.2, ry * (0.05 + 0.13 * talk), 0, 0, Math.PI * 2); ctx.fill();
-      } else {
-        ctx.lineWidth = Math.max(1, rx * 0.07);
-        ctx.beginPath(); ctx.arc(fx, my - ry * 0.1, rx * 0.24, 0.2 * Math.PI, 0.8 * Math.PI); ctx.stroke();
-      }
     },
     torsoExtras(ctx, pts, scale) {
-      // whistle on a lanyard
-      const cx = (pts.ls.x + pts.rs.x) / 2, cy = pts.ls.y + (pts.lh.y - pts.ls.y) * 0.32;
-      ctx.strokeStyle = 'rgba(248, 250, 252, 0.9)';
-      ctx.lineWidth = Math.max(1, scale * 0.02);
+      // collar + a zip line in the accent colour
+      const top = { x: (pts.ls.x + pts.rs.x) / 2, y: (pts.ls.y + pts.rs.y) / 2 };
+      const bottom = { x: (pts.lh.x + pts.rh.x) / 2, y: (pts.lh.y + pts.rh.y) / 2 };
+      ctx.strokeStyle = L.accent;
+      ctx.lineWidth = Math.max(1, scale * 0.028);
+      ctx.beginPath(); ctx.moveTo(top.x, top.y + scale * 0.05); ctx.lineTo(bottom.x, bottom.y - scale * 0.08); ctx.stroke();
+      ctx.lineWidth = Math.max(1, scale * 0.035);
       ctx.beginPath();
-      ctx.moveTo(pts.ls.x + (pts.rs.x - pts.ls.x) * 0.3, pts.ls.y);
-      ctx.lineTo(cx, cy);
-      ctx.lineTo(pts.ls.x + (pts.rs.x - pts.ls.x) * 0.7, pts.rs.y);
+      ctx.moveTo(top.x - scale * 0.12, top.y - scale * 0.01);
+      ctx.lineTo(top.x, top.y + scale * 0.07);
+      ctx.lineTo(top.x + scale * 0.12, top.y - scale * 0.01);
       ctx.stroke();
-      ctx.fillStyle = '#e2e8f0';
-      ctx.beginPath(); ctx.ellipse(cx, cy + scale * 0.03, scale * 0.07, scale * 0.045, 0, 0, Math.PI * 2); ctx.fill();
-      ctx.strokeStyle = '#64748b'; ctx.lineWidth = Math.max(1, scale * 0.012); ctx.stroke();
     },
   };
 }
@@ -147,10 +134,10 @@ export function coachPose(mode, spec, lp, ms, talking = false) {
  */
 export function drawCoach(ctx, coach, { mode, spec, lp, ms, talk = 0 }, w, h) {
   const pose = coachPose(mode, spec, lp, ms, talk > 0);
-  // a light "studio" card so the coach stands out from the camera picture
+  // a light studio card (soft gradient + floor line): the dark athletic figure stands out cleanly
   const bg = ctx.createLinearGradient(0, 0, 0, h);
-  bg.addColorStop(0, 'rgba(15, 23, 42, 0.55)');
-  bg.addColorStop(1, 'rgba(30, 41, 59, 0.35)');
+  bg.addColorStop(0, 'rgba(248, 250, 252, 0.94)');
+  bg.addColorStop(1, 'rgba(203, 213, 225, 0.94)');
   ctx.fillStyle = bg;
   ctx.beginPath();
   const rad = Math.min(16, w * 0.1);
@@ -159,7 +146,7 @@ export function drawCoach(ctx, coach, { mode, spec, lp, ms, talk = 0 }, w, h) {
   const scale = Math.min(h / 4.6, w / 3.4);
   const ox = w / 2, oy = h * 0.5;
   const P = (p) => ({ x: ox + p.x * scale, y: oy + p.y * scale });
-  drawFigure(ctx, pose, P, scale, { floorShadow: true, glow: false, look: coachLook(coach, { talk }) });
+  drawFigure(ctx, pose, P, scale, { floorShadow: true, glow: false, look: coachLook(coach) });
   if (mode === 'demo' && spec) {
     const t = phaseOf(ms, periodOf(spec));
     drawShadowBall(ctx, shadowBallAt(spec, t, lp), pose, P, scale, true);

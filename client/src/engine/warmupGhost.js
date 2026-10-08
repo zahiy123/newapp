@@ -221,9 +221,10 @@ function taperPath(ctx, a, b, w1, w2) {
   ctx.beginPath();
   ctx.moveTo(a.x + nx * w1 / 2, a.y + ny * w1 / 2);
   ctx.lineTo(b.x + nx * w2 / 2, b.y + ny * w2 / 2);
-  ctx.arc(b.x, b.y, w2 / 2, Math.atan2(ny, nx), Math.atan2(-ny, -nx));
+  // round caps bulge OUTWARD (anticlockwise on the canvas) — the other way they cut a hole at every joint
+  ctx.arc(b.x, b.y, w2 / 2, Math.atan2(ny, nx), Math.atan2(-ny, -nx), true);
   ctx.lineTo(a.x - nx * w1 / 2, a.y - ny * w1 / 2);
-  ctx.arc(a.x, a.y, w1 / 2, Math.atan2(-ny, -nx), Math.atan2(ny, nx));
+  ctx.arc(a.x, a.y, w1 / 2, Math.atan2(-ny, -nx), Math.atan2(ny, nx), true);
   ctx.closePath();
 }
 
@@ -240,7 +241,8 @@ export function drawFigure(ctx, pose, P0, scale, { floorShadow = true, glow = tr
     : look?.sleeves && part === 'upperArm' ? pal.jersey[1] : skinFill);
   const { proj, depthOf, yaw } = figureProjection(pose);
   const P = (p) => P0(proj(p));
-  const ow = Math.max(1, scale * 0.022);          // outline width
+  const ow = Math.max(1, scale * 0.022) * (look?.outlineScale ?? 1);   // outline width
+  const limbK = look?.limbScale ?? 1;                                    // limb thickness (body type)
   ctx.save();
   ctx.lineCap = 'round';
   ctx.lineJoin = 'round';
@@ -277,15 +279,20 @@ export function drawFigure(ctx, pose, P0, scale, { floorShadow = true, glow = tr
       taperPath(ctx, a, socketEnd, 0.22 * scale, 0.17 * scale);
       ctx.fillStyle = '#94a3b8'; ctx.fill(); ctx.stroke();
     } else {
-      const [w1, w2] = TAPER[seg.part] || [0.15, 0.12];
+      const [w1, w2] = (TAPER[seg.part] || [0.15, 0.12]).map(v => v * limbK);
       taperPath(ctx, a, b, w1 * scale, w2 * scale);
       ctx.fillStyle = fillFor(seg.part, skin);
       glowOn(); ctx.fill(); glowOff();
       ctx.lineWidth = ow; ctx.strokeStyle = pal.outline; ctx.stroke();
       if (look?.pants && (seg.part === 'thigh' || seg.part === 'shin') && pal.stripe) {
-        // the tracksuit's side stripe
-        ctx.strokeStyle = pal.stripe; ctx.lineWidth = Math.max(1, scale * 0.025);
-        ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke();
+        // the tracksuit's side stripe (on the outer edge of the leg, like a real tracksuit)
+        const L = Math.hypot(b.x - a.x, b.y - a.y) || 1;
+        let nx = -(b.y - a.y) / L, ny = (b.x - a.x) / L;
+        const out = seg.limb === 'left_leg' ? 1 : -1;
+        if (nx * out < 0) { nx = -nx; ny = -ny; }
+        const off1 = look.stripeSide ? w1 * scale * 0.36 : 0, off2 = look.stripeSide ? w2 * scale * 0.36 : 0;
+        ctx.strokeStyle = pal.stripe; ctx.lineWidth = Math.max(1, scale * 0.022);
+        ctx.beginPath(); ctx.moveTo(a.x + nx * off1, a.y + ny * off1); ctx.lineTo(b.x + nx * off2, b.y + ny * off2); ctx.stroke();
       }
       // shorts over the upper thigh
       if (seg.part === 'thigh' && !look?.pants) {
@@ -341,6 +348,15 @@ export function drawFigure(ctx, pose, P0, scale, { floorShadow = true, glow = tr
   const drawTorso = () => {
     const { ls, rs, lh, rh, lw, rw } = pose.torso;
     const T = [P(ls), P(rs), P(rw), P(rh), P(lh), P(lw)];
+    // body type: shoulder / waist / hip width (around each pair's middle)
+    if (look?.torsoShape) {
+      const widen = (i, j, k) => {
+        const mx = (T[i].x + T[j].x) / 2, my = (T[i].y + T[j].y) / 2;
+        T[i] = { x: mx + (T[i].x - mx) * k, y: my + (T[i].y - my) * k };
+        T[j] = { x: mx + (T[j].x - mx) * k, y: my + (T[j].y - my) * k };
+      };
+      widen(0, 1, look.torsoShape.shoulder); widen(5, 2, look.torsoShape.waist); widen(4, 3, look.torsoShape.hip);
+    }
     const jersey = ctx.createLinearGradient(0, Math.min(T[0].y, T[1].y), 0, Math.max(T[3].y, T[4].y) + 1);
     jersey.addColorStop(0, pal.jersey[0]);
     jersey.addColorStop(1, pal.jersey[1]);
@@ -656,7 +672,17 @@ export function drawWarmupGhost(ctx, spec, lp, nowMs, w, h, opts = {}) {
  * @param {number} [alpha=0.42] - transparency so the trainee stays visible through the Ghost
  * @param {number|null} [feetY] - canvas y of the trainee's feet (ankles) when seen
  */
-export function drawGhostOverlay(ctx, spec, lp, nowMs, origin, scale, alpha = 0.55, feetY = null) {
+// The big Ghost on the camera picture must be visible on ANY background: a strong cyan body with a
+// thick dark outline (a pale, outline-less figure vanished on a bright wall / white shirt — field test)
+const OVERLAY_LOOK = Object.freeze({
+  palette: {
+    skin: ['#a5f3fc', '#06b6d4'], jersey: ['#22d3ee', '#0891b2'], shorts: '#155e75', boot: '#083344',
+    outline: 'rgba(2, 6, 23, 0.9)', far: 'rgba(2, 6, 23, 0.3)',
+  },
+  outlineScale: 2.6,
+});
+
+export function drawGhostOverlay(ctx, spec, lp, nowMs, origin, scale, alpha = 0.72, feetY = null) {
   if (!spec || !origin || !(scale > 0)) return;
   const t = phaseOf(nowMs, periodOf(spec));
   const pose = ghostPose(spec, t, lp);
@@ -677,7 +703,7 @@ export function drawGhostOverlay(ctx, spec, lp, nowMs, origin, scale, alpha = 0.
   ctx.globalAlpha = alpha;
   // Full-screen on a phone: NO blur (a canvas blur per body part at this size cost ~40 ms a frame
   // and starved the pose detection — the big Ghost seemed not to load / froze)
-  drawFigure(ctx, pose, P, scale, { floorShadow: false, glow: false });
+  drawFigure(ctx, pose, P, scale, { floorShadow: false, glow: false, look: OVERLAY_LOOK });
   drawShadowBall(ctx, shadowBallAt(spec, t, lp), pose, P, scale, true);
   drawStrikeSurface(ctx, pose, P, scale, true);
   ctx.restore();

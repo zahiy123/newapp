@@ -5,6 +5,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { drawCoach, COACH_INFO } from '../engine/coachAvatar';
+import { genderizeCoachText } from '../engine/coachVoiceText';
 
 export default function CoachAvatar({ coach, mode, spec, limbProfile, isHe, isSpeaking, bubble = null }) {
   const canvasRef = useRef(null);
@@ -55,12 +56,21 @@ export default function CoachAvatar({ coach, mode, spec, limbProfile, isHe, isSp
       {talking && bubble && (
         <div className="absolute right-full mr-2 top-4 w-max max-w-[42vw] sm:max-w-[260px] bg-white/95 text-gray-800 text-xs font-semibold rounded-2xl rounded-tr-sm px-3 py-2 shadow-lg line-clamp-3"
           dir={isHe ? 'rtl' : 'ltr'}>
-          {bubble}
+          {genderizeCoachText(bubble, coach)}
         </div>
       )}
-      <canvas ref={canvasRef} className="w-28 h-44 sm:w-36 sm:h-56 rounded-2xl shadow-xl" style={{ transform: 'scaleX(-1)' }} />
-      <div className={`text-[11px] font-semibold text-white rounded-full px-2 py-0.5 ${coach === 'female' ? 'bg-pink-600/80' : 'bg-blue-700/80'}`}>
-        {info.icon} {isHe ? info.label.he : info.label.en}
+      <canvas ref={canvasRef} className="w-28 h-44 sm:w-36 sm:h-56 rounded-2xl shadow-xl ring-1 ring-white/40" style={{ transform: 'scaleX(-1)' }} />
+      <div className="flex items-center gap-1.5 text-[11px] font-semibold text-white rounded-full px-2.5 py-0.5 bg-slate-900/85 ring-1 ring-white/15">
+        <span className={`w-1.5 h-1.5 rounded-full ${coach === 'female' ? 'bg-rose-400' : 'bg-sky-400'}`} />
+        {isHe ? info.label.he : info.label.en}
+        {talking && (
+          <span className="flex items-end gap-[2px] h-3" aria-label={isHe ? 'מדבר' : 'talking'}>
+            {[0, 1, 2, 3].map(i => (
+              <span key={i} className={`w-[2px] rounded-full animate-pulse ${coach === 'female' ? 'bg-rose-300' : 'bg-sky-300'}`}
+                style={{ height: `${[60, 100, 75, 45][i]}%`, animationDelay: `${i * 120}ms`, animationDuration: '600ms' }} />
+            ))}
+          </span>
+        )}
       </div>
     </div>
   );

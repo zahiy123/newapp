@@ -1,9 +1,11 @@
 import { useCallback, useRef, useEffect } from 'react';
+import { genderizeCoachText } from '../engine/coachVoiceText';
 import { getCoachingRate, getCoachingPitch, getLifeStage } from '../utils/ageAdaptive';
 
 // The chosen virtual coach's voice (owner, 2026-10-08): a male coach speaks lower, a female coach
 // higher, with a matching device voice when one exists for the language
 let coachVoice = null;
+export function getCoachVoice() { return coachVoice; }
 export function setCoachVoice(gender) { coachVoice = gender === 'male' || gender === 'female' ? gender : null; }
 const FEMALE_VOICE = /female|woman|hila|carmit|zira|samantha|karen|victoria|susan|tessa|moira/i;
 const MALE_VOICE = /male|man|asaf|david|mark|daniel|alex|fred|guy|james|george/i;
@@ -140,7 +142,8 @@ export function useSpeech(lang = 'he-IL', age) {
     // Resume before every speak (Android/iOS requirement)
     try { window.speechSynthesis.resume(); } catch {}
 
-    const utterance = new SpeechSynthesisUtterance(text);
+    // the coach speaks in its own gender (a female coach: feminine first person)
+    const utterance = new SpeechSynthesisUtterance(genderizeCoachText(text, coachVoice));
     utterance.lang = effectiveLangRef.current;
     utterance.rate = 1.0;
     utterance.pitch = 1.0;

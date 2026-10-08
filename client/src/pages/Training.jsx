@@ -871,6 +871,8 @@ export default function Training() {
     lang: isHe ? 'he-IL' : 'en-US',
     isSpeaking,
     onNext: () => {
+      // a move by voice is always shown, so it is never mistaken for an automatic skip
+      setFeedback({ type: 'info', text: isHe ? '🎤 שמעתי "תרגיל הבא" — עוברים' : '🎤 Heard "next exercise" — moving on' });
       if (voiceNextAction === 'warmup') goNextWarmUp();
       else if (voiceNextAction === 'exercise') handleNextExercise();
     },
@@ -1935,8 +1937,8 @@ export default function Training() {
           setWarmUpAwaitNext(true);
           const last = warmUpIdx >= warmUpExercises.length - 1;
           speakPriority(isHe
-            ? `כל הכבוד ${playerName}! ${last ? 'סיימנו את החימום.' : 'סיימת את התרגיל.'} כשאתה מוכן — לחץ "הבא" או תגיד "הבא".`
-            : `Well done ${playerName}! ${last ? 'Warm-up complete.' : 'Exercise done.'} When you're ready — tap "Next" or say "next".`, { rate: 1.1 });
+            ? `כל הכבוד ${playerName}! ${last ? 'סיימנו את החימום.' : 'סיימת את התרגיל.'} כשאתה מוכן — לחץ על הכפתור, או אמור: תרגיל הבא.`
+            : `Well done ${playerName}! ${last ? 'Warm-up complete.' : 'Exercise done.'} When you're ready — tap the button, or say: next exercise.`, { rate: 1.1 });
           return 0;
         }
         return prev - 1;
@@ -2858,7 +2860,7 @@ export default function Training() {
                 {warmUpIdx < warmUpExercises.length - 1 ? (isHe ? '▶ התרגיל הבא' : '▶ Next exercise') : (isHe ? '▶ לתרגילים' : '▶ To the exercises')}
               </button>
               {voiceNext.listening && (
-                <div className="text-xs text-gray-500">{'🎤'} {isHe ? 'או פשוט תגיד "הבא"' : 'or just say "next"'}</div>
+                <div className="text-xs text-gray-500">{'🎤'} {isHe ? 'או אמור "תרגיל הבא"' : 'or say "next exercise"'}</div>
               )}
             </div>
           </div>
@@ -3303,7 +3305,7 @@ export default function Training() {
               {/* the next exercise starts only when the trainee asks for it */}
               <div className="text-white/70 text-xs">
                 {isHe ? 'ממשיכים רק כשאתה מוכן' : 'We move on only when you are ready'}
-                {voiceNext.listening && (isHe ? ' — לחץ או תגיד "הבא" 🎤' : ' — tap or say "next" 🎤')}
+                {voiceNext.listening && (isHe ? ' — לחץ, או אמור "תרגיל הבא" 🎤' : ' — tap, or say "next exercise" 🎤')}
               </div>
             </div>
           </div>

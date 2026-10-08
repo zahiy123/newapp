@@ -917,6 +917,26 @@ Two critical corrections to the existing onboarding (Stages 1B/1C), completed **
     - A fresh storage key (`ghostModeV3`, default big). An overlay error now falls back for THIS session only and shows the error text (a tap on "big" retries).
     - **Coach selection screen** at the start: a full-screen card with an animated preview of each coach, shown once per device when no coach was chosen yet (also on a resumed session). The coach choice also moved to the TOP of the check-in, with previews.
   - *Verification:* a Playwright run on a 390×844 phone screen with a fake camera: selection screen → coach chosen → small Ghost + coach beside it → a real click on "גדולה" → the big Ghost on the body at once, no error. Client 691 pass, 0 new failures; build passes.
+- **Field test #2, 2026-10-08 — "the coach looks like a joke, the big Ghost still does not show, the auto skip is back" (+ the coach speaks in its own gender) (backup = restore point #16, `72802e3`):**
+  1. **Big Ghost — invisible on a real picture.**
+     - Tested on a BRIGHT synthetic room (white wall, white shirt, dark pants) as the fake camera: after the blur was removed for speed, the pale, outline-less figure at 55% vanished into the wall / shirt and the dark pants. On the earlier green test picture it had looked fine.
+     - Fix: the big Ghost now has a high-contrast look (`OVERLAY_LOOK`): a strong cyan body with a thick dark outline (2.6×) at 72% opacity. It is visible on both bright and dark backgrounds, and still has no blur (fast).
+     - Also fixed a real drawing bug: the round end caps of every limb were drawn inward, cutting a hole at each joint (`taperPath`, now anticlockwise).
+  2. **Professional coach.**
+     - The cartoon face, whistle and skin colours were replaced by a clean athletic silhouette, like the figures of professional training apps: a monochrome performance tracksuit with ONE accent colour (blue / rose), a collar + zip line, the accent stripe on the outer edge of the pants, white shoes and a hair silhouette.
+     - Each coach has a real body type: male broader shoulders and fuller limbs; female narrower waist, wider hips and lighter limbs (`torsoShape`, `limbScale`).
+     - The coach stands on a light studio card. "Talking" is shown by an animated sound wave next to the name, not a moving mouth.
+  3. **The auto skip — root cause: the app heard itself.**
+     - The voice "next" listened for single words ("הבא", "ממשיכים", "עבור"), and the coach itself says them ("…תגיד 'הבא'", "תרגיל הבא").
+     - The phone's recognizer returns the text ~1 s after the audio, after the 0.9 s echo guard, so the app skipped by itself.
+     - Fix:
+       - Only the explicit phrase ("תרגיל הבא" / "next exercise"), as a short FINAL result, counts.
+       - The **microphone is OFF while the coach speaks** and re-opens only 1.5 s after it stops; anything heard in a session that overlapped the coach's speech is discarded.
+       - The prompts no longer invite "הבא".
+       - A move by voice always shows "🎤 שמעתי 'תרגיל הבא' — עוברים".
+     - No other automatic exercise change exists in the code (checked every `setCurrentIdx` / `setWarmUpIdx` / timer).
+  4. **The coach speaks in its own gender** (`engine/coachVoiceText.js`): with the female coach, every first-person form the coach says about itself becomes feminine ("אני סופרת איתך", "אני עוקבת אחריך", "אני לא מצליחה לראות", "אני מוכנה"…), in the voice and the speech bubble. Words addressed to the trainee are unchanged.
+  - *Verification:* a Playwright run on a phone screen with a BRIGHT fake camera (big Ghost clearly visible); coaches rendered and checked; new tests (explicit phrase only, the mic session rule, feminine forms). Client 693 pass, 0 new failures; build passes.
    3. **Profile-based rep counting with a quality score per rep** (replacing the per-exercise analyzers step by step), including the correction hierarchy, timing and external-focus cues.
    4. **Special sport libraries:** leg amputees (amputee football: crutch kick / crutch sprint / balance / header / goalkeeper), wheelchair (push stroke, seated throws, shoulder protection), running (opened for selection), then tennis / martial arts (trunk-rotation metric) and basketball.
    - Following (already in the roadmap): velocity-based fatigue detection (stop the set at ~20% rep-speed loss or form decay), automatic progression / regression, Pain Traffic Light integration, two-way voice ("why?"), best vs. weakest rep clips with the Ghost in the Stage 4 report.
@@ -1190,3 +1210,4 @@ Two critical corrections to the existing onboarding (Stages 1B/1C), completed **
 - **2026-10-08:** Pushed `2036591` → deployed, verified in the served bundle. Restore point `checkpoint-2026-10-08-coach` (#15). `client/src/hooks/useSegmentationModel.js` was committed by mistake (untracked local file, not imported) and untracked again (kept on disk). Awaiting the owner's device check.
 - **2026-10-08:** **Field test fix.** Root cause of 'no big Ghost': the small Ghost panel covered the in-camera Ghost buttons on a phone + a permanently saved 'panel' from an old fallback → a control strip below the camera (Ghost off / small / big, coach male / female / none), a fresh storage key, session-only fallback; a coach selection screen with previews at the start, and the coach choice at the top of the check-in. Verified with a real click in a phone-sized browser. Committed as `72802e3`.
 - **2026-10-08:** Pushed `72802e3` → deployed, verified in the served bundle. Restore point `checkpoint-2026-10-08-controls` (#16). Awaiting the owner's device check.
+- **2026-10-08:** **Field test #2.** Big Ghost invisible on a bright picture → high-contrast look (dark thick outline, strong cyan, 72%) + fixed inward limb caps; professional athletic coach silhouettes (body type per coach, accent tracksuit, sound wave when talking); auto skip = the app heard its own 'הבא' → explicit 'תרגיל הבא' only, mic off while the coach speaks (+1.5 s), on-screen notice; the female coach speaks in the feminine. Client 693 pass, 0 new failures. Not yet committed.

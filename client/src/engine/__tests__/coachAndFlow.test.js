@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { coachMode, coachPose, coachLook, drawCoach, COACH_IDS, COACH_INFO } from '../coachAvatar.js';
-import { isNextCommand, acceptCommand, ECHO_GUARD_MS } from '../training/voiceCommands.js';
+import { isNextCommand, acceptCommand } from '../training/voiceCommands.js';
+import { genderizeCoachText } from '../coachVoiceText.js';
 import { drawGhostOverlay } from '../warmupGhost.js';
 import { catalogGhostSpec, buildCatalog } from '../catalog/catalog.js';
 import { EXPERT_PROFILES } from '../exercise/exerciseProfiles.js';
@@ -90,15 +91,34 @@ describe('Virtual coach — male / female, at the side of the screen', () => {
   });
 });
 
-describe('Manual moves only — "next" by tap or voice', () => {
-  it('recognizes short "next" commands in Hebrew and English', () => {
-    for (const s of ['הבא', 'תרגיל הבא', 'יאללה הבא', 'next', 'Next exercise', 'ממשיכים']) expect(isNextCommand(s), s).toBe(true);
-    for (const s of ['', 'אני עייף', 'wait', 'הבאתי את הכדור מהמכונית שלי היום בבוקר מוקדם מאוד']) expect(isNextCommand(s), s).toBe(false);
+describe('Manual moves only — "next exercise" by tap or an EXPLICIT voice request', () => {
+  it('only the explicit "תרגיל הבא" / "next exercise" counts — single words do not', () => {
+    for (const s of ['תרגיל הבא', 'יאללה תרגיל הבא', 'עבור לתרגיל הבא', 'Next exercise']) expect(isNextCommand(s), s).toBe(true);
+    for (const s of ['', 'הבא', 'ממשיכים', 'עבור', 'next', 'הלאה', 'הבאתי את הכדור', 'כל הכבוד סיימת את התרגיל כשאתה מוכן לחץ על הכפתור או אמור תרגיל הבא']) {
+      expect(isNextCommand(s), s).toBe(false);
+    }
   });
 
-  it('never reacts to the coach\'s own voice', () => {
-    expect(acceptCommand({ coachSpeaking: true, lastCoachSpeechAt: null, now: 0 })).toBe(false);
-    expect(acceptCommand({ coachSpeaking: false, lastCoachSpeechAt: 1000, now: 1000 + ECHO_GUARD_MS - 1 })).toBe(false);
-    expect(acceptCommand({ coachSpeaking: false, lastCoachSpeechAt: 1000, now: 1000 + ECHO_GUARD_MS + 1 })).toBe(true);
+  it('never accepts what was heard while (or right after) the coach spoke', () => {
+    expect(acceptCommand({ coachSpeaking: true, sessionHeardCoach: false })).toBe(false);
+    expect(acceptCommand({ coachSpeaking: false, sessionHeardCoach: true })).toBe(false);
+    expect(acceptCommand({ coachSpeaking: false, sessionHeardCoach: false, isFinal: false })).toBe(false);
+    expect(acceptCommand({ coachSpeaking: false, sessionHeardCoach: false, isFinal: true })).toBe(true);
+  });
+});
+
+describe('The coach speaks in its own gender', () => {
+  it('a female coach: feminine first person; words to the trainee unchanged', () => {
+    expect(genderizeCoachText('יפה, התחלת! אני סופר איתך.', 'female')).toBe('יפה, התחלת! אני סופרת איתך.');
+    expect(genderizeCoachText('אני עוקב אחריך!', 'female')).toBe('אני עוקבת אחריך!');
+    expect(genderizeCoachText('אני לא מצליח לראות את הרגליים', 'female')).toBe('אני לא מצליחה לראות את הרגליים');
+    expect(genderizeCoachText('אני מוכן כשאתה מוכן.', 'female')).toBe('אני מוכנה כשאתה מוכן.');
+    expect(genderizeCoachText('אני צריך לראות אותך', 'female')).toBe('אני צריכה לראות אותך');
+    expect(genderizeCoachText('תתחיל כשאתה מוכן', 'female')).toBe('תתחיל כשאתה מוכן');
+  });
+
+  it('a male coach (or none) is unchanged', () => {
+    expect(genderizeCoachText('אני סופר איתך', 'male')).toBe('אני סופר איתך');
+    expect(genderizeCoachText('אני סופר איתך', null)).toBe('אני סופר איתך');
   });
 });
