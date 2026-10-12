@@ -807,6 +807,18 @@ export default function Training() {
   // before the warm-up, the opening screen previews the first warm-up move
   const demoSpecShown = idlePreview && !warmUpDone && currentIdx === 0 && warmUpExercises[0]?.ghost
     ? warmUpExercises[0].ghost : demoGhostSpec;
+  // MIRROR → GUIDE (owner): the big Ghost mirrors the trainee until they are in the exercise's start
+  // position (the start gate), then it performs the exercise on them; in the exercise it guides
+  const ghostIsGuide = useCallback(() => {
+    const ph = phaseRef.current;
+    if (ph === PHASE.EXERCISING) return true;
+    if (ph === PHASE.BRIEFING || ph === PHASE.CHECKING_EQUIPMENT || ph === PHASE.CALIBRATING) {
+      const ex = workingSourceRef.current;
+      return !!ex?.active && !!ex.startReadyRef?.current;
+    }
+    return false;                      // the opening screen / the rest: a mirror of the trainee
+  }, []);
+
   // Kick / pass drills: a ball comes to the kicking foot on the beat (the strike timing)
   const incomingKind = useMemo(() => {
     const pid = currentExercise?.catalogId ? parseCatalogId(currentExercise.catalogId)?.pattern : null;
@@ -2920,7 +2932,7 @@ export default function Training() {
           />
         )}
         {demoGhostPhase && showDemoGhost && demoOnBody && (
-          <GhostOverlay spec={ghostViewSpec} limbProfile={limbProfile} landmarksRef={poseLandmarksRef} videoRef={videoRef} onError={handleOverlayError} />
+          <GhostOverlay spec={ghostViewSpec} limbProfile={limbProfile} landmarksRef={poseLandmarksRef} videoRef={videoRef} onError={handleOverlayError} isGuide={ghostIsGuide} />
         )}
         {incomingActive && (
           <IncomingBall
@@ -3556,7 +3568,10 @@ export default function Training() {
             if (!on) return null;
             const bigShown = (phase === PHASE.WARM_UP && warmUpGhostOn && ghostSpec && overlayActive) || (demoGhostPhase && showDemoGhost && demoOnBody);
             const smallShown = (phase === PHASE.WARM_UP && warmUpGhostOn && ghostSpec && !overlayActive) || (demoGhostPhase && showDemoGhost && !demoOnBody);
-            if (bigShown) return isHe ? '✓ הצללית הגדולה מוצגת עכשיו על הגוף שלך' : '✓ The big Ghost is on your body now';
+            if (bigShown) {
+              if (phase === PHASE.WARM_UP || ghostIsGuide()) return isHe ? '✓ הצללית מדגימה את התרגיל עליך — עקוב אחריה' : '✓ The Ghost performs the exercise on you — follow it';
+              return isHe ? '✓ הצללית משקפת אותך — היכנס לעמדת הפתיחה והיא תתחיל להדגים' : '✓ The Ghost mirrors you — take the start position and it starts guiding';
+            }
             if (smallShown) return isHe ? '✓ הצללית הקטנה מוצגת בצד המסך' : '✓ The small Ghost is shown at the side';
             if (phase === PHASE.IDLE && !checkIn && currentIdx === 0) return isHe ? 'הצללית תופיע אחרי הצ\'ק-אין' : 'The Ghost appears after the check-in';
             return isHe ? 'הצללית תופיע עם תחילת החימום / התרגיל' : 'The Ghost appears when the warm-up / exercise starts';

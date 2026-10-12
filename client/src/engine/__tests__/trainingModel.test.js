@@ -149,3 +149,38 @@ describe('Floor exercises: the big Ghost lies on the trainee INSIDE the camera p
     expect(Math.sign(cx(a) - 300)).not.toBe(Math.sign(cx(b) - 300));
   });
 });
+
+describe('MIRROR mode: the big Ghost drawn from the trainee\'s own skeleton', () => {
+  const map = (x, y) => ({ x: x * 600, y: y * 800 });
+  const standing = lm([[0, 0.5, 0.15], [11, 0.56, 0.25], [12, 0.44, 0.25], [13, 0.6, 0.38], [14, 0.4, 0.38], [15, 0.62, 0.5], [16, 0.38, 0.5],
+    [23, 0.54, 0.52], [24, 0.46, 0.52], [25, 0.55, 0.7], [26, 0.45, 0.7], [27, 0.55, 0.9], [28, 0.45, 0.9]]);
+
+  it('every joint of the Ghost is exactly on the trainee\'s skeleton point', async () => {
+    const { mirrorPoseFromSkeleton } = await import('../warmupGhost.js');
+    const m = mirrorPoseFromSkeleton(standing, map, lpOk);
+    const knee = m.pose.segments.find(s => s.limb === 'left_leg' && s.part === 'thigh').to;
+    expect(knee).toEqual(map(0.55, 0.7));
+    const wrist = m.pose.segments.find(s => s.limb === 'right_arm' && s.part === 'forearm').to;
+    expect(wrist).toEqual(map(0.38, 0.5));
+    expect(m.pose.torso.ls).toEqual(map(0.56, 0.25));
+    expect(m.pose.head.x).toBeCloseTo(300, 6);
+    // a head of a real size (drawFigure scales the radius): never a giant circle over the picture
+    expect(m.pose.head.r * m.scale).toBeLessThan(0.6 * Math.abs(m.pose.torso.ls.y - m.pose.torso.lh.y));
+  });
+
+  it('an absent leg is not drawn; a below-knee prosthesis is a pylon', async () => {
+    const { mirrorPoseFromSkeleton } = await import('../warmupGhost.js');
+    const m = mirrorPoseFromSkeleton(standing, map, lpBK);
+    expect(m.pose.segments.find(s => s.limb === 'left_leg' && s.part === 'shin').dashed).toBe(true);
+    const lpAK = getLimbProfile({ scanData: { classification: 'TRANSFEMORAL_AMPUTEE', prostheticSide: 'left' } });
+    const lpNoLeft = { ...lpAK, left_leg: { ...lpAK.left_leg, state: 'absent' } };
+    expect(mirrorPoseFromSkeleton(standing, map, lpNoLeft).pose.segments.some(s => s.limb === 'left_leg')).toBe(false);
+  });
+
+  it('no skeleton (no shoulders in the picture) → no Ghost at all (it never floats)', async () => {
+    const { mirrorPoseFromSkeleton, drawGhostMirror } = await import('../warmupGhost.js');
+    expect(mirrorPoseFromSkeleton(lm([[23, 0.5, 0.5], [24, 0.4, 0.5]]), map, lpOk)).toBeNull();
+    expect(mirrorPoseFromSkeleton(null, map, lpOk)).toBeNull();
+    expect(drawGhostMirror({}, null, map, lpOk)).toBe(false);
+  });
+});

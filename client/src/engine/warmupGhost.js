@@ -878,3 +878,82 @@ export function drawGhostOverlay(ctx, spec, lp, nowMs, origin, scale, alpha = 0.
     ctx.restore();
   }
 }
+
+// ============================================================
+// MIRROR mode (owner, 2026-10-12: "before the exercise starts the Ghost mirrors me exactly; once I am
+// in the start position it becomes the guide that performs the exercise on me"): the big Ghost drawn
+// FROM THE TRAINEE'S OWN SKELETON — every joint exactly on the green points, so it can never float
+// away from the body. Absent limbs are not drawn; a below-knee prosthesis is drawn as a pylon.
+// ============================================================
+
+const MIRROR_VIS = 0.5;
+const LIMBS = [
+  ['left_leg', 'thigh', 23, 25], ['left_leg', 'shin', 25, 27], ['right_leg', 'thigh', 24, 26], ['right_leg', 'shin', 26, 28],
+  ['left_arm', 'upperArm', 11, 13], ['left_arm', 'forearm', 13, 15], ['right_arm', 'upperArm', 12, 14], ['right_arm', 'forearm', 14, 16],
+];
+
+/**
+ * The trainee's own pose as a Ghost figure (view px), or null without a usable skeleton.
+ * @param {Array} landmarks - normalized pose landmarks
+ * @param {(nx, ny) => {x,y}} map - camera → view mapping (frameTransform)
+ * @returns {{ pose, scale } | null}
+ */
+export function mirrorPoseFromSkeleton(landmarks, map, lp = {}) {
+  const seen = (i) => { const p = landmarks?.[i]; return p && (p.visibility ?? 1) >= MIRROR_VIS && p.x > -0.05 && p.x < 1.05 && p.y > -0.05 && p.y < 1.05; };
+  const at = (i) => map(landmarks[i].x, landmarks[i].y);
+  if (!seen(11) || !seen(12)) return null;
+  const ls = at(11), rs = at(12);
+  const shMid = { x: (ls.x + rs.x) / 2, y: (ls.y + rs.y) / 2 };
+  const shoulderW = Math.hypot(ls.x - rs.x, ls.y - rs.y);
+  let lh, rh;
+  if (seen(23) && seen(24)) { lh = at(23); rh = at(24); } else {
+    // hips out of the picture: below the shoulders by a real torso (1.3 × the shoulder width)
+    const down = shoulderW * 1.3;
+    lh = { x: ls.x - (ls.x - shMid.x) * 0.5, y: ls.y + down };
+    rh = { x: rs.x - (rs.x - shMid.x) * 0.5, y: rs.y + down };
+  }
+  const hipMid = { x: (lh.x + rh.x) / 2, y: (lh.y + rh.y) / 2 };
+  const torsoPx = Math.hypot(shMid.x - hipMid.x, shMid.y - hipMid.y);
+  if (!(torsoPx > 8)) return null;
+  const scale = torsoPx / B.shoulderY * -1;              // px per body unit (shoulders are 1.4 units above the hips)
+  const segments = [];
+  for (const [limb, part, a, b] of LIMBS) {
+    const state = lp?.[limb]?.state;
+    if (state === 'absent' || lp?.[limb]?.trainable === false) continue;
+    if (!seen(a) || !seen(b)) continue;
+    const isLegShin = part === 'shin';
+    const dashed = isLegShin && state === 'prosthetic';
+    const from = a === 23 ? lh : a === 24 ? rh : at(a);
+    segments.push({ from, to: at(b), limb, part, dashed });
+  }
+  const waist = (k) => ({ x: hipMid.x + (shMid.x - hipMid.x) * 0.4 + k, y: hipMid.y + (shMid.y - hipMid.y) * 0.4 });
+  const hw = Math.hypot(lh.x - rh.x, lh.y - rh.y) * 0.6;
+  const up = { x: (shMid.x - hipMid.x) / torsoPx, y: (shMid.y - hipMid.y) / torsoPx };
+  const neck = { x: shMid.x + up.x * 0.05 * scale, y: shMid.y + up.y * 0.05 * scale };
+  // (the head radius is in body units — drawFigure scales it)
+  const head = seen(0)
+    ? { ...at(0), r: B.headR }
+    : { x: shMid.x + up.x * 0.4 * scale, y: shMid.y + up.y * 0.4 * scale, r: B.headR };
+  const sideX = Math.sign(ls.x - rs.x) || 1;
+  return {
+    scale,
+    pose: {
+      segments,
+      head,
+      neck,
+      torso: { ls, rs, lh, rh, lw: waist(sideX * hw), rw: waist(-sideX * hw) },
+      mirror: true,
+    },
+  };
+}
+
+/** Draw the MIRROR Ghost on the trainee's skeleton (view px). Nothing without a skeleton. */
+export function drawGhostMirror(ctx, landmarks, map, lp, alpha = 0.9) {
+  const m = mirrorPoseFromSkeleton(landmarks, map, lp);
+  if (!m) return false;
+  ctx.save();
+  ctx.globalAlpha = alpha;
+  drawFigure(ctx, m.pose, (p) => p, m.scale, { floorShadow: false, glow: false, look: OVERLAY_LOOK });
+  ctx.restore();
+  return true;
+}
