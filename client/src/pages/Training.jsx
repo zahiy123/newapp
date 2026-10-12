@@ -4,7 +4,7 @@ import { useAuth } from '../context/AuthContext';
 import { useCamera } from '../hooks/useCamera';
 import { usePose } from '../hooks/usePose';
 import { useSpeech } from '../hooks/useSpeech';
-import { useObjectDetection, classifyDetectedObjects } from '../hooks/useObjectDetection';
+import { useObjectDetection } from '../hooks/useObjectDetection';
 import { useBallDetection } from '../hooks/useBallDetection';
 import { useEquipmentDetection } from '../hooks/useEquipmentDetection';
 import { useAICoach } from '../hooks/useAICoach';
@@ -26,13 +26,15 @@ import TrainingViewControls from '../components/TrainingViewControls';
 import CoachVoicePicker from '../components/CoachVoicePicker';
 import { pickCoachVoice } from '../engine/voicePick';
 import { coachMode, COACH_IDS } from '../engine/coachAvatar';
-import { setCoachVoice } from '../hooks/useSpeech';
+import { setCoachVoice, setSpeechOpen } from '../hooks/useSpeech';
 import { useVoiceCommand } from '../hooks/useVoiceCommand';
-import { READY_DRIVE, withDrive, splitLegOrder, legLabel, splitStartText, splitSwitchText, splitWorkingSide, setLegHalf, legSetStartText, legSetNextText } from '../engine/training/coachFlow';
+import { READY_DRIVE, withDrive, splitLegOrder, legLabel, splitStartText, splitSwitchText, splitWorkingSide, setLegHalf, legSetStartText, legSetNextText, isStrikeMode } from '../engine/training/coachFlow';
 import { exerciseNeedsSetup } from '../engine/training/exerciseSetup';
 import DailyCheckIn from '../components/DailyCheckIn';
 import { applyCheckIn } from '../engine/training/dailyCheckIn';
-import { catalogGhostSpec } from '../engine/catalog/catalog';
+import { catalogGhostSpec, parseCatalogId } from '../engine/catalog/catalog';
+import IncomingBall from '../components/IncomingBall';
+import { kickingSide } from '../engine/incomingBall';
 import { rebuildPlanFromCatalog, planContext } from '../engine/catalog/planBuilder';
 import { availableEquipment, fitExercises, needsBall } from '../engine/exercise/equipmentFit';
 import { sportContextsFor } from '../engine/sports/sportLibrary';
@@ -42,7 +44,7 @@ import { FEATURES } from '../config/features';
 import { CHALLENGE_MOVES, createRangeChallenge, updateRangeChallenge, createPeakTracker, trackPeak, shoulderAngle } from '../engine/rangeProgression';
 import { detectActivity, requiredPointsFor } from '../engine/warmupActivity';
 import { createAccuracyTracker, retargetAccuracyTracker, updateAccuracy, accuracyLevel } from '../engine/movementAccuracy';
-import { getAnalyzer, getLocationProps, getWarmUpExercises, getDisabilityContext, getCalibrationAngles, checkOrientation, checkPerspective, checkMovementQuality, ORIENTATION, WARMUP_STABILIZER_CONFIG } from '../utils/exerciseAnalysis';
+import { getAnalyzer, getLocationProps, getDisabilityContext, getCalibrationAngles, checkOrientation, checkPerspective, checkMovementQuality, ORIENTATION, WARMUP_STABILIZER_CONFIG } from '../utils/exerciseAnalysis';
 import { LandmarkStabilizer, computeJointAngles, computeSymmetryScore, computeStabilityScore, detectMovementPhase, buildPerformanceReport, evaluateSetPerformance, getSportProfile, runSafetyCheck, generateCoachFeedback } from '../utils/motionEngine';
 
 import { estimateCalories } from '../utils/calorieEstimator';
@@ -124,6 +126,9 @@ const OPTIMIZATION_TIPS = {
 
 const LOCATION_ICONS = { home: '\uD83C\uDFE0', yard: '\uD83C\uDF33', field: '\u26BD', gym: '\uD83C\uDFCB\uFE0F' };
 
+// The exercise's analyzer: by the movement itself (catalog exercises carry it), never by a long display name
+const analyzerFor = (ex) => getAnalyzer(ex?.analyzerName || ex?.name);
+
 export default function Training() {
   const { t } = useTranslation();
   const { user, userProfile } = useAuth();
@@ -149,7 +154,7 @@ export default function Training() {
   }), [userProfile?.disability, userProfile?.amputationSide, userProfile?.amputationLevel]);
   const { videoRef, active: cameraActive, error: cameraError, start: startCamera, stop: stopCamera } = useCamera();
   const { ready: poseReady, landmarks, landmarksRef: poseLandmarksRef, startLoop, stopLoop } = usePose(canvasRef, beforeDrawRef, amputationProfile);
-  const { ready: objReady, detectedObjects, startLoop: startObjLoop, stopLoop: stopObjLoop, hasEquipment, scanEnvironment, captureFrame } = useObjectDetection();
+  const { ready: objReady, detectedObjects, startLoop: startObjLoop, stopLoop: stopObjLoop, scanEnvironment, captureFrame } = useObjectDetection();
   const { ready: ballReady, getBallData, startLoop: startBallLoop, stopLoop: stopBallLoop } = useBallDetection(userProfile?.sport);
   const { ready: equipReady, getEquipmentData, getBallData: getEquipBallData, startLoop: startEquipLoop, stopLoop: stopEquipLoop } = useEquipmentDetection(userProfile?.sport);
 
@@ -164,14 +169,14 @@ export default function Training() {
   const [equipmentLabel, setEquipmentLabel] = useState('');
   const equipCheckTimerRef = useRef(null);
   const {
-    speak, speakPriority, speakIfIdle, speakQueued, speakBriefing, speakEncouragement, speakCorrection,
+    speak, speakPriority, speakIfIdle, speakBriefing, speakEncouragement, speakCorrection,
     speakOptimization, speakRestTip, speakSetStart, speakCount,
-    speakPostBriefingNudge, speakMidSetQuit, speakHeadUp,
-    speakHowToStart, speakSitting, speakReadyWhenYouAre, speakActiveProd,
+    speakMidSetQuit, speakHeadUp,
+    speakActiveProd,
     speakQuickReExplain, speakEquipmentFound,
-    speakWarmUpIntro, speakWarmUpExercise, speakWarmUpNudge, speakWarmUpInactivityNudge, speakWarmUpReExplain,
+    speakWarmUpIntro, speakWarmUpExercise, speakWarmUpInactivityNudge, speakWarmUpReExplain,
     speakWarmUpCorrection, speakWarmUpComplete,
-    speakDisabilityTip, speakMindMuscleCue, speakAICoaching, speakEnvironmentScan,
+    speakDisabilityTip, speakMindMuscleCue, speakAICoaching,
     speakNotVisible, speakPositiveReinforcement,
     speakMissingBodyParts, speakSideCamera, speakResumeWelcome, speakCalibrationStart, speakCalibrationDone,
     speakLevelUpPrompt, speakCritical, unlockAudio,
@@ -581,6 +586,7 @@ export default function Training() {
         const built = rebuildPlanFromCatalog(plan, planContext(eff, lp, user.uid), (data.language || 'he') === 'he');
         loaded = built.weeks[weekIdx]?.days?.[dayIdx]?.exercises || [];
         sessionDataRef.current.sessionGoal = built.weeks[weekIdx]?.days?.[dayIdx]?.goal || null;
+        sessionDataRef.current.sessionGoalName = built.weeks[weekIdx]?.days?.[dayIdx]?.goalName || null;
       } catch (err) {
         console.error('[Catalog] session build failed — using the AI exercises:', err);
         loaded = null;
@@ -718,8 +724,8 @@ export default function Training() {
   // Stage 3.1 — Expert Execution Profile of the current exercise (isolated module, behind a flag):
   // required limbs in the frame, kinematic errors / danger, accuracy, and the Ghost of the same profile
   const exerciseCueKey = useMemo(
-    () => (currentExercise ? getAnalyzer(currentExercise.name).cueKey : null),
-    [currentExercise?.name],
+    () => (currentExercise ? analyzerFor(currentExercise).cueKey : null),
+    [currentExercise?.name, currentExercise?.analyzerName],
   );
   // Sport contexts (rehab / rehab + sport / sport) layer sport-specific technique on every profile
   const sportContexts = useMemo(
@@ -795,16 +801,31 @@ export default function Training() {
       // this half's working leg: the kicking leg (kicks) or the free leg while standing on the other
       spec = { ...spec, profile: { ...spec.profile, ghost: { ...spec.profile.ghost, workingSide: splitWorkingSide(limbProfile, splitHalf, currentExercise.splitMode) } } };
     }
-    return spec;
+    // never no Ghost: an exercise without its own demonstration still gets a standing guide figure
+    return spec || (currentExercise ? { move: 'idle' } : null);
   }, [demoGhostPhase, demoProfile, exerciseCueKey, currentExercise?.catalogId, currentExercise?.sideSwitch, currentExercise?.splitMode, splitHalf, limbProfile]);
   // before the warm-up, the opening screen previews the first warm-up move
   const demoSpecShown = idlePreview && !warmUpDone && currentIdx === 0 && warmUpExercises[0]?.ghost
     ? warmUpExercises[0].ghost : demoGhostSpec;
+  // Kick / pass drills: a ball comes to the kicking foot on the beat (the strike timing)
+  const incomingKind = useMemo(() => {
+    const pid = currentExercise?.catalogId ? parseCatalogId(currentExercise.catalogId)?.pattern : null;
+    if (pid === 'shadowKick') return 'kick';
+    if (pid === 'shadowPass') return 'pass';
+    const ck = exerciseCueKey;
+    return ck === 'kick' || ck === 'pass' ? ck : null;
+  }, [currentExercise?.catalogId, exerciseCueKey]);
+  const incomingActive = !!incomingKind && phase === PHASE.EXERCISING;
+  // while the ball comes to the trainee, the Ghost does not kick its own ball (one ball on screen)
+  const ghostViewSpec = useMemo(
+    () => (incomingActive && demoSpecShown?.ball ? { ...demoSpecShown, ball: undefined } : demoSpecShown),
+    [incomingActive, demoSpecShown],
+  );
   const showDemoGhost = exerciseGhostOn && !!demoSpecShown;
   // ROM gauge only for dynamic range-of-motion exercises (never static holds / ball drills / kicks / running)
   const showRomGauge = useMemo(() => {
     if (!currentExercise) return false;
-    const a = getAnalyzer(currentExercise.name);
+    const a = analyzerFor(currentExercise);
     const kind = buildExecutionProfile(a.cueKey, currentExercise.name, limbProfile, sportContexts, currentExercise.catalogId || null)?.kind;
     return showsRangeGauge({ analyzerType: a.type, profileKind: kind, exerciseName: currentExercise.name });
   }, [currentExercise?.name, limbProfile, sportContexts]);
@@ -820,7 +841,7 @@ export default function Training() {
   // Set up analyzer when exercise changes
   useEffect(() => {
     if (currentExercise) {
-      const { analyze, type, cueKey, ballAware } = getAnalyzer(currentExercise.name);
+      const { analyze, type, cueKey, ballAware } = analyzerFor(currentExercise);
       // Timed catalog exercises (intervals / holds): the target is seconds of REAL work, not reps.
       // Rep exercises: the count comes from the exact profile rep detector when there is one.
       const isWorking = () => !workingSourceRef.current?.active || workingSourceRef.current.workingRef.current;
@@ -867,6 +888,33 @@ export default function Training() {
       setFeedback({ type: 'info', text: isHe ? '🔄 החלף רגל!' : '🔄 Switch legs!' });
     }
   }, [displayReps, phase, splitHalf]);
+
+  // SILENT setup (owner): no word / sound during the check-in, the space scan, the ball question —
+  // the coach speaks only once the workout itself starts (the warm-up or the first exercise)
+  useEffect(() => {
+    setSpeechOpen(false);
+    return () => setSpeechOpen(true);
+  }, []);
+  const workoutVoiceRef = useRef(false);
+  const [goalBanner, setGoalBanner] = useState(null);
+  /** The workout starts: open the voice and say today's goal first ("היום אימון כוח"). */
+  function beginWorkoutVoice() {
+    if (workoutVoiceRef.current) return false;
+    workoutVoiceRef.current = true;
+    setSpeechOpen(true);
+    const g = sessionDataRef.current.sessionGoalName;
+    const line = g ? (isHe ? `היום אימון ${g.he}` : `Today: ${g.en} training`) : null;
+    if (line) {
+      setGoalBanner(line);
+      setTimeout(() => setGoalBanner(null), 6000);
+      speakPriority(`${line}!`, { rate: 1.05 });
+    }
+    return !!line;
+  }
+  /** Run the first coaching line after today's goal has been said (they never cut each other). */
+  function afterGoal(say) {
+    if (beginWorkoutVoice()) pollSpeechEnd(say); else say();
+  }
 
   // The coach's voice follows the chosen character
   useEffect(() => { setCoachVoice(coachChoice); }, [coachChoice]);
@@ -1623,11 +1671,12 @@ export default function Training() {
   function startWarmUpOrBriefing() {
     if (!warmUpDone && currentIdx === 0 && warmUpExercises.length > 0) {
       setWarmUpIdx(0);
-      speakWarmUpIntro(playerName);
+      afterGoal(() => speakWarmUpIntro(playerName));
       setPhase(PHASE.WARM_UP);
     } else {
       setPhase(PHASE.BRIEFING);
-      doBriefingSpeech(currentExercise);
+      const ex = currentExercise;
+      afterGoal(() => doBriefingSpeech(ex));
     }
   }
 
@@ -2430,7 +2479,7 @@ export default function Training() {
   // Build briefing voice params from deterministic instruction map
   function doBriefingSpeech(exercise) {
     if (!exercise) return;
-    const instr = getExerciseInstruction(exercise.name, getAnalyzer(exercise.name)?.cueKey);
+    const instr = getExerciseInstruction(exercise.name, analyzerFor(exercise)?.cueKey);
     const voiceText = instr ? instr.steps.join('. ') : (exercise.voicePrompt || exercise.description);
     const safetyText = instr?.safety || exercise.tips;
     // Equipment set-up only for drills that really use it (never "two chairs" for a plank)
@@ -2488,14 +2537,16 @@ export default function Training() {
     if (!warmUpDone && currentIdx === 0 && warmUpExercises.length > 0) {
       console.log('[handleStartBriefing] → WARM_UP phase');
       setWarmUpIdx(0);
-      speakWarmUpIntro(playerName);
+      afterGoal(() => speakWarmUpIntro(playerName));
       setPhase(PHASE.WARM_UP);
       return;
     }
 
     console.log('[handleStartBriefing] → BRIEFING phase');
     setPhase(PHASE.BRIEFING);
-    doBriefingSpeech(currentExercise);
+    // (a resumed workout starts here: the voice opens with today's goal first)
+    const ex = currentExercise;
+    afterGoal(() => doBriefingSpeech(ex));
   }
 
   function handleStartAfterBriefing() {
@@ -2805,7 +2856,7 @@ export default function Training() {
   }
 
   return (
-    <div className={isFullscreen ? 'fixed inset-0 bg-black z-40' : isMobile ? 'fixed inset-0 flex flex-col bg-black' : 'max-w-4xl mx-auto space-y-4'}>
+    <div className={isFullscreen ? 'fixed inset-0 bg-black z-40 flex flex-col' : isMobile ? 'fixed inset-0 flex flex-col bg-black' : 'max-w-4xl mx-auto space-y-4'}>
       {!isFullscreen && !isMobile && (
         <div className="flex items-center justify-between flex-wrap gap-2">
           <h1 className="text-xl font-bold text-gray-800">{t('training.title')}</h1>
@@ -2821,13 +2872,17 @@ export default function Training() {
       )}
 
       {/* Camera + Pose Overlay */}
+      {/* Full screen: the camera takes all the free space (the whole frame, never cut / stretched);
+          the exercise card and the controls sit BELOW it, never over the trainee */}
       <div className={isFullscreen
-        ? 'relative w-full h-full bg-black overflow-hidden'
+        ? 'relative w-full flex-1 min-h-0 bg-black overflow-hidden'
         : isMobile ? 'relative w-full bg-black overflow-hidden flex-shrink-0'
         : 'relative bg-black rounded-xl overflow-hidden'}
-        style={isFullscreen ? undefined : isMobile ? { height: '40vh' } : { aspectRatio: '4/3' }}>
-        <video ref={videoRef} className="w-full h-full object-cover" playsInline muted style={{ transform: 'scaleX(-1)' }} />
-        <canvas ref={canvasRef} className="absolute inset-0 w-full h-full" style={{ transform: 'scaleX(-1)' }} />
+        style={isFullscreen ? undefined : isMobile ? { height: '55vh' } : { aspectRatio: '4/3' }}>
+        {/* The WHOLE camera frame is shown (contain): what the camera sees = what the trainee sees =
+            where the skeleton and the big Ghost are drawn (cover cut ~35% of an upright phone frame) */}
+        <video ref={videoRef} className="w-full h-full object-contain" playsInline muted style={{ transform: 'scaleX(-1)' }} />
+        <canvas ref={canvasRef} className="absolute inset-0 w-full h-full object-contain" style={{ transform: 'scaleX(-1)' }} />
 
         {/* Warm-up demo figure (Ghost): own canvas, always visible, not stretched, not covered by the banner */}
         {phase === PHASE.WARM_UP && warmUpGhostOn && ghostSpec && !overlayActive && (
@@ -2848,16 +2903,31 @@ export default function Training() {
             the panel, or the full overlay on the body for standing exercises */}
         {demoGhostPhase && showDemoGhost && !demoOnBody && (
           <WarmupGhostPanel
-            spec={demoSpecShown} limbProfile={limbProfile} isHe={isHe}
+            spec={ghostViewSpec} limbProfile={limbProfile} isHe={isHe}
             placement={phase === PHASE.BRIEFING || phase === PHASE.CHECKING_EQUIPMENT || phase === PHASE.RESTING ? 'top' : 'middle'}
             size={demoLarge ? 'large' : 'small'}
             label={demoLabel}
           />
         )}
         {demoGhostPhase && showDemoGhost && demoOnBody && (
-          <GhostOverlay spec={demoSpecShown} limbProfile={limbProfile} landmarksRef={poseLandmarksRef} videoRef={videoRef} onError={handleOverlayError} />
+          <GhostOverlay spec={ghostViewSpec} limbProfile={limbProfile} landmarksRef={poseLandmarksRef} videoRef={videoRef} onError={handleOverlayError} />
+        )}
+        {incomingActive && (
+          <IncomingBall
+            kind={incomingKind}
+            side={kickingSide(limbProfile, currentExercise?.sideSwitch && isStrikeMode(currentExercise?.splitMode) ? splitSupport : null)}
+            landmarksRef={poseLandmarksRef}
+            videoRef={videoRef}
+            isHe={isHe}
+          />
         )}
         {(phase === PHASE.EXERCISING || phase === PHASE.CALIBRATING) && <ExecutionHud execution={execution} isHe={isHe} />}
+        {/* Today's goal, said and shown the moment the workout starts */}
+        {goalBanner && (
+          <div className="absolute top-14 left-1/2 -translate-x-1/2 z-[27] pointer-events-none rounded-2xl bg-emerald-600/95 text-white text-base font-bold px-4 py-2 shadow-xl whitespace-nowrap" dir={isHe ? 'rtl' : 'ltr'}>
+            {'🎯'} {goalBanner}
+          </div>
+        )}
         {/* The virtual coach (chosen in the check-in): demonstrates with the Ghost, talks, claps */}
         {COACH_IDS.includes(coachChoice) && [PHASE.WARM_UP, PHASE.BRIEFING, PHASE.CHECKING_EQUIPMENT, PHASE.CALIBRATING,
           PHASE.EXERCISING, PHASE.RESTING, PHASE.EXERCISE_DONE, PHASE.PAUSED].includes(phase) && (
@@ -2869,6 +2939,15 @@ export default function Training() {
             isHe={isHe}
             isSpeaking={isSpeaking}
             bubble={feedback?.text || null}
+            action={(() => {
+              // what the coach is doing right now — in the coach's gender
+              const f = coachChoice === 'female';
+              const m = coachMode({ phase, hasSpec: !!(phase === PHASE.WARM_UP ? ghostSpec : demoGhostSpec), justFinished: coachCheer });
+              const what = phase === PHASE.WARM_UP ? (isHe ? currentWarmUp?.name?.he : currentWarmUp?.name?.en) : (isHe ? currentExercise?.name : (currentExercise?.nameEn || currentExercise?.name));
+              if (m === 'cheer') return isHe ? 'כל הכבוד!' : 'Well done!';
+              if (m === 'demo' && what) return isHe ? `${f ? 'מדגימה' : 'מדגים'}: ${what}` : `Showing: ${what}`;
+              return isHe ? (f ? 'מוכנה כשתהיה מוכן' : 'מוכן כשתהיה מוכן') : 'Ready when you are';
+            })()}
           />
         )}
         {/* A finished warm-up move waits for the trainee — never moves on by itself */}
@@ -2888,10 +2967,15 @@ export default function Training() {
         )}
         {phase === PHASE.EXERCISING && currentExercise?.sideSwitch && (
           <div className={`absolute top-2 left-1/2 -translate-x-1/2 z-20 pointer-events-none rounded-full text-white text-sm font-bold px-3 py-1 shadow ${splitHalf === 1 ? 'bg-sky-700/90' : 'bg-orange-600/90'}`}>
-            {'🦵'} {currentExercise.splitMode === 'kick'
-              ? (currentExercise.splitBy === 'set'
-                ? (isHe ? `בעיטות ב${legLabel(splitSupport, limbProfile, true)} · סט ${currentSet}/${totalSets}` : `Kicking with your ${legLabel(splitSupport, limbProfile, false)} · set ${currentSet}/${totalSets}`)
-                : (isHe ? `בעיטות ב${legLabel(splitSupport, limbProfile, true)} · חצי ${splitHalf}/2` : `Kicking with your ${legLabel(splitSupport, limbProfile, false)} · half ${splitHalf}/2`))
+            {'🦵'} {isStrikeMode(currentExercise.splitMode)
+              ? (() => {
+                const he = currentExercise.splitMode === 'pass' ? 'מסירות' : 'בעיטות';
+                const en = currentExercise.splitMode === 'pass' ? 'Passing' : 'Kicking';
+                const part = currentExercise.splitBy === 'set'
+                  ? (isHe ? `סט ${currentSet}/${totalSets}` : `set ${currentSet}/${totalSets}`)
+                  : (isHe ? `חצי ${splitHalf}/2` : `half ${splitHalf}/2`);
+                return isHe ? `${he} ב${legLabel(splitSupport, limbProfile, true)} · ${part}` : `${en} with your ${legLabel(splitSupport, limbProfile, false)} · ${part}`;
+              })()
               : (isHe ? `עמידה על ${legLabel(splitSupport, limbProfile, true)} · חצי ${splitHalf}/2` : `Standing on your ${legLabel(splitSupport, limbProfile, false)} · half ${splitHalf}/2`)}
           </div>
         )}
@@ -3009,7 +3093,7 @@ export default function Training() {
         {/* Briefing overlay — bottom sheet on mobile so camera stays visible */}
         {phase === PHASE.BRIEFING && (() => {
           // Deterministic Hebrew instructions from map (override AI-generated)
-          const analyzer = currentExercise ? getAnalyzer(currentExercise.name) : null;
+          const analyzer = currentExercise ? analyzerFor(currentExercise) : null;
           const instruction = getExerciseInstruction(currentExercise?.name, analyzer?.cueKey);
           const steps = instruction?.steps
             || (currentExercise?.instructions?.length > 0
@@ -3441,7 +3525,7 @@ export default function Training() {
       {cameraActive && (
         <TrainingViewControls
           isHe={isHe}
-          floating={isFullscreen}
+          floating={false}
           ghost={(phase === PHASE.WARM_UP ? warmUpGhostOn : exerciseGhostOn) ? (overlayActive ? 'big' : 'small') : 'off'}
           bigAvailable={FEATURES.GHOST_OVERLAY}
           onGhost={(v) => {
@@ -3652,7 +3736,7 @@ export default function Training() {
 
       {/* === FULLSCREEN LAYOUT: overlay at bottom (unchanged) === */}
       {isFullscreen && (
-        <div className="absolute bottom-0 inset-x-0 z-20 bg-black/60 backdrop-blur-sm p-3 max-h-[45vh] flex flex-col pb-[env(safe-area-inset-bottom)]">
+        <div className="relative flex-shrink-0 z-20 bg-gray-950 p-3 max-h-[30vh] overflow-y-auto flex flex-col pb-[env(safe-area-inset-bottom)]">
           {exercises.length > 0 && (
             <div className="space-y-2">
               {phase === PHASE.WARM_UP && currentWarmUp && (

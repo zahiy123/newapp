@@ -241,6 +241,16 @@ export function drawFigure(ctx, pose, P0, scale, { floorShadow = true, glow = tr
     : look?.sleeves && part === 'upperArm' ? pal.jersey[1] : skinFill);
   const { proj, depthOf, yaw } = figureProjection(pose);
   const P = (p) => P0(proj(p));
+  // fills at `fillAlpha` of the outline's opacity (look.fillAlpha): the trainee stays visible
+  // through a training-model Ghost, the crisp outline shows the movement
+  const fillA = look?.fillAlpha ?? 1;
+  const doFill = () => {
+    if (fillA >= 1) { ctx.fill(); return; }
+    const a0 = ctx.globalAlpha;
+    ctx.globalAlpha = a0 * fillA;
+    ctx.fill();
+    ctx.globalAlpha = a0;
+  };
   const ow = Math.max(1, scale * 0.022) * (look?.outlineScale ?? 1);   // outline width
   const limbK = look?.limbScale ?? 1;                                    // limb thickness (body type)
   ctx.save();
@@ -252,7 +262,7 @@ export function drawFigure(ctx, pose, P0, scale, { floorShadow = true, glow = tr
     ctx.fillStyle = 'rgba(0, 0, 0, 0.28)';
     ctx.beginPath();
     ctx.ellipse(feet.x, feet.y, 0.55 * scale, 0.09 * scale, 0, 0, Math.PI * 2);
-    ctx.fill();
+    doFill();
   }
 
   const top = P0({ x: 0, y: B.headY - B.headR }).y;
@@ -274,15 +284,24 @@ export function drawFigure(ctx, pose, P0, scale, { floorShadow = true, glow = tr
       // Below-knee prosthesis: socket under the knee + slim pylon + foot, static
       const socketEnd = { x: a.x + (b.x - a.x) * 0.3, y: a.y + (b.y - a.y) * 0.3 };
       taperPath(ctx, a, b, 0.075 * scale, 0.06 * scale);
-      ctx.fillStyle = '#cbd5e1'; ctx.fill();
+      ctx.fillStyle = '#cbd5e1'; doFill();
       ctx.lineWidth = ow; ctx.strokeStyle = pal.outline; ctx.stroke();
       taperPath(ctx, a, socketEnd, 0.22 * scale, 0.17 * scale);
-      ctx.fillStyle = '#94a3b8'; ctx.fill(); ctx.stroke();
+      ctx.fillStyle = '#94a3b8'; doFill(); ctx.stroke();
     } else {
       const [w1, w2] = (TAPER[seg.part] || [0.15, 0.12]).map(v => v * limbK);
       taperPath(ctx, a, b, w1 * scale, w2 * scale);
       ctx.fillStyle = fillFor(seg.part, skin);
-      glowOn(); ctx.fill(); glowOff();
+      glowOn(); doFill(); glowOff();
+      if (look?.sleeveShort && seg.part === 'upperArm') {
+        // a short sleeve over the upper arm (the rest of the arm is skin)
+        const end = { x: a.x + (b.x - a.x) * 0.55, y: a.y + (b.y - a.y) * 0.55 };
+        taperPath(ctx, a, end, w1 * scale * 1.12, (w1 * 0.5 + w2 * 0.5) * scale * 1.12);
+        ctx.fillStyle = pal.jersey[1]; doFill();
+        taperPath(ctx, a, b, w1 * scale, w2 * scale);
+      }
+      if (look?.shade) shadeCylinder(a, b, Math.max(w1, w2) * scale);
+      taperPath(ctx, a, b, w1 * scale, w2 * scale);
       ctx.lineWidth = ow; ctx.strokeStyle = pal.outline; ctx.stroke();
       if (look?.pants && (seg.part === 'thigh' || seg.part === 'shin') && pal.stripe) {
         // the tracksuit's side stripe (on the outer edge of the leg, like a real tracksuit)
@@ -298,9 +317,9 @@ export function drawFigure(ctx, pose, P0, scale, { floorShadow = true, glow = tr
       if (seg.part === 'thigh' && !look?.pants) {
         const end = { x: a.x + (b.x - a.x) * 0.42, y: a.y + (b.y - a.y) * 0.42 };
         taperPath(ctx, a, end, w1 * scale * 1.08, (w1 * 0.6 + w2 * 0.4) * scale * 1.08);
-        ctx.fillStyle = pal.shorts; ctx.fill(); ctx.stroke();
+        ctx.fillStyle = pal.shorts; doFill(); ctx.stroke();
       }
-      if (far) { taperPath(ctx, a, b, w1 * scale, w2 * scale); ctx.fillStyle = pal.far; ctx.fill(); }
+      if (far) { taperPath(ctx, a, b, w1 * scale, w2 * scale); ctx.fillStyle = pal.far; doFill(); }
     }
     const side = seg.limb === 'left_leg' ? 'left' : seg.limb === 'right_leg' ? 'right' : null;
     const foot = seg.part === 'shin' && side ? pose.feet?.[side] : null;
@@ -316,16 +335,31 @@ export function drawFigure(ctx, pose, P0, scale, { floorShadow = true, glow = tr
       ctx.beginPath();
       ctx.ellipse(bx, by, len, 0.065 * scale, ang, 0, Math.PI * 2);
       ctx.fillStyle = seg.dashed ? '#cbd5e1' : pal.boot;
-      ctx.fill();
+      doFill();
       ctx.lineWidth = ow; ctx.strokeStyle = 'rgba(148, 163, 184, 0.9)'; ctx.stroke();
     }
     if (seg.part === 'forearm') {
       ctx.beginPath();
       ctx.arc(b.x, b.y, 0.085 * scale, 0, Math.PI * 2);
-      ctx.fillStyle = pal.skin[0]; ctx.fill();
+      ctx.fillStyle = pal.skin[0]; doFill();
       ctx.lineWidth = ow; ctx.strokeStyle = pal.outline; ctx.stroke();
     }
   };
+
+  // ---- volume: the current path shaded like a cylinder lit from the upper left ----
+  function shadeCylinder(a, b, w) {
+    const L = Math.hypot(b.x - a.x, b.y - a.y) || 1;
+    let nx = -(b.y - a.y) / L, ny = (b.x - a.x) / L;
+    if (nx + ny > 0) { nx = -nx; ny = -ny; }                 // the lit side faces the upper left
+    const m = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
+    const g = ctx.createLinearGradient(m.x + nx * w / 2, m.y + ny * w / 2, m.x - nx * w / 2, m.y - ny * w / 2);
+    g.addColorStop(0, 'rgba(0, 0, 0, 0.18)');
+    g.addColorStop(0.28, 'rgba(255, 255, 255, 0.22)');
+    g.addColorStop(0.55, 'rgba(255, 255, 255, 0.02)');
+    g.addColorStop(1, 'rgba(0, 0, 0, 0.42)');
+    ctx.fillStyle = g;
+    ctx.fill();
+  }
 
   // ---- a boot from the heel to the toe; the striking surface (laces / inside) glows ----
   function drawBoot(foot, prosthetic) {
@@ -340,7 +374,7 @@ export function drawFigure(ctx, pose, P0, scale, { floorShadow = true, glow = tr
     }
     taperPath(ctx, h, toe, 0.15 * scale, 0.1 * scale);
     ctx.fillStyle = prosthetic ? '#cbd5e1' : pal.boot;
-    ctx.fill();
+    doFill();
     ctx.lineWidth = ow; ctx.strokeStyle = 'rgba(148, 163, 184, 0.9)'; ctx.stroke();
   }
 
@@ -367,7 +401,21 @@ export function drawFigure(ctx, pose, P0, scale, { floorShadow = true, glow = tr
     ctx.fillStyle = jersey;
     ctx.strokeStyle = jersey;
     ctx.lineWidth = 0.16 * scale;                 // rounds the corners
-    glowOn(); ctx.fill(); ctx.stroke(); glowOff();
+    glowOn(); doFill(); ctx.stroke(); glowOff();
+    if (look?.shade) {
+      // the chest's volume: lit from the left, darker toward the right side and the waist
+      const xs = T.map(p => p.x), ys = T.map(p => p.y);
+      const x0 = Math.min(...xs), x1 = Math.max(...xs), y0 = Math.min(...ys), y1 = Math.max(...ys);
+      const gx = ctx.createLinearGradient(x0, 0, x1, 0);
+      gx.addColorStop(0, 'rgba(255, 255, 255, 0.16)');
+      gx.addColorStop(0.45, 'rgba(255, 255, 255, 0.04)');
+      gx.addColorStop(1, 'rgba(0, 0, 0, 0.34)');
+      ctx.fillStyle = gx; ctx.fill();
+      const gy = ctx.createLinearGradient(0, y0, 0, y1);
+      gy.addColorStop(0, 'rgba(255, 255, 255, 0.08)');
+      gy.addColorStop(1, 'rgba(0, 0, 0, 0.22)');
+      ctx.fillStyle = gy; ctx.fill();
+    }
     // waistband of the shorts
     const hl = P(lh), hr = P(rh);
     ctx.lineWidth = 0.12 * scale;
@@ -376,7 +424,7 @@ export function drawFigure(ctx, pose, P0, scale, { floorShadow = true, glow = tr
     // shoulder caps (sleeves) so the arm joins the jersey
     for (const sp of [T[0], T[1]]) {
       ctx.beginPath(); ctx.arc(sp.x, sp.y, 0.11 * scale, 0, Math.PI * 2);
-      ctx.fillStyle = pal.jersey[0]; ctx.fill();
+      ctx.fillStyle = pal.jersey[0]; doFill();
     }
     look?.torsoExtras?.(ctx, { ls: T[0], rs: T[1], lh: hl, rh: hr, neck: P(pose.neck) }, scale);
   };
@@ -385,13 +433,13 @@ export function drawFigure(ctx, pose, P0, scale, { floorShadow = true, glow = tr
     const n = P(pose.neck);
     const h = P(pose.head);
     taperPath(ctx, n, { x: h.x, y: h.y + pose.head.r * scale * 0.7 }, 0.15 * scale, 0.12 * scale);
-    ctx.fillStyle = skin; ctx.fill();
+    ctx.fillStyle = skin; doFill();
     const rx = pose.head.r * scale * 0.95, ry = pose.head.r * scale * 1.12;
     look?.head?.(ctx, h, rx, ry, 'behind', yaw ? (pose.yawOut ?? 1) : 0);
     ctx.beginPath();
     ctx.ellipse(h.x, h.y, rx, ry, 0, 0, Math.PI * 2);
     ctx.fillStyle = pal.skin[0];
-    glowOn(); ctx.fill(); glowOff();
+    glowOn(); doFill(); glowOff();
     ctx.lineWidth = ow; ctx.strokeStyle = pal.outline; ctx.stroke();
     look?.head?.(ctx, h, rx, ry, 'front', yaw ? (pose.yawOut ?? 1) : 0);
   };
@@ -680,23 +728,106 @@ const OVERLAY_LOOK = Object.freeze({
     outline: 'rgba(2, 6, 23, 0.9)', far: 'rgba(2, 6, 23, 0.3)',
   },
   outlineScale: 2.6,
+  // a training model, not an obstacle: the trainee sees themself through the body, the outline
+  // and the limbs show the correct movement
+  fillAlpha: 0.45,
 });
 
-export function drawGhostOverlay(ctx, spec, lp, nowMs, origin, scale, alpha = 0.72, feetY = null) {
+const LEG_SIDES = ['left', 'right'];
+const scaleFrom = (o, p, k) => ({ ...p, x: o.x + (p.x - o.x) * k, y: o.y + (p.y - o.y) * k, z: (o.z ?? 0) + ((p.z ?? 0) - (o.z ?? 0)) * k });
+const moveBy = (p, d) => (p ? { ...p, x: p.x + d.x, y: p.y + d.y, z: (p.z ?? 0) + d.z } : p);
+
+/**
+ * The Ghost fitted to the trainee's proportions: every limb keeps its DIRECTION (so every joint angle
+ * of the demonstration is unchanged) but takes the trainee's length (factors vs. the Ghost's own).
+ * @returns {{ pose, floorY }} - floorY = the fitted standing ankle height (body units)
+ */
+export function fitPoseToBody(pose, limbs) {
+  if (!limbs) return { pose, floorY: FLOOR_ANKLE_Y };
+  const segs = pose.segments.map(sg => ({ ...sg }));
+  const feet = pose.feet ? { ...pose.feet } : null;
+  const find = (limb, part) => segs.find(sg => sg.limb === limb && sg.part === part);
+  for (const side of LEG_SIDES) {
+    const th = find(`${side}_leg`, 'thigh'), sh = find(`${side}_leg`, 'shin');
+    if (th) {
+      const knee = scaleFrom(th.from, th.to, limbs.thigh);
+      const d = { x: knee.x - th.to.x, y: knee.y - th.to.y, z: (knee.z ?? 0) - (th.to.z ?? 0) };
+      th.to = knee;
+      if (sh) {
+        const ankle0 = sh.to;
+        const ankle = scaleFrom(sh.from, moveBy(sh.to, d), 1);
+        sh.from = knee;
+        sh.to = scaleFrom(knee, ankle, sh.dashed ? 1 : limbs.shin);
+        const fd = { x: sh.to.x - ankle0.x, y: sh.to.y - ankle0.y, z: (sh.to.z ?? 0) - (ankle0.z ?? 0) };
+        if (feet?.[side]) {
+          const f = feet[side];
+          feet[side] = { ...f, ankle: moveBy(f.ankle, fd), heel: moveBy(f.heel, fd), toe: moveBy(f.toe, fd), patch: f.patch ? moveBy(f.patch, fd) : null };
+        }
+      }
+    }
+    const ua = find(`${side}_arm`, 'upperArm'), fa = find(`${side}_arm`, 'forearm');
+    if (ua) {
+      const elbow = scaleFrom(ua.from, ua.to, limbs.upperArm);
+      const d = { x: elbow.x - ua.to.x, y: elbow.y - ua.to.y, z: (elbow.z ?? 0) - (ua.to.z ?? 0) };
+      ua.to = elbow;
+      if (fa) {
+        fa.from = elbow;
+        fa.to = scaleFrom(elbow, moveBy(fa.to, d), limbs.forearm);
+      }
+    }
+  }
+  const floorY = B.thigh * limbs.thigh + B.shin * limbs.shin;
+  return { pose: { ...pose, segments: segs, feet }, floorY };
+}
+
+/**
+ * The Ghost SEATED (a seated trainee / a wheelchair / a seated exercise): the thighs come forward
+ * (toward the camera), the shins hang down; the arms and the torso keep the demonstration.
+ */
+export function seatPose(pose) {
+  const segs = pose.segments.map(sg => ({ ...sg }));
+  const feet = pose.feet ? { ...pose.feet } : null;
+  for (const side of LEG_SIDES) {
+    const th = segs.find(sg => sg.limb === `${side}_leg` && sg.part === 'thigh');
+    const sh = segs.find(sg => sg.limb === `${side}_leg` && sg.part === 'shin');
+    if (!th) continue;
+    const hip = th.from;
+    const knee = { x: hip.x, y: hip.y + 0.18, z: (hip.z ?? 0) - B.thigh * 0.95 };
+    th.to = knee;
+    if (sh) {
+      const ankle0 = sh.to;
+      sh.from = knee;
+      sh.to = { x: knee.x, y: knee.y + B.shin, z: knee.z };
+      if (feet?.[side]) {
+        const fd = { x: sh.to.x - ankle0.x, y: sh.to.y - ankle0.y, z: (sh.to.z ?? 0) - (ankle0.z ?? 0) };
+        const f = feet[side];
+        feet[side] = { ...f, ankle: moveBy(f.ankle, fd), heel: moveBy(f.heel, fd), toe: moveBy(f.toe, fd), patch: null };
+      }
+    }
+  }
+  return { ...pose, segments: segs, feet, seated: true };
+}
+
+export function drawGhostOverlay(ctx, spec, lp, nowMs, origin, scale, alpha = 0.72, feetY = null, body = null) {
   if (!spec || !origin || !(scale > 0)) return;
   const t = phaseOf(nowMs, periodOf(spec));
-  const pose = ghostPose(spec, t, lp);
-  const lying = pose.landmarks && !pose.depth && pose.view !== 'front' && spec.profile?.posture !== 'standing';
+  const raw = ghostPose(spec, t, lp);
+  const lying = raw.landmarks && !raw.depth && raw.view !== 'front' && spec.profile?.posture !== 'standing';
+  // seated trainee (detected, a wheelchair, or a seated exercise) → the Ghost sits too
+  const seated = !lying && (body?.seated || lp?.wheelchair || spec.profile?.posture === 'seated');
+  // fitted to the trainee's own limb lengths (the same joint angles = the same correct movement)
+  const fitted = lying ? { pose: raw, floorY: FLOOR_ANKLE_Y } : fitPoseToBody(raw, body?.limbs);
+  const pose = seated ? seatPose(fitted.pose) : fitted.pose;
   let P;
-  if (!lying && typeof feetY === 'number') {
+  if (!lying && !seated && typeof feetY === 'number') {
     // Standing: the Ghost STANDS where the trainee stands — its feet on the trainee's feet, so it
     // never bobs up and down with the trainee's hips (steady, like a real demonstrator)
-    P = (p) => ({ x: origin.x + p.x * scale, y: feetY + (p.y - FLOOR_ANKLE_Y) * scale });
+    P = (p) => ({ x: origin.x + p.x * scale, y: feetY + (p.y - fitted.floorY) * scale });
   } else {
-    // Lying down (or feet not seen): the Ghost's hips sit on the trainee's hips
+    // Lying / seated (or feet not seen): the Ghost's hips sit on the trainee's hips
     let hx = 0, hy = 0;
-    const lh = pose.landmarks?.[23], rh = pose.landmarks?.[24];
-    if (lh?.visibility && rh?.visibility) { hx = (lh.x + rh.x) / 2; hy = (lh.y + rh.y) / 2; }
+    const lh = raw.landmarks?.[23], rh = raw.landmarks?.[24];
+    if (lying && lh?.visibility && rh?.visibility) { hx = (lh.x + rh.x) / 2; hy = (lh.y + rh.y) / 2; }
     P = (p) => ({ x: origin.x + (p.x - hx) * scale, y: origin.y + (p.y - hy) * scale });
   }
   ctx.save();

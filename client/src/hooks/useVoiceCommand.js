@@ -7,15 +7,15 @@ import { useEffect, useRef, useState } from 'react';
 import { isNextCommand, acceptCommand, MIC_REOPEN_MS } from '../engine/training/voiceCommands';
 
 export function useVoiceCommand({ active, lang = 'he-IL', isSpeaking, onNext }) {
+  // the latest callbacks for the listener (updated after render, not during it)
   const onNextRef = useRef(onNext);
-  onNextRef.current = onNext;
   const speakingRef = useRef(isSpeaking);
-  speakingRef.current = isSpeaking;
+  useEffect(() => { onNextRef.current = onNext; speakingRef.current = isSpeaking; }, [onNext, isSpeaking]);
   const [listening, setListening] = useState(false);
 
   useEffect(() => {
     const SR = typeof window !== 'undefined' && (window.SpeechRecognition || window.webkitSpeechRecognition);
-    if (!active || !SR) { setListening(false); return undefined; }
+    if (!active || !SR) return undefined;
     let stopped = false;
     let rec = null;
     let running = false;
@@ -86,5 +86,6 @@ export function useVoiceCommand({ active, lang = 'he-IL', isSpeaking, onNext }) 
     };
   }, [active, lang]);
 
-  return { listening };
+  // not listening whenever the command is not active (no state update needed for that)
+  return { listening: !!active && listening };
 }

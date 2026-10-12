@@ -230,18 +230,35 @@ export function toExercise(item, isHe = true, label = null, { canSplit = true } 
   // Split sets: the target covers BOTH legs (each leg gets the full dose → the set is twice as long).
   // splitMode: 'kick' = the working (kicking) leg alternates; 'stand' = the leg you stand / work on
   const split = item.variation.side === 'bothSides' && canSplit;
-  const splitMode = KICK_PATTERNS.has(item.patternId) ? 'kick' : 'stand';
+  const splitMode = item.patternId === 'shadowPass' ? 'pass' : KICK_PATTERNS.has(item.patternId) ? 'kick' : 'stand';
   // Kicks / passes (owner): a FULL, separate set per leg (base leg set, then the other leg's set) →
   // twice the sets, the reps per set unchanged. Balance / one-leg work: the leg switches mid-set.
-  const perSet = split && splitMode === 'kick';
+  const perSet = split && (splitMode === 'kick' || splitMode === 'pass');
   const reps = split && !perSet ? String(Number(d.reps) * 2) : d.reps;
   const sets = perSet ? Number(d.sets) * 2 : d.sets;
-  const perSetName = (s, he) => (perSet ? s.replace(he ? 'חצי סט לכל רגל' : 'half a set each', he ? 'סט נפרד לכל רגל' : 'a separate set per leg') : s);
+  // SHORT name (owner): only the movement's name, plus the leg when it is one-sided. The details
+  // (purpose, tempo, focus) move to the description; split sets show the leg per set in the chip.
+  const shortName = (lang) => {
+    const base = (label ? label.name[lang] : PATTERNS[item.patternId].name[lang]).split(' — ')[0].trim();
+    const focus = item.dose?.focus?.[lang];          // e.g. "בדיוק" / "בעוצמה": two kick drills are never named alike
+    const side = item.variation.side;
+    const leg = side === 'left' || side === 'right' ? (lang === 'he' ? `רגל ${side === 'left' ? 'שמאל' : 'ימין'}` : `${side} leg`) : null;
+    return [base, focus, leg].filter(Boolean).join(' · ');
+  };
+  const details = (lang) => {
+    const SIDE_LABELS = ['שתי הרגליים — חצי סט לכל רגל', 'both legs — half a set each', 'שתי הרגליים', 'both legs', 'רגל שמאל', 'רגל ימין', 'left leg', 'right leg'];
+    const parts = name[lang].split(/ — | · /).slice(1).filter(p => p && !SIDE_LABELS.some(l => l.includes(p) || p.includes(l)));
+    return parts.join(' · ');
+  };
+  const legNote = (lang) => (perSet ? (lang === 'he' ? 'סט נפרד לכל רגל' : 'a separate set for each leg') : split ? (lang === 'he' ? 'לכל רגל' : 'each leg') : '');
+  const describe = (lang) => [details(lang), cue[lang], [d.label[lang], legNote(lang)].filter(Boolean).join(' — ')].filter(Boolean).join('. ');
   return {
-    name: perSetName(name.he, true),
-    nameEn: perSetName(name.en, false),
-    description: `${cue.he}. ${d.label.he}${perSet ? ' — סט נפרד לכל רגל' : split ? ' — לכל רגל' : ''}`,
-    descriptionEn: `${cue.en}. ${d.label.en}${perSet ? ' — a separate set for each leg' : split ? ' — each leg' : ''}`,
+    name: shortName('he'),
+    nameEn: shortName('en'),
+    // the analyzer keyword lives in the movement's own name (never in the sport label's description)
+    analyzerName: PATTERNS[item.patternId].name.he,
+    description: describe('he'),
+    descriptionEn: describe('en'),
     sets,
     reps,
     sideSwitch: split,

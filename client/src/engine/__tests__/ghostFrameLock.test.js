@@ -34,9 +34,21 @@ describe('The big Ghost is locked to the camera picture', () => {
     const pl = overlayPlacement(a, 960, 1280, 390, 338);
     // the Ghost's shoulders (feetY − 3.18 units) are inside the view, where the trainee's shoulders are
     const sY = pl.feetY - 3.18 * pl.scale;
-    const s = Math.max(390 / 960, 338 / 1280), dh = 1280 * s, oy = (338 - dh) / 2;
-    expect(Math.abs(sY - (oy + 0.55 * dh))).toBeLessThan(12);
+    // the WHOLE frame is shown (contain) — the picture's height is the view's height here
+    const s = Math.min(390 / 960, 338 / 1280), dh = 1280 * s, oy = (338 - dh) / 2;
+    expect(Math.abs(sY - (oy + 0.55 * dh))).toBeLessThan(3);
     expect(sY).toBeGreaterThan(0);
     expect(sY).toBeLessThan(338);
+  });
+
+  it('what the camera sees is what is shown: a full body in the frame is fully inside the view (no cut-off feet / head)', () => {
+    const full = lm([[0, 0.5, 0.12], [11, 0.56, 0.22], [12, 0.44, 0.22], [23, 0.54, 0.5], [24, 0.46, 0.5], [27, 0.54, 0.94], [28, 0.46, 0.94]]);
+    const a = bodyAnchor(full, null, 0.25, 3 / 4);
+    for (const [W, H] of [[390, 464], [390, 338], [800, 600]]) {
+      const pl = overlayPlacement(a, 960, 1280, W, H);
+      const headTop = pl.feetY - (1.78 + 2.02) * pl.scale;
+      expect(pl.feetY, `${W}x${H}`).toBeLessThanOrEqual(H);
+      expect(headTop, `${W}x${H}`).toBeGreaterThan(-0.08 * H);
+    }
   });
 });

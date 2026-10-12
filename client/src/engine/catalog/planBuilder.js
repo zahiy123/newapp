@@ -60,7 +60,7 @@ export function rebuildPlanFromCatalog(plan, ctx, isHe = true) {
             goal: s.goal,
             goalName: GOALS[s.goal].name,
             coherence: s.coherence,
-            exercises: s.items.map((x) => {
+            exercises: s.items.filter((x, i, all) => all.findIndex(y => y.item.id === x.item.id) === i).map((x) => {
               // with a ball today the kick / pass is real ball work (same motion, same Ghost)
               const ball = ballLabel({ hasBall: ctx.hasBall, location: ctx.location, crutches: !!ctx.lp?.crutches }, x.item.patternId);
               const label = ball || crutchLabel(ctx.lp, x.item.patternId) || sportLabel(ctx.sport, x.item.patternId);

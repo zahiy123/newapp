@@ -6,6 +6,14 @@ import { getCoachingRate, getCoachingPitch, getLifeStage } from '../utils/ageAda
 // The chosen virtual coach's voice (owner, 2026-10-08): a male coach speaks lower, a female coach
 // higher, with a matching device voice when one exists for the language
 let coachVoice = null;
+// Speech gate (owner, 2026-10-12): during the setup screens (check-in, space scan, ball question)
+// the app is completely SILENT — the coach speaks only once the workout itself has started.
+let speechOpen = true;
+export function setSpeechOpen(open) {
+  speechOpen = !!open;
+  if (!speechOpen && typeof window !== 'undefined' && window.speechSynthesis) window.speechSynthesis.cancel();
+}
+export function isSpeechOpen() { return speechOpen; }
 export function getCoachVoice() { return coachVoice; }
 export function setCoachVoice(gender) { coachVoice = gender === 'male' || gender === 'female' ? gender : null; }
 /** The coach's chosen / best device voice (explicit — from getVoices()), and whether it is surely of its gender. */
@@ -126,6 +134,7 @@ export function useSpeech(lang = 'he-IL', age) {
   // Low-level helper: speak a single utterance, does NOT clear queue
   const _utterSpeak = useCallback((text, options = {}) => {
     if (!window.speechSynthesis || !text) return;
+    if (!speechOpen) { queueRef.current = []; return; }          // the setup screens are silent
 
     // Dedup: skip if identical text was spoken within the last 10 seconds
     const now = Date.now();
@@ -221,12 +230,13 @@ export function useSpeech(lang = 'he-IL', age) {
       }).catch(() => {});
     } catch {}
 
-    // Speak sanity test in English with Google voice (inside click stack)
+    // Unlock the speech engine inside the tap (mobile browsers require a speak() in a user gesture) —
+    // SILENTLY: the setup screens make no sound at all (owner, 2026-10-12)
     try {
       window.speechSynthesis.cancel();
       const test = new SpeechSynthesisUtterance('System Ready');
       test.lang = 'en-US';
-      test.volume = 1.0;
+      test.volume = 0;
       test.rate = 1.0;
       // Force Google English voice for the test
       const voices = window.speechSynthesis.getVoices();
@@ -288,6 +298,7 @@ export function useSpeech(lang = 'he-IL', age) {
   // Uses setTimeout(50ms) after cancel() to avoid browser "interrupted" onerror
   const _doSpeak = useCallback((text, options = {}) => {
     if (!window.speechSynthesis || !text) return;
+    if (!speechOpen) return;                                      // the setup screens are silent
     unstickSpeaking();
     window.speechSynthesis.cancel();
     queueRef.current = [];

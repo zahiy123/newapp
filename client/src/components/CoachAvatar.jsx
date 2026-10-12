@@ -7,13 +7,14 @@ import { useEffect, useRef, useState } from 'react';
 import { drawCoach, COACH_INFO } from '../engine/coachAvatar';
 import { genderizeCoachText } from '../engine/coachVoiceText';
 
-export default function CoachAvatar({ coach, mode, spec, limbProfile, isHe, isSpeaking, bubble = null }) {
+export default function CoachAvatar({ coach, mode, spec, limbProfile, isHe, isSpeaking, bubble = null, action = null }) {
   const canvasRef = useRef(null);
   const clockRef = useRef({ last: null, ms: 0 });
   const [failed, setFailed] = useState(false);
   const [talking, setTalking] = useState(false);
+  // the latest "is the coach speaking?" reader, for the draw loop (updated after render, not during it)
   const speakingRef = useRef(isSpeaking);
-  speakingRef.current = isSpeaking;
+  useEffect(() => { speakingRef.current = isSpeaking; }, [isSpeaking]);
 
   useEffect(() => {
     if (failed) return undefined;
@@ -59,7 +60,7 @@ export default function CoachAvatar({ coach, mode, spec, limbProfile, isHe, isSp
           {genderizeCoachText(bubble, coach)}
         </div>
       )}
-      <canvas ref={canvasRef} className="w-28 h-44 sm:w-36 sm:h-56 rounded-2xl shadow-xl ring-1 ring-white/40" style={{ transform: 'scaleX(-1)' }} />
+      <canvas ref={canvasRef} className="w-32 h-52 sm:w-40 sm:h-64 rounded-2xl shadow-xl ring-1 ring-white/40" style={{ transform: 'scaleX(-1)' }} />
       <div className="flex items-center gap-1.5 text-[11px] font-semibold text-white rounded-full px-2.5 py-0.5 bg-slate-900/85 ring-1 ring-white/15">
         <span className={`w-1.5 h-1.5 rounded-full ${coach === 'female' ? 'bg-rose-400' : 'bg-sky-400'}`} />
         {isHe ? info.label.he : info.label.en}
@@ -72,6 +73,11 @@ export default function CoachAvatar({ coach, mode, spec, limbProfile, isHe, isSp
           </span>
         )}
       </div>
+      {action && (
+        <div className="max-w-[8.5rem] sm:max-w-[10rem] text-center text-[11px] leading-tight font-semibold text-white bg-black/60 rounded-lg px-2 py-0.5" dir={isHe ? 'rtl' : 'ltr'}>
+          {action}
+        </div>
+      )}
     </div>
   );
 }

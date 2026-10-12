@@ -149,9 +149,13 @@ export function legLabel(side, lp = {}, isHe = true) {
 export const liftedLeg = (support) => (support === 'left' ? 'right' : 'left');
 
 /** What the current half of a split set does: 'stand' = stand / work on that leg; 'kick' = kick with it. */
-const action = (mode, isHe) => (mode === 'kick'
-  ? (isHe ? 'בעיטות ב' : 'kicks with your ')
-  : (isHe ? 'עמידה על ' : 'stand on your '));
+/** A kick or a pass set (the kicking / passing leg alternates); otherwise a stance set. */
+export const isStrikeMode = (mode) => mode === 'kick' || mode === 'pass';
+const action = (mode, isHe) => (mode === 'pass'
+  ? (isHe ? 'מסירות ב' : 'passes with your ')
+  : mode === 'kick'
+    ? (isHe ? 'בעיטות ב' : 'kicks with your ')
+    : (isHe ? 'עמידה על ' : 'stand on your '));
 
 export function splitStartText(lp, isHe, mode = 'stand') {
   const { first } = splitLegOrder(lp);
@@ -171,7 +175,7 @@ export function splitSwitchText(lp, isHe, mode = 'stand') {
 export function splitWorkingSide(lp, half, mode = 'stand') {
   const { first, second } = splitLegOrder(lp);
   const current = half === 1 ? first : second;
-  return mode === 'kick' ? current : liftedLeg(current);
+  return isStrikeMode(mode) ? current : liftedLeg(current);
 }
 
 // ---- Kicks / passes: a FULL set per leg (owner) — set 1 base leg, set 2 the other leg / prosthesis, … ----

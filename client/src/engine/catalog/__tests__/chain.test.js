@@ -160,7 +160,8 @@ describe('No generic filler anywhere in sport / rehab tracks (owner rule)', () =
 
   it('amputee football (rehab + sport and sport): ONLY core, single-leg balance, crutch upper body, kicks — in the sport language', () => {
     const allowed = new Set(Object.values(AMPUTEE_FOOTBALL_CATEGORIES).flat());
-    const labels = Object.values(SPORT_LABELS.footballAmputee).map(l => l.name.he);
+    // the shown name is the label's short movement name (owner: no long details in the name)
+    const labels = Object.values(SPORT_LABELS.footballAmputee).map(l => l.name.he.split(' — ')[0]);
     for (const profile of [{ sport: 'rehab', trainingTrack: 'rehab_sport', rehabSport: 'footballAmputee' }, { sport: 'footballAmputee' }]) {
       for (const lp of [lpBK, lpAK]) {
         for (const w of built(profile, lp).weeks) for (const d of w.days) for (const e of d.exercises) {
@@ -201,7 +202,7 @@ describe('Kick volume, working-leg kicks, split balance sets', () => {
         for (const e of kicks) {
           expect(parseCatalogId(e.catalogId).side).toBe('bothSides');
           expect(e.sideSwitch).toBe(true);
-          expect(e.splitMode).toBe('kick');
+          expect(['kick', 'pass']).toContain(e.splitMode);
         }
         // all kicks / passes of the session form one consecutive run
         const idx = d.exercises.map((e, i) => (KICKS.has(parseCatalogId(e.catalogId).pattern) ? i : -1)).filter(i => i >= 0);

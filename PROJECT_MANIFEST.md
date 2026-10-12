@@ -124,6 +124,44 @@ Readiness Rating (1-5 emoji, 3 seconds)
 - Redeploy the checkpoint in Vercel without code changes: Vercel → Deployments → the deployment of the checkpoint commit → "Promote to Production" (instant rollback).
 - New risky features are built on a **feature branch** first (Vercel gives the branch its own preview URL) and are merged into `main` only after the owner approves.
 
+## Owner Verification Board (sync point — updated 2026-10-12)
+
+**Rule (owner, 2026-10-12):**
+- Nothing is marked done until the owner tests it on the device and approves it.
+- Until then everything below is **"implemented — awaiting the owner's check — NOT complete"**.
+- After the owner's check, items move to ✅ or back to ❌ with the owner's words.
+
+**✅ Verified by the owner (works):**
+- Stage 2: track selection, quick space scan, scan-adapted warm-up (2026-10-05).
+- 3.0: Ghost overlay + range challenge + accuracy % + required-limbs gate + direction swap (2026-10-05).
+- No automatic move between exercises (manual "next" only) — owner: "works great" (2026-10-08).
+
+**❌ Reported NOT working by the owner — fixed in code, awaiting the owner's check (NOT complete):**
+
+| Owner's report | Root cause found | Fix (code) | Status |
+|---|---|---|---|
+| The big Ghost does not show / sits low, must tilt the phone (10-08, several times) | (1) the small Ghost panel covered the toggle; (2) a pale Ghost vanished on bright walls; (3) guessed off-picture hips / feet anchored it below the view; (4) **`object-fit: cover` cut ~35% of the upright phone frame** — the Ghost was placed in the cut-off part | Toggle strip below the camera; high-contrast see-through look; in-picture landmarks + shoulder lock; **the whole frame is shown (contain)**, a taller camera view; fitted to the trainee's proportions; seated Ghost | Awaiting check |
+| The skeleton is not on the body | The skeleton canvas was stretched while the video was cropped | Both `object-contain` | Awaiting check |
+| Full screen cuts / covers the picture | The exercise card was drawn over the lower half of the camera | Column layout: the camera on top, the card + controls below | Awaiting check |
+| The coach looks amateur ("a joke", "cardboard") | — | A realistic shaded person (face, hair, clothes) + an action caption | Awaiting check |
+| The female coach speaks with a man's voice | Many devices have only a male / default Hebrew voice | Explicit voice choice from the device voices + a clear pitch fallback + an install guide | Awaiting check (depends on the device's voices) |
+| Speech during the setup screens ("לא זוהו מכשולים") | The space scan + an audible "System Ready" unlock | A speech gate: silent until the workout starts; a silent audio unlock | Awaiting check |
+| The auto-skip came back (10-08) | The voice "next" heard the coach's own "הבא" | Explicit "תרגיל הבא" only, the mic off while the coach speaks | Awaiting check |
+
+**🟡 Implemented, never confirmed by the owner (NOT complete):**
+- Early start + an immediate count.
+- A steady skeleton (One Euro filter).
+- A realistic kick / pass with the striking surface.
+- A full set per leg for kicks / passes ("מסירות / בעיטות ב…").
+- Short exercise names (distinct, e.g. "מסירה בצל · בדיוק"); the analyzer chosen by the movement.
+- The incoming ball with the strike cue.
+- Today's goal announced at the start ("היום אימון …").
+- The seated Ghost / seated detection.
+- The virtual coach selection + the gendered coach speech.
+- The voice "תרגיל הבא".
+
+---
+
 ## Development Roadmap — Status Overview
 
 | # | Stage | Status | Notes |
@@ -135,7 +173,7 @@ Readiness Rating (1-5 emoji, 3 seconds)
 | 1C | Sport + Goals flow polish | DONE | Iron Rule sport filtering + limb-aware muscle groups + goal blocking |
 | 1D | **Onboarding Corrections** | **DONE (code + tests), awaiting a real-camera check** | Separate right/left arm assessment + walking in place in the scan calibration; muscle-group step only for the strength goal |
 | 2 | Pre-Workout: Track Selection + Quick Space Scan + Warm-up | **DONE ✅ — verified by the owner on device (2026-10-05)** | Stable checkpoint `checkpoint-stage2-stable`. 2.1 track selection; 2.2/2.2b environment scan + movement-zone obstacles; 2.3 scan + track adapted warm-up, ball question; 2.4/2.5 seated tracking + Ghost panel |
-| 3 | Kinetic Coach Core — Hybrid Architecture | **IN PROGRESS** (3.0 DONE ✅; **3.1 Expert Execution Profile — code + tests done, awaiting the owner's device check**) | Approved 2026-10-05. Includes the **scan-calibrated Ghost**, **Sport-Specific Rehab tracks**, **Adaptive Coach Styles**, **Two-way voice**, **Critical-only feedback**, **Pain Traffic Light**, **Personal-baseline analysis**, **Coach Notebook** |
+| 3 | Kinetic Coach Core — Hybrid Architecture | **IN PROGRESS — NOT COMPLETE** (3.0 DONE ✅ owner-verified; **3.1 — code + tests done, NOT complete until the owner verifies on the device** — see the Owner Verification Board above) | Approved 2026-10-05. Includes the **scan-calibrated Ghost**, **Sport-Specific Rehab tracks**, **Adaptive Coach Styles**, **Two-way voice**, **Critical-only feedback**, **Pain Traffic Light**, **Personal-baseline analysis**, **Coach Notebook** |
 | 4 | Analytics Report + Load Adaptation | PENDING | Blocked by 3. Produces the reports the Physio Portal (4B) displays |
 | 4B | **Physiotherapist Portal (B2B Dashboard)** | PENDING | Blocked by 3, 4. Full permission isolation (Firestore rules), clinical reports, clinician-set limits enforced in real time |
 | 5 | Game Mode + Real-Time Refereeing | PENDING | Blocked by 3. Re-scoped to **community games** (not pro teams) |
@@ -973,6 +1011,56 @@ Two critical corrections to the existing onboarding (Stages 1B/1C), completed **
     - **Shoulder lock:** the Ghost's standing shoulders may never be further than 0.6 torso from the trainee's shoulders (which are almost always in view); if the lower-body landmarks say otherwise, the Ghost is re-anchored on the shoulders.
     - The size matches the body exactly (only a microscopic Ghost is prevented).
   - *Verification:* new `ghostFrameLock.test.js` (close-up with hips guessed at 1.25 and ankles at 2.0 → the Ghost's shoulders on the trainee's; the full body → feet on the feet; the placement inside the cropped view). A visual run with a close-up camera picture: the Ghost sits on the upper body inside the view. Client 702 pass, 0 new failures; build passes.
+- **Clean pass on the big Ghost + coach, 2026-10-12 (owner: "the last attempt before going back"; backup tag `backup-2026-10-12-pre-clean-pass` = `d1c24cf`):**
+  - **Measured, not guessed.** The real training screen ran end to end (Vite harness outside the repo, real `usePose` / MediaPipe on a camera video, a phone viewport with an Android user agent, real taps), with the Ghost's numbers dumped on every frame.
+  - **The root cause of "the big Ghost sits low":** the phone's front camera delivers an UPRIGHT frame (960×1280), but the camera view on a phone is short and wide (390×338). The video used `object-fit: cover`, which cut ~35% of the frame (head / feet) off the screen. MediaPipe sees the whole frame, so the Ghost, placed correctly on the body in the FRAME, landed partly in the cut-off part. Measured: the Ghost's feet at y = 546 in a 507-high view.
+  - A second mismatch on the same screen: the skeleton canvas was CSS-stretched (not cropped like the video), so it did not sit on the picture either.
+  - **Fix — one coordinate chain:**
+    - The camera picture is shown WHOLE (`object-fit: contain` on the video AND the skeleton canvas), so what the camera sees = what the trainee sees = where the skeleton and the Ghost are drawn.
+    - `engine/ghostOverlay.js` was rewritten cleanly: `frameTransform` (contain / cover); `bodyAnchor` (in-picture landmarks only, real torso / shoulder-width ratio, feet when really seen, shoulder lock, time-based smoothing); `overlayPlacement` / `defaultPlacement` (exact size, centered in the picture before a body is seen).
+    - The phone camera view is taller (55% of the screen height instead of 40%), so the whole body is large enough.
+    - `components/GhostOverlay.jsx` was rewritten (constants, clear steps), with a field-debug line: `?ghostdebug=1` shows the video / view size, the anchor and the scale (for a screenshot report).
+    - Verified on the real screen: the Ghost's head on the head and its feet on the feet (real feet ✓, scale 148), the skeleton on the picture, the coach beside it.
+  - **Coach / voice cleanup:**
+    - The "latest value" refs in `CoachAvatar` and `useVoiceCommand` are updated in effects, not during render (React lint errors, unstable updates).
+    - `useVoiceCommand` no longer sets state synchronously in an effect; "listening" is derived.
+    - The microphone stays OFF while the coach speaks (+1.5 s) and listens only while waiting for "תרגיל הבא".
+  - **Code cleanup:** unused imports / variables removed from `Training.jsx` (`classifyDetectedObjects`, `getWarmUpExercises`, `hasEquipment`, `speakQueued`, `speakPostBriefingNudge`, `speakHowToStart`, `speakSitting`, `speakReadyWhenYouAre`, `speakWarmUpNudge`, `speakEnvironmentScan`). Lint: no errors in the Ghost / coach / voice files; `Training.jsx` has no unused / undefined names (only the long-standing exhaustive-deps warnings).
+  - *Verification:* `ghostFrameLock.test.js` updated (contain mapping, ±3 px; a full body in the frame is fully inside the view for three view sizes). Client 703 pass, 0 new failures; server 10/10; build passes.
+- **Six owner items, 2026-10-12 (same backup `backup-2026-10-12-pre-clean-pass`; verified on the REAL training screen with a phone viewport):**
+  1. **Skeleton on the body.** The skeleton canvas is `object-contain` like the video: it was CSS-stretched while the video was cropped, so it never sat on the body. Verified: the green points on the picture.
+  2. **Real full screen.** Full screen is a column: the camera picture takes all the free space (the whole frame, never cut or stretched), and the exercise card (scrollable, max 30% of the height) and the Ghost / coach strip sit BELOW it. The card used to cover the lower half of the picture, the trainee and the Ghost included.
+  3. **A realistic coach.**
+     - Real skin tones with volume: every limb is shaded like a cylinder lit from the upper left, and the chest has a horizontal + vertical light.
+     - A calm face with natural proportions: eyes with iris and lid line, brows, a soft nose shadow, ears, and a mouth that moves while the coach talks.
+     - Real hair (a short crop / pulled back with a ponytail), and real training clothes: a short-sleeved top with a collar, long pants with a side stripe, sneakers.
+     - A bigger card and a caption of what the coach is doing ("מדגימה: מסירה בצל" / "כל הכבוד!" / "מוכנה כשתהיה מוכן"), in the coach's gender.
+  4. **The big Ghost as a training model.**
+     - It is fitted to the trainee's OWN proportions (`bodyAnchor` measures thigh / shin / upper arm / forearm vs. the torso; `fitPoseToBody` scales each limb along its direction, so every joint angle of the demonstration is unchanged).
+     - It is see-through (fill at 45% under a crisp outline, `fillAlpha`), so the trainee sees themself through it.
+  5. **Standing AND seated, never missing.**
+     - A seated trainee is detected (knees at about hip height, with hysteresis), as are a wheelchair or a seated exercise. The Ghost then sits (`seatPose`: thighs forward, shins down, arms unchanged) and is anchored on the hips.
+     - The Ghost keeps its last place when detection drops.
+     - An exercise without its own demonstration still gets a standing guide figure.
+  6. **Short names + an incoming ball.**
+     - Names: only the movement's name (+ "רגל ימין / שמאל" when one-sided). The details (purpose, tempo, focus, crutch support, a separate set per leg) moved to the description, and identical twins in a session were removed.
+     - The analyzer is now chosen by the movement's own name (`analyzerName`), never by the display name: the long names had sent "רוטציות גו" and "יציבות על רגל אחת" to the KICK analyzer.
+     - **Incoming ball** (`engine/incomingBall.js`, `components/IncomingBall.jsx`): in kick / pass drills a ball is passed to the trainee from the front. It enters big near the camera, rolls to the kicking foot of this set and arrives on the beat with a ring, "בעט!" / "מסור!" and a short beep (kick 3.0 s / pass 3.4 s cycles). The Ghost's own shadow ball is hidden meanwhile (one ball on screen).
+  - *Verification:* new `trainingModel.test.js` (ball timing / direction / kicking leg, proportion measurement, angle-preserving fit, seated pose + detection, short names). The real-screen runs: full body, full screen, the coach, the ball sequence. Client 711 pass, 0 new failures; server 10/10; build passes.
+- **Setup silence + today's goal + names / ball polish, 2026-10-12 (awaiting the owner's check — NOT complete):**
+  1. **Silent setup.**
+     - A speech gate in `useSpeech` (`setSpeechOpen`): closed from the moment the training screen opens. The check-in, the space scan ("לא זוהו מכשולים…"), the ball question and the resume welcome make no sound — their text stays on screen.
+     - The audio unlock on the camera tap ("System Ready") is now silent (volume 0; mobile browsers still need a speak() in the tap).
+     - The gate opens when the workout itself starts: the warm-up, or the first exercise's explanation (a resumed workout too).
+  2. **Today's goal first.**
+     - The coach's first sentence is the day's goal, from the plan's `goalName` ("היום אימון כוח!" / "היום אימון טכניקה וענף!"), with a 🎯 banner for 6 s.
+     - The warm-up / exercise explanation follows only after it has been said (`afterGoal`).
+  3. **Big Ghost standing / seated:** no change this round (the fitted, see-through, seated-aware Ghost of the previous round). The real-screen run confirmed it on the body.
+  4. **Names + ball.**
+     - Two drills never share a name: the strike focus is kept ("מסירה בצל · בדיוק" / "· בעוצמה").
+     - Pass sets are worded as passes ("מסירות ברגל ימין · סט 1/6"; `splitMode: 'pass'`, `isStrikeMode`).
+     - The incoming ball, confirmed in the REAL exercise flow: in a shadow-pass drill it rolls from the camera side to the kicking foot of the set while the counter waits.
+  - *Verification:* the real training screen with every speech call recorded — nothing before the warm-up except the silent unlock, and the first sentence = today's goal. A real pass drill reached: the chip "מסירות ברגל ימין · סט 1/6", the ball, the coach, the Ghost. Client 712 pass, 0 new failures; build passes.
    3. **Profile-based rep counting with a quality score per rep** (replacing the per-exercise analyzers step by step), including the correction hierarchy, timing and external-focus cues.
    4. **Special sport libraries:** leg amputees (amputee football: crutch kick / crutch sprint / balance / header / goalkeeper), wheelchair (push stroke, seated throws, shoulder protection), running (opened for selection), then tennis / martial arts (trunk-rotation metric) and basketball.
    - Following (already in the roadmap): velocity-based fatigue detection (stop the set at ~20% rep-speed loss or form decay), automatic progression / regression, Pain Traffic Light integration, two-way voice ("why?"), best vs. weakest rep clips with the Ghost in the Stage 4 report.
@@ -1252,3 +1340,6 @@ Two critical corrections to the existing onboarding (Stages 1B/1C), completed **
 - **2026-10-08:** Pushed `d43af71` → deployed, verified in the served bundle. Restore point `checkpoint-2026-10-08-voice` (#18). Awaiting the owner's device check.
 - **2026-10-08:** **Field test #4.** The big Ghost sat low: guessed off-picture hips / feet (close-up) anchored it below the view → only in-picture landmarks, real torso / shoulder-width ratio, a shoulder lock, exact size. Client 702 pass, 0 new failures. Committed as `acbc956`.
 - **2026-10-08:** Pushed `acbc956` → deployed, verified in the served bundle. Restore point `checkpoint-2026-10-08-frame-lock` (#19). Awaiting the owner's device check.
+- **2026-10-12:** **Clean pass (Ghost + coach).** Measured on the real screen: `object-fit: cover` cut ~35% of the upright phone frame → the whole frame is shown (contain) for the video + skeleton + Ghost, a taller phone camera view, `ghostOverlay.js` / `GhostOverlay.jsx` rewritten (+ `?ghostdebug=1`), coach / voice refs fixed, unused code removed. Client 703 pass, server 10/10, 0 new failures. Not yet committed.
+- **2026-10-12:** **Six owner items.** Skeleton contain-aligned; full screen = camera on top with the card / controls below; a realistic shaded coach with a face and an action caption; the big Ghost fitted to the trainee's proportions and see-through; seated detection + seated Ghost, never missing; short exercise names (analyzer by the movement) + an incoming ball with the strike cue. Client 711 pass, server 10/10, 0 new failures. Not yet committed.
+- **2026-10-12:** Owner Verification Board added (nothing is marked done before the owner's device check). Silent setup (speech gate + silent audio unlock), today's goal announced first, distinct short names, pass wording, the ball verified in the real flow. Client 712 pass, 0 new failures. Not yet committed.

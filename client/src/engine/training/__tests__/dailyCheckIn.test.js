@@ -52,7 +52,8 @@ describe('The workout is built from TODAY\'s answers', () => {
     // one-leg squats / lunges ARE in, crutch-supported
     const oneLeg = crutch.filter(e => ['singleLegSquat', 'singleLegLunge'].includes(parseCatalogId(e.catalogId).pattern));
     expect(oneLeg.length).toBeGreaterThan(0);
-    for (const e of oneLeg) expect(e.name).toContain('בתמיכת קביים');
+    // the name is short (owner); the crutch support is said in the description
+    for (const e of oneLeg) expect(e.description).toContain('בתמיכת קביים');
   });
 
   it('ball today → real ball kicks / passes for the place (home: soft control to a wall); no ball → shadow', () => {
@@ -66,7 +67,7 @@ describe('The workout is built from TODAY\'s answers', () => {
     }
     const field = today(owner, { location: 'field', hasBall: true, mobility: 'crutches' });
     const fk = field.filter(e => parseCatalogId(e.catalogId).pattern === 'shadowKick');
-    for (const e of fk) expect(e.name).toMatch(/בעיטה בכדור — טכניקת בעיטה — על הקביים/);
+    for (const e of fk) { expect(e.name.startsWith('בעיטה בכדור')).toBe(true); expect(e.description).toMatch(/על הקביים/); }
     const noBall = today(owner, { location: 'home', hasBall: false, mobility: 'prosthesis' });
     expect(noBall.some(e => e.requiresBall)).toBe(false);
   });
