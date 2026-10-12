@@ -26,7 +26,7 @@ import TrainingViewControls from '../components/TrainingViewControls';
 import CoachVoicePicker from '../components/CoachVoicePicker';
 import { pickCoachVoice } from '../engine/voicePick';
 import { coachMode, COACH_IDS } from '../engine/coachAvatar';
-import { setCoachVoice, setSpeechOpen } from '../hooks/useSpeech';
+import { setCoachVoice, setSpeechOpen, holdSpeech } from '../hooks/useSpeech';
 import { useVoiceCommand } from '../hooks/useVoiceCommand';
 import { READY_DRIVE, withDrive, splitLegOrder, legLabel, splitStartText, splitSwitchText, splitWorkingSide, setLegHalf, legSetStartText, legSetNextText, isStrikeMode } from '../engine/training/coachFlow';
 import { exerciseNeedsSetup } from '../engine/training/exerciseSetup';
@@ -896,24 +896,34 @@ export default function Training() {
     return () => setSpeechOpen(true);
   }, []);
   const workoutVoiceRef = useRef(false);
-  const [goalBanner, setGoalBanner] = useState(null);
-  /** The workout starts: open the voice and say today's goal first ("היום אימון כוח"). */
+  const [goalBanner, setGoalBanner] = useState(null);      // the big card at the start (8 s)
+  const [sessionGoalLine, setSessionGoalLine] = useState(null);   // shown for the whole workout
+  /** Today's goal line: the catalog day's goal, else the plan day's focus. */
+  function todayGoalLine() {
+    const g = sessionDataRef.current.sessionGoalName;
+    if (g) return isHe ? `היום אימון ${g.he}` : `Today: ${g.en} training`;
+    const src = planSourceRef.current;
+    const focus = src?.plan?.weeks?.[src.weekIdx]?.days?.[src.dayIdx]?.focus;
+    return focus ? (isHe ? `היום: ${String(focus).split(/[—,.]/)[0].trim()}` : `Today: ${String(focus).split(/[—,.]/)[0].trim()}`) : null;
+  }
+  /** The workout starts: open the voice and say + show today's goal FIRST ("היום אימון כוח"). */
   function beginWorkoutVoice() {
-    if (workoutVoiceRef.current) return false;
+    if (workoutVoiceRef.current) return;
     workoutVoiceRef.current = true;
     setSpeechOpen(true);
-    const g = sessionDataRef.current.sessionGoalName;
-    const line = g ? (isHe ? `היום אימון ${g.he}` : `Today: ${g.en} training`) : null;
-    if (line) {
-      setGoalBanner(line);
-      setTimeout(() => setGoalBanner(null), 6000);
-      speakPriority(`${line}!`, { rate: 1.05 });
-    }
-    return !!line;
+    const line = todayGoalLine();
+    if (!line) return;
+    setGoalBanner(line);
+    setSessionGoalLine(line);
+    setTimeout(() => setGoalBanner(null), 8000);
+    speakPriority(`${line}!`, { rate: 1.0 });
+    // nothing cuts it: the warm-up / explanation lines wait and follow it
+    holdSpeech(Math.max(2800, line.length * 120));
   }
-  /** Run the first coaching line after today's goal has been said (they never cut each other). */
+  /** The first coaching line of the workout comes right after today's goal. */
   function afterGoal(say) {
-    if (beginWorkoutVoice()) pollSpeechEnd(say); else say();
+    beginWorkoutVoice();
+    say();
   }
 
   // The coach's voice follows the chosen character
@@ -2924,8 +2934,11 @@ export default function Training() {
         {(phase === PHASE.EXERCISING || phase === PHASE.CALIBRATING) && <ExecutionHud execution={execution} isHe={isHe} />}
         {/* Today's goal, said and shown the moment the workout starts */}
         {goalBanner && (
-          <div className="absolute top-14 left-1/2 -translate-x-1/2 z-[27] pointer-events-none rounded-2xl bg-emerald-600/95 text-white text-base font-bold px-4 py-2 shadow-xl whitespace-nowrap" dir={isHe ? 'rtl' : 'ltr'}>
-            {'🎯'} {goalBanner}
+          <div className="absolute inset-x-0 top-1/3 z-[45] flex justify-center px-4 pointer-events-none">
+            <div className="rounded-2xl bg-emerald-600 text-white shadow-2xl px-5 py-3 text-center" dir={isHe ? 'rtl' : 'ltr'}>
+              <div className="text-xs font-semibold opacity-90">{isHe ? 'מטרת האימון של היום' : "Today's goal"}</div>
+              <div className="text-xl font-extrabold">{'🎯'} {goalBanner}</div>
+            </div>
           </div>
         )}
         {/* The virtual coach (chosen in the check-in): demonstrates with the Ghost, talks, claps */}
@@ -3582,6 +3595,9 @@ export default function Training() {
         <>
           {/* ZONE 2: Action buttons — fixed middle strip, always visible, z-50 */}
           <div className="flex-shrink-0 bg-gray-900 px-3 py-2 z-50 relative" style={{ minHeight: '20vh' }}>
+            {sessionGoalLine && (
+              <div className="text-emerald-300 text-xs font-bold mb-1" dir={isHe ? 'rtl' : 'ltr'}>{'🎯'} {isHe ? 'מטרת היום:' : "Today's goal:"} {sessionGoalLine.replace(/^היום:?\s*|^Today:?\s*/, '')}</div>
+            )}
             {/* Feedback badge — small floating tag, doesn't block buttons */}
             {feedback && (phase === PHASE.EXERCISING || phase === PHASE.WARM_UP) && (
               <div className={`${feedbackColor[feedback.type] || 'bg-blue-500'} text-white px-3 py-1 rounded-lg text-center text-sm font-bold mb-2 pointer-events-none`}>
@@ -3737,6 +3753,9 @@ export default function Training() {
       {/* === FULLSCREEN LAYOUT: overlay at bottom (unchanged) === */}
       {isFullscreen && (
         <div className="relative flex-shrink-0 z-20 bg-gray-950 p-3 max-h-[30vh] overflow-y-auto flex flex-col pb-[env(safe-area-inset-bottom)]">
+          {sessionGoalLine && (
+            <div className="text-emerald-300 text-xs font-bold mb-1" dir={isHe ? 'rtl' : 'ltr'}>{'🎯'} {isHe ? 'מטרת היום:' : "Today's goal:"} {sessionGoalLine.replace(/^היום:?\s*|^Today:?\s*/, '')}</div>
+          )}
           {exercises.length > 0 && (
             <div className="space-y-2">
               {phase === PHASE.WARM_UP && currentWarmUp && (

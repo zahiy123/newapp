@@ -103,3 +103,17 @@ describe('Short exercise names', () => {
     expect(names.size).toBe(kicks.length);
   });
 });
+
+describe('A lying Ghost turns to the trainee\'s head side', () => {
+  it('draws the push-up Ghost mirrored when the trainee\'s head is on the other side', async () => {
+    const { drawGhostOverlay } = await import('../warmupGhost.js');
+    const xs = (headDir) => {
+      const pts = [];
+      const ctx = new Proxy({}, { get: (t, k) => (k === 'moveTo' || k === 'lineTo' ? (x) => pts.push(x) : k === 'createLinearGradient' || k === 'createRadialGradient' ? () => ({ addColorStop() {} }) : () => {}), set: () => true });
+      drawGhostOverlay(ctx, { profile: EXPERT_PROFILES.pushUp }, lpOk, 0, { x: 300, y: 300 }, 50, 0.9, null, { lying: true, headDir });
+      return pts.reduce((a, b) => a + b, 0) / pts.length;
+    };
+    // the drawing's mass moves to the other side of the hips when the head side flips
+    expect(Math.sign(xs(1) - 300)).not.toBe(Math.sign(xs(-1) - 300));
+  });
+});

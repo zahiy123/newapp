@@ -828,7 +828,14 @@ export function drawGhostOverlay(ctx, spec, lp, nowMs, origin, scale, alpha = 0.
     let hx = 0, hy = 0;
     const lh = raw.landmarks?.[23], rh = raw.landmarks?.[24];
     if (lying && lh?.visibility && rh?.visibility) { hx = (lh.x + rh.x) / 2; hy = (lh.y + rh.y) / 2; }
-    P = (p) => ({ x: origin.x + (p.x - hx) * scale, y: origin.y + (p.y - hy) * scale });
+    // lying: the Ghost lies the same way round as the trainee (its head on the trainee's head side)
+    let flip = 1;
+    const ls = raw.landmarks?.[11];
+    if (lying && body?.headDir && ls?.visibility) {
+      const ghostHeadDir = Math.sign(ls.x - hx) || 1;
+      flip = ghostHeadDir === body.headDir ? 1 : -1;
+    }
+    P = (p) => ({ x: origin.x + flip * (p.x - hx) * scale, y: origin.y + (p.y - hy) * scale });
   }
   ctx.save();
   ctx.globalAlpha = alpha;

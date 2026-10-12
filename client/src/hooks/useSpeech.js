@@ -14,6 +14,10 @@ export function setSpeechOpen(open) {
   if (!speechOpen && typeof window !== 'undefined' && window.speechSynthesis) window.speechSynthesis.cancel();
 }
 export function isSpeechOpen() { return speechOpen; }
+// A protected line (today's goal at the start): for `ms` nothing cuts it — interrupting speech
+// waits in the queue and plays right after it (field test: the warm-up's first line cut the goal)
+let holdUntil = 0;
+export function holdSpeech(ms) { holdUntil = Date.now() + ms; }
 export function getCoachVoice() { return coachVoice; }
 export function setCoachVoice(gender) { coachVoice = gender === 'male' || gender === 'female' ? gender : null; }
 /** The coach's chosen / best device voice (explicit — from getVoices()), and whether it is surely of its gender. */
@@ -299,6 +303,11 @@ export function useSpeech(lang = 'he-IL', age) {
   const _doSpeak = useCallback((text, options = {}) => {
     if (!window.speechSynthesis || !text) return;
     if (!speechOpen) return;                                      // the setup screens are silent
+    if (Date.now() < holdUntil && speaking.current) {
+      // a protected line is playing: queue instead of cutting it
+      for (const c of splitToChunks(text)) queueRef.current.push({ text: c, options });
+      return;
+    }
     unstickSpeaking();
     window.speechSynthesis.cancel();
     queueRef.current = [];

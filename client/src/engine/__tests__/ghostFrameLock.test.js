@@ -52,3 +52,41 @@ describe('The big Ghost is locked to the camera picture', () => {
     }
   });
 });
+
+describe('Floor exercises: the big Ghost lies on the trainee (no standing rules)', () => {
+  // lying on the floor across the picture: shoulders on the left, hips in the middle, feet on the right
+  const lyingBody = (flip = false) => {
+    const X = (x) => (flip ? 1 - x : x);
+    return lm([[0, X(0.12), 0.72], [11, X(0.22), 0.74], [12, X(0.22), 0.73], [23, X(0.5), 0.76], [24, X(0.5), 0.75],
+      [25, X(0.66), 0.78], [26, X(0.66), 0.77], [27, X(0.82), 0.8], [28, X(0.82), 0.79]]);
+  };
+
+  it('detects lying and keeps the Ghost\'s hips ON the trainee\'s hips (inside the picture)', () => {
+    let a = null;
+    for (let i = 0; i < 12; i++) a = bodyAnchor(lyingBody(), a, 0.25, 4 / 3);
+    expect(a.lying).toBe(true);
+    expect(a.seated).toBe(false);
+    expect(a.hipY).toBeCloseTo(0.755, 2);          // the standing shoulder lock used to push this a torso lower
+    expect(a.hipX).toBeCloseTo(0.5, 2);
+    const pl = overlayPlacement(a, 1280, 960, 390, 293);
+    expect(pl.origin.y).toBeGreaterThan(0);
+    expect(pl.origin.y).toBeLessThan(293);
+    expect(pl.feetY).toBeNull();
+    expect(pl.body.lying).toBe(true);
+  });
+
+  it('knows which side the head is (the Ghost lies the same way round)', () => {
+    let a = null, b = null;
+    for (let i = 0; i < 12; i++) { a = bodyAnchor(lyingBody(false), a, 0.25, 4 / 3); b = bodyAnchor(lyingBody(true), b, 0.25, 4 / 3); }
+    expect(a.headDir).toBe(-1);
+    expect(b.headDir).toBe(1);
+  });
+
+  it('getting back up returns to the standing rules', () => {
+    let a = null;
+    for (let i = 0; i < 12; i++) a = bodyAnchor(lyingBody(), a, 0.25, 4 / 3);
+    const standing = lm([[11, 0.56, 0.22], [12, 0.44, 0.22], [23, 0.54, 0.5], [24, 0.46, 0.5], [27, 0.54, 0.94], [28, 0.46, 0.94]]);
+    for (let i = 0; i < 12; i++) a = bodyAnchor(standing, a, 0.25, 3 / 4);
+    expect(a.lying).toBe(false);
+  });
+});
