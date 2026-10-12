@@ -117,10 +117,11 @@ Readiness Rating (1-5 emoji, 3 seconds)
 | 19 | `checkpoint-2026-10-08-frame-lock` | `acbc956` | yes | + big Ghost locked to the camera picture (in-picture landmarks, shoulder lock, exact size) |
 | 20 | `checkpoint-2026-10-12-clean-pass` | `5459b3c` (deployed via the redeploy `54aba47`) | yes | + whole-frame camera (contain) for video / skeleton / Ghost, fitted see-through seated-aware Ghost, realistic coach, full-screen layout, short distinct names, incoming ball, silent setup + today's goal — **awaiting the owner's check (NOT complete)** |
 | 21 | `checkpoint-2026-10-12-floor-goal` | `44182db` | yes | + the floor / lying big Ghost, today's goal protected + shown — **awaiting the owner's check (NOT complete)** |
-| 22 | `checkpoint-2026-10-12-floor-fit` | `b3535a2` | **yes — the current production (2026-10-12)** | + the floor Ghost fitted to the in-picture body box, squeezed inside the camera picture — **awaiting the owner's check (NOT complete)** |
+| 22 | `checkpoint-2026-10-12-floor-fit` | `b3535a2` | yes | + the floor Ghost fitted to the in-picture body box, squeezed inside the camera picture — **awaiting the owner's check (NOT complete)** |
+| 23 | `checkpoint-2026-10-12-mirror-guide` | `b63f39a` | **yes — the current production (2026-10-12)** | + the big Ghost mirrors the trainee's skeleton before the start position and guides in it — **awaiting the owner's check (NOT complete)** |
 
 **How to return to a checkpoint:**
-- **To a deployed point (#1, #2, #3, #5, #8, #9, #10, #11, #12, #13, #14, #15, #16, #17, #18, #19, #20, #21, #22): instant rollback with no code change** — Vercel → Deployments → the deployment of that commit → "Promote to Production".
+- **To a deployed point (#1, #2, #3, #5, #8, #9, #10, #11, #12, #13, #14, #15, #16, #17, #18, #19, #20, #21, #22, #23): instant rollback with no code change** — Vercel → Deployments → the deployment of that commit → "Promote to Production".
 - **To any point in the code:** `git checkout <tag>` to look at it, or create a branch from it (`git checkout -b restore-<n> <tag>`) and deploy that branch / merge it into `main` after approval.
 - Look at it without changing anything: `git checkout checkpoint-stage2-stable` (then `git checkout main` to come back).
 - Undo later work on `main` safely (keeps history): `git revert <commits after the checkpoint>`, then push → Vercel redeploys.
@@ -1380,4 +1381,5 @@ Two critical corrections to the existing onboarding (Stages 1B/1C), completed **
 - **2026-10-12:** Pushed `44182db` → deployed, verified in the served bundle. Restore point `checkpoint-2026-10-12-floor-goal` (#21). Awaiting the owner's check — NOT complete.
 - **2026-10-12:** The floor Ghost root fix: fitted to the in-picture body box and squeezed inside the camera picture (no standing model for floor exercises). On the board as 'awaiting check'. Client 719 pass, 0 new failures. Committed as `b3535a2`.
 - **2026-10-12:** Pushed `b3535a2` → deployed, verified in the served bundle. Restore point `checkpoint-2026-10-12-floor-fit` (#22). Awaiting the owner's check — NOT complete.
-- **2026-10-12:** Mirror → Guide model for the big Ghost (a mirror of the skeleton before the start position, a guide in it / in the exercise; never floating); the mirror head fix. On the board as 'awaiting check'. Client 722 pass, 0 new failures. Not yet committed.
+- **2026-10-12:** Mirror → Guide model for the big Ghost (a mirror of the skeleton before the start position, a guide in it / in the exercise; never floating); the mirror head fix. On the board as 'awaiting check'. Client 722 pass, 0 new failures. Committed as `b63f39a`.
+- **2026-10-12:** Pushed `b63f39a` → deployed, verified in the served bundle. Restore point `checkpoint-2026-10-12-mirror-guide` (#23). Awaiting the owner's check — NOT complete.
