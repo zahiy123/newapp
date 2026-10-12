@@ -238,3 +238,72 @@ export function overlayPlacement(anchor, videoW, videoH, viewW, viewH) {
     body: { limbs: anchor.limbs || null, seated: !!anchor.seated, lying: !!anchor.lying, headDir: anchor.headDir || null },
   };
 }
+
+// ============================================================
+// Floor / lying exercises (owner field test, 2026-10-12: "standing is great, but lying down the
+// Ghost vanishes below — I must lower the camera to the floor")
+//
+// A trainee lying down in front of an upright phone is at the BOTTOM of the picture, long and
+// horizontal, often with the head or the feet outside the narrow frame — the hip / shoulder anchor
+// of a standing body does not apply (with the hips out of view it fell back to "a torso below the
+// shoulders" = below the picture). For floor exercises the Ghost is therefore fitted to the BOX of
+// the trainee's body points that are really in the picture, and kept INSIDE the camera picture.
+// ============================================================
+
+const BOX_POINTS = [0, 11, 12, 13, 14, 15, 16, 23, 24, 25, 26, 27, 28];
+const BOX_TAU_MS = 250;
+
+/**
+ * The box (view px) of the trainee's body points inside the picture, smoothed, with the head side.
+ * @param {(nx, ny) => {x,y}} map - frameTransform of the displayed picture
+ * @returns {{ x0, y0, x1, y1, headDir } | null} - headDir: +1 the head toward +x (raw), −1 toward −x
+ */
+export function bodyBox(landmarks, map, prev = null, dtMs = null) {
+  const pts = BOX_POINTS.map(i => landmarks?.[i])
+    .filter(p => p && (p.visibility ?? 1) >= MIN_VISIBILITY && p.x >= 0 && p.x <= 1 && p.y >= 0 && p.y <= 1);
+  if (pts.length < 4) return prev;
+  const px = pts.map(p => map(p.x, p.y));
+  const box = { x0: Math.min(...px.map(p => p.x)), x1: Math.max(...px.map(p => p.x)), y0: Math.min(...px.map(p => p.y)), y1: Math.max(...px.map(p => p.y)) };
+  // the head side: the nose (or the shoulders) vs. the hips / ankles
+  const avg = (ids) => { const q = ids.map(i => landmarks?.[i]).filter(p => p && (p.visibility ?? 1) >= MIN_VISIBILITY); return q.length ? q.reduce((a, p) => a + p.x, 0) / q.length : null; };
+  const head = avg([0]) ?? avg([11, 12]);
+  const tail = avg([27, 28]) ?? avg([23, 24]);
+  const headDir = head !== null && tail !== null && Math.abs(head - tail) > 0.05 ? Math.sign(head - tail) : (prev?.headDir ?? null);
+  if (!prev || !(typeof dtMs === 'number' && dtMs > 0)) return { ...box, headDir };
+  const a = 1 - Math.exp(-Math.min(dtMs, 100) / BOX_TAU_MS);
+  const f = (k) => prev[k] + a * (box[k] - prev[k]);
+  return { x0: f('x0'), x1: f('x1'), y0: f('y0'), y1: f('y1'), headDir };
+}
+
+/**
+ * Fit a lying Ghost (its rest-pose box in body units) onto the trainee, ALWAYS inside the picture.
+ * @param {{x0,x1,y0,y1}} g - the Ghost's box (body units)
+ * @param {{x0,x1,y0,y1}|null} b - the trainee's body box (view px) or null
+ * @param {{x,y,w,h}} F - the displayed camera picture (view px)
+ * @returns {{ s, cx, bottomY }} - px per body unit, the Ghost box's center x and bottom y (view px)
+ */
+export function fitLyingGhost(g, b, F) {
+  const gW = g.x1 - g.x0, gH = g.y1 - g.y0;
+  const bw = b ? b.x1 - b.x0 : 0, bh = b ? b.y1 - b.y0 : 0;
+  const horizontal = b && bw > bh * 1.1 && bw > F.w * 0.25;
+  let targetW, cx, bottomY;
+  if (horizontal) {
+    // on the trainee: their length (never tiny when part of the body is out of view), their center,
+    // their lowest point (the floor contact)
+    targetW = Math.max(bw, F.w * 0.55);
+    cx = (b.x0 + b.x1) / 2;
+    bottomY = b.y1;
+  } else {
+    // not lying (yet) / not seen: the bottom strip of the picture, where a lying body will be
+    targetW = F.w * 0.85;
+    cx = F.x + F.w / 2;
+    bottomY = b ? Math.min(b.y1, F.y + F.h * 0.97) : F.y + F.h * 0.95;
+  }
+  let s = targetW / gW;
+  // squeezed into the picture: never wider than it, never taller than 60% of it
+  s = Math.min(s, (F.w * 0.98) / gW, (F.h * 0.6) / gH);
+  const halfW = (gW * s) / 2;
+  cx = Math.min(F.x + F.w - halfW - F.w * 0.01, Math.max(F.x + halfW + F.w * 0.01, cx));
+  bottomY = Math.min(F.y + F.h * 0.99, Math.max(F.y + gH * s, bottomY));
+  return { s, cx, bottomY };
+}

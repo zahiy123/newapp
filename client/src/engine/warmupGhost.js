@@ -15,6 +15,7 @@
 
 import { GHOST_BODY } from './ghostBody.js';
 import { profileGhostPose } from './exercise/profileGhost.js';
+import { fitLyingGhost } from './ghostOverlay.js';
 
 const PERIOD_MS = 1600;
 // Elbow flex range during arm circles (makes the hand path elliptical → direction visible)
@@ -720,6 +721,25 @@ export function drawWarmupGhost(ctx, spec, lp, nowMs, w, h, opts = {}) {
  * @param {number} [alpha=0.42] - transparency so the trainee stays visible through the Ghost
  * @param {number|null} [feetY] - canvas y of the trainee's feet (ankles) when seen
  */
+// The rest-pose box of a lying (floor) Ghost in body units + its head's x — the fit target size.
+// Computed over the whole cycle so the fit never changes while the Ghost moves (no pumping).
+const lyingBoxCache = new WeakMap();
+function lyingGhostBox(spec, lp) {
+  const key = spec.profile || spec;
+  if (lyingBoxCache.has(key)) return lyingBoxCache.get(key);
+  let x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity, headX = 0;
+  for (let k = 0; k < 8; k++) {
+    const pose = ghostPose(spec, k / 8, lp);
+    const pts = pose.segments.flatMap(sg => [sg.from, sg.to]).concat([pose.head]);
+    for (const p of pts) { x0 = Math.min(x0, p.x); x1 = Math.max(x1, p.x); y0 = Math.min(y0, p.y); y1 = Math.max(y1, p.y); }
+    y0 = Math.min(y0, pose.head.y - pose.head.r);
+    if (k === 0) headX = pose.head.x;
+  }
+  const box = { x0, x1, y0, y1, headX };
+  lyingBoxCache.set(key, box);
+  return box;
+}
+
 // The big Ghost on the camera picture must be visible on ANY background: a strong cyan body with a
 // thick dark outline (a pale, outline-less figure vanished on a bright wall / white shirt — field test)
 const OVERLAY_LOOK = Object.freeze({
@@ -824,18 +844,24 @@ export function drawGhostOverlay(ctx, spec, lp, nowMs, origin, scale, alpha = 0.
     // never bobs up and down with the trainee's hips (steady, like a real demonstrator)
     P = (p) => ({ x: origin.x + p.x * scale, y: feetY + (p.y - fitted.floorY) * scale });
   } else {
-    // Lying / seated (or feet not seen): the Ghost's hips sit on the trainee's hips
-    let hx = 0, hy = 0;
-    const lh = raw.landmarks?.[23], rh = raw.landmarks?.[24];
-    if (lying && lh?.visibility && rh?.visibility) { hx = (lh.x + rh.x) / 2; hy = (lh.y + rh.y) / 2; }
-    // lying: the Ghost lies the same way round as the trainee (its head on the trainee's head side)
-    let flip = 1;
-    const ls = raw.landmarks?.[11];
-    if (lying && body?.headDir && ls?.visibility) {
-      const ghostHeadDir = Math.sign(ls.x - hx) || 1;
-      flip = ghostHeadDir === body.headDir ? 1 : -1;
+    if (lying && body?.frame) {
+      // FLOOR exercise: fitted to the box of the trainee's body points in the picture and kept
+      // INSIDE the camera picture (never below it), lying the same way round as the trainee
+      const g = lyingGhostBox(spec, lp);
+      const fit = fitLyingGhost(g, body.box || null, body.frame);
+      const ghostHeadDir = Math.sign(g.headX - (g.x0 + g.x1) / 2) || 1;
+      const headDir = body.box?.headDir ?? body.headDir ?? null;
+      const flip = headDir && headDir !== ghostHeadDir ? -1 : 1;
+      const gcx = (g.x0 + g.x1) / 2;
+      scale = fit.s;
+      P = (p) => ({ x: fit.cx + flip * (p.x - gcx) * fit.s, y: fit.bottomY + (p.y - g.y1) * fit.s });
+    } else {
+      // seated (or feet not seen): the Ghost's hips sit on the trainee's hips
+      let hx = 0, hy = 0;
+      const lh = raw.landmarks?.[23], rh = raw.landmarks?.[24];
+      if (lying && lh?.visibility && rh?.visibility) { hx = (lh.x + rh.x) / 2; hy = (lh.y + rh.y) / 2; }
+      P = (p) => ({ x: origin.x + (p.x - hx) * scale, y: origin.y + (p.y - hy) * scale });
     }
-    P = (p) => ({ x: origin.x + flip * (p.x - hx) * scale, y: origin.y + (p.y - hy) * scale });
   }
   ctx.save();
   ctx.globalAlpha = alpha;

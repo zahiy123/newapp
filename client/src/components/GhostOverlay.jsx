@@ -9,7 +9,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { drawGhostOverlay } from '../engine/warmupGhost';
-import { bodyAnchor, overlayPlacement, defaultPlacement } from '../engine/ghostOverlay';
+import { bodyAnchor, overlayPlacement, defaultPlacement, bodyBox, frameTransform } from '../engine/ghostOverlay';
 
 const OVERLAY_ALPHA = 0.9;          // the outline's opacity; the body fill is lighter (a see-through model)
 const FADE_IN_MS = 250;
@@ -22,6 +22,7 @@ const debugOn = () => {
 export default function GhostOverlay({ spec, limbProfile, landmarksRef, videoRef, onError }) {
   const canvasRef = useRef(null);
   const anchorRef = useRef(null);
+  const boxRef = useRef(null);              // the trainee's body box in the picture (floor exercises)
   const lastAnchorAtRef = useRef(null);
   const shownAtRef = useRef(null);
   // animation clock (runs backward for a "backward" direction — continuous, no jump on the switch)
@@ -49,14 +50,16 @@ export default function GhostOverlay({ spec, limbProfile, landmarksRef, videoRef
           const v = videoRef?.current;
           const vw = v?.videoWidth || 0, vh = v?.videoHeight || 0;
           // the body anchor (time-based smoothing), once the camera picture exists
-          if (vw && vh) {
-            const dt = lastAnchorAtRef.current === null ? null : now - lastAnchorAtRef.current;
-            anchorRef.current = bodyAnchor(landmarksRef?.current, anchorRef.current, 0.25, vw / vh, dt);
-          }
+          const dt = lastAnchorAtRef.current === null ? null : now - lastAnchorAtRef.current;
+          if (vw && vh) anchorRef.current = bodyAnchor(landmarksRef?.current, anchorRef.current, 0.25, vw / vh, dt);
           lastAnchorAtRef.current = now;
           const place = vw && vh && anchorRef.current
             ? overlayPlacement(anchorRef.current, vw, vh, w, h)
             : defaultPlacement(w, h, vw || null, vh || null);
+          // the displayed picture + the trainee's body box in it: floor exercises are fitted INTO it
+          const map = vw && vh ? frameTransform(vw, vh, w, h, 'contain') : null;
+          if (map) boxRef.current = bodyBox(landmarksRef?.current, map, boxRef.current, dt);
+          place.body = { ...(place.body || {}), box: boxRef.current, frame: map ? map.box : { x: 0, y: 0, w, h } };
 
           if (shownAtRef.current === null) shownAtRef.current = now;
           const fade = Math.min(1, (now - shownAtRef.current) / FADE_IN_MS);

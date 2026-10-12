@@ -104,16 +104,48 @@ describe('Short exercise names', () => {
   });
 });
 
-describe('A lying Ghost turns to the trainee\'s head side', () => {
-  it('draws the push-up Ghost mirrored when the trainee\'s head is on the other side', async () => {
+describe('Floor exercises: the big Ghost lies on the trainee INSIDE the camera picture', () => {
+  // record every point the drawing uses
+  const drawPts = async (body) => {
     const { drawGhostOverlay } = await import('../warmupGhost.js');
-    const xs = (headDir) => {
-      const pts = [];
-      const ctx = new Proxy({}, { get: (t, k) => (k === 'moveTo' || k === 'lineTo' ? (x) => pts.push(x) : k === 'createLinearGradient' || k === 'createRadialGradient' ? () => ({ addColorStop() {} }) : () => {}), set: () => true });
-      drawGhostOverlay(ctx, { profile: EXPERT_PROFILES.pushUp }, lpOk, 0, { x: 300, y: 300 }, 50, 0.9, null, { lying: true, headDir });
-      return pts.reduce((a, b) => a + b, 0) / pts.length;
-    };
-    // the drawing's mass moves to the other side of the hips when the head side flips
-    expect(Math.sign(xs(1) - 300)).not.toBe(Math.sign(xs(-1) - 300));
+    const pts = [];
+    const ctx = new Proxy({}, {
+      get: (t, k) => (k === 'moveTo' || k === 'lineTo' ? (x, y) => pts.push({ x, y })
+        : k === 'arc' || k === 'ellipse' ? (x, y) => pts.push({ x, y })
+          : k === 'createLinearGradient' || k === 'createRadialGradient' ? () => ({ addColorStop() {} }) : () => {}),
+      set: () => true,
+    });
+    drawGhostOverlay(ctx, { profile: EXPERT_PROFILES.pushUp }, lpOk, 0, { x: 300, y: 300 }, 50, 0.9, null, body);
+    return pts;
+  };
+  // a portrait phone picture inside a 585×696 view (contain): x 31…554, y 0…696
+  const F = { x: 31, y: 0, w: 522, h: 696 };
+  const inside = (pts) => pts.every(p => p.x >= F.x - 2 && p.x <= F.x + F.w + 2 && p.y >= F.y - 2 && p.y <= F.y + F.h + 2);
+
+  it('the trainee lying at the bottom of the picture → the Ghost lies there, inside the picture', async () => {
+    const box = { x0: 60, x1: 540, y0: 560, y1: 650, headDir: -1 };
+    const pts = await drawPts({ box, frame: F });
+    expect(inside(pts)).toBe(true);
+    const ys = pts.map(p => p.y);
+    expect(Math.max(...ys)).toBeGreaterThan(600);           // on the floor where the trainee is
+    expect(Math.min(...ys)).toBeGreaterThan(400);
+  });
+
+  it('the head / feet outside the narrow frame → squeezed into the picture, never below it', async () => {
+    const box = { x0: 31, x1: 553, y0: 600, y1: 696, headDir: 1 };   // the body cut by both edges and the bottom
+    expect(inside(await drawPts({ box, frame: F }))).toBe(true);
+  });
+
+  it('nobody detected (or still standing) → the bottom strip of the picture, inside', async () => {
+    expect(inside(await drawPts({ box: null, frame: F }))).toBe(true);
+    expect(inside(await drawPts({ box: { x0: 250, x1: 330, y0: 100, y1: 650, headDir: null }, frame: F }))).toBe(true);
+  });
+
+  it('lies the same way round as the trainee (the head side)', async () => {
+    const cx = (pts) => pts.reduce((a, p) => a + p.x, 0) / pts.length;
+    const box = { x0: 60, x1: 540, y0: 560, y1: 650 };
+    const a = await drawPts({ box: { ...box, headDir: 1 }, frame: F });
+    const b = await drawPts({ box: { ...box, headDir: -1 }, frame: F });
+    expect(Math.sign(cx(a) - 300)).not.toBe(Math.sign(cx(b) - 300));
   });
 });
