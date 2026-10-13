@@ -119,10 +119,11 @@ Readiness Rating (1-5 emoji, 3 seconds)
 | 21 | `checkpoint-2026-10-12-floor-goal` | `44182db` | yes | + the floor / lying big Ghost, today's goal protected + shown — **awaiting the owner's check (NOT complete)** |
 | 22 | `checkpoint-2026-10-12-floor-fit` | `b3535a2` | yes | + the floor Ghost fitted to the in-picture body box, squeezed inside the camera picture — **awaiting the owner's check (NOT complete)** |
 | 23 | `checkpoint-2026-10-12-mirror-guide` | `b63f39a` | yes | + the big Ghost mirrors the trainee's skeleton before the start position and guides in it — **awaiting the owner's check (NOT complete)** |
-| 24 | `checkpoint-2026-10-13-honest-ball` | `5b6a9b8` | **yes — the current production (2026-10-13)** | + kick/pass stability, a frontal guide, the ball kicked in real time (hit / miss + score), no blink, honest feedback (praise only when verified) — **awaiting the owner's check (NOT complete)** |
+| 24 | `checkpoint-2026-10-13-honest-ball` | `5b6a9b8` | yes | + kick/pass stability, a frontal guide, the ball kicked in real time (hit / miss + score), no blink, honest feedback (praise only when verified) — **awaiting the owner's check (NOT complete)** |
+| 25 | `checkpoint-2026-10-13-virtual-ball` | `334d833` | **yes — the current production (2026-10-13)** | + the equipment finder only for chair / bottle / can, the guide pinned to the trainee's pelvis, the smart virtual ball for every ball drill in every sport (ball drills kept without a real ball) — **awaiting the owner's check (NOT complete)** |
 
 **How to return to a checkpoint:**
-- **To a deployed point (#1, #2, #3, #5, #8, #9, #10, #11, #12, #13, #14, #15, #16, #17, #18, #19, #20, #21, #22, #23, #24): instant rollback with no code change** — Vercel → Deployments → the deployment of that commit → "Promote to Production".
+- **To a deployed point (#1, #2, #3, #5, #8, #9, #10, #11, #12, #13, #14, #15, #16, #17, #18, #19, #20, #21, #22, #23, #24, #25): instant rollback with no code change** — Vercel → Deployments → the deployment of that commit → "Promote to Production".
 - **To any point in the code:** `git checkout <tag>` to look at it, or create a branch from it (`git checkout -b restore-<n> <tag>`) and deploy that branch / merge it into `main` after approval.
 - Look at it without changing anything: `git checkout checkpoint-stage2-stable` (then `git checkout main` to come back).
 - Undo later work on `main` safely (keeps history): `git revert <commits after the checkpoint>`, then push → Vercel redeploys.
@@ -1402,3 +1403,4 @@ Two critical corrections to the existing onboarding (Stages 1B/1C), completed **
 - **2026-10-13:** Pushed `5b6a9b8` → deployed, verified in the served bundle. Restore point `checkpoint-2026-10-13-honest-ball` (#24). Awaiting the owner's check — NOT complete.
 - **2026-10-13:** Owner round: the equipment finder opt-in only (chair / bottle / can), the guide pinned to the trainee's pelvis, a virtual ball at the trainee's kicking foot in every kick / pass drill (run-up + exercise). Added to the Owner Verification Board as 'awaiting check' — NOT complete. Client 735 pass, 0 new failures; build OK.
 - **2026-10-13:** The virtual ball for every ball drill in every sport (incoming / dribble / juggle / hand dribble / throw), ball drills kept without a real ball (client + server — replaces the old removal rule), the virtual ball feeds the analysis engine, the hand-dribble analyzer order fixed. Added to the Owner Verification Board as 'awaiting check' — NOT complete. Client 748 pass, 0 new failures; server 10/10; build OK.
+- **2026-10-13:** Pushed `334d833` → deployed, verified in the served bundle. Restore point `checkpoint-2026-10-13-virtual-ball` (#25). Awaiting the owner's check — NOT complete.
