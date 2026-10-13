@@ -754,6 +754,8 @@ const OVERLAY_LOOK = Object.freeze({
 });
 
 const LEG_SIDES = ['left', 'right'];
+// shoulders this wide (vs. a frontal body) = the trainee faces the camera → the guide is frontal
+const FRONTAL_FACING = 0.75;
 const scaleFrom = (o, p, k) => ({ ...p, x: o.x + (p.x - o.x) * k, y: o.y + (p.y - o.y) * k, z: (o.z ?? 0) + ((p.z ?? 0) - (o.z ?? 0)) * k });
 const moveBy = (p, d) => (p ? { ...p, x: p.x + d.x, y: p.y + d.y, z: (p.z ?? 0) + d.z } : p);
 
@@ -837,7 +839,15 @@ export function drawGhostOverlay(ctx, spec, lp, nowMs, origin, scale, alpha = 0.
   const seated = !lying && (body?.seated || lp?.wheelchair || spec.profile?.posture === 'seated');
   // fitted to the trainee's own limb lengths (the same joint angles = the same correct movement)
   const fitted = lying ? { pose: raw, floorY: FLOOR_ANKLE_Y } : fitPoseToBody(raw, body?.limbs);
-  const pose = seated ? seatPose(fitted.pose) : fitted.pose;
+  let pose = seated ? seatPose(fitted.pose) : fitted.pose;
+  // the guide turns the way the TRAINEE turns: facing the camera → nearly frontal (a 3/4 Ghost on a
+  // frontal trainee clashed with the body — parts of it hid / stuck out); side-on → its own 3/4 view
+  if (pose.depth && typeof body?.facing === 'number') {
+    // facing the camera (the shoulders wide) → FULLY frontal, exactly like the trainee; turned → the
+    // trainee's own turn (never more than the demonstration's 3/4)
+    const trainee = body.facing >= FRONTAL_FACING ? 0 : (Math.acos(Math.max(0, Math.min(1, body.facing))) * 180) / Math.PI;
+    pose = { ...pose, yaw: Math.min(pose.yaw ?? 0, trainee) };
+  }
   let P;
   if (!lying && !seated && typeof feetY === 'number') {
     // Standing: the Ghost STANDS where the trainee stands — its feet on the trainee's feet, so it

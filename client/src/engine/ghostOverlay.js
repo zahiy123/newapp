@@ -158,20 +158,40 @@ export function bodyAnchor(landmarks, prev = null, alpha = 0.25, aspect = 4 / 3,
   const footReal = ankles.length ? Math.max(...ankles.map(a => a.y)) : null;
   const footMiss = footReal === null ? (prev?.footMiss ?? 0) + 1 : 0;
   const keepFoot = footReal === null && prev?.footY != null && prev.footReal && footMiss <= FOOT_KEEP_UPDATES;
-  let footTarget = footReal ?? (keepFoot ? prev.footY : hipY + legLen);
+  // not seen: the feet stay at the trainee's LAST measured leg length below the hips (the generic
+  // leg length differs from the real one — switching to it made the Ghost jump)
+  const legOffset = prev?.legOffset ?? legLen;
+  let footTarget = footReal ?? (keepFoot ? prev.footY : hipY + legOffset);
   const footIsReal = footReal !== null || keepFoot;
 
   // ---- shoulder lock: the Ghost's standing shoulders stay on the trainee's ----
-  if (Math.abs(footTarget - SHOULDER_TO_ANKLE_PER_TORSO * torso - sh.y) > SHOULDER_LOCK * torso) {
+  // ONLY when the feet are not really seen (guessed / out of the picture): with real feet the feet
+  // are the truth — leaning into a pass / a kick never re-anchors the Ghost (that was a jump).
+  // Hysteresis: engage beyond SHOULDER_LOCK × torso, release below half of it.
+  const shoulderGap = Math.abs(footTarget - SHOULDER_TO_ANKLE_PER_TORSO * torso - sh.y);
+  const locked = !footIsReal && (prev?.shoulderLocked ? shoulderGap > SHOULDER_LOCK * torso * 0.5 : shoulderGap > SHOULDER_LOCK * torso);
+  if (locked) {
     footTarget = sh.y + SHOULDER_TO_ANKLE_PER_TORSO * torso;
     hipY = sh.y + torso;
   }
+  // ---- which way the trainee faces: 1 = straight at the camera, 0 = side-on (the shoulder width) ----
+  const facingRaw = seen(ls) && seen(rs) ? Math.min(1, (Math.abs(ls.x - rs.x) * aspect) / (torso * 0.77)) : (prev?.facing ?? 1);
+  const facing = prev?.facing == null ? facingRaw : prev.facing + 0.1 * (facingRaw - prev.facing);
 
   // ---- the trainee's proportions: each limb's length vs. the torso, as a factor of the Ghost's ----
   // (a limb pointing at the camera looks short → a long reading counts fast, a short one slowly)
   const limbs = { ...(prev?.limbs || { thigh: 1, shin: 1, upperArm: 1, forearm: 1 }) };
+  // measured ONLY on a straight limb (a bent / swinging limb looks shorter or longer → a distorted Ghost)
+  const straight = (a, b, c) => {
+    const A = landmarks?.[a], Bp = landmarks?.[b], C = landmarks?.[c];
+    if (!seen(A) || !seen(Bp) || !seen(C)) return false;
+    const v1 = [A.x - Bp.x, A.y - Bp.y], v2 = [C.x - Bp.x, C.y - Bp.y];
+    const cos = (v1[0] * v2[0] + v1[1] * v2[1]) / (Math.hypot(...v1) * Math.hypot(...v2) || 1);
+    return cos < -0.96;                                      // ≥ ~164°
+  };
+  const STRAIGHT = { 23: [23, 25, 27], 24: [24, 26, 28], 25: [23, 25, 27], 26: [24, 26, 28], 11: [11, 13, 15], 12: [12, 14, 16], 13: [11, 13, 15], 14: [12, 14, 16] };
   for (const [seg, pairs] of Object.entries(SEGMENTS)) {
-    const reads = pairs.filter(([a, b]) => seen(landmarks?.[a]) && seen(landmarks?.[b])).map(([a, b]) => len(landmarks[a], landmarks[b]));
+    const reads = pairs.filter(([a, b]) => seen(landmarks?.[a]) && seen(landmarks?.[b]) && straight(...STRAIGHT[a])).map(([a, b]) => len(landmarks[a], landmarks[b]));
     if (!reads.length) continue;
     const f = Math.min(LIMB_MAX, Math.max(LIMB_MIN, Math.max(...reads) / torso / GHOST_RATIO[seg]));
     limbs[seg] += (f > limbs[seg] ? 0.1 : 0.01) * (f - limbs[seg]);
@@ -185,7 +205,7 @@ export function bodyAnchor(landmarks, prev = null, alpha = 0.25, aspect = 4 / 3,
   }
   const seated = seatedCount >= SEATED_ON;
 
-  if (!prev) return { hipX, hipY, torso, footY: footTarget, footMiss, footReal: footIsReal, limbs, seatedCount, seated, lyingCount, lying: false };
+  if (!prev) return { hipX, hipY, torso, footY: footTarget, footMiss, footReal: footIsReal, limbs, seatedCount, seated, lyingCount, lying: false, shoulderLocked: locked, facing, legOffset: footReal !== null ? footReal - hipY : null };
 
   // ---- smoothing: no sudden size change, glide with the body, ignore noise ----
   const bounded = Math.min(prev.torso * (1 + MAX_SIZE_STEP), Math.max(prev.torso * (1 - MAX_SIZE_STEP), torso));
@@ -200,7 +220,8 @@ export function bodyAnchor(landmarks, prev = null, alpha = 0.25, aspect = 4 / 3,
       footY: prev.footY == null ? footTarget : follow(prev.footY, footTarget, aPos, POS_DEADBAND),
       footMiss,
       footReal: footIsReal,
-      limbs, seatedCount, seated, lyingCount, lying: false,
+      limbs, seatedCount, seated, lyingCount, lying: false, shoulderLocked: locked, facing,
+      legOffset: footReal !== null ? (prev.legOffset == null ? footReal - hipY : prev.legOffset + 0.1 * (footReal - hipY - prev.legOffset)) : prev.legOffset,
     };
   }
   return {
@@ -210,7 +231,8 @@ export function bodyAnchor(landmarks, prev = null, alpha = 0.25, aspect = 4 / 3,
     footY: prev.footY == null ? footTarget : prev.footY + alpha * (footTarget - prev.footY),
     footMiss,
     footReal: footIsReal,
-    limbs, seatedCount, seated, lyingCount, lying: false,
+    limbs, seatedCount, seated, lyingCount, lying: false, shoulderLocked: locked, facing,
+      legOffset: footReal !== null ? (prev.legOffset == null ? footReal - hipY : prev.legOffset + 0.1 * (footReal - hipY - prev.legOffset)) : prev.legOffset,
   };
 }
 
@@ -235,7 +257,7 @@ export function overlayPlacement(anchor, videoW, videoH, viewW, viewH) {
     origin: map(anchor.hipX, anchor.hipY),
     scale: Math.max(minScale, (anchor.torso * map.scaleY) / GHOST_TORSO_UNITS),
     feetY: typeof anchor.footY === 'number' && !anchor.seated && !anchor.lying ? map(anchor.hipX, anchor.footY).y : null,
-    body: { limbs: anchor.limbs || null, seated: !!anchor.seated, lying: !!anchor.lying, headDir: anchor.headDir || null },
+    body: { limbs: anchor.limbs || null, seated: !!anchor.seated, lying: !!anchor.lying, headDir: anchor.headDir || null, facing: anchor.facing ?? 1 },
   };
 }
 

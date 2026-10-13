@@ -765,7 +765,7 @@ export default function Training() {
   // Exact counting source for the analyzer wrapper (expert rep exercises only)
   const profileRepsRef = useRef({ active: false, countRef: null });
   profileRepsRef.current = {
-    active: execution.active && execution.profile?.precision === 'expert' && execution.profile?.kind === 'reps',
+    active: execution.active && execution.profile?.precision === 'expert' && (execution.profile?.kind === 'reps' || execution.profile?.kind === 'strike'),
     countRef: execution.repCountRef,
   };
   const workingSourceRef = useRef(execution);
@@ -809,12 +809,21 @@ export default function Training() {
     ? warmUpExercises[0].ghost : demoGhostSpec;
   // MIRROR → GUIDE (owner): the big Ghost mirrors the trainee until they are in the exercise's start
   // position (the start gate), then it performs the exercise on them; in the exercise it guides
+  const guideLatchRef = useRef({ phase: null, on: false });
   const ghostIsGuide = useCallback(() => {
     const ph = phaseRef.current;
+    const latch = guideLatchRef.current;
+    // the latch holds through the whole run-up (briefing → equipment check → countdown → exercise);
+    // it resets only when the trainee is out of an exercise (the opening screen, the rest, …)
+    const runUp = ph === PHASE.BRIEFING || ph === PHASE.CHECKING_EQUIPMENT || ph === PHASE.CALIBRATING || ph === PHASE.EXERCISING;
+    if (!runUp) latch.on = false;
+    latch.phase = ph;
     if (ph === PHASE.EXERCISING) return true;
     if (ph === PHASE.BRIEFING || ph === PHASE.CHECKING_EQUIPMENT || ph === PHASE.CALIBRATING) {
+      // once the trainee is in the start position the guide STAYS (no flip-flop on every knee bend)
       const ex = workingSourceRef.current;
-      return !!ex?.active && !!ex.startReadyRef?.current;
+      if (ex?.active && ex.startReadyRef?.current) latch.on = true;
+      return latch.on;
     }
     return false;                      // the opening screen / the rest: a mirror of the trainee
   }, []);
@@ -940,9 +949,33 @@ export default function Training() {
 
   // The coach's voice follows the chosen character
   useEffect(() => { setCoachVoice(coachChoice); }, [coachChoice]);
-  // The coach claps for a finished set / exercise (3 s), then stands ready
+  // HONEST feedback (owner): praise ONLY for an execution the expert module really saw and measured as
+  // correct — in view, a reliable measurement, accuracy ≥ PRAISE_ACCURACY, no current error. Not seen /
+  // unsure / wrong → no praise: the coach says what to fix.
+  const PRAISE_ACCURACY = 75;
+  const verifiedGood = () => !!execution.active && !!executionInViewRef.current && !execution.unsure
+    && (execution.accuracy ?? 0) >= PRAISE_ACCURACY && !execution.issue;
+  // the set's real quality: its accuracy readings + its most frequent error (for the set summary)
+  const setQualityRef = useRef({ sum: 0, n: 0, errors: {} });
+  useEffect(() => {
+    if (phase !== PHASE.EXERCISING || typeof execution.accuracy !== 'number') return;
+    const q = setQualityRef.current;
+    q.sum += execution.accuracy; q.n += 1;
+  }, [execution.accuracy, phase]);
+  useEffect(() => {
+    if (phase !== PHASE.EXERCISING || !execution.issue) return;
+    const q = setQualityRef.current;
+    const e = q.errors[execution.issue.id] || { n: 0, msg: execution.issue.msg, why: execution.issue.why };
+    e.n += 1;
+    q.errors[execution.issue.id] = e;
+  }, [execution.issue, phase]);
+  useEffect(() => { setQualityRef.current = { sum: 0, n: 0, errors: {} }; }, [currentSet, currentIdx]);
+  const lastSetGoodRef = useRef(false);
+
+  // The coach celebrates ONLY a good set (its measured accuracy), then stands ready
   useEffect(() => {
     if (phase !== PHASE.RESTING && phase !== PHASE.EXERCISE_DONE) return undefined;
+    if (!lastSetGoodRef.current) return undefined;
     setCoachCheer(true);
     const tm = setTimeout(() => setCoachCheer(false), 3000);
     return () => { clearTimeout(tm); setCoachCheer(false); };
@@ -982,8 +1015,8 @@ export default function Training() {
       if (!ex?.active || !ex.earlyRef?.current) return;
       clearInterval(id);
       const kind = ex.profile?.kind;
-      const early = kind === 'reps' ? (ex.repCountRef.current || 0) : kind === 'strike' ? (ex.strikeCountRef.current || 0) : 0;
-      if (kind === 'strike') earlyOffsetRef.current = early;    // the kick analyzer counts on from here
+      // reps AND kicks are counted by the expert module from the briefing on (no offset needed)
+      const early = kind === 'reps' || kind === 'strike' ? (ex.repCountRef.current || 0) : 0;
       calibrationDataRef.current = null;
       commandPhaseRef.current = 'IDLE';                          // no rep-by-rep commands over the work
       sittingWarnedRef.current = false;
@@ -1377,7 +1410,7 @@ export default function Training() {
       // === SPEECH: Only trigger encouragement/correction AFTER a confirmed new rep ===
       if (isNewRep) {
         // Encouragement: speak after rep if form was mostly good
-        if (goodFormCountRef.current >= 5) {
+        if (goodFormCountRef.current >= 5 && verifiedGood()) {
           const now = Date.now();
           const isAnalyzing = commandPhaseRef.current === 'ANALYZING' || commandPhaseRef.current === 'SPEAKING_FEEDBACK';
           if (!isAnalyzing && now - lastEncouragementRef.current > 8000) {
@@ -1551,8 +1584,8 @@ export default function Training() {
           setFeedback({
             type: 'info',
             text: isHe
-              ? `אתה עושה מעולה! רק עוד ${repsRemaining} חזרות!`
-              : `You're doing great! Just ${repsRemaining} more reps!`
+              ? `עוד ${repsRemaining} חזרות — ממשיכים`
+              : `${repsRemaining} more reps — keep going`
           });
           return;
         }
@@ -2061,8 +2094,9 @@ export default function Training() {
 
     if (fb) {
       if (fb.type === 'good') {
-        // Good movement - occasional encouragement
-        if (now - lastWarmUpNudgeRef.current > 10000) {
+        // Good movement - occasional encouragement, only when it really matches the Ghost (accuracy)
+        const acc = accuracyShownRef.current?.ema ?? accuracyShownRef.current?.value;
+        if (typeof acc === 'number' && acc >= PRAISE_ACCURACY && now - lastWarmUpNudgeRef.current > 10000) {
           lastWarmUpNudgeRef.current = now;
           speakEncouragement();
         }
@@ -2593,8 +2627,14 @@ export default function Training() {
     commandRepRef.current = 1;
     clearTimeout(analyzeTimeoutRef.current);
 
-    const wasGood = badFormCountRef.current < 3;
-    const wasPerfect = badFormCountRef.current === 0 && goodFormCountRef.current > 3;
+    // the set's real quality: the expert module's measured accuracy over the set (when it measures)
+    const sq = setQualityRef.current;
+    const setAcc = sq.n ? sq.sum / sq.n : null;
+    const measured = execution.active && setAcc !== null;
+    const wasGood = measured ? setAcc >= 75 : badFormCountRef.current < 3;
+    const wasPerfect = measured ? setAcc >= 90 : (badFormCountRef.current === 0 && goodFormCountRef.current > 3);
+    lastSetGoodRef.current = wasGood;
+    const topError = Object.values(sq.errors).sort((a, b) => b.n - a.n)[0] || null;
 
     // Compute set average from AI vision scores
     const setAvgScore = repScoresRef.current.length > 0
@@ -2605,7 +2645,13 @@ export default function Training() {
     const romReport = performanceReportRef.current;
     const romPct = romReport?.romPercentage ?? 0;
     let grade, gradeColor;
-    if (setAvgScore >= 9.0 && romPct >= 95) {
+    if (measured) {
+      // the grade is the measured accuracy — an honest grade, a C when it was not right
+      if (setAcc >= 90) { grade = 'A+'; gradeColor = '#00FF00'; }
+      else if (setAcc >= 80) { grade = 'A'; gradeColor = '#FFD700'; }
+      else if (setAcc >= 65) { grade = 'B'; gradeColor = '#FF8C00'; }
+      else { grade = 'C'; gradeColor = '#EF4444'; }
+    } else if (setAvgScore >= 9.0 && romPct >= 95) {
       grade = 'A+'; gradeColor = '#00FF00';
     } else if (setAvgScore >= 7.5 || romPct >= 85) {
       grade = 'A'; gradeColor = '#FFD700';
@@ -2623,7 +2669,15 @@ export default function Training() {
 
     setSetsPerformance(prev => [...prev, { set: currentSet, quality: wasPerfect ? 'perfect' : wasGood ? 'good' : 'needs_work', avgScore: Math.round(setAvgScore * 10) / 10, grade }]);
 
-    if (wasPerfect) {
+    if (measured && !wasGood) {
+      // not right: say it, with the one thing to fix (no praise)
+      const fix = topError ? (isHe ? topError.msg?.he : topError.msg?.en) : null;
+      const line = isHe
+        ? `הסט הסתיים, הדיוק ${Math.round(setAcc)} אחוז — עוד לא מספיק. ${fix ? `בסט הבא: ${fix}.` : 'בסט הבא: לאט ובטווח מלא, בדיוק כמו הצללית.'}`
+        : `Set done, ${Math.round(setAcc)}% accuracy — not there yet. ${fix ? `Next set: ${fix}.` : 'Next set: slow and full range, exactly like the Ghost.'}`;
+      speakPriority(line, { rate: 1.0 });
+      setFeedback({ type: 'warning', text: line });
+    } else if (wasPerfect) {
       const langKey = isHe ? 'he' : 'en';
       const exType = analyzerRef.current?.cueKey || 'default';
       speakOptimization(OPTIMIZATION_TIPS[langKey][exType] || OPTIMIZATION_TIPS[langKey].default);
@@ -3467,21 +3521,22 @@ export default function Training() {
 
         {/* Calibration overlay — 5-second ROM measurement */}
         {phase === PHASE.CALIBRATING && (
-          <div className="absolute inset-x-0 bottom-6 flex items-center justify-center z-20 pointer-events-none">
-            <div className="bg-black/60 backdrop-blur-sm rounded-2xl px-6 py-4 text-center text-white">
-              <div className="text-lg font-bold mb-1">
+          // a compact line at the bottom edge — never a big card over the trainee's body and the Ghost
+          <div className="absolute inset-x-0 bottom-2 flex items-center justify-center z-20 pointer-events-none">
+            <div className="bg-black/65 rounded-full px-3 py-1 text-white flex items-center gap-2 text-xs">
+              <span className="font-bold">
                 {execution.active ? (isHe ? 'עמדת פתיחה' : 'Start position') : (isHe ? 'כיול תנועה' : 'Calibrating')}
-              </div>
-              <div className="text-4xl font-bold text-yellow-400 mb-1">
+              </span>
+              <span className="text-lg font-bold text-yellow-400 leading-none">
                 {calibrationCountdown === null ? '⏳' : calibrationCountdown}
-              </div>
-              <div className="text-sm opacity-80">
+              </span>
+              <span className="opacity-80">
                 {calibrationCountdown === null
                   ? (isHe ? 'מחכה שתיכנס לעמדת הפתיחה' : 'Waiting for you to get into the start position')
                   : execution.active
                     ? (isHe ? 'החזק את עמדת הפתיחה...' : 'Hold the start position...')
                     : (isHe ? 'בצע תנועה אחת מלאה' : 'Perform one full movement')}
-              </div>
+              </span>
             </div>
           </div>
         )}

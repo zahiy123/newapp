@@ -19,39 +19,39 @@ export default function ExecutionHud({ execution, isHe }) {
   return (
     <>
       {setup && (
-        <div className="absolute top-24 left-1/2 -translate-x-1/2 z-[16] pointer-events-none bg-amber-500 text-white rounded-2xl px-4 py-3 text-base sm:text-lg font-bold shadow-lg text-center max-w-[92%]">
+        <div className="absolute top-11 left-1/2 -translate-x-1/2 z-[16] pointer-events-none opacity-90 bg-amber-500 text-white rounded-xl px-3 py-1.5 text-sm font-bold shadow-lg text-center max-w-[86%] leading-snug">
           {'📷'} {isHe ? setup.he : setup.en}
-          <div className="text-xs font-medium opacity-90 mt-0.5">{isHe ? 'מתחילים ברגע שאראה אותך נכון' : "We start as soon as I see you right"}</div>
+          <div className="text-[11px] font-medium opacity-90">{isHe ? 'מתחילים ברגע שאראה אותך נכון' : "We start as soon as I see you right"}</div>
         </div>
       )}
       {!setup && !readyFlash && startPrompt && (
-        <div className="absolute top-24 left-1/2 -translate-x-1/2 z-[16] pointer-events-none bg-sky-600 text-white rounded-2xl px-4 py-3 text-base sm:text-lg font-bold shadow-lg text-center max-w-[92%]">
+        <div className="absolute top-11 left-1/2 -translate-x-1/2 z-[16] pointer-events-none opacity-90 bg-sky-600 text-white rounded-xl px-3 py-1.5 text-sm font-bold shadow-lg text-center max-w-[86%] leading-snug">
           {'🏁'} {isHe ? 'קח עמדת פתיחה — בדיוק כמו הצללית' : 'Get into the start position — exactly like the Ghost'}
-          <div className="text-xs font-medium opacity-90 mt-0.5">{isHe ? 'מתחילים ברגע שאתה בעמדה' : "We start the moment you're in position"}</div>
+          <div className="text-[11px] font-medium opacity-90">{isHe ? 'מתחילים ברגע שאתה בעמדה' : "We start the moment you're in position"}</div>
         </div>
       )}
       {!setup && readyFlash && (
-        <div className="absolute top-24 left-1/2 -translate-x-1/2 z-[16] pointer-events-none bg-green-600 text-white rounded-2xl px-4 py-3 text-base sm:text-lg font-bold shadow-lg text-center max-w-[92%]">
+        <div className="absolute top-11 left-1/2 -translate-x-1/2 z-[16] pointer-events-none opacity-90 bg-green-600 text-white rounded-xl px-3 py-1.5 text-sm font-bold shadow-lg text-center max-w-[86%] leading-snug">
           {'✅'} {isHe ? readyFlash.he : readyFlash.en}
         </div>
       )}
 
       {/* Silence when unsure: no corrections — say what would make the measurement reliable */}
       {!setup && !readyFlash && !issue && unsure && (
-        <div className="absolute top-24 left-1/2 -translate-x-1/2 z-[16] pointer-events-none bg-sky-700/90 text-white rounded-2xl px-4 py-2 text-sm font-bold shadow-lg text-center max-w-[90%]">
+        <div className="absolute top-11 left-1/2 -translate-x-1/2 z-[16] pointer-events-none opacity-90 bg-sky-700/90 text-white rounded-xl px-3 py-1.5 text-xs font-bold shadow-lg text-center max-w-[86%] leading-snug">
           {'📐'} {unsure === 'view'
             ? cameraViewHint(profile.cameraView, isHe)
             : (isHe ? 'לא רואה אותך מספיק טוב — התקרב או הוסף אור' : "I can't see you clearly — move closer or add light")}
-          <div className="text-xs font-medium opacity-90">{isHe ? 'ממשיכים ברגע שאראה אותך ברור' : 'We continue as soon as I see you clearly'}</div>
+          <div className="text-[11px] font-medium opacity-90">{isHe ? 'ממשיכים ברגע שאראה אותך ברור' : 'We continue as soon as I see you clearly'}</div>
         </div>
       )}
 
       {!setup && issue && (
-        <div className={`absolute top-24 left-1/2 -translate-x-1/2 z-[16] pointer-events-none text-white rounded-2xl px-4 py-2 text-sm sm:text-base font-bold shadow-lg text-center max-w-[90%] ${
+        <div className={`absolute top-11 left-1/2 -translate-x-1/2 z-[16] pointer-events-none opacity-90 text-white rounded-xl px-3 py-1.5 text-xs sm:text-sm font-bold shadow-lg text-center max-w-[86%] leading-snug ${
           issue.severity === 'danger' ? 'bg-red-600 animate-pulse' : 'bg-amber-500/95'}`}>
           {issue.severity === 'danger' ? '⛔' : '⚠️'} {isHe ? issue.msg.he : issue.msg.en}
           {issue.why && (
-            <div className="text-xs font-medium opacity-90 mt-0.5">{isHe ? issue.why.he : issue.why.en}</div>
+            <div className="text-[11px] font-medium opacity-90">{isHe ? issue.why.he : issue.why.en}</div>
           )}
         </div>
       )}

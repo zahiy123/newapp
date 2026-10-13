@@ -15,6 +15,7 @@ import { bodyAnchor, overlayPlacement, defaultPlacement, bodyBox, frameTransform
 const OVERLAY_ALPHA = 0.9;          // the outline's opacity; the body fill is lighter (a see-through model)
 const FADE_IN_MS = 250;
 const MODE_FADE_MS = 300;          // a soft switch between the mirror and the guide
+const LOST_GRACE_MS = 1100;        // the Ghost stays this long through a detection drop
 const MAX_DPR = 1.5;               // a full-view canvas at 3× density is ~9× the work — 1.5× is sharp enough
 
 const debugOn = () => {
@@ -29,6 +30,9 @@ export default function GhostOverlay({ spec, limbProfile, landmarksRef, videoRef
   const canvasRef = useRef(null);
   const anchorRef = useRef(null);
   const boxRef = useRef(null);              // the trainee's body box in the picture (floor exercises)
+  const scaleRef = useRef(null);            // the guide's smoothed size (px per body unit)
+  const heightKRef = useRef(null);          // the trainee's height vs. the torso estimate (kept between readings)
+  const lastLmRef = useRef(null);           // the last skeleton (bridges a short detection drop)
   const lastAnchorAtRef = useRef(null);
   const shownAtRef = useRef(null);
   const modeRef = useRef({ mode: null, since: 0 });   // mirror / guide / none, and since when (fade on a switch)
@@ -74,7 +78,9 @@ export default function GhostOverlay({ spec, limbProfile, landmarksRef, videoRef
           // ---- MIRROR or GUIDE (owner): before the start position the Ghost mirrors the trainee
           // (drawn from the skeleton itself); in the start position it performs the exercise on them.
           // No skeleton → no Ghost (it never floats in the picture unrelated to the body).
-          const lm = landmarksRef?.current;
+          // a skeleton dropped for a moment (a fast kick): keep the last one ~1 s — no blinking
+          let lm = landmarksRef?.current;
+          if (lm) { lastLmRef.current = { lm, at: now }; } else if (lastLmRef.current && now - lastLmRef.current.at < LOST_GRACE_MS) lm = lastLmRef.current.lm;
           const box = boxRef.current;
           const floorSpec = !!spec?.profile && spec.profile.posture !== 'standing' && spec.profile.posture !== 'seated';
           const lyingNow = !!box && (box.x1 - box.x0) > (box.y1 - box.y0) * 1.1;
@@ -87,6 +93,24 @@ export default function GhostOverlay({ spec, limbProfile, landmarksRef, videoRef
           if (clk.last !== null) clk.ms += (now - clk.last) * (spec?.direction === 'backward' ? -1 : 1);
           clk.last = now;
           if (mode === 'guide') {
+            // the whole trainee: when the head and the feet are both in the picture, the Ghost's height
+            // follows the body's real height there (a drifting torso estimate never shrinks it to the legs)
+            const nose = lm?.[0], la = lm?.[27], ra = lm?.[28];
+            const vis = (p) => p && (p.visibility ?? 1) >= 0.5 && p.y >= 0 && p.y <= 1;
+            // (continuous and smoothed: a threshold switch made the size jump)
+            // the measured height ratio is KEPT while the nose / an ankle flickers (no switch between estimates)
+            if (!floorSpec && vis(nose) && (vis(la) || vis(ra)) && place.feetY != null) {
+              const footN = Math.max(vis(la) ? la.y : 0, vis(ra) ? ra.y : 0);
+              const bodyPx = (footN - nose.y) * map.scaleY;                    // nose → ankle in the picture
+              if (bodyPx > 0) {
+                const k = Math.min(1.6, Math.max(0.6, bodyPx / 3.46 / place.scale));
+                heightKRef.current = heightKRef.current == null ? k : heightKRef.current + 0.08 * (k - heightKRef.current);
+              }
+            }
+            const target = place.scale * (heightKRef.current ?? 1);
+            const sm = scaleRef.current;
+            scaleRef.current = sm == null || dt == null ? target : sm + (1 - Math.exp(-Math.min(dt, 100) / 400)) * (target - sm);
+            place.scale = scaleRef.current;
             drawGhostOverlay(ctx, spec, limbProfile, clk.ms, place.origin, place.scale, OVERLAY_ALPHA * fade, place.feetY, place.body);
           } else if (mode === 'mirror') {
             drawGhostMirror(ctx, lm, map, limbProfile, OVERLAY_ALPHA * fade);

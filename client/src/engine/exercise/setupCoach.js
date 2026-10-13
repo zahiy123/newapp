@@ -42,8 +42,8 @@ export const SETUP = Object.freeze({
 });
 
 export const READY = Object.freeze({
-  first: { he: 'מעולה, עכשיו אני רואה אותך — אפשר להתחיל!', en: "Great, now I can see you — let's start!" },
-  again: { he: 'מצוין, אני רואה אותך — ממשיכים', en: 'Perfect, I can see you — carry on' },
+  first: { he: 'עכשיו אני רואה אותך — אפשר להתחיל!', en: "Now I can see you — let's start!" },
+  again: { he: 'אני רואה אותך — ממשיכים', en: 'I can see you — carry on' },
 });
 
 const ok = (p, v = VIS) => p && (p.visibility ?? 1) >= v;

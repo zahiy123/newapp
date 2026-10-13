@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { ballCycle, ballOnScreen, kickingSide, BALL_TIMING } from '../incomingBall.js';
+import { ballCycle, ballOnScreen, kickingSide, BALL_TIMING, footStrikeSpeed, HIT_SPEED } from '../incomingBall.js';
 import { bodyAnchor } from '../ghostOverlay.js';
 import { fitPoseToBody, seatPose, ghostPose } from '../warmupGhost.js';
 import { profileGhostPose } from '../exercise/profileGhost.js';
@@ -20,23 +20,46 @@ const ang = (a, b, c) => {
   return Math.acos(d / (Math.hypot(...v1) * Math.hypot(...v2))) * 180 / Math.PI;
 };
 
-describe('The incoming ball gives the strike timing', () => {
-  it('approaches, arrives on the beat (the cue), then the next ball comes', () => {
-    const T = BALL_TIMING.kick;
+describe('The incoming ball: flows to the foot, kicked in real time', () => {
+  const foot = { x: 200, y: 600 }, start = { x: 300, y: 690 };
+  const T = BALL_TIMING.kick;
+
+  it('the timing: an approach, a strike window around the arrival, then the next ball', () => {
     expect(ballCycle(0, 'kick').phase).toBe('approach');
-    expect(ballCycle(T.approachMs + 10, 'kick').phase).toBe('strike');
-    expect(ballCycle(T.approachMs + T.strikeMs + 50, 'kick').phase).toBe('gone');
+    expect(ballCycle(T.approachMs - 100, 'kick').inWindow).toBe(true);     // the window opens before the arrival
+    expect(ballCycle(T.approachMs + 100, 'kick')).toMatchObject({ phase: 'after', inWindow: true });
+    expect(ballCycle(T.approachMs + T.windowAfterMs + 50, 'kick').inWindow).toBe(false);
     expect(ballCycle(T.cycleMs + 10, 'kick')).toMatchObject({ phase: 'approach', n: 1 });
   });
 
-  it('is passed from the front: big near the camera, smaller as it reaches the foot, ending at the foot', () => {
-    const foot = { x: 200, y: 600 }, start = { x: 300, y: 690 };
+  it('is passed from the front: big near the camera, smaller at the foot, and it reaches the foot', () => {
     const a = ballOnScreen(ballCycle(100, 'kick'), foot, start, 500);
-    const b = ballOnScreen(ballCycle(1900, 'kick'), foot, start, 500);
+    const b = ballOnScreen(ballCycle(T.approachMs - 20, 'kick'), foot, start, 500);
     expect(a.r).toBeGreaterThan(b.r);
-    expect(Math.abs(b.x - foot.x)).toBeLessThan(Math.abs(a.x - foot.x));
-    const hit = ballOnScreen(ballCycle(BALL_TIMING.kick.approachMs + 50, 'kick'), foot, start, 500);
-    expect(hit.x).toBe(foot.x);
+    expect(Math.abs(b.x - foot.x)).toBeLessThan(3);
+  });
+
+  it('never parks: without a kick it keeps rolling past the foot and fades (a miss)', () => {
+    const p1 = ballOnScreen(ballCycle(T.approachMs + 100, 'kick'), foot, start, 500, null);
+    const p2 = ballOnScreen(ballCycle(T.approachMs + 400, 'kick'), foot, start, 500, null);
+    expect(p2.x).not.toBeCloseTo(p1.x, 3);                                   // still moving
+    expect(Math.sign(p2.x - foot.x)).toBe(Math.sign(foot.x - start.x));     // past the foot, away from the camera
+    const late = ballOnScreen(ballCycle(T.approachMs + T.windowAfterMs + 400, 'kick'), foot, start, 500, 'miss');
+    expect(late.alpha).toBeLessThan(0.6);
+  });
+
+  it('a hit: the ball flies away from the foot toward the camera, a kick lifts it', () => {
+    const at = 50;
+    const h = ballOnScreen(ballCycle(T.approachMs + at + 250, 'kick'), foot, start, 500, 'hit', 'kick', at);
+    expect(h.y).toBeLessThan(foot.y - 50);                                  // lifted
+    expect(Math.sign(h.x - foot.x)).toBe(Math.sign(start.x - foot.x));      // back toward the camera
+  });
+
+  it('a hit is a FAST move of the kicking foot (a still / slow foot is not)', () => {
+    const fast = [{ t: 0, x: 0.5, y: 0.9 }, { t: 150, x: 0.5, y: 0.7 }];
+    const slow = [{ t: 0, x: 0.5, y: 0.9 }, { t: 150, x: 0.5, y: 0.88 }];
+    expect(footStrikeSpeed(fast, 0.6)).toBeGreaterThanOrEqual(HIT_SPEED);
+    expect(footStrikeSpeed(slow, 0.6)).toBeLessThan(HIT_SPEED);
   });
 
   it('comes to the kicking leg: the leg of this set, or the working leg (never the prosthesis)', () => {
@@ -182,5 +205,20 @@ describe('MIRROR mode: the big Ghost drawn from the trainee\'s own skeleton', ()
     expect(mirrorPoseFromSkeleton(lm([[23, 0.5, 0.5], [24, 0.4, 0.5]]), map, lpOk)).toBeNull();
     expect(mirrorPoseFromSkeleton(null, map, lpOk)).toBeNull();
     expect(drawGhostMirror({}, null, map, lpOk)).toBe(false);
+  });
+});
+
+describe('The guide faces the way the trainee faces', () => {
+  it('a trainee facing the camera gets a FRONTAL kick Ghost (no sideways 3/4 turn); a turned trainee a turned one', async () => {
+    const { drawGhostOverlay } = await import('../warmupGhost.js');
+    const spread = (facing) => {
+      const xs = [];
+      const ctx = new Proxy({}, { get: (t, k) => (k === 'moveTo' || k === 'lineTo' ? (x) => xs.push(x) : k === 'createLinearGradient' || k === 'createRadialGradient' ? () => ({ addColorStop() {} }) : () => {}), set: () => true });
+      // the follow-through: the kicking leg far forward (toward the camera)
+      drawGhostOverlay(ctx, { profile: EXPERT_PROFILES.footballKick }, lpOk, 0.64 * 2000, { x: 300, y: 300 }, 60, 0.9, 500, { facing });
+      return Math.max(...xs) - Math.min(...xs);
+    };
+    // frontal: the forward swing goes INTO the screen (no sideways spread); turned: it shows sideways
+    expect(spread(1)).toBeLessThan(spread(0.3) * 0.8);
   });
 });

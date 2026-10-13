@@ -578,8 +578,8 @@ export function useSpeech(lang = 'he-IL', age) {
   const speakMidSetQuit = useCallback((playerName, repsRemaining) => {
     const name = playerName || (isHe ? 'אלוף' : 'champ');
     const text = isHe
-      ? `${name}, אתה עושה מעולה! רק עוד ${repsRemaining} חזרות, אתה יכול!`
-      : `${name}, you're doing great! Just ${repsRemaining} more reps, you've got this!`;
+      ? `${name}, עוד ${repsRemaining} חזרות — ממשיכים!`
+      : `${name}, ${repsRemaining} more reps — keep going!`;
     speakPriority(text, { rate: 1.2, pitch: 1.0 });
   }, [lang, speakPriority, isHe]);
 
@@ -795,16 +795,16 @@ export function useSpeech(lang = 'he-IL', age) {
   const speakWarmUpComplete = useCallback((playerName) => {
     const name = playerName || (isHe ? 'אלוף' : 'champ');
     const text = isHe
-      ? `מעולה ${name}, אתה חם ומוכן! עכשיו נתחיל את האימון הראשי.`
-      : `Great ${name}, you're warmed up and ready! Now let's start the main workout.`;
+      ? `${name}, החימום הסתיים — עכשיו האימון הראשי.`
+      : `${name}, the warm-up is done — now the main workout.`;
     speakPriority(text, { rate: 1.1 });
   }, [isHe, speakPriority]);
 
   // Equipment found announcement
   const speakEquipmentFound = useCallback((objectName) => {
     const text = isHe
-      ? `מעולה! אני רואה ${objectName}! הציוד מוכן.`
-      : `Great! I can see a ${objectName}! Equipment is ready.`;
+      ? `אני רואה ${objectName} — הציוד מוכן.`
+      : `I can see a ${objectName} — equipment is ready.`;
     speakPriority(text, { rate: 1.1 });
   }, [isHe, speakPriority]);
 
@@ -1053,8 +1053,8 @@ export function useSpeech(lang = 'he-IL', age) {
   // Calibration done — quick confirmation
   const speakCalibrationDone = useCallback((playerName) => {
     const msg = isHe
-      ? `מעולה, תפסתי את הטווח שלך. יאללה נתחיל!`
-      : `Great ${playerName}, I've got your range. Let's go!`;
+      ? `תפסתי את הטווח שלך — מתחילים.`
+      : `${playerName}, I've got your range — let's start.`;
     speakPriority(msg);
   }, [isHe, speakPriority]);
 

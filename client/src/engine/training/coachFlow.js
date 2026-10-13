@@ -102,10 +102,12 @@ const START_POSITION = {
   he: 'קח עמדת פתיחה — בדיוק כמו הצללית.',
   en: 'Get into the start position — exactly like the Ghost.',
 };
+// Positioning acknowledgements are FACTUAL, never praise (owner: praise only for a verified correct
+// execution) — "I can see you", not "great"
 export const READY_DRIVE = {
-  first: { he: 'מעולה! עכשיו אני רואה אותך — יאללה, תן בראש!', en: "Great! Now I can see you — let's go all out!" },
-  again: { he: 'מצוין, ממשיכים בכל הכוח!', en: 'Perfect, back at it — full power!' },
-  start: { he: 'זהו, אתה בעמדה — מתחילים!', en: "That's it, you're in position — let's start!" },
+  first: { he: 'עכשיו אני רואה אותך — יאללה, מתחילים!', en: "Now I can see you — let's start!" },
+  again: { he: 'רואה אותך שוב — ממשיכים.', en: 'I can see you again — back at it.' },
+  start: { he: 'אתה בעמדה — מתחילים!', en: "You're in position — let's start!" },
 };
 
 /** The k-th drive line (rotates; never the same twice in a row). */

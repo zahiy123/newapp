@@ -90,3 +90,26 @@ describe('Floor exercises: the big Ghost lies on the trainee (no standing rules)
     expect(a.lying).toBe(false);
   });
 });
+
+describe('Kick / pass: a steady Ghost on the whole body', () => {
+  const stand = (shY, footY = 0.9) => lm([[0, 0.5, shY - 0.1], [11, 0.56, shY], [12, 0.44, shY], [23, 0.54, shY + 0.28], [24, 0.46, shY + 0.28], [27, 0.54, footY], [28, 0.46, footY]]);
+
+  it('with the feet in the picture, leaning into the pass never re-anchors the Ghost (no jump)', () => {
+    let a = null;
+    for (let i = 0; i < 20; i++) a = bodyAnchor(stand(0.22), a, 0.25, 3 / 4, 16);
+    const before = a.footY;
+    // a deep lean: the shoulders drop by more than half a torso — the feet stay where they are
+    for (let i = 0; i < 20; i++) a = bodyAnchor(stand(0.38), a, 0.25, 3 / 4, 16);
+    expect(a.shoulderLocked).toBe(false);
+    expect(Math.abs(a.footY - before)).toBeLessThan(0.01);
+  });
+
+  it('knows how the trainee faces: straight at the camera vs. side-on', () => {
+    let front = null, side = null;
+    const sideOn = lm([[11, 0.505, 0.22], [12, 0.495, 0.22], [23, 0.505, 0.5], [24, 0.495, 0.5], [27, 0.5, 0.9], [28, 0.5, 0.9]]);
+    const frontal = lm([[11, 0.6, 0.22], [12, 0.4, 0.22], [23, 0.55, 0.5], [24, 0.45, 0.5], [27, 0.55, 0.9], [28, 0.45, 0.9]]);
+    for (let i = 0; i < 40; i++) { front = bodyAnchor(frontal, front, 0.25, 3 / 4); side = bodyAnchor(sideOn, side, 0.25, 3 / 4); }
+    expect(front.facing).toBeGreaterThan(0.6);
+    expect(side.facing).toBeLessThan(0.25);
+  });
+});

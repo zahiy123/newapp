@@ -130,7 +130,9 @@ export function useExpertExecution({
     let wasCounting = countingRef.current;
     let notStartSince = null; let startSpokenAt = 0; let lastStartPrompt = false;
     let driveK = Math.floor(Math.random() * 6);
-    const countsReps = profile.precision === 'expert' && profile.kind === 'reps';
+    // reps: a full rest → peak → rest cycle; kicks / passes: a real strike (hip → knee chain) — both only
+    // in view and measured reliably (honest counting: no strike, no count)
+    const countsReps = profile.precision === 'expert' && (profile.kind === 'reps' || profile.kind === 'strike');
     statsRef.current = { dangers: 0, errors: {}, coached: [] };
     let lastMissing; let lastIssueId; let lastDanger = 0; let lastAccuracyAt = 0; let lastVoice = 0;
     let lastCadence = null;
@@ -159,8 +161,10 @@ export function useExpertExecution({
         wasCounting = countingRef.current;
         if (countingRef.current && r.inView) {
           for (const ev of r.events) {
-            if (countsReps && isValidRep(ev)) { repCountRef.current += 1; earlyRef.current = true; }
-            if (ev.type === 'strike' && profile.kind === 'strike') { strikeCountRef.current += 1; earlyRef.current = true; }
+            if (countsReps && profile.kind === 'reps' && isValidRep(ev)) { repCountRef.current += 1; earlyRef.current = true; }
+            if (countsReps && profile.kind === 'strike' && ev.type === 'strike' && r.quality?.confident !== false) {
+              repCountRef.current += 1; strikeCountRef.current += 1; earlyRef.current = true;
+            }
           }
           if (profile.kind === 'cyclic' && workingRef.current) earlyRef.current = true;
         }
