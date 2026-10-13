@@ -122,7 +122,7 @@ Readiness Rating (1-5 emoji, 3 seconds)
 | 24 | `checkpoint-2026-10-13-honest-ball` | `5b6a9b8` | **yes — the current production (2026-10-13)** | + kick/pass stability, a frontal guide, the ball kicked in real time (hit / miss + score), no blink, honest feedback (praise only when verified) — **awaiting the owner's check (NOT complete)** |
 
 **How to return to a checkpoint:**
-- **To a deployed point (#1, #2, #3, #5, #8, #9, #10, #11, #12, #13, #14, #15, #16, #17, #18, #19, #20, #21, #22, #23): instant rollback with no code change** — Vercel → Deployments → the deployment of that commit → "Promote to Production".
+- **To a deployed point (#1, #2, #3, #5, #8, #9, #10, #11, #12, #13, #14, #15, #16, #17, #18, #19, #20, #21, #22, #23, #24): instant rollback with no code change** — Vercel → Deployments → the deployment of that commit → "Promote to Production".
 - **To any point in the code:** `git checkout <tag>` to look at it, or create a branch from it (`git checkout -b restore-<n> <tag>`) and deploy that branch / merge it into `main` after approval.
 - Look at it without changing anything: `git checkout checkpoint-stage2-stable` (then `git checkout main` to come back).
 - Undo later work on `main` safely (keeps history): `git revert <commits after the checkpoint>`, then push → Vercel redeploys.
