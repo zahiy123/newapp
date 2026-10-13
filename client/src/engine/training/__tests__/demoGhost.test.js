@@ -20,7 +20,7 @@ describe('Demo Ghost for an exercise', () => {
     expect(ghostPose({ move: 'side_steps' }, 0.3, {}).segments.length).toBeGreaterThan(5);
   });
 
-  it('a ball drill without a ball becomes a shadow drill WITH a demo', () => {
+  it('a ball drill without a ball (kept, with the virtual ball) still has its demo', () => {
     for (const name of ['בעיטה לקיר', 'עצירת כדור עם קיר', 'מסירת חזה', 'פורהנד לקיר', 'דריבל']) {
       const { exercise } = fitExercise({ name, sets: 3 }, { ball: false, dumbbells: false, bands: false });
       const cue = getAnalyzer(exercise.name).cueKey;

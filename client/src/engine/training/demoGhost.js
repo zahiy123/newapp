@@ -11,6 +11,10 @@ const FAMILY_MOVES = {
   splitStep: 'side_steps', crutchAgility: 'side_steps',
   chestPass: 'chest_pass', bouncePass: 'chest_pass', overheadPass: 'chest_pass', wheelchairPass: 'chest_pass', wcBouncePass: 'chest_pass',
   stroke: 'twist', volley: 'twist', wheelchairStroke: 'twist',
+  // ball drills kept with the VIRTUAL ball (2026-10-13): the same movement, the ball reacts to it —
+  // dribbling = quick side steps with the ball at the feet; a pass / first touch = the kick swing
+  dribbling: 'side_steps', crutchDribble: 'side_steps', shieldBall: 'side_steps', crutchShield: 'side_steps',
+  pass: 'kick', firstTouch: 'kick', amputeeKick: 'kick', crutchPass: 'kick',
 };
 
 /**

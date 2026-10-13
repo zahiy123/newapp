@@ -1,5 +1,6 @@
 // Server-side equipment guard for generated plans (mirror of client/src/engine/exercise/equipmentFit.js).
-// The owner's rule: never offer an exercise that needs equipment the trainee does not have.
+// The owner's rule: never offer an exercise that needs equipment the trainee does not have — except a
+// ball: without one, ball drills are kept and done with the app's virtual ball.
 // The prompt states the constraint; this post-filter enforces it on every generated week. The
 // client re-fits again at display / training time (the authoritative last line of defence).
 
@@ -22,28 +23,17 @@ export function needsBall(ex) {
   return BALL_WORDS.some(w => name.includes(w)) || KICK_WORDS.some(w => name.includes(w));
 }
 
-const SUBS = [
-  { test: /בעיט|kick|shot|מסיר|pass|שליטה|first touch/, name: 'בעיטה בצל — תנועת בעיטה באוויר', description: 'תנועת בעיטה מלאה באוויר: רגל תמיכה יציבה, תנופה מהירך, מעקב רגל. בלי כדור.' },
-  { test: /זריק|קליע|shoot|layup|לייאפ|עליה לסל/, name: 'תנועת זריקה בצל', description: 'תנועת זריקה מלאה: מרפק מתחת לכף היד, הארכה ומעקב — בלי כדור.' },
-  { test: /פורהנד|בקהנד|forehand|backhand|ווליי|volley|סמאש|smash/, name: 'פורהנד בצל — תנועת מכה באוויר', description: 'סיבוב גו, תנופה ומעקב מלא — בלי כדור.' },
-  { test: /הגשה|serve/, name: 'הגשה בצל — תנועת הגשה באוויר', description: 'תנוחת גביע, הארכה מלאה למעלה ומעקב — בלי כדור.' },
-  { test: /נגיח|header/, name: 'קפיצות טאק — תזמון נגיחה', description: 'קפיצה אנכית עם הרמת ברכיים ונחיתה רכה, כמו עלייה לנגיחה.' },
-];
-const DEFAULT_SUB = { name: 'עבודת רגליים במקום', description: 'צעדים קצרים ומהירים במקום ולצדדים, מבט קדימה — בלי כדור.' };
 
-/** Replace every ball drill of a generated week when the trainee has NO ball (hasBall === false). */
+/**
+ * NO REAL BALL (hasBall === false): every ball drill of a generated week is KEPT and marked
+ * `virtualBall: true` — the app shows a virtual ball at the trainee's body and the drill is trained
+ * fully at home (owner, 2026-10-13; this replaced the old rule that swapped them for shadow drills).
+ */
 export function fitWeekToEquipment(week, { hasBall } = {}) {
   if (hasBall !== false || !week?.days) return week;
   for (const day of week.days) {
     if (!Array.isArray(day?.exercises)) continue;
-    day.exercises = day.exercises.map((ex) => {
-      if (!needsBall(ex)) return ex;
-      const n = lower(ex.name);
-      const s = SUBS.find(x => x.test.test(n)) || DEFAULT_SUB;
-      console.warn(`[Equipment Filter] no ball → "${ex.name}" replaced by "${s.name}"`);
-      const { instructions, ...rest } = ex;
-      return { ...rest, name: s.name, description: s.description, substitutedFor: ex.name, substitutionReason: ['ball'] };
-    });
+    day.exercises = day.exercises.map(ex => (needsBall(ex) ? { ...ex, virtualBall: true } : ex));
   }
   return week;
 }

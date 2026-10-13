@@ -11,12 +11,11 @@ test('ball drills are detected; look-alikes are not', () => {
   }
 });
 
-test('no ball → no ball drill survives; unknown / has ball → unchanged', () => {
+test('no ball → every ball drill is KEPT with the virtual ball; unknown / has ball → unchanged', () => {
   const week = () => ({ days: [{ exercises: [{ name: 'עצירת כדור עם קיר', sets: 3 }, { name: 'סקוואט', sets: 3 }, { name: 'בעיטה לקיר', sets: 4 }] }] });
   const fitted = fitWeekToEquipment(week(), { hasBall: false });
-  assert.equal(fitted.days[0].exercises.some(needsBall), false);
-  assert.equal(fitted.days[0].exercises[1].name, 'סקוואט');
-  assert.equal(fitted.days[0].exercises[2].name, 'בעיטה בצל — תנועת בעיטה באוויר');
+  assert.deepEqual(fitted.days[0].exercises.map(e => e.name), ['עצירת כדור עם קיר', 'סקוואט', 'בעיטה לקיר']);
+  assert.deepEqual(fitted.days[0].exercises.map(e => !!e.virtualBall), [true, false, true]);
   assert.equal(fitted.days[0].exercises[2].sets, 4);
   assert.deepEqual(fitWeekToEquipment(week(), { hasBall: true }), week());
   assert.deepEqual(fitWeekToEquipment(week(), {}), week());

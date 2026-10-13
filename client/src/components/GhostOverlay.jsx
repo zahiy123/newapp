@@ -33,6 +33,7 @@ export default function GhostOverlay({ spec, limbProfile, landmarksRef, videoRef
   const scaleRef = useRef(null);            // the guide's smoothed size (px per body unit)
   const heightKRef = useRef(null);          // the trainee's height vs. the torso estimate (kept between readings)
   const lastLmRef = useRef(null);           // the last skeleton (bridges a short detection drop)
+  const pinRef = useRef(null);              // the trainee's pelvis x on the screen (the guide is pinned to it)
   const lastAnchorAtRef = useRef(null);
   const shownAtRef = useRef(null);
   const modeRef = useRef({ mode: null, since: 0 });   // mirror / guide / none, and since when (fade on a switch)
@@ -111,6 +112,15 @@ export default function GhostOverlay({ spec, limbProfile, landmarksRef, videoRef
             const sm = scaleRef.current;
             scaleRef.current = sm == null || dt == null ? target : sm + (1 - Math.exp(-Math.min(dt, 100) / 400)) * (target - sm);
             place.scale = scaleRef.current;
+            // the pelvis pin: the trainee's hip center NOW (the landmarks are already One-Euro filtered;
+            // a 60 ms touch only removes the last pixel jitter) — no lag, no sideways drift
+            const lh = lm?.[23], rh = lm?.[24], ls = lm?.[11], rs = lm?.[12];
+            const pinN = vis(lh) && vis(rh) ? (lh.x + rh.x) / 2 : vis(ls) && vis(rs) ? (ls.x + rs.x) / 2 : null;
+            if (pinN != null) {
+              const px = map(pinN, 0.5).x;
+              pinRef.current = pinRef.current == null || dt == null ? px : pinRef.current + (1 - Math.exp(-Math.min(dt, 100) / 60)) * (px - pinRef.current);
+            }
+            if (pinRef.current != null) place.body = { ...place.body, pinX: pinRef.current };
             drawGhostOverlay(ctx, spec, limbProfile, clk.ms, place.origin, place.scale, OVERLAY_ALPHA * fade, place.feetY, place.body);
           } else if (mode === 'mirror') {
             drawGhostMirror(ctx, lm, map, limbProfile, OVERLAY_ALPHA * fade);

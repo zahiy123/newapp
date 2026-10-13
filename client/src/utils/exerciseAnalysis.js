@@ -4222,9 +4222,10 @@ const ANALYZER_MAP = [
   { keywords: ['פלאנק עם נגיעת כתף', 'plank shoulder tap', 'נגיעת כתף'], analyze: analyzePlankShoulderTap, type: 'reps', cueKey: 'plankTap', orientation: O.LYING },
   { keywords: ['סופרמן-בננה', 'superman banana', 'בננה'], analyze: analyzeSuperman, type: 'hold', cueKey: 'superman', orientation: O.LYING },
   // === STANDING sport drills ===
+  // the hand dribble BEFORE the generic football dribble ('כדורסל' contains 'כדור', 'hand dribbl' contains 'dribbl')
+  { keywords: ['כדרור ביד', 'hand dribbl', 'כדרור כדורסל'], analyze: analyzeHandDribbling, type: 'form', cueKey: 'handDribble', orientation: O.STANDING },
   { keywords: ['דריבל', 'dribbl', 'שליטה', 'כדור'], analyze: analyzeDribbling, type: 'form', cueKey: 'dribbling', orientation: O.STANDING },
   { keywords: ['זריקה', 'קליעה', 'shooting', 'free throw', 'זריקות חופשיות'], analyze: analyzeShootingForm, type: 'form', cueKey: 'shooting', orientation: O.STANDING },
-  { keywords: ['כדרור ביד', 'hand dribbl', 'כדרור כדורסל'], analyze: analyzeHandDribbling, type: 'form', cueKey: 'handDribble', orientation: O.STANDING },
   { keywords: ['עליה לסל', 'עלייה לסל', 'layup', 'ליי אפ'], analyze: analyzeLayup, type: 'form', cueKey: 'layup', orientation: O.STANDING },
   { keywords: ['קרוסאובר', 'crossover', 'העברה'], analyze: analyzeCrossover, type: 'form', cueKey: 'crossover', orientation: O.STANDING },
   { keywords: ['החלקת הגנה', 'defensive slide', 'הגנה', 'סלייד'], analyze: analyzeDefensiveSlide, type: 'form', cueKey: 'defensiveSlide', orientation: O.STANDING },

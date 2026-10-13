@@ -29,12 +29,14 @@ import { coachMode, COACH_IDS } from '../engine/coachAvatar';
 import { setCoachVoice, setSpeechOpen, holdSpeech } from '../hooks/useSpeech';
 import { useVoiceCommand } from '../hooks/useVoiceCommand';
 import { READY_DRIVE, withDrive, splitLegOrder, legLabel, splitStartText, splitSwitchText, splitWorkingSide, setLegHalf, legSetStartText, legSetNextText, isStrikeMode } from '../engine/training/coachFlow';
+import { needsEquipmentCheck } from '../engine/training/equipmentNeed';
 import { exerciseNeedsSetup } from '../engine/training/exerciseSetup';
 import DailyCheckIn from '../components/DailyCheckIn';
 import { applyCheckIn } from '../engine/training/dailyCheckIn';
 import { catalogGhostSpec, parseCatalogId } from '../engine/catalog/catalog';
-import IncomingBall from '../components/IncomingBall';
+import VirtualBall from '../components/VirtualBall';
 import { kickingSide } from '../engine/incomingBall';
+import { ballModeFor, virtualBallWanted, handSide, ballLook, realBallInPlay } from '../engine/virtualBall';
 import { rebuildPlanFromCatalog, planContext } from '../engine/catalog/planBuilder';
 import { availableEquipment, fitExercises, needsBall } from '../engine/exercise/equipmentFit';
 import { sportContextsFor } from '../engine/sports/sportLibrary';
@@ -158,10 +160,21 @@ export default function Training() {
   const { ready: ballReady, getBallData, startLoop: startBallLoop, stopLoop: stopBallLoop } = useBallDetection(userProfile?.sport);
   const { ready: equipReady, getEquipmentData, getBallData: getEquipBallData, startLoop: startEquipLoop, stopLoop: stopEquipLoop } = useEquipmentDetection(userProfile?.sport);
 
-  // Unified ball data: prefer equipment model (16-class), fall back to dedicated ball model
+  // Unified ball data: prefer equipment model (16-class), fall back to dedicated ball model; no real
+  // ball seen → the VIRTUAL ball (it is the trainee's ball — the analysis engine follows it the same way)
+  const virtualBallOutRef = useRef({ detected: false });
+  const realBallHitsRef = useRef([]);
+  const realBallLastRef = useRef(null);
   const getBallDataUnified = useCallback(() => {
-    if (equipReady) return getEquipBallData();
-    return getBallData();
+    const real = equipReady ? getEquipBallData() : getBallData();
+    if (real?.detected) {
+      const hits = realBallHitsRef.current;
+      // one detection is read by many analysis frames — count each detection once
+      if (realBallLastRef.current !== real) { realBallLastRef.current = real; hits.push(performance.now()); }
+      if (hits.length > 30) hits.splice(0, hits.length - 30);
+      return real;
+    }
+    return virtualBallOutRef.current?.detected ? virtualBallOutRef.current : real;
   }, [equipReady, getEquipBallData, getBallData]);
 
   // Equipment check state
@@ -828,19 +841,30 @@ export default function Training() {
     return false;                      // the opening screen / the rest: a mirror of the trainee
   }, []);
 
-  // Kick / pass drills: a ball comes to the kicking foot on the beat (the strike timing)
-  const incomingKind = useMemo(() => {
+  // EVERY ball drill, in every sport: a trainee without a real ball gets the smart VIRTUAL ball at
+  // their body (engine/virtualBall.js) — kick / pass / header / catch (it comes to the body point on
+  // the beat), dribble (rolls with the feet), juggling, a basketball dribble, throws. There from the
+  // briefing / start position; counting in the exercise. A real ball seen in play hides it.
+  const ballDrill = useMemo(() => {
     const pid = currentExercise?.catalogId ? parseCatalogId(currentExercise.catalogId)?.pattern : null;
-    if (pid === 'shadowKick') return 'kick';
-    if (pid === 'shadowPass') return 'pass';
-    const ck = exerciseCueKey;
-    return ck === 'kick' || ck === 'pass' ? ck : null;
-  }, [currentExercise?.catalogId, exerciseCueKey]);
-  const incomingActive = !!incomingKind && phase === PHASE.EXERCISING;
-  // while the ball comes to the trainee, the Ghost does not kick its own ball (one ball on screen)
+    const m = ballModeFor({ cueKey: exerciseCueKey, pattern: pid, name: currentExercise?.name, nameEn: currentExercise?.nameEn });
+    return m ? { ...m, pattern: pid } : null;
+  }, [currentExercise, exerciseCueKey]);
+  const [realBallSeen, setRealBallSeen] = useState(false);
+  useEffect(() => {
+    if (!ballDrill) { setRealBallSeen(false); return undefined; }
+    const id = setInterval(() => setRealBallSeen(realBallInPlay(realBallHitsRef.current, performance.now())), 500);
+    return () => clearInterval(id);
+  }, [ballDrill]);
+  const hasRealBall = typeof ballAnswer === 'boolean' ? ballAnswer : (typeof userProfile?.hasBall === 'boolean' ? userProfile.hasBall : null);
+  const incomingShown = !!ballDrill && virtualBallWanted({ mode: ballDrill.mode, pattern: ballDrill.pattern, hasBall: hasRealBall, realBallSeen })
+    && (phase === PHASE.EXERCISING || phase === PHASE.BRIEFING || phase === PHASE.CHECKING_EQUIPMENT || phase === PHASE.CALIBRATING);
+  const incomingLive = incomingShown && phase === PHASE.EXERCISING;
+  // the big Ghost on the body does not kick its own ball (ONE ball on the trainee); the small Ghost
+  // panel keeps its ball (it demonstrates the kick on a ball)
   const ghostViewSpec = useMemo(
-    () => (incomingActive && demoSpecShown?.ball ? { ...demoSpecShown, ball: undefined } : demoSpecShown),
-    [incomingActive, demoSpecShown],
+    () => (incomingShown && demoSpecShown?.ball ? { ...demoSpecShown, ball: undefined } : demoSpecShown),
+    [incomingShown, demoSpecShown],
   );
   const showDemoGhost = exerciseGhostOn && !!demoSpecShown;
   // ROM gauge only for dynamic range-of-motion exercises (never static holds / ball drills / kicks / running)
@@ -2485,30 +2509,6 @@ export default function Training() {
     }
   }
 
-  // Determine if exercise needs equipment detection (skip for bodyweight/fitness exercises)
-  function needsEquipmentCheck(exercise) {
-    if (!exercise) return false;
-    const sport = userProfile?.sport;
-    // Fitness exercises never need equipment check
-    if (sport === 'fitness') return false;
-    // Known bodyweight exercise names (Hebrew) — no equipment needed
-    const bodyweightNames = [
-      'שכיבות סמיכה', 'סקוואט', 'פלאנק', 'לאנג\'ים', 'דיפס',
-      'כפיפות מרפק', 'גשר ישבן', 'כפיפות בטן', 'מטפס הרים',
-      'ישיבה על הקיר', 'פלאנק צידי', 'בורפיז',
-      'כתפיים עם משקולות', 'גובלט סקוואט', 'הרמה צידית',
-      'משיכת משקולת', 'הרחבת מרפק',
-      'לחיצת כתפיים עם גומייה', 'סקוואט עם גומייה',
-      'כפיפות מרפק עם גומייה', 'משיכת גומייה', 'מתיחת גומייה',
-      'ריצת אינטרוולים', 'ספרינטים', 'אירובי ישיבה',
-      'אגרוף ישיבה', 'סיבובי ידיים מהירים', 'סיבובי גוף עליון מהירים',
-    ];
-    const name = exercise.name || '';
-    if (bodyweightNames.some(bw => name.includes(bw))) return false;
-    // Ball/sport drills likely need equipment
-    return true;
-  }
-
   // Complete warmup and auto-transition to first exercise briefing
   function finishWarmUp() {
     console.log('[finishWarmUp] Completing warmup. currentIdx:', currentIdx, 'exercises.length:', exercises.length);
@@ -2979,7 +2979,7 @@ export default function Training() {
             the panel, or the full overlay on the body for standing exercises */}
         {demoGhostPhase && showDemoGhost && !demoOnBody && (
           <WarmupGhostPanel
-            spec={ghostViewSpec} limbProfile={limbProfile} isHe={isHe}
+            spec={demoSpecShown} limbProfile={limbProfile} isHe={isHe}
             placement={phase === PHASE.BRIEFING || phase === PHASE.CHECKING_EQUIPMENT || phase === PHASE.RESTING ? 'top' : 'middle'}
             size={demoLarge ? 'large' : 'small'}
             label={demoLabel}
@@ -2988,10 +2988,16 @@ export default function Training() {
         {demoGhostPhase && showDemoGhost && demoOnBody && (
           <GhostOverlay spec={ghostViewSpec} limbProfile={limbProfile} landmarksRef={poseLandmarksRef} videoRef={videoRef} onError={handleOverlayError} isGuide={ghostIsGuide} />
         )}
-        {incomingActive && (
-          <IncomingBall
-            kind={incomingKind}
-            side={kickingSide(limbProfile, currentExercise?.sideSwitch && isStrikeMode(currentExercise?.splitMode) ? splitSupport : null)}
+        {incomingShown && (
+          <VirtualBall
+            mode={ballDrill.mode}
+            target={ballDrill.target}
+            kind={ballDrill.kind}
+            look={ballLook(userProfile?.sport)}
+            live={incomingLive}
+            ballOutRef={virtualBallOutRef}
+            side={ballDrill.target === 'hand' || ballDrill.target === 'hands' ? handSide(limbProfile)
+              : kickingSide(limbProfile, currentExercise?.sideSwitch && isStrikeMode(currentExercise?.splitMode) ? splitSupport : null)}
             landmarksRef={poseLandmarksRef}
             videoRef={videoRef}
             isHe={isHe}
@@ -3248,7 +3254,7 @@ export default function Training() {
               <div className="text-5xl">{'\u26BD'}</div>
               <h3 className="text-lg font-bold text-gray-800">{isHe ? 'יש לך כדור זמין עכשיו?' : 'Do you have a ball available?'}</h3>
               <p className="text-sm text-gray-500">
-                {isHe ? 'בלי כדור — נחמם עם תנועות באוויר.' : 'No ball — we will warm up with air movements.'}
+                {isHe ? 'בלי כדור — תקבל כדור וירטואלי על המסך, שמגיב לתנועה שלך.' : 'No ball — you get a virtual ball on the screen that reacts to your moves.'}
               </p>
               <div className="flex gap-2">
                 <button onClick={() => answerBall(true)} className="flex-1 py-2 rounded-lg bg-green-600 text-white font-medium hover:bg-green-700">

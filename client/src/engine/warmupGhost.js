@@ -852,7 +852,16 @@ export function drawGhostOverlay(ctx, spec, lp, nowMs, origin, scale, alpha = 0.
   if (!lying && !seated && typeof feetY === 'number') {
     // Standing: the Ghost STANDS where the trainee stands — its feet on the trainee's feet, so it
     // never bobs up and down with the trainee's hips (steady, like a real demonstrator)
-    P = (p) => ({ x: origin.x + p.x * scale, y: feetY + (p.y - fitted.floorY) * scale });
+    // PINNED to the trainee (owner): the Ghost's pelvis sits on the trainee's pelvis in EVERY frame
+    // (body.pinX, from the live skeleton) — its own demonstration sway never moves it sideways off the body
+    let ox = origin.x;
+    if (typeof body?.pinX === 'number') {
+      const { proj } = figureProjection(pose);
+      const hips = pose.segments.filter(sg => sg.part === 'thigh').map(sg => proj(sg.from).x);
+      const gx = hips.length ? hips.reduce((a, x) => a + x, 0) / hips.length : 0;
+      ox = body.pinX - gx * scale;
+    }
+    P = (p) => ({ x: ox + p.x * scale, y: feetY + (p.y - fitted.floorY) * scale });
   } else {
     if (lying && body?.frame) {
       // FLOOR exercise: fitted to the box of the trainee's body points in the picture and kept
@@ -870,7 +879,8 @@ export function drawGhostOverlay(ctx, spec, lp, nowMs, origin, scale, alpha = 0.
       let hx = 0, hy = 0;
       const lh = raw.landmarks?.[23], rh = raw.landmarks?.[24];
       if (lying && lh?.visibility && rh?.visibility) { hx = (lh.x + rh.x) / 2; hy = (lh.y + rh.y) / 2; }
-      P = (p) => ({ x: origin.x + (p.x - hx) * scale, y: origin.y + (p.y - hy) * scale });
+      const ox = !lying && typeof body?.pinX === 'number' ? body.pinX : origin.x;   // pinned to the pelvis
+      P = (p) => ({ x: ox + (p.x - hx) * scale, y: origin.y + (p.y - hy) * scale });
     }
   }
   ctx.save();

@@ -10,12 +10,14 @@
 //   availableEquipment(profile, session) → { ball: true|false|null, dumbbells, bands }
 //       ball null = not answered yet → the training screen asks before the workout
 //   fitExercises(list, available) → { exercises, substitutions }
+//       NO BALL: a ball drill is KEPT with `virtualBall: true` (the app's virtual ball, 2026-10-13)
 //       a missing item → the movement-pattern substitute WITHOUT that equipment (a shadow
 //       kick instead of a kick, footwork instead of dribbling, a bodyweight squat instead of a
 //       goblet squat…), keeping sets / reps / rest, and recording what was replaced and why.
 // ============================================================
 
 import { getAnalyzer } from '../../utils/exerciseAnalysis.js';
+import { ballModeFor } from '../virtualBall.js';
 
 // Analyzer cueKeys whose drill is done WITH a ball
 const BALL_CUES = new Set([
@@ -147,7 +149,13 @@ function loadSubstitute(cue) {
  */
 export function fitExercise(ex, available) {
   const need = requiredEquipment(ex);
-  const missing = [...need].filter(item => available?.[item] === false || (item !== 'ball' && !available?.[item]));
+  let missing = [...need].filter(item => available?.[item] === false || (item !== 'ball' && !available?.[item]));
+  // NO REAL BALL → the drill stays, done with the app's VIRTUAL ball (owner, 2026-10-13: every ball
+  // drill in every sport trains fully at home) — only a drill the virtual ball cannot model is replaced
+  if (missing.includes('ball') && ballModeFor({ cueKey: getAnalyzer(ex.name || ex.nameEn || '').cueKey, name: ex.name, nameEn: ex.nameEn })) {
+    missing = missing.filter(i => i !== 'ball');
+    ex = { ...ex, virtualBall: true };
+  }
   if (!missing.length) return { exercise: ex, substitution: null };
   const cue = getAnalyzer(ex.name || ex.nameEn || '').cueKey;
   // A ball is replaced by its no-ball pattern; weights / bands by the bodyweight pattern

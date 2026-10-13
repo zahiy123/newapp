@@ -37,28 +37,28 @@ describe('Available equipment', () => {
 });
 
 describe('Hard fit — never offer an exercise the trainee cannot do', () => {
-  it('"no ball" removes every ball drill (owner case: ball stop against the wall)', () => {
+  it('"no ball" KEEPS every ball drill, done with the virtual ball (owner, 2026-10-13 — replaces the old removal rule)', () => {
     const plan = ['עצירת כדור עם קיר', 'סקוואט', 'בעיטה לקיר', 'דריבל', 'נגיחות ראש', 'זריקה לסל', 'פלאנק'].map(n => ex(n));
     const { exercises, substitutions } = fitExercises(plan, noBall);
-    expect(needsBall(exercises)).toBe(false);
-    expect(substitutions.length).toBe(5);
-    expect(exercises.map(e => e.name)).toContain('סקוואט');
-    expect(exercises.map(e => e.name)).toContain('פלאנק');
+    expect(substitutions.length).toBe(0);
+    expect(exercises.map(e => e.name)).toEqual(plan.map(e => e.name));
+    expect(exercises.filter(e => e.virtualBall).map(e => e.name))
+      .toEqual(['עצירת כדור עם קיר', 'בעיטה לקיר', 'דריבל', 'נגיחות ראש', 'זריקה לסל']);
     for (const e of exercises) expect(e.sets).toBe(3);
   });
 
   it('a ball is kept when the trainee has one; unknown ball is not decided here', () => {
     expect(fitExercise(ex('בעיטה לקיר'), { ball: true }).substitution).toBeNull();
     expect(fitExercise(ex('בעיטה לקיר'), { ball: null }).substitution).toBeNull();
+    expect(fitExercise(ex('בעיטה לקיר'), { ball: true }).exercise.virtualBall).toBeUndefined();
   });
 
-  it('every ball / load substitute maps to a real analyzer of the same pattern and needs nothing missing', () => {
-    const expectCue = { 'בעיטה לקיר': 'kick', 'זריקה לסל': 'shooting', 'פורהנד לקיר': 'stroke', 'הגשה': 'serve', 'מסירת חזה': 'chestPass', 'דריבל': 'footwork', 'נגיחות ראש': 'jump', 'עצירת כדור עם קיר': 'footwork', 'בעיטה בקביים': 'kick' };
+  it('every kept ball drill keeps its own analyzer (the same movement, now on the virtual ball)', () => {
+    const expectCue = { 'בעיטה לקיר': 'kick', 'זריקה לסל': 'shooting', 'פורהנד לקיר': 'stroke', 'הגשה': 'serve', 'מסירת חזה': 'chestPass', 'בעיטה בקביים': 'kick' };
     for (const [name, cue] of Object.entries(expectCue)) {
       const r = fitExercise(ex(name), noBall);
-      expect(requiredEquipment(r.exercise).size, name).toBe(0);
-      expect(getAnalyzer(r.exercise.name).cueKey, `${name} → ${r.exercise.name}`).toBe(cue);
-      expect(r.exercise.name.includes('כדור'), r.exercise.name).toBe(false);
+      expect(r.exercise.virtualBall, name).toBe(true);
+      expect(getAnalyzer(r.exercise.name).cueKey, name).toBe(cue);
     }
   });
 
