@@ -26,7 +26,7 @@ import {
   WARM_UP_FORWARD_KICKS,
   WARM_UP_SINGLE_ARM_ROTATION,
 } from '../utils/exerciseAnalysis.js';
-import { getLimbProfile, trainingLimbs } from './limbProfile.js';
+import { getLimbProfile, trainingLimbs, hasResidualKnee } from './limbProfile.js';
 
 const [ARM_CIRCLES, HIGH_KNEES, SIDE_STEPS] = WARM_UP_EXERCISES;
 
@@ -47,9 +47,10 @@ export function sportFamily(sport) {
 }
 
 /** Build a planned exercise from a base definition (keeps its movement analyzer). */
-function make(base, { id, nameHe, nameEn, stepsHe, stepsEn, ghost, suppressCorrections = [], ball = false }) {
+function make(base, { id, nameHe, nameEn, stepsHe, stepsEn, ghost, suppressCorrections = [], ball = false, voiceHe = null, voiceEn = null }) {
   return {
     ...base,
+    ...(voiceHe ? { voicePrompt: { he: voiceHe, en: voiceEn || base.voicePrompt?.en } } : {}),
     id: id || base.id,
     baseId: base.id,
     name: { he: nameHe || base.name.he, en: nameEn || base.name.en },
@@ -145,9 +146,35 @@ function legMobility(lp, rehab) {
         ghost: { move: 'high_knees' },
       });
   }
-  // One leg affected → the intact leg works, the other stays as the stable support
   const affected = lp.affectedLegs[0].startsWith('left') ? 'left' : 'right';
   const intact = affected === 'left' ? 'right' : 'left';
+  // BELOW-KNEE (owner, 2026-10-14): the amputated leg still has its hip, thigh, QUADS and KNEE — they are
+  // warmed exactly like the other leg's
+  if (hasResidualKnee(lp[`${affected}_leg`])) {
+    if (lp.crutches) {
+      // on crutches (no prosthesis): standing on the intact leg + the crutches, the residual leg works
+      return make(WARM_UP_SINGLE_LEG_HIGH_KNEE, {
+        id: 'residual_knee_activation',
+        nameHe: `הפעלת ברך ${SIDE_HE[affected]} — הרגל הקטועה`, nameEn: `${affected === 'left' ? 'Left' : 'Right'} knee activation — the amputated leg`,
+        stepsHe: ['עמוד על הרגל הבריאה, היאחז בקביים', `הרם את ברך רגל ${SIDE_HE[affected]} לכיוון החזה`, 'בלמעלה — יישר את הברך עד הסוף, כופף בחזרה והורד בשליטה'],
+        stepsEn: ['Stand on your sound leg, hold the crutches', `Raise your ${affected} knee toward your chest`, 'At the top straighten the knee fully, bend it back and lower with control'],
+        voiceHe: 'גם לרגל הקטועה יש ברך וירך שצריכות חימום — מרימים ומיישרים את הברך',
+        voiceEn: 'Your amputated leg has a knee and a thigh that need warming too — raise and straighten the knee',
+        ghost: { move: 'single_knee', side: affected },
+      });
+    }
+    // with the prosthesis: knee raises with BOTH legs, alternating (the prosthesis side too)
+    return make(HIGH_KNEES, {
+      id: 'high_knees_both_legs',
+      nameHe: 'הרמות ברכיים — שתי הרגליים', nameEn: 'Knee raises — both legs',
+      stepsHe: ['עמוד יציב — אפשר להיעזר בקיר או בגב כיסא', `הרם ברך ${SIDE_HE[intact]} לגובה המותניים, הורד, ואז ברך ${SIDE_HE[affected]} עם הפרוטזה`, 'החלף רגליים בקצב אחיד ובשליטה'],
+      stepsEn: ['Stand stable — you can hold a wall or a chair back', `Raise your ${intact} knee to hip height, lower it, then your ${affected} knee with the prosthesis`, 'Alternate legs at a steady, controlled pace'],
+      voiceHe: 'מחממים את שתי הרגליים — גם הברך והירך בצד הפרוטזה עובדות',
+      voiceEn: 'We warm up both legs — the knee and the thigh on the prosthesis side work too',
+      ghost: { move: 'high_knees' },
+    });
+  }
+  // One leg affected above the knee / absent → the intact leg works, the other stays as the stable support
   const support = lp.crutches ? 'היאחז בקביים ליציבות' : 'עמוד יציב — אפשר להיעזר בקיר או בגב כיסא';
   const supportEn = lp.crutches ? 'Hold your crutches for balance' : 'Stand stable — you can hold a wall or a chair back';
   return make(WARM_UP_SINGLE_LEG_HIGH_KNEE, {
@@ -258,8 +285,9 @@ export function planWarmUp(profile, { hasBall = false } = {}) {
   const crutchSport = !!lp.crutches;
   const candidates = [
     genericOk ? armMobility(lp) : upperActivation(lp, crutchSport),
-    // On crutches with one working leg, lifting it leaves nothing on the ground — no knee raises
-    lp.trainsOnCrutches && lp.affectedLegs.length > 0 ? null : legMobility(lp, rehab),
+    // On crutches with one working leg, lifting it leaves nothing on the ground — no knee raises of
+    // that leg; a below-knee residual leg CAN lift (the sound leg + the crutches stay on the ground)
+    lp.trainsOnCrutches && lp.affectedLegs.length > 0 && !lp.affectedLegs.some(k => hasResidualKnee(lp[k])) ? null : legMobility(lp, rehab),
     activationSport(profile, track) ? sportActivation(activationSport(profile, track), lp, hasBall) : null,
     // fallbacks (in order) when a slot above is not possible for this body
     coreTwists(lp),

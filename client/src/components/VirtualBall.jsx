@@ -16,13 +16,14 @@ import { useEffect, useRef, useState } from 'react';
 import { frameTransform } from '../engine/ghostOverlay';
 import { ballCycle, ballOnScreen, windowOver, HIT_SPEED, BALL_TIMING } from '../engine/incomingBall';
 import {
-  bodyPoints, targetPoint, pointVelocity, BALL_R, toDetection,
+  bodyPoints, steadyFloor, targetPoint, pointVelocity, BALL_R, toDetection,
   dribbleInit, dribbleStep, juggleInit, juggleStep, handDribbleInit, handDribbleStep,
   throwInit, throwStep, throwFlight,
 } from '../engine/virtualBall';
 
 const SAMPLE_MS = 160;                       // a body point's speed over this recent span
 const LOST_GRACE_MS = 1100;                  // the ball stays with the last skeleton through a detection drop
+const FEET_GRACE_MS = 4000;                  // the feet flicker out of detection: the ball stays on the last MEASURED floor this long
 const MEET_SPEED = 0.6;                      // a head / chest / hands meeting the ball (slower than a kick)
 
 function beep(ctxRef, freq = 880, len = 0.16) {
@@ -144,6 +145,7 @@ export default function VirtualBall({ mode = 'incoming', target = 'foot', kind =
     let lastCueN = -1;
     let lastLm = null;
     let st = null, spin = 0, heldSince = 0, bothAt = -1e9;
+    let ground = null, feetAt = -1e9;                      // the steady floor line; when the feet were last seen
     const track = (name, p, now) => {
       const a = samples[name] || (samples[name] = []);
       // a lost point → no speed across the gap (a jump back is not a fast move)
@@ -174,7 +176,19 @@ export default function VirtualBall({ mode = 'incoming', target = 'foot', kind =
           if (!pts?.bodyPx || pts.floorY == null) { out(null, map); raf = requestAnimationFrame(draw); return; }
           bodyPx = bodyPx ? bodyPx + (pts.bodyPx - bodyPx) * 0.1 : pts.bodyPx;
           const r = BALL_R * bodyPx * (look === 'tennis' ? 0.5 : look === 'basketball' ? 1.1 : 1);
-          const floorY = Math.min(map.box.y + map.box.h - r * 0.3, pts.floorY);
+          // THE FLOOR: under the trainee's real soles, steady (a lifted foot never lifts it). A foot ball
+          // is drawn ONLY with the feet really in the picture — never guessed, never floating
+          const footMode = mode === 'dribble' || mode === 'juggle' || (mode === 'incoming' && target === 'foot');
+          if (pts.floorReal) feetAt = now;
+          ground = steadyFloor(ground, pts.floorReal || !footMode ? pts.floorY : null, dt);
+          if (footMode && (now - feetAt > FEET_GRACE_MS || ground == null)) {
+            if (window.__GHOST_DEBUG) window.__ballDebug = { mode, live, hidden: 'no-feet', at: now };
+            const box = map.box;
+            drawText(ctx, isHe ? 'הכדור מופיע כשכפות הרגליים בתמונה' : 'The ball shows when your feet are in the picture',
+              box.x + box.w / 2, box.y + box.h * 0.24, bodyPx * 0.045, '#fde68a');   // above the bottom HUD
+            out(null, map); raf = requestAnimationFrame(draw); return;
+          }
+          const floorY = Math.min(map.box.y + map.box.h - r * 0.3, ground);
           const size = bodyPx * 0.07;
           const cueAt = (p) => ({ x: p.x, y: Math.max(map.box.y + size * 1.4, p.y - bodyPx * 0.22) });
           let ball = null;
@@ -182,7 +196,8 @@ export default function VirtualBall({ mode = 'incoming', target = 'foot', kind =
           if (mode === 'incoming') {
             const tp = targetPoint(pts, target, side);
             const isFoot = target === 'foot';
-            const tT = tp ? { x: tp.x, y: isFoot ? tp.y + bodyPx * 0.015 : tp.y } : anchor;
+            // a foot ball meets the foot ON THE FLOOR, just in front of the toe (toward the camera)
+            const tT = tp ? { x: tp.x, y: isFoot ? floorY + r * 0.2 : tp.y } : anchor;
             if (!tT) { out(null, map); raf = requestAnimationFrame(draw); return; }
             anchor = anchor ? { x: anchor.x + (tT.x - anchor.x) * 0.35, y: anchor.y + (tT.y - anchor.y) * 0.35 } : tT;
             const cx = map.box.x + map.box.w / 2;
@@ -234,10 +249,10 @@ export default function VirtualBall({ mode = 'incoming', target = 'foot', kind =
             const vL = track('footL', pts.footL, now), vR = track('footR', pts.footR, now);
             if (!st) st = dribbleInit(pts);
             const prevTouches = st.touches;
-            st = dribbleStep(st, { ...pts, bodyPx }, { L: vL, R: vR }, dt, now, { x0: map.box.x, x1: map.box.x + map.box.w });
+            st = dribbleStep(st, { ...pts, bodyPx, floorY }, { L: vL, R: vR }, dt, now, { x0: map.box.x, x1: map.box.x + map.box.w });
             if (st.touches > prevTouches) { beep(audioRef, 660, 0.08); if (live) setScore(s => ({ ...s, touches: s.touches + 1 })); }
             spin += (st.vx * dt / 1000) / Math.max(1, r);
-            ball = { x: st.x, y: floorY - r * 0.85, r, alpha: 1, shadowY: floorY + r * 0.1 };
+            ball = { x: st.x, y: floorY + r * 0.2 - r, r, alpha: 1, shadowY: floorY + r * 0.2 };
             drawBall(ctx, ball, spin, look);
           } else if (mode === 'juggle') {
             const foot = targetPoint(pts, 'foot', side);
@@ -246,7 +261,9 @@ export default function VirtualBall({ mode = 'incoming', target = 'foot', kind =
             if (!anchor) { out(null, map); raf = requestAnimationFrame(draw); return; }
             if (!st) st = juggleInit();
             const prev = st;
-            st = juggleStep(st, fv.vy, Math.max(0, (floorY - anchor.y) / bodyPx), dt, now);
+            // how high the kicking foot's SOLE is above the floor (the ball rests on it)
+            const sole = side === 'left' ? pts.soleL ?? pts.soleR : pts.soleR ?? pts.soleL;
+            st = juggleStep(st, fv.vy, sole == null ? 0 : Math.max(0, (floorY - sole) / bodyPx), dt, now);
             if (st.touched) { beep(audioRef, 760, 0.08); if (live) setScore(s => ({ ...s, touches: s.touches + 1 })); }
             if (st.dropped && live) setScore(s => ({ ...s, drops: s.drops + 1 }));
             if (prev.up || st.up) spin += dt / 120;

@@ -72,9 +72,13 @@ describe('The workout is built from TODAY\'s answers', () => {
     expect(noBall.some(e => e.requiresBall)).toBe(false);
   });
 
-  it('the warm-up follows today too (crutches today → no knee raise)', () => {
+  it('the warm-up follows today too (crutches today → the standing leg is never lifted; the residual knee works)', () => {
     const w = planWarmUp(applyCheckIn(owner, { location: 'home', hasBall: false, mobility: 'crutches' }), { hasBall: false });
-    expect(w.some(e => e.ghost?.move === 'single_knee')).toBe(false);
+    expect(w.some(e => e.ghost?.move === 'high_knees')).toBe(false);
+    const knee = w.find(e => e.ghost?.move === 'single_knee');
+    expect(knee?.id).toBe('residual_knee_activation');
+    expect(knee.ghost.side).toBe('left');                 // the owner's below-knee leg
+    expect(knee.spokenSteps.he.join(' ')).toContain('קביים');
   });
 });
 

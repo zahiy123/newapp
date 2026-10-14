@@ -59,10 +59,14 @@ describe('Crutches without a prosthesis — never stand on the missing leg', () 
     expect(catalogGhostSpec(id)).toBeTruthy();
   });
 
-  it('crutch warm-up: no knee raise of the only leg, no switching legs, crutch support stated', () => {
+  it('crutch warm-up: the only STANDING leg is never lifted, no switching legs, crutch support stated', () => {
     for (const p of [crutchProfile({ sport: 'footballAmputee' }), crutchProfile({ sport: 'rehab', trainingTrack: 'rehab_only' })]) {
       const w = planWarmUp(p, { hasBall: false });
-      expect(w.some(e => e.ghost?.move === 'single_knee' || e.ghost?.move === 'high_knees'), JSON.stringify(w.map(e => e.id))).toBe(false);
+      const lp = trainingLimbs(getLimbProfile(p));
+      const standing = ['left', 'right'].find(s => lp[`${s}_leg`].state === 'ok');
+      // no alternating knees; a knee raise only of the below-knee RESIDUAL leg (owner, 2026-10-14)
+      expect(w.some(e => e.ghost?.move === 'high_knees'), JSON.stringify(w.map(e => e.id))).toBe(false);
+      expect(w.some(e => e.ghost?.move === 'single_knee' && e.ghost.side === standing), JSON.stringify(w.map(e => e.id))).toBe(false);
       const text = w.flatMap(e => e.spokenSteps.he).join(' ');
       expect(text).not.toContain('החלף רגל');
     }

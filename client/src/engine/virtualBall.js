@@ -91,38 +91,66 @@ const mid = (a, b) => ({ x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 });
 
 /**
  * The body points the ball uses, in view px. `map(nx, ny)` = the camera → view mapping.
- * @returns {{ head, chest, hands, handL, handR, footL, footR, floorY, centerX, bodyPx } | null}
+ * The FEET are only what is really seen (no guess from the knee — a guessed foot made the ball float):
+ *   footL / footR  the ball's contact point — the toe (foot index) when seen, else the ankle
+ *   soleL / soleR  where that foot meets the floor — the lowest of the heel / toe (the ankle joint is a
+ *                  foot-height ABOVE the floor: a ball on the ankle line floated)
+ *   floorY         the floor under the trainee (the lowest sole); `floorReal` = a foot really seen
+ * @returns {{ head, chest, hands, handL, handR, footL, footR, soleL, soleR, floorY, floorReal, centerX, bodyPx } | null}
  */
 export function bodyPoints(lm, map) {
   if (!lm || !map) return null;
   const P = (i) => (vis(lm[i]) ? map(lm[i].x, lm[i].y) : null);
   const ls = P(11), rs = P(12), lh = P(23), rh = P(24);
-  const foot = (hip, knee, ankle) => {
-    const a = P(ankle);
-    if (a) return a;
-    const k = P(knee), h = P(hip);
-    return k && h ? { x: k.x + (k.x - h.x) * 0.95, y: k.y + (k.y - h.y) * 0.95 } : null;
-  };
-  const footL = foot(23, 25, 27), footR = foot(24, 26, 28);
   const head = P(0) || (ls && rs ? { x: (ls.x + rs.x) / 2, y: Math.min(ls.y, rs.y) - Math.abs(ls.x - rs.x) * 0.6 } : null);
+  const shoulders = ls && rs ? mid(ls, rs) : ls || rs;
+  const hipY = lh && rh ? (lh.y + rh.y) / 2 : null;
+  const top = head ? head.y : shoulders ? shoulders.y - 0.3 * Math.abs((hipY ?? shoulders.y + 1) - shoulders.y) : null;
+  const side = (ankle, heel, toe) => {
+    const A = P(ankle), H = P(heel), T = P(toe);
+    if (!A && !H && !T) return { foot: null, sole: null };
+    const footH = A && top != null ? Math.max(4, (A.y - top) * 0.045) : 8;   // the ankle's height above the floor
+    const soles = [H?.y, T?.y, A ? A.y + footH : null].filter(v => v != null);
+    return { foot: T || A || H, sole: Math.max(...soles) };
+  };
+  const L = side(27, 29, 31), R = side(28, 30, 32);
+  const footL = L.foot, footR = R.foot;
+  // a foot out of detection for a moment: its SIDEWAYS place from the hip → knee line (only the x is
+  // used — the ball stays on the last MEASURED floor, never on a guessed height)
+  const guess = (hip, knee) => { const k = P(knee), h = P(hip); return k && h ? { x: k.x + (k.x - h.x) * 0.95, y: k.y + (k.y - h.y) * 0.95 } : null; };
+  const footGuessL = footL ? null : guess(23, 25), footGuessR = footR ? null : guess(24, 26);
   const chest = ls && rs ? { x: (ls.x + rs.x) / 2, y: (ls.y + rs.y) / 2 + Math.abs(ls.x - rs.x) * 0.35 } : null;
   const handL = P(15), handR = P(16);
   const hands = handL && handR ? mid(handL, handR) : handL || handR;
-  const shoulders = ls && rs ? mid(ls, rs) : ls || rs;
   if (!shoulders && !footL && !footR) return null;
-  const feetY = [footL, footR].filter(Boolean).map(f => f.y);
-  const hipY = lh && rh ? (lh.y + rh.y) / 2 : null;
-  const floorY = feetY.length ? Math.max(...feetY) : hipY != null && shoulders ? hipY + (hipY - shoulders.y) * 1.6 : null;
-  const top = head ? head.y : shoulders ? shoulders.y - 0.3 * Math.abs((hipY ?? shoulders.y + 1) - shoulders.y) : null;
+  const soles = [L.sole, R.sole].filter(v => v != null);
+  const floorReal = soles.length > 0;
+  // no foot in the picture: an ESTIMATE (for the hand drills only — a foot ball is not drawn on it)
+  const floorY = floorReal ? Math.max(...soles) : hipY != null && shoulders ? hipY + (hipY - shoulders.y) * 1.6 : null;
   const bodyPx = floorY != null && top != null ? Math.max(40, floorY - top) : null;
   const centerX = lh && rh ? (lh.x + rh.x) / 2 : shoulders ? shoulders.x : (footL || footR).x;
-  return { head, chest, hands, handL, handR, footL, footR, shoulders, floorY, centerX, bodyPx };
+  return { head, chest, hands, handL, handR, footL, footR, footGuessL, footGuessR, soleL: L.sole, soleR: R.sole, shoulders, floorY, floorReal, centerX, bodyPx };
+}
+
+/**
+ * A STEADY floor line (view px): it follows a lower floor quickly but rises only slowly — a lifted
+ * foot (a kick, a juggle, a hop) never lifts the floor, so the ball never rises with it.
+ */
+export function steadyFloor(prev, floorY, dtMs) {
+  if (floorY == null) return prev;
+  if (prev == null) return floorY;
+  const dt = Math.min(100, Math.max(0, dtMs || 16));
+  const k = floorY > prev ? 1 - Math.exp(-dt / 60) : 1 - Math.exp(-dt / 3000);   // a hop of 0.5 s lifts it < 15 %
+  return prev + (floorY - prev) * k;
 }
 
 /** The body point an incoming ball goes to. */
 export function targetPoint(pts, target, side = 'right') {
   if (!pts) return null;
-  if (target === 'foot') return side === 'left' ? pts.footL || pts.footR : pts.footR || pts.footL;
+  if (target === 'foot') {
+    return side === 'left' ? pts.footL || pts.footGuessL || pts.footR || pts.footGuessR
+      : pts.footR || pts.footGuessR || pts.footL || pts.footGuessL;
+  }
   if (target === 'hand') return side === 'left' ? pts.handL || pts.handR : pts.handR || pts.handL;
   if (target === 'hands') return pts.hands;
   if (target === 'head') return pts.head;

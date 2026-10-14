@@ -40,6 +40,11 @@ export function trainingLimbs(lp, todayMobility = null) {
   return out;
 }
 
+/** A below-knee residual leg (prosthesis worn or not): the hip, the thigh, the KNEE and the quads are all there. */
+export function hasResidualKnee(limb) {
+  return !!limb && limb.level === 'below_knee' && (limb.state === 'absent' || limb.state === 'prosthetic');
+}
+
 // A healthy shoulder reaches ~150-180° in the frontal 2D estimate
 const LIMITED_SHOULDER_DEG = 140;
 

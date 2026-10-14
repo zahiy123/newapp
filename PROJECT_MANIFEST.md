@@ -1,5 +1,5 @@
 # Project Manifest — AI Kinetic Training Platform
-## Last Updated: 2026-10-05
+## Last Updated: 2026-10-14
 
 ---
 
@@ -9,6 +9,7 @@
 - On each update: bump `Last Updated`, update the Roadmap table status, move items from "Pending" to "Completed", and append a line to the **Change Log** at the bottom.
 - The stage order in the Roadmap is fixed. New features are placed *inside* the existing stages, never by reordering them.
 - No practical work on a new stage starts without the owner's explicit approval.
+- **Every owner request** is appended to the **Request Log** in the Knowledge Base section (what we do, how, where we stand), and its failures / fixes / lessons are added there — the binding basis for every next change (owner, 2026-10-14).
 
 ---
 
@@ -130,7 +131,7 @@ Readiness Rating (1-5 emoji, 3 seconds)
 - Redeploy the checkpoint in Vercel without code changes: Vercel → Deployments → the deployment of the checkpoint commit → "Promote to Production" (instant rollback).
 - New risky features are built on a **feature branch** first (Vercel gives the branch its own preview URL) and are merged into `main` only after the owner approves.
 
-## Owner Verification Board (sync point — updated 2026-10-12)
+## Owner Verification Board (sync point — updated 2026-10-14)
 
 **Rule (owner, 2026-10-12):**
 - Nothing is marked done until the owner tests it on the device and approves it.
@@ -160,6 +161,7 @@ Readiness Rating (1-5 emoji, 3 seconds)
 | (10-13, from the owner's video — NOTE: the stability round above was NOT yet deployed when it was filmed) (1) "I face the camera, the Ghost is turned sideways / diagonal"; (2) the ball must flow to me so I can time and kick it; (3) no blink / jitter / cut limbs; (4) no positive feedback or moving on unless the exercise is really done right and detected | (1) the guide's yaw had a 12° floor + the demo's 3/4 view; (2) the ball parked / passed beside the foot with no hit detection; (3) limb proportions were read from bent limbs (a swinging leg looked shorter → distortion); a 1-frame detection drop hid the Ghost; (4) praise lines were spoken on positioning / after any rep / at set end regardless of the measured accuracy; kicks were counted by a loose analyzer | (1) facing the camera → the guide is FULLY frontal (yaw 0); (2) the ball rolls from near the camera to the kicking foot wherever it is, a "בעט!/מסור!" window + beep; a fast foot move in the window = HIT (it flies away, "יפה!"), else MISS (rolls on, "פספסת"), a hits/balls score; (3) proportions only from straight limbs; a 1.1 s grace bridges a detection drop; (4) praise only for a verified execution (in view, reliable, accuracy ≥ 75, no error); the set grade = its measured accuracy (C when wrong) + the main error to fix; kicks counted only by a real, confident strike; positioning lines are factual ("אני רואה אותך"), no "מעולה/מצוין". Measured on the real screen: frontal guide, ball at the foot, mode guide, size 128–132 | Awaiting check |
 | (10-13, after `5b6a9b8`) (1) "The equipment finder shows up in exercises that need no equipment"; (2) "The Ghost must sit exactly on my body — never sideways / away / disconnected from the skeleton"; (3) "A virtual ball for every trainee, at my position (big and small Ghost), so I can kick / pass it without a real ball" | (1) The finder was opt-OUT: every exercise not on a fixed bodyweight list (all football drills) went to it; (2) the guide's horizontal position came from a smoothed hip anchor (lag) + the demonstration's own sideways sway; (3) the ball appeared only DURING the exercise, only in two named drills, and was removed from the small Ghost | (1) Opt-IN only: the finder runs only when the exercise names a chair / bottle / can (a wheelchair is not equipment); (2) the guide's pelvis is pinned to the trainee's live pelvis every frame (standing and seated) — measured on the real screen: pin = the trainee's hip ± 1 px over 9 s; (3) the ball for every kick / pass / shot drill: resting at the kicking foot from the briefing / start position, coming to the foot on the beat in the exercise; follows the foot (extrapolated from the knee when the foot is not seen, held through a detection drop, never floating without a body); the small Ghost keeps its own ball | Awaiting check |
 | (10-13) "Extend the virtual ball to EVERY ball drill in every sport (dribbling, ball carry, control, pass, kick…): no real ball → a smart virtual ball; it adapts to dribbling / continuous control, moving with the trainee's feet; Ghost + skeleton + ball in full sync" | Without a real ball every ball drill was REPLACED by a no-ball shadow drill (client + server) — the old rule "no ball → never offer a ball drill"; the virtual ball existed only for two kick / pass drills; the ball analysis read only a detected real ball; a basketball dribble got the football-dribble analyzer ('כדורסל' contains 'כדור') | **The old removal rule is replaced** (owner, 10-13): no ball → the ball drill STAYS (`virtualBall: true`, client + server; the AI prompt asks for in-place ball drills). One ball model for every drill (engine/virtualBall.js + VirtualBall.jsx): **incoming** to the foot / head / chest / hands / racket hand (kick, pass, first touch, header, chest control, catch, strokes — hit / miss + score); **dribble** — rolls on the floor at the feet, each foot touch pushes it, stays close to the body (touches count); **juggle** — flicked up from the foot, falls by gravity (touches / drops); **hand dribble** — hand → floor → hand (dribbles count); **throw** — held in the hands, a fast two-hand extension releases it (throws count). The ball's look follows the sport (football / basketball / tennis). Sync: the ball is at the live skeleton (held through a detection drop, never without a body); its position feeds the analysis engine like a detected ball; the big Ghost draws no second ball; a real ball seen in play hides the virtual one; dribbling / pass / first-touch drills got their Ghost demo (side steps / the kick swing). Measured on the real screen (5 drills): the ball at the feet / on the foot / at the hand / at the chest / coming to the head; no false throws; no equipment finder. Known gap: no Ghost animation yet for a basketball dribble / shooting / header (the ball works there; no misleading demo is shown) | Awaiting check |
+| (10-14, field) (1) "The warm-up works only the healthy leg — below the knee I have a full quad and knee on the amputated leg that need warming exactly like the other leg"; (2) "The virtual ball often floats in the air or is disconnected from my foot; it must sit on the floor / at the foot exactly where I stand, in sync with the big Ghost" | (1) The warm-up planner treated any amputated leg as not trainable (knee raise of the intact leg only); on crutches the prosthetic leg became 'absent' and the Ghost did not draw the residual thigh / knee; with a prosthesis the Ghost froze that leg as the support; (2) the ball's floor was the ANKLE joint (a foot-height above the floor → the ball floated); the floor rose with a lifted foot; a foot out of the picture was guessed from the knee and clamped to the picture's bottom (detached) | (1) Below-knee = hip + thigh + quads + KNEE trained: with the prosthesis — knee raises with BOTH legs, alternating (the prosthesis knee too); on crutches — standing on the sound leg + crutches, the residual knee is raised and straightened (the sound leg is never lifted; it warms in the kicks); the Ghost draws the residual thigh + knee + a short shank and lifts that knee; above-knee unchanged; (2) the floor = the real soles (heel / toe; ankle + a foot height), STEADY (a lifted foot / a hop never lifts it); the foot ball sits on that floor just in front of the toe (incoming / at rest / dribble); juggling rests on the kicking sole; feet out of detection → the ball stays on the last MEASURED floor (its sideways place from the knee) up to 4 s, then it is hidden with "הכדור מופיע כשכפות הרגליים בתמונה" (never a guessed height). Measured on the real screen: ball bottom = the floor line ± a few px, in front of the Ghost's boots | Awaiting check |
 | (10-12) Today's goal is neither said nor shown at the start | The goal line was spoken, but the warm-up's first line cut it at once; the 6 s chip sat under the coaching banners | A protected goal line (`holdSpeech`: nothing cuts it, the next lines queue after it); a big goal card above every HUD for 8 s + a "🎯 מטרת היום" line under the camera for the whole workout; a fallback to the plan day's focus | Awaiting check |
 
 **🟡 Implemented, never confirmed by the owner (NOT complete):**
@@ -173,6 +175,91 @@ Readiness Rating (1-5 emoji, 3 seconds)
 - The seated Ghost / seated detection.
 - The virtual coach selection + the gendered coach speech.
 - The voice "תרגיל הבא".
+
+---
+
+## Knowledge Base — Requests, Failures, Fixes, Binding Lessons (owner, 2026-10-14)
+
+**Why this section exists (owner):** every request is recorded here — what we do, how we do it, and where we stand on it. It is the BINDING basis for every next development step, in addition to the roadmap.
+**Status rule:** everything listed as "implemented" is **awaiting the owner's device check — NOT complete** until the owner approves it on the Owner Verification Board above.
+
+### 1. The owner's core requirements
+1. **A professional HOME kinetic-training platform** that works without equipment — including a **global virtual ball** for every ball drill in every sport.
+2. **Exact personal fit for a below-knee amputee** (the owner — LEFT leg, below the knee): the residual leg keeps its hip, thigh, quads and a working **knee**. They are warmed up and trained like the other leg, with a prosthesis AND on crutches.
+3. **The equipment finder only where an exercise explicitly needs equipment** (a chair, a bottle, a can) — never in other exercises.
+4. **The Ghost = a training model ON the trainee:** in the picture, on the body, in the trainee's proportions and facing direction, steady (no blink / jitter / cut limbs / distortion).
+5. **Honest, professional coaching:** no praise and no moving on unless the exercise was really done right AND was really detected; real feedback, good and bad.
+6. **Manual exercise transitions only** (a button or the explicit phrase "תרגיל הבא"); silent setup screens; today's goal said and shown at the start.
+
+### 2. What did NOT work (the history — so it never comes back)
+**The Ghost**
+- Not visible / appeared low: covered by a panel; pale on bright walls; drawn on guessed off-frame landmarks; the video used `object-fit: cover` (≈35 % of the frame cropped, the skeleton misaligned).
+- Floor exercises: the Ghost vanished below the picture (a standing-body anchor applied to a lying body; then a fix that depended on the hips being visible).
+- Lay **diagonally and huge across the screen** while the trainee stood (a lying placeholder unrelated to the body).
+- In pass / kick: **jumped**, focused on the leg area and **cut the rest of the body** (mirror ↔ guide flip-flop, a shoulder lock that re-anchored on a lean, size thresholds that jumped, a 3/4 view on a frontal trainee, big cards over the torso).
+- **Turned sideways / diagonal while the trainee faced the camera** (a minimum 12° yaw + the demo's 3/4 view).
+- Drifted sideways / lagged off the body (a smoothed hip anchor + the demonstration's own sway).
+- Distorted limbs (proportions measured on bent limbs); blinked on a detection drop.
+
+**The virtual ball**
+- First it existed only in two kick / pass drills and only during the exercise; it floated / parked beside the foot with no hit detection.
+- Without a real ball every ball drill was **replaced by a shadow drill** (client + server) — so dribbling / control never got a ball.
+- **Floated above the floor:** its "floor" was the ANKLE joint (a foot-height above the real floor); the floor rose with a lifted foot; a foot out of the picture was guessed from the knee and clamped to the picture's bottom (detached).
+- On a chest pass it "threw itself" when one hand dropped out of detection (a jump between the hands read as a fast move).
+
+**The warm-up**
+- The amputated leg was treated as **not trainable** at all: knee raises for the sound leg only; on crutches the Ghost did not even draw the residual thigh / knee; with a prosthesis the Ghost froze that leg.
+
+**Feedback and detection**
+- Generic lines and **praise for wrong / unseen execution** ("מעולה!", "מצוין!", "אתה עושה מעולה") on positioning, after any rep and at set end, regardless of the measured accuracy; kicks counted by a loose analyzer.
+- The Ghost did not reflect the trainee's facing (frontal vs. side).
+- A basketball dribble got the football-dribble analyzer ('כדורסל' contains 'כדור').
+
+**Other**
+- The equipment finder ran for every exercise not on a fixed bodyweight list (all football drills).
+- The female coach spoke with a male voice; the auto-skip came back (the mic heard the coach's own "הבא"); speech during setup screens.
+
+### 3. What was implemented (the fixes — awaiting the owner's check)
+| Area | The fix | Commit |
+|---|---|---|
+| Ghost — model | **Mirror → Guide:** before the start position the big Ghost is drawn FROM the trainee's own skeleton (a mirror); from the start position / in the exercise it guides ON the body; no skeleton → no Ghost (never floating) | `b63f39a` |
+| Ghost — stability | A guide latch through the run-up; feet-first anchoring; the shoulder lock only without real feet; a continuous smoothed height fit; proportions only from straight limbs; a 1.1 s grace through detection drops; compact notices at the view's edges | `5b6a9b8` |
+| Ghost — facing | Facing the camera → the guide is fully frontal (yaw 0); turned → the trainee's own turn | `5b6a9b8` |
+| Ghost — anchoring | The guide's **pelvis pinned to the trainee's live pelvis every frame** (measured: 0–1 px off on the real screen) | `334d833` |
+| Virtual ball | One smart ball model for every ball drill in every sport: incoming (foot / head / chest / hands / racket hand, hit / miss + score), dribble (rolls with the feet), juggle, hand dribble, throw; the sport's ball look; feeds the analysis engine like a detected ball; hidden when a real ball is in play; the big Ghost draws no second ball | `334d833` |
+| Ball without a real ball | "Do you have a ball?" → no → ball drills are KEPT with the virtual ball (client + server, the AI prompt asks for in-place drills) — this **replaced** the old "no ball → remove ball drills" rule | `334d833` |
+| Ball on the floor | The floor = the real soles (heel / toe), STEADY (a lifted foot never lifts it); the foot ball sits on it just in front of the toe; feet out of detection → the last MEASURED floor up to 4 s, then hidden with "הכדור מופיע כשכפות הרגליים בתמונה" | 10-14 round |
+| Below-knee warm-up | With a prosthesis: knee raises with BOTH legs (the prosthesis knee too); on crutches: the residual knee raised and straightened while standing on the sound leg + crutches; the Ghost draws the residual thigh + knee + a short shank | 10-14 round |
+| Honest feedback | Praise only for a verified execution (in view, reliable, accuracy ≥ 75, no error); the set grade = the measured accuracy (C when wrong) + the one thing to fix; kicks counted only by a confident strike; factual positioning lines ("אני רואה אותך"), no "מעולה / מצוין" | `5b6a9b8` |
+| Equipment finder | Opt-in only: the exercise names a chair / bottle / can (a wheelchair is not equipment) | `334d833` |
+| UI | Notices / guidance cards at the view's top / bottom edges (never over the torso); a compact calibration pill | `5b6a9b8` |
+
+### 4. Binding lessons (apply to EVERY next change)
+1. **Test on the REAL training screen**, not on an imagined case: the harness mounts `Training.jsx` with stubs and fake camera videos (scratchpad `training-harness`, port 5288; never committed). Measure (Ghost size / feet / pin, ball vs. floor) — do not assume.
+2. **Never draw on a guess.** The Ghost and the ball exist only where the skeleton really is; a short detection drop is bridged (grace), a long one hides them — never a floating / placeholder figure or ball.
+3. **The floor is the soles, not the ankles;** floor lines are steady (a lifted foot / a hop never moves them).
+4. **The guide is pinned to the trainee** (pelvis, feet, height, facing); its own demonstration never moves it off the body.
+5. **No threshold switches for sizes / modes** — continuous smoothing with kept ratios; latches against flip-flop.
+6. **Proportions only from straight limbs;** a lost point resets its speed (no "fast move" across a gap).
+7. **A below-knee leg trains:** hip, thigh, quads, knee — warm-ups and drills include it; only the sole standing leg on crutches is never lifted. The side convention is anatomical (the owner = LEFT leg).
+8. **Honesty:** praise only what was measured as correct and seen; otherwise say what to fix. Never move on automatically.
+9. **Equipment is opt-in by name;** a ball is never "missing" — it is virtual.
+10. **The Ghost's demo must be the exercise's real movement** — no misleading demo (a drill without a matching animation shows the ball only).
+11. **Every owner request** goes into the Request Log below and onto the Owner Verification Board; nothing is "done" before the owner's device check; ask before every push; after a push verify the deploy + the served bundle, tag a restore point, update the restore table.
+12. **The owner tests the DEPLOYED site** — say clearly what is and is not deployed before he tests.
+
+### 5. Request Log — where we stand (newest last)
+| Date | The owner's request | What we did | Status |
+|---|---|---|---|
+| 10-12 | Silent setup; today's goal said + shown; short names; a ball with timing | Speech gate; a protected goal line + card; distinct names; the incoming ball | Deployed — awaiting check |
+| 10-12 | The floor / lying Ghost vanishes | Lying detection → a body-box fit inside the picture | Deployed — awaiting check |
+| 10-12 | The Ghost lies diagonally while standing | The Mirror → Guide model | Deployed (`b63f39a`) — awaiting check |
+| 10-12 | Pass: the Ghost jumps, cuts the body | Guide latch, feet-first, height fit, compact notices | Deployed (`5b6a9b8`) — awaiting check |
+| 10-13 | Frontal facing; a kickable ball; no blink; honest feedback | Yaw 0 when frontal; a hit / miss ball; straight-limb proportions + grace; verified-only praise | Deployed (`5b6a9b8`) — awaiting check |
+| 10-13 | The equipment finder only when needed; the Ghost exactly on the body; a virtual ball at the trainee | Opt-in finder; the pelvis pin; the ball at the foot from the run-up | Deployed (`334d833`) — awaiting check |
+| 10-13 | The virtual ball for every ball drill in every sport (dribble, control…) | The smart ball model; drills kept without a ball; the analysis engine fed | Deployed (`334d833`) — awaiting check |
+| 10-14 | Below-knee warm-up for both legs; the ball floats / is detached from the foot | The residual-knee warm-up + the Ghost's residual leg; the ball on the real, steady floor | Implemented — awaiting check |
+| 10-14 | Full documentation of the requests, failures, fixes and lessons; every request added here | This Knowledge Base section + the protocol rule + memory | Done (documentation) |
 
 ---
 
@@ -1404,3 +1491,4 @@ Two critical corrections to the existing onboarding (Stages 1B/1C), completed **
 - **2026-10-13:** Owner round: the equipment finder opt-in only (chair / bottle / can), the guide pinned to the trainee's pelvis, a virtual ball at the trainee's kicking foot in every kick / pass drill (run-up + exercise). Added to the Owner Verification Board as 'awaiting check' — NOT complete. Client 735 pass, 0 new failures; build OK.
 - **2026-10-13:** The virtual ball for every ball drill in every sport (incoming / dribble / juggle / hand dribble / throw), ball drills kept without a real ball (client + server — replaces the old removal rule), the virtual ball feeds the analysis engine, the hand-dribble analyzer order fixed. Added to the Owner Verification Board as 'awaiting check' — NOT complete. Client 748 pass, 0 new failures; server 10/10; build OK.
 - **2026-10-13:** Pushed `334d833` → deployed, verified in the served bundle. Restore point `checkpoint-2026-10-13-virtual-ball` (#25). Awaiting the owner's check — NOT complete.
+- **2026-10-14:** Below-knee warm-up for both legs (the residual knee + quads; Ghost draws the residual leg) + the virtual ball on the real, steady floor (soles, not the ankle line; never a guessed height). Added to the Owner Verification Board as 'awaiting check' — NOT complete. Client 754 pass, 0 new failures; build OK.

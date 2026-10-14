@@ -82,15 +82,22 @@ describe('warmupPlanner', () => {
     }
   });
 
-  it('owner (left BK prosthesis, no crutches): right-knee raise, NO crutch instructions, left leg never instructed to move', () => {
+  it('owner (left BK prosthesis, no crutches): knee raises with BOTH legs — the prosthesis knee too; NO crutch instructions', () => {
     const plan = planWarmUp(leftBelowKnee());
     const text = allText(plan);
     expect(text).not.toContain('קביים');
+    const knees = plan.find(e => e.ghost.move === 'high_knees');
+    expect(knees?.id).toBe('high_knees_both_legs');
+    const steps = knees.spokenSteps.he.join(' ');
+    expect(steps).toContain('ברך ימין');
+    expect(steps).toContain('ברך שמאל עם הפרוטזה');
+  });
+
+  it('above-knee: only the intact leg lifts (no knee on the amputated side)', () => {
+    const plan = planWarmUp({ sport: 'rehab', trainingTrack: 'rehab_only', mobilityAid: 'none', scanData: { classification: 'TRANSFEMORAL_AMPUTEE', prostheticSide: 'left' } });
+    expect(plan.some(e => e.ghost.move === 'high_knees')).toBe(false);
     const knee = plan.find(e => e.ghost.move === 'single_knee');
-    expect(knee).toBeDefined();
-    expect(knee.ghost.side).toBe('right');
-    expect(knee.name.he).toContain('ימין');
-    expect(text).not.toMatch(/ברך רגל שמאל|ברגל שמאל/);
+    if (knee) expect(knee.ghost.side).toBe('right');
   });
 
   it('crutch user gets crutch instructions', () => {
@@ -234,5 +241,27 @@ describe('warmupGhost drawing (dedicated panel)', () => {
         }
       }
     }
+  });
+});
+
+import { ghostPose } from '../warmupGhost.js';
+import { trainingLimbs as tl, getLimbProfile as glp } from '../limbProfile.js';
+
+describe('The Ghost shows the below-knee leg working (owner, 2026-10-14)', () => {
+  const seg = (pose, limb, part) => pose.segments.find(s => s.limb === limb && s.part === part);
+  it('on crutches: the residual thigh + knee + a short shank are drawn and the knee rises', () => {
+    const lp = tl(glp({ mobilityAid: 'crutches', scanData: { classification: 'TRANSTIBIAL_AMPUTEE', prostheticSide: 'left' } }));
+    const down = ghostPose({ move: 'single_knee', side: 'left' }, 0, lp);
+    const up = ghostPose({ move: 'single_knee', side: 'left' }, 0.5, lp);
+    expect(seg(down, 'left_leg', 'thigh')).toBeDefined();
+    expect(seg(down, 'left_leg', 'stump')).toBeDefined();
+    expect(seg(down, 'left_leg', 'shin')).toBeUndefined();
+    expect(seg(up, 'left_leg', 'thigh').to.y).toBeLessThan(seg(down, 'left_leg', 'thigh').to.y - 0.3);
+  });
+  it('with the prosthesis: in alternating knee raises the prosthesis knee rises too', () => {
+    const lp = tl(glp({ scanData: { classification: 'TRANSTIBIAL_AMPUTEE', prostheticSide: 'left' } }));
+    const ys = [0, 0.25, 0.5, 0.75].map(t => seg(ghostPose({ move: 'high_knees' }, t, lp), 'left_leg', 'thigh').to.y);
+    expect(Math.max(...ys) - Math.min(...ys)).toBeGreaterThan(0.3);
+    expect(seg(ghostPose({ move: 'high_knees' }, 0, lp), 'left_leg', 'shin').dashed).toBe(true);
   });
 });

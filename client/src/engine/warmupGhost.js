@@ -7,13 +7,15 @@
 // (the canvas is CSS-mirrored together with the video): the figure's LEFT limbs
 // are at +x, exactly like MediaPipe's LEFT_* landmarks of the trainee.
 //
-// Iron Rule: limbs that are absent / not trainable (limbProfile) are NOT drawn;
+// Iron Rule: limbs that are absent / not trainable (limbProfile) are NOT drawn — except a below-knee
+// residual leg (thigh + knee + a short shank: it trains);
 // a below-knee prosthesis is drawn as a dashed, non-animated shank. Arm angles
 // are capped at the range measured in the scan (romCapDeg).
 // Animation is time-based (ms), so the speed is the same on every screen.
 // ============================================================
 
 import { GHOST_BODY } from './ghostBody.js';
+import { hasResidualKnee } from './limbProfile.js';
 import { profileGhostPose } from './exercise/profileGhost.js';
 import { fitLyingGhost } from './ghostOverlay.js';
 
@@ -54,6 +56,8 @@ function limbPoint(origin, angleDeg, length, outward) {
 function canDraw(limb) {
   return limb && limb.trainable !== false && limb.state !== 'absent';
 }
+
+const STUMP = 0.38;                                // a below-knee residual shank vs. a full shin
 
 /**
  * Pose of the demo figure for a warm-up move at phase t (0..1).
@@ -154,10 +158,14 @@ export function ghostPose(spec, t, lp = {}) {
   for (const side of ['left', 'right']) {
     const key = `${side}_leg`;
     const limb = lp[key] || { trainable: true, state: 'ok' };
-    if (limb.state === 'absent' || (limb.state === 'prosthetic' && limb.level !== 'below_knee')) continue;
+    // a below-knee residual leg (no prosthesis today) is drawn too: the thigh + the knee + a short shank
+    const residual = limb.state === 'absent' && hasResidualKnee(limb);
+    if ((limb.state === 'absent' && !residual) || (limb.state === 'prosthetic' && limb.level !== 'below_knee')) continue;
     const S = side === 'left' ? L : R;
     const isProsthetic = limb.state === 'prosthetic';
-    const l = isProsthetic ? 0 : lift[side];       // the prosthetic side is the stable support
+    // the knee of a below-knee leg WORKS (owner, 2026-10-14): knee raises lift it too; only in a kick
+    // is the prosthetic side the stable support
+    const l = isProsthetic && spec?.move === 'kick' ? 0 : lift[side];
     // Knee raise: thigh rotates forward → in a frontal view the knee rises
     const out = side === 'left' ? 1 : -1;
     const kicking = spec?.move === 'kick';
@@ -166,7 +174,8 @@ export function ghostPose(spec, t, lp = {}) {
       ? { x: knee.x + out * 0.1 * l, y: knee.y + B.shin * (1 - 0.85 * l) }   // shin swings forward (foreshortened)
       : { x: S.hip.x, y: knee.y + B.shin * (1 - 0.55 * l) };
     add(S.hip, knee, key, false, 'thigh');
-    add(knee, ankle, key, isProsthetic, 'shin');   // prosthetic shank: drawn as a pylon, not animated
+    if (residual) add(knee, { x: knee.x + (ankle.x - knee.x) * STUMP, y: knee.y + (ankle.y - knee.y) * STUMP }, key, false, 'stump');
+    else add(knee, ankle, key, isProsthetic, 'shin');   // prosthetic shank: drawn as a pylon
   }
 
   return {
@@ -187,7 +196,7 @@ export function ghostPose(spec, t, lp = {}) {
 
 // Limb widths in body units at the proximal / distal end (natural, athletic proportions)
 const TAPER = {
-  thigh: [0.30, 0.2], shin: [0.2, 0.12], upperArm: [0.19, 0.14], forearm: [0.145, 0.105],
+  thigh: [0.30, 0.2], shin: [0.2, 0.12], upperArm: [0.19, 0.14], forearm: [0.145, 0.105], stump: [0.2, 0.17],
 };
 const FLOOR_ANKLE_Y = B.thigh + B.shin;           // ankle height when standing (hip center = 0)
 
@@ -770,7 +779,8 @@ export function fitPoseToBody(pose, limbs) {
   const feet = pose.feet ? { ...pose.feet } : null;
   const find = (limb, part) => segs.find(sg => sg.limb === limb && sg.part === part);
   for (const side of LEG_SIDES) {
-    const th = find(`${side}_leg`, 'thigh'), sh = find(`${side}_leg`, 'shin');
+    // (a below-knee residual leg has a short 'stump' shank instead of the shin)
+    const th = find(`${side}_leg`, 'thigh'), sh = find(`${side}_leg`, 'shin') || find(`${side}_leg`, 'stump');
     if (th) {
       const knee = scaleFrom(th.from, th.to, limbs.thigh);
       const d = { x: knee.x - th.to.x, y: knee.y - th.to.y, z: (knee.z ?? 0) - (th.to.z ?? 0) };
@@ -811,7 +821,7 @@ export function seatPose(pose) {
   const feet = pose.feet ? { ...pose.feet } : null;
   for (const side of LEG_SIDES) {
     const th = segs.find(sg => sg.limb === `${side}_leg` && sg.part === 'thigh');
-    const sh = segs.find(sg => sg.limb === `${side}_leg` && sg.part === 'shin');
+    const sh = segs.find(sg => sg.limb === `${side}_leg` && (sg.part === 'shin' || sg.part === 'stump'));
     if (!th) continue;
     const hip = th.from;
     const knee = { x: hip.x, y: hip.y + 0.18, z: (hip.z ?? 0) - B.thigh * 0.95 };
@@ -819,7 +829,7 @@ export function seatPose(pose) {
     if (sh) {
       const ankle0 = sh.to;
       sh.from = knee;
-      sh.to = { x: knee.x, y: knee.y + B.shin, z: knee.z };
+      sh.to = { x: knee.x, y: knee.y + B.shin * (sh.part === 'stump' ? STUMP : 1), z: knee.z };
       if (feet?.[side]) {
         const fd = { x: sh.to.x - ankle0.x, y: sh.to.y - ankle0.y, z: (sh.to.z ?? 0) - (ankle0.z ?? 0) };
         const f = feet[side];
@@ -939,6 +949,17 @@ export function mirrorPoseFromSkeleton(landmarks, map, lp = {}) {
   const segments = [];
   for (const [limb, part, a, b] of LIMBS) {
     const state = lp?.[limb]?.state;
+    // a below-knee residual leg: its thigh and knee are mirrored; without a prosthesis, a short shank
+    if (hasResidualKnee(lp?.[limb])) {
+      if (part === 'thigh' && seen(a) && seen(b)) { segments.push({ from: a === 23 ? lh : rh, to: at(b), limb, part, dashed: false }); continue; }
+      if (part === 'shin' && state === 'absent' && seen(a)) {
+        const k = at(a), th = segments.find(sg => sg.limb === limb && sg.part === 'thigh');
+        const dir = seen(b) ? { x: at(b).x - k.x, y: at(b).y - k.y } : th ? { x: th.to.x - th.from.x, y: th.to.y - th.from.y } : { x: 0, y: 1 };
+        const n = Math.hypot(dir.x, dir.y) || 1, len = (th ? Math.hypot(th.to.x - th.from.x, th.to.y - th.from.y) : torsoPx * 0.8) * STUMP;
+        segments.push({ from: k, to: { x: k.x + dir.x / n * len, y: k.y + dir.y / n * len }, limb, part: 'stump', dashed: false });
+        continue;
+      }
+    }
     if (state === 'absent' || lp?.[limb]?.trainable === false) continue;
     if (!seen(a) || !seen(b)) continue;
     const isLegShin = part === 'shin';

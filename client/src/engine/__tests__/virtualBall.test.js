@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import {
-  ballModeFor, virtualBallWanted, bodyPoints, targetPoint, dribbleInit, dribbleStep, juggleInit, juggleStep,
+  ballModeFor, virtualBallWanted, bodyPoints, steadyFloor, targetPoint, dribbleInit, dribbleStep, juggleInit, juggleStep,
   handDribbleInit, handDribbleStep, throwInit, throwStep, throwFlight, toDetection, handSide, ballLook, realBallInPlay,
 } from '../virtualBall';
 import { frameTransform } from '../ghostOverlay';
@@ -70,8 +70,10 @@ const map = frameTransform(1000, 1000, 1000, 1000, 'contain');
 describe('the ball is AT the trainee body (skeleton sync)', () => {
   it('body points in view px', () => {
     const p = bodyPoints(stand(), map);
-    expect(p.floorY).toBeCloseTo(900, 0);
-    expect(p.bodyPx).toBeCloseTo(800, 0);
+    // only ankles seen: the floor is a foot-height BELOW the ankle joint (not on it — that floated)
+    expect(p.floorY).toBeGreaterThan(925);
+    expect(p.floorY).toBeLessThan(950);
+    expect(p.floorReal).toBe(true);
     expect(p.centerX).toBeCloseTo(500, 0);
     expect(targetPoint(p, 'foot', 'right')).toMatchObject({ x: 550, y: 900 });
     expect(targetPoint(p, 'head').y).toBeCloseTo(100, 0);
@@ -83,6 +85,30 @@ describe('the ball is AT the trainee body (skeleton sync)', () => {
     expect(d).toMatchObject({ detected: true, virtual: true });
     expect(d.x).toBeCloseTo(0.55, 3); expect(d.y).toBeCloseTo(0.86, 3);
     expect(toDetection(null, map).detected).toBe(false);
+  });
+});
+
+describe('the floor: the real soles, steady', () => {
+  it('heel / toe seen → the floor is the lowest sole; the contact point is the toe', () => {
+    const lm = stand();
+    lm[30] = { x: 0.55, y: 0.93, visibility: 1 }; lm[32] = { x: 0.57, y: 0.94, visibility: 1 };
+    const p = bodyPoints(lm, map);
+    expect(p.floorY).toBeCloseTo(940, 0);
+    expect(p.footR).toMatchObject({ x: 570, y: 940 });
+  });
+  it('no foot in the picture → no real floor (a foot ball is not drawn on a guess)', () => {
+    const lm = stand();
+    for (const i of [27, 28, 29, 30, 31, 32]) lm[i] = { x: 0.5, y: 1.2, visibility: 0.1 };
+    const p = bodyPoints(lm, map);
+    expect(p.floorReal).toBe(false);
+    expect(p.footL).toBe(null); expect(p.footR).toBe(null);
+  });
+  it('a lifted foot never lifts the floor; a lower floor is followed fast', () => {
+    let g = steadyFloor(null, 900, 16);
+    for (let i = 0; i < 30; i++) g = steadyFloor(g, 800, 16);        // ~0.5 s with both soles up (a hop)
+    expect(g).toBeGreaterThan(880);
+    for (let i = 0; i < 20; i++) g = steadyFloor(g, 950, 16);
+    expect(g).toBeGreaterThan(945);
   });
 });
 
