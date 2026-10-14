@@ -8,6 +8,9 @@ import { createLandmarkFilter, filterLandmarks } from '../engine/landmarkFilter'
 // aspect, so normalized landmarks are unchanged) instead of the full camera frame keeps every
 // detection fast on a phone (no dropped frames / skipped movements)
 const DETECT_MAX_SIDE = 640;
+// the skeleton drawn on the camera: only confident points inside the picture (a small edge margin)
+const SKELETON_MIN_VIS = 0.5;
+const SKELETON_EDGE = 0.02;
 
 // Key landmark indices
 const LM = {
@@ -27,6 +30,16 @@ function angle(a, b, c) {
 
 function midpoint(a, b) {
   return { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2, z: (a.z + b.z) / 2 };
+}
+
+/**
+ * The part of the skeleton that is drawn: confident points INSIDE the picture (not hidden), and
+ * the connections whose two ends are both drawn.
+ */
+export function drawableSkeleton(lm, connections, hidden = new Set()) {
+  const ok = (lm || []).map((pt, i) => !!pt && !hidden.has(i) && (pt.visibility ?? 1) >= SKELETON_MIN_VIS
+    && pt.x >= -SKELETON_EDGE && pt.x <= 1 + SKELETON_EDGE && pt.y >= -SKELETON_EDGE && pt.y <= 1 + SKELETON_EDGE);
+  return { points: (lm || []).filter((_, i) => ok[i]), connections: (connections || []).filter(c => ok[c.start] && ok[c.end]) };
 }
 
 // Returns Set of landmark indices to hide for the amputated limb
@@ -176,19 +189,13 @@ export function usePose(canvasRef, beforeDrawRef, amputationProfile, enabled = t
       }
       if (!drawingUtilsRef.current) drawingUtilsRef.current = new DrawingUtils(ctx);
       const drawingUtils = drawingUtilsRef.current;
-      const hiddenIndices = getAmputatedIndices(amputationProfile);
-      if (hiddenIndices.size === 0) {
-        drawingUtils.drawLandmarks(lm, { radius: 4, color: '#00FF00' });
-        drawingUtils.drawConnectors(lm, PoseLandmarker.POSE_CONNECTIONS, { color: '#00FFFF', lineWidth: 2 });
-      } else {
-        const visibleLm = lm.filter((_, i) => !hiddenIndices.has(i));
-        drawingUtils.drawLandmarks(visibleLm, { radius: 4, color: '#00FF00' });
-        const filteredConnections = PoseLandmarker.POSE_CONNECTIONS.filter(
-          c => !hiddenIndices.has(c.start) && !hiddenIndices.has(c.end)
-        );
-        const mappedLm = lm.map((pt, i) => hiddenIndices.has(i) ? { ...pt, visibility: 0 } : pt);
-        drawingUtils.drawConnectors(mappedLm, filteredConnections, { color: '#00FFFF', lineWidth: 2 });
-      }
+      // ONLY what the camera really sees: a point is drawn when it is confident AND inside the
+      // picture; a line only between two such points. MediaPipe GUESSES the joints outside the
+      // frame (a close-up / a cut body) — drawn, they made long green / cyan lines across the screen
+      // that were not on the body (owner field report, 2026-10-14)
+      const sk = drawableSkeleton(lm, PoseLandmarker.POSE_CONNECTIONS, getAmputatedIndices(amputationProfile));
+      drawingUtils.drawLandmarks(sk.points, { radius: 4, color: '#00FF00' });
+      drawingUtils.drawConnectors(lm, sk.connections, { color: '#00FFFF', lineWidth: 2 });
     }
   }, [canvasRef]);
 

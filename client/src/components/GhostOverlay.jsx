@@ -86,7 +86,10 @@ export default function GhostOverlay({ spec, limbProfile, landmarksRef, videoRef
           if (lm) { lastLmRef.current = { lm, at: now }; } else if (lastLmRef.current && now - lastLmRef.current.at < LOST_GRACE_MS) lm = lastLmRef.current.lm;
           const box = boxRef.current;
           const floorSpec = !!spec?.profile && spec.profile.posture !== 'standing' && spec.profile.posture !== 'seated';
-          const lyingNow = !!box && (box.x1 - box.x0) > (box.y1 - box.y0) * 1.1;
+          // lying = the TORSO is horizontal (the anchor's shoulder → hip test, with hysteresis) — never
+          // a wide body box alone: a standing trainee with spread arms / a close-up made a wide box and
+          // the floor guide lay across the whole screen, huge and flat (field report, 2026-10-14)
+          const lyingNow = !!box && !!anchorRef.current?.lying;
           let mode = !lm || !map ? 'none' : (isGuideRef.current ? isGuideRef.current() : true) ? 'guide' : 'mirror';
           if (mode === 'guide' && floorSpec && !lyingNow) mode = 'mirror';     // a floor guide only on a lying body
           if (mode !== modeRef.current.mode) modeRef.current = { mode, since: now };
