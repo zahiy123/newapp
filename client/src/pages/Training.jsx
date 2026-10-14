@@ -30,6 +30,7 @@ import { setCoachVoice, setSpeechOpen, holdSpeech } from '../hooks/useSpeech';
 import { useVoiceCommand } from '../hooks/useVoiceCommand';
 import { READY_DRIVE, withDrive, splitLegOrder, legLabel, splitStartText, splitSwitchText, splitWorkingSide, setLegHalf, legSetStartText, legSetNextText, isStrikeMode } from '../engine/training/coachFlow';
 import { needsEquipmentCheck } from '../engine/training/equipmentNeed';
+import { createExerciseNav, navGo, navNext, navPrev, navUnchangedSince } from '../engine/training/exerciseNav';
 import { exerciseNeedsSetup } from '../engine/training/exerciseSetup';
 import DailyCheckIn from '../components/DailyCheckIn';
 import { applyCheckIn } from '../engine/training/dailyCheckIn';
@@ -389,6 +390,8 @@ export default function Training() {
 
   const [exercises, setExercises] = useState([]);
   const [currentIdx, setCurrentIdx] = useState(0);
+  const navRef = useRef(createExerciseNav(0));     // the LIVE exercise index (engine/training/exerciseNav)
+  useEffect(() => { navRef.current.idx = currentIdx; if (window.__GHOST_DEBUG) window.__trainingIdx = currentIdx; }, [currentIdx]);
   const exerciseStateRef = useRef({});
   const [displayReps, setDisplayReps] = useState(0);
   const [feedback, setFeedback] = useState(null);
@@ -677,7 +680,7 @@ export default function Training() {
         const saved = loadActiveWorkout();
         if (saved && saved.week === weekIdx && saved.day === dayIdx) {
           // Restore state
-          setCurrentIdx(Math.min(saved.exerciseIndex || 0, loadedExercises.length - 1));
+          setCurrentIdx(navGo(navRef.current, saved.exerciseIndex || 0, loadedExercises.length));
           setCurrentSet(saved.currentSet || 1);
           setDisplayReps(saved.displayReps || 0);
           setTimer(saved.timer || 0);
@@ -2854,14 +2857,38 @@ export default function Training() {
     }
   }
 
-  async function handleNextExercise() {
+  // ---- Moving between exercises (IRON RULE, owner 2026-10-14): ONLY the trainee moves themself ----
+  // A skip / "next" moves forward AT ONCE from where the trainee IS (the live index, never a stale
+  // closure) and stays there; the workout adaptation runs in the background and never moves them —
+  // its result is dropped if they navigated meanwhile. "Back" happens only on their own "previous".
+  function goToExercise(target) {
+    const idx = navGo(navRef.current, target, exercises.length);
+    setCurrentIdx(idx);
+    return idx;
+  }
+
+  function resetExerciseRun() {
+    stopSpeech(); setPhase(PHASE.IDLE); setTimer(0); setFeedback(null);
+    exerciseStateRef.current = { _userProfile: userProfile }; setDisplayReps(0); setCurrentSet(1); setSetsPerformance([]); resetAllTracking();
+  }
+
+  function handleNextExercise() {
+    const from = navRef.current.idx;
     // Record this exercise's results before moving on
     recordExerciseResult();
-    // Save progress for resume
+    resetExerciseRun();
+    if (from >= exercises.length - 1) {
+      setWorkoutDone(true); speak(t('training.workoutComplete')); saveSession('completed');
+      return;
+    }
+    const to = navNext(navRef.current, exercises.length);
+    setCurrentIdx(to);
+    speak(t('training.nextExercise'));
+    // Save progress for resume (the exercise the trainee is now on)
     saveActiveWorkout({
       week: parseInt(searchParams.get('week') || '0'),
       day: parseInt(searchParams.get('day') || '0'),
-      exerciseIndex: currentIdx + 1 < exercises.length ? currentIdx + 1 : currentIdx,
+      exerciseIndex: to,
       currentSet: 1,
       displayReps: 0,
       timer: 0,
@@ -2869,62 +2896,53 @@ export default function Training() {
       warmUpCompleted: sessionDataRef.current.warmUpCompleted,
       startTime: sessionDataRef.current.startTime,
     });
-    stopSpeech(); setPhase(PHASE.IDLE); setTimer(0); setFeedback(null);
-    exerciseStateRef.current = { _userProfile: userProfile }; setDisplayReps(0); setCurrentSet(1); setSetsPerformance([]); resetAllTracking();
+    adaptRemainingInBackground(to);
+  }
 
-    if (currentIdx < exercises.length - 1) {
-      // Try workout adaptation after 2+ exercises, max once per 2 min
-      const now = Date.now();
-      const completedCount = sessionDataRef.current.exerciseResults.length;
-      const shouldAdapt = completedCount >= 2
-        && (now - lastAdaptationRef.current) > 120000
-        && currentIdx < exercises.length - 2;
-
-      if (shouldAdapt) {
-        try {
-          const resp = await authFetch(apiUrl('/api/coach/adapt-workout'), {
-            method: 'POST',
-            body: JSON.stringify({
-              profile: { name: userProfile?.name, age: userProfile?.age, disability: userProfile?.disability, sport: userProfile?.sport, skillLevel: userProfile?.skillLevel },
-              completedExercises: sessionDataRef.current.exerciseResults,
-              remainingPlan: exercises.slice(currentIdx + 1),
-              environmentContext: environmentScan,
-            }),
-          });
-          if (resp.ok) {
-            const result = await resp.json();
-            if (result.adapted && result.plan?.length > 0 && FEATURES.CATALOG_PLANS) {
-              console.info('[Adaptation] catalog sessions are active — free AI exercises are not inserted');
-            } else if (result.adapted && result.plan?.length > 0) {
-              const sport = userProfile?.sport || 'fitness';
-              const sanitizedAdapt = sanitizePlan({ weeks: [{ days: [{ exercises: result.plan }] }] }, sport, userProfile?.age);
-              const cleanPlan = fitExercises(sanitizedAdapt.weeks[0].days[0].exercises || [],
-                availableEquipment(userProfile, { hasBall: typeof ballAnswer === 'boolean' ? ballAnswer : undefined })).exercises;
-              const newExercises = [...exercises.slice(0, currentIdx + 1), ...cleanPlan];
-              setExercises(newExercises);
-              lastAdaptationRef.current = now;
-              if (result.reasoning) {
-                speakPriority(isHe ? `שיניתי את התוכנית: ${result.reasoning}` : `Plan adapted: ${result.reasoning}`);
-              }
-            }
-          }
-        } catch (err) {
-          console.warn('[Adaptation] Failed:', err.message);
-        }
+  // Workout adaptation after 2+ exercises (max once per 2 min) — in the BACKGROUND: it may change the
+  // exercises AFTER the trainee's current one, never the trainee's position
+  async function adaptRemainingInBackground(atIdx) {
+    const now = Date.now();
+    const completedCount = sessionDataRef.current.exerciseResults.length;
+    if (!(completedCount >= 2 && (now - lastAdaptationRef.current) > 120000 && atIdx < exercises.length - 1)) return;
+    const seqAtStart = navRef.current.seq;
+    lastAdaptationRef.current = now;
+    try {
+      const resp = await authFetch(apiUrl('/api/coach/adapt-workout'), {
+        method: 'POST',
+        body: JSON.stringify({
+          profile: { name: userProfile?.name, age: userProfile?.age, disability: userProfile?.disability, sport: userProfile?.sport, skillLevel: userProfile?.skillLevel },
+          completedExercises: sessionDataRef.current.exerciseResults,
+          remainingPlan: exercises.slice(atIdx + 1),
+          environmentContext: environmentScan,
+        }),
+      });
+      if (!resp.ok) return;
+      const result = await resp.json();
+      if (!(result.adapted && result.plan?.length > 0)) return;
+      if (FEATURES.CATALOG_PLANS) {
+        console.info('[Adaptation] catalog sessions are active — free AI exercises are not inserted');
+        return;
       }
-
-      setCurrentIdx(currentIdx + 1); speak(t('training.nextExercise'));
-    } else {
-      setWorkoutDone(true); speak(t('training.workoutComplete')); saveSession('completed');
+      // the trainee moved meanwhile → their choice wins; the late result is dropped
+      if (!navUnchangedSince(navRef.current, seqAtStart)) { console.info('[Adaptation] dropped — the trainee navigated meanwhile'); return; }
+      const sport = userProfile?.sport || 'fitness';
+      const sanitizedAdapt = sanitizePlan({ weeks: [{ days: [{ exercises: result.plan }] }] }, sport, userProfile?.age);
+      const cleanPlan = fitExercises(sanitizedAdapt.weeks[0].days[0].exercises || [],
+        availableEquipment(userProfile, { hasBall: typeof ballAnswer === 'boolean' ? ballAnswer : undefined })).exercises;
+      setExercises(prev => [...prev.slice(0, navRef.current.idx + 1), ...cleanPlan]);
+      if (result.reasoning) {
+        speakPriority(isHe ? `שיניתי את המשך התוכנית: ${result.reasoning}` : `Plan adapted: ${result.reasoning}`);
+      }
+    } catch (err) {
+      console.warn('[Adaptation] Failed:', err.message);
     }
   }
 
   function handlePrevExercise() {
-    if (currentIdx > 0) {
-      stopSpeech(); setPhase(PHASE.IDLE); setTimer(0); setFeedback(null);
-      exerciseStateRef.current = { _userProfile: userProfile }; setDisplayReps(0); setCurrentSet(1); setSetsPerformance([]); resetAllTracking();
-      setCurrentIdx(currentIdx - 1);
-    }
+    if (navRef.current.idx <= 0) return;
+    resetExerciseRun();
+    setCurrentIdx(navPrev(navRef.current, exercises.length));
   }
 
   function formatTime(s) {
@@ -3808,7 +3826,7 @@ export default function Training() {
                     key={item.key}
                     onClick={() => {
                       if (item.isWarmup || phase === PHASE.WARM_UP) return;
-                      stopSpeech(); setCurrentIdx(item.idx); setPhase(PHASE.IDLE); setTimer(0);
+                      stopSpeech(); goToExercise(item.idx); setPhase(PHASE.IDLE); setTimer(0);
                       exerciseStateRef.current = { _userProfile: userProfile }; setDisplayReps(0); setSetsPerformance([]); setCurrentSet(1); resetAllTracking();
                     }}
                     className={`flex-shrink-0 px-3 py-2 rounded-lg text-xs font-medium transition truncate max-w-[150px] ${
@@ -3967,7 +3985,7 @@ export default function Training() {
                   <button
                     key={i}
                     onClick={() => {
-                      stopSpeech(); setCurrentIdx(i); setPhase(PHASE.IDLE); setTimer(0);
+                      stopSpeech(); goToExercise(i); setPhase(PHASE.IDLE); setTimer(0);
                       exerciseStateRef.current = { _userProfile: userProfile }; setDisplayReps(0); setSetsPerformance([]); setCurrentSet(1); resetAllTracking();
                     }}
                     className={`flex-shrink-0 px-3 py-1.5 rounded-lg text-xs font-medium transition ${
@@ -4131,7 +4149,7 @@ export default function Training() {
                       key={item.key}
                       onClick={() => {
                         if (item.isWarmup || phase === PHASE.WARM_UP) return;
-                        stopSpeech(); setCurrentIdx(item.idx); setPhase(PHASE.IDLE); setTimer(0);
+                        stopSpeech(); goToExercise(item.idx); setPhase(PHASE.IDLE); setTimer(0);
                         exerciseStateRef.current = { _userProfile: userProfile }; setDisplayReps(0); setSetsPerformance([]); setCurrentSet(1); resetAllTracking();
                       }}
                       className={`text-start p-3 rounded-lg border transition ${
