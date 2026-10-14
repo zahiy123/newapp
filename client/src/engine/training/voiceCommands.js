@@ -6,8 +6,8 @@
 // heard in the coach's OWN speech (the phone's recognizer returns the text ~1 s after the audio,
 // after the old 0.9 s echo guard) — the app skipped by itself. So:
 //   • only the explicit phrase counts, in a FINAL result, as a short utterance;
-//   • the microphone is OFF while the coach speaks and for MIC_REOPEN_MS after it (useVoiceCommand),
-//     and nothing heard in a session that overlapped the coach's speech is accepted.
+//   • (2026-10-14) the microphone stays OPEN; a command is rejected only when the coach itself said
+//     "הבא" / "next" in the last ECHO_WINDOW_MS — the precise guard against its own echo.
 // ============================================================
 
 const NEXT = ['תרגיל הבא', 'התרגיל הבא', 'לתרגיל הבא', 'next exercise'];
@@ -21,9 +21,19 @@ export function isNextCommand(text) {
   return NEXT.some(p => ` ${n} `.includes(` ${p} `));
 }
 
-export const MIC_REOPEN_MS = 1500;           // the mic re-opens this long after the coach stops speaking
+export const MIC_REOPEN_MS = 1500;           // (legacy) the old mic re-open delay after the coach spoke
+export const ECHO_WINDOW_MS = 5000;          // a coach line with "הבא" this recent may be echoing back
 
-/** Accept a command only from a listening session that never overlapped the coach's speech. */
-export function acceptCommand({ coachSpeaking, sessionHeardCoach, isFinal = true }) {
-  return !coachSpeaking && !sessionHeardCoach && isFinal;
+/** The words of the command that could come back as an echo of the coach's own line. */
+export const COMMAND_ECHO_RE = /הבא|next/i;
+
+/**
+ * Accept a command (owner, 2026-10-14: "the voice command must work"): the mic stays OPEN through the
+ * whole workout (it used to close on every coach line + 1.5 s — while the coach counted every rep it
+ * was almost never open). A command is accepted when it is FINAL, and the coach did NOT say "הבא" /
+ * "next" in the last ECHO_WINDOW_MS (its own words can never move the trainee); everything else the
+ * coach says (counting, corrections) does not block the trainee's command.
+ */
+export function acceptCommand({ isFinal = true, coachSaidCommandWord = false }) {
+  return isFinal && !coachSaidCommandWord;
 }

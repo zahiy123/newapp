@@ -113,6 +113,19 @@ describe('the floor: the real soles, steady', () => {
 });
 
 describe('dribble: the ball rolls with the feet', () => {
+  it('a touch (and its green ring) ONLY on a real contact: the toe at the ball, the sole on the floor', () => {
+    const p = { ...pts, soleR: pts.floorY };
+    let st = { ...dribbleInit(p), x: 560 };
+    // the toe far from the ball → no touch even with a fast foot
+    st = dribbleStep({ ...st, x: 700 }, p, { R: { vx: 1.5, vy: 0, speed: 1.5 }, L: { vx: 0, vy: 0, speed: 0 } }, 16, 1000, frame);
+    expect(st.touches).toBe(0);
+    // the foot in the air (sole well above the floor) → no touch
+    st = dribbleStep({ ...dribbleInit(p), x: 560 }, { ...p, soleR: p.floorY - 0.2 * p.bodyPx }, { R: { vx: 1.5, vy: 0, speed: 1.5 }, L: { vx: 0, vy: 0, speed: 0 } }, 16, 2000, frame);
+    expect(st.touches).toBe(0);
+    // toe at the ball, sole down, a real push → a touch
+    st = dribbleStep({ ...dribbleInit(p), x: 560 }, p, { R: { vx: 1.5, vy: 0, speed: 1.5 }, L: { vx: 0, vy: 0, speed: 0 } }, 16, 3000, frame);
+    expect(st.touches).toBe(1);
+  });
   const pts = bodyPoints(stand(), map);
   const frame = { x0: 0, x1: 1000 };
   it('a foot touch pushes it the foot\'s way; friction stops it; it stays close to the body', () => {
@@ -130,11 +143,16 @@ describe('dribble: the ball rolls with the feet', () => {
     let st = dribbleInit(pts);
     const moving = { ...pts };
     for (let i = 0; i < 60; i++) {
-      moving.centerX = pts.centerX + i * 3;                    // walking right ~3 px / frame
+      // walking right ~3 px / frame: the body AND the feet move
+      moving.centerX = pts.centerX + i * 3;
+      moving.footL = { ...pts.footL, x: pts.footL.x + i * 3 };
+      moving.footR = { ...pts.footR, x: pts.footR.x + i * 3 };
       st = dribbleStep(st, moving, { R: { vx: 0, vy: 0, speed: 0 }, L: { vx: 0, vy: 0, speed: 0 } }, 16, i * 16, frame, 0.6);
     }
-    expect(st.x).toBeGreaterThan(moving.centerX);              // ahead, in the direction of movement
-    expect(st.x - moving.centerX).toBeLessThan(0.42 * pts.bodyPx);
+    // glued just in front of the LEADING (right) foot's toe, in the direction of movement
+    const r = 0.07 * pts.bodyPx;
+    expect(st.x).toBeGreaterThan(moving.footR.x);
+    expect(st.x - moving.footR.x).toBeLessThan(r * 1.6);
   });
   it('a forward tap (toward the camera, no sideways move) touches it too', () => {
     let st = { ...dribbleInit(pts), x: 560 };
@@ -204,5 +222,40 @@ describe('throw: held, released by a fast extension, back in the hands', () => {
   it('a slow move does not release it', () => {
     const st = throwStep(throwInit(), { x: 500, y: 500 }, { vx: 0.3, vy: 0, speed: 0.3 }, 0);
     expect(st.held).toBe(true);
+  });
+});
+
+import { createIncoming, incomingStep, incomingBallAt, atBall, INCOMING_ROLL_MS, INCOMING_FLY_MS, INCOMING_GAP_MS } from '../virtualBall';
+
+describe('REAL ball physics: it comes, WAITS, and moves only when the trainee acts (every sport)', () => {
+  const foot = { x: 500, y: 900 }, start = { x: 400, y: 1000 };
+  it('it rolls to the foot and then waits — for as long as it takes, never "missed" by a clock', () => {
+    let st = createIncoming(0);
+    let r = incomingStep(st, { now: INCOMING_ROLL_MS.kick + 1, kind: 'kick', contact: false, speed: 0, threshold: 1 });
+    expect(r.event).toBe('arrived');
+    st = r.st;
+    for (let t = 2000; t < 30000; t += 500) { r = incomingStep(st, { now: t, kind: 'kick', contact: false, speed: 0, threshold: 1 }); st = r.st; }
+    expect(st.phase).toBe('waiting');                         // 30 s later: still waiting at the foot
+    const b = incomingBallAt(st, 30000, foot, start, 800);
+    expect(b.x).toBe(500);
+    expect(b.y + b.r).toBeCloseTo(900, 6);                    // resting ON the floor at the foot
+  });
+  it('a fast foot that is NOT at the ball does not move it; a fast foot AT the ball kicks it away', () => {
+    let st = { ...createIncoming(0), phase: 'waiting', at: 0 };
+    let r = incomingStep(st, { now: 100, kind: 'kick', contact: false, speed: 3, threshold: 1 });
+    expect(r.st.phase).toBe('waiting');
+    r = incomingStep(st, { now: 100, kind: 'kick', contact: true, speed: 3, threshold: 1, moveDir: { x: 1, y: -1 } });
+    expect(r.event).toBe('hit');
+    const fly = incomingBallAt(r.st, 100 + INCOMING_FLY_MS / 2, foot, start, 800);
+    expect(fly.x).toBeGreaterThan(500);                        // along the foot's own movement
+    // after its flight and a short gap the next ball comes
+    st = incomingStep(r.st, { now: 100 + INCOMING_FLY_MS + 1, kind: 'kick', contact: false, speed: 0, threshold: 1 }).st;
+    st = incomingStep(st, { now: 100 + INCOMING_FLY_MS + INCOMING_GAP_MS + 2, kind: 'kick', contact: false, speed: 0, threshold: 1 }).st;
+    expect(st.phase).toBe('rolling');
+    expect(st.n).toBe(1);
+  });
+  it('contact = the body point at the ball', () => {
+    expect(atBall({ x: 510, y: 880 }, { x: 500, y: 870, r: 56 }, 'foot')).toBe(true);
+    expect(atBall({ x: 800, y: 880 }, { x: 500, y: 870, r: 56 }, 'foot')).toBe(false);
   });
 });

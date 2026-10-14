@@ -1,8 +1,8 @@
 // VirtualBall — the smart virtual ball for EVERY ball drill, in every sport (engine/virtualBall.js).
 // A trainee without a real ball trains every ball drill: the ball appears at their body in the
 // camera view and reacts to their live skeleton —
-//   incoming     comes to the foot / head / chest / hands on the beat; struck there = a HIT ("יפה!"),
-//                not met = a MISS ("פספסת") — a hits / balls score
+//   incoming     comes to the foot / head / chest / hands, WAITS there, and moves only when the trainee
+//                acts on it (kick / pass / head / catch / strike) — "יפה!", a hits / balls score
 //   dribble      rolls at the feet, every foot touch pushes it — a touches count
 //   juggle       bounces up from the foot on each flick, falls by gravity — touches / drops
 //   handDribble  bounces between the hand and the floor — a dribbles count
@@ -14,11 +14,11 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { frameTransform } from '../engine/ghostOverlay';
-import { ballCycle, ballOnScreen, windowOver, HIT_SPEED, BALL_TIMING } from '../engine/incomingBall';
+import { HIT_SPEED } from '../engine/incomingBall';
 import {
   bodyPoints, steadyFloor, targetPoint, pointVelocity, BALL_R, toDetection,
   dribbleInit, dribbleStep, juggleInit, juggleStep, handDribbleInit, handDribbleStep,
-  throwInit, throwStep, throwFlight,
+  throwInit, throwStep, throwFlight, createIncoming, incomingStep, incomingBallAt, atBall, INCOMING_FLY_MS,
 } from '../engine/virtualBall';
 
 const SAMPLE_MS = 160;                       // a body point's speed over this recent span
@@ -112,7 +112,7 @@ function drawText(ctx, text, x, y, size, color) {
 }
 
 const scoreText = (mode, s, isHe) => {
-  if (mode === 'incoming') return isHe ? `פגיעות בכדור: ${s.hits}/${s.balls}` : `Ball hits: ${s.hits}/${s.balls}`;
+  if (mode === 'incoming') return isHe ? `כדורים ששוחקו: ${s.hits}/${s.balls}` : `Balls played: ${s.hits}/${s.balls}`;
   if (mode === 'dribble') return isHe ? `נגיעות בכדור: ${s.touches}` : `Ball touches: ${s.touches}`;
   if (mode === 'juggle') return isHe ? `נגיעות: ${s.touches} · נפילות: ${s.drops}` : `Touches: ${s.touches} · drops: ${s.drops}`;
   if (mode === 'handDribble') return isHe ? `כדרורים: ${s.touches}` : `Dribbles: ${s.touches}`;
@@ -139,15 +139,12 @@ export default function VirtualBall({ mode = 'incoming', target = 'foot', kind =
   useEffect(() => {
     if (failed) return undefined;
     let raf;
-    const t0 = performance.now();
     let last = null;
     let anchor = null, start = null, bodyPx = null;        // smoothed screen targets
     const samples = {};                                   // body point → recent [{t,x,y}]
-    const results = new Map();                            // incoming ball n → { outcome, at }
-    let lastCueN = -1;
     let lastLm = null;
     let st = null, spin = 0, heldSince = 0, bothAt = -1e9;
-    let ground = null, feetAt = -1e9, touchFlashAt = -1e9;                      // the steady floor line; when the feet were last seen
+    let ground = null, feetAt = -1e9, touchFlashAt = -1e9, hitShownAt = -1e9;                      // the steady floor line; when the feet were last seen
     const track = (name, p, now) => {
       const a = samples[name] || (samples[name] = []);
       // a lost point → no speed across the gap (a jump back is not a fast move)
@@ -207,7 +204,10 @@ export default function VirtualBall({ mode = 'incoming', target = 'foot', kind =
               ? { x: cx + (cx - tT.x) * 0.9, y: map.box.y + map.box.h * 0.99 }
               : { x: cx + (cx - tT.x) * 0.9, y: Math.min(map.box.y + map.box.h * 0.97, tT.y + bodyPx * 0.3) };
             start = start ? { x: start.x + (sT.x - start.x) * 0.1, y: start.y + (sT.y - start.y) * 0.1 } : sT;
-            const speed = track('target', tp, now).speed;
+            const tv = track('target', tp, now);
+            const word = target === 'head' ? (isHe ? 'נגח!' : 'Head it!') : target === 'chest' ? (isHe ? 'עצור בחזה!' : 'Chest it!')
+              : target === 'hands' ? (isHe ? 'תפוס!' : 'Catch!') : target === 'hand' ? (isHe ? 'הכה!' : 'Hit!')
+              : kind === 'pass' ? (isHe ? 'מסור!' : 'Pass!') : (isHe ? 'בעט!' : 'Kick!');
             if (!live) {
               // the run-up: the ball rests at the kicking foot / is held in the hands / waits at the feet
               ball = isFoot ? { x: anchor.x, y: anchor.y - r, r, alpha: 1, shadowY: anchor.y }
@@ -215,38 +215,34 @@ export default function VirtualBall({ mode = 'incoming', target = 'foot', kind =
                 : { x: pts.centerX + r * 1.5, y: floorY - r, r, alpha: 1, shadowY: floorY };
               drawBall(ctx, ball, 0, look);
             } else {
-              const cyc = ballCycle(now - t0, kind);
-              let res = results.get(cyc.n);
-              if (!res) { res = { outcome: null, at: 0 }; results.set(cyc.n, res); results.delete(cyc.n - 3); }
-              if (!res.outcome && cyc.inWindow && speed >= (isFoot ? HIT_SPEED : MEET_SPEED)) {
-                res.outcome = 'hit'; res.at = cyc.sinceArrival;
+              // REAL ball physics (every sport): it comes to the trainee, WAITS in place, and moves only
+              // when the trainee acts on it (the body point AT the ball, moving fast) — never on a clock
+              if (!st) st = createIncoming(now);
+              const rScale = r / (BALL_R * bodyPx);
+              const before = incomingBallAt(st, now, anchor, start, bodyPx, { kind, onFloor: isFoot, rScale });
+              const contact = st.phase === 'waiting' && atBall(tp, before, target);
+              const step = incomingStep(st, { now, kind, contact, speed: tv.speed, threshold: isFoot ? HIT_SPEED : MEET_SPEED, moveDir: { x: tv.vx, y: tv.vy } });
+              st = step.st;
+              if (step.event === 'arrived') { beep(audioRef, 880); setScore(s => ({ ...s, balls: s.balls + 1 })); }
+              if (step.event === 'hit') {
                 beep(audioRef, 1180);
-                setScore(s => ({ ...s, hits: s.hits + 1, balls: s.balls + 1 }));
+                hitShownAt = now;
+                setScore(s => ({ ...s, hits: s.hits + 1 }));
                 onBallRef.current?.(true);
-              } else if (!res.outcome && windowOver(cyc, kind)) {
-                res.outcome = 'miss';
-                setScore(s => ({ ...s, balls: s.balls + 1 }));
-                onBallRef.current?.(false);
               }
-              ball = ballOnScreen(cyc, anchor, start, bodyPx, res.outcome, kind, res.at);
+              ball = incomingBallAt(st, now, anchor, start, bodyPx, { kind, onFloor: isFoot, rScale });
               if (ball && !isFoot) ball = { ...ball, shadowY: floorY };
-              if (ball) drawBall(ctx, ball, cyc.u * 9 + Math.max(0, cyc.sinceArrival) / 80, look);
-              if (cyc.inWindow && !res.outcome) {
-                if (cyc.n !== lastCueN) { lastCueN = cyc.n; beep(audioRef, 880); }
+              if (ball) drawBall(ctx, ball, st.phase === 'rolling' ? (now - st.at) / 90 : st.phase === 'flying' ? (now - st.at) / 60 : 0, look);
+              if (st.phase === 'waiting') {
+                // waiting for the trainee: the cue at the ball until they act
                 ctx.strokeStyle = 'rgba(250, 204, 21, 0.9)';
                 ctx.lineWidth = Math.max(3, bodyPx * 0.012);
-                ctx.beginPath(); ctx.arc(anchor.x, anchor.y - (isFoot ? bodyPx * 0.07 : 0), bodyPx * 0.12, 0, Math.PI * 2); ctx.stroke();
-                const word = target === 'head' ? (isHe ? 'נגח!' : 'Head it!') : target === 'chest' ? (isHe ? 'עצור בחזה!' : 'Chest it!')
-                  : target === 'hands' ? (isHe ? 'תפוס!' : 'Catch!') : target === 'hand' ? (isHe ? 'הכה!' : 'Hit!')
-                  : kind === 'pass' ? (isHe ? 'מסור!' : 'Pass!') : (isHe ? 'בעט!' : 'Kick!');
+                ctx.beginPath(); ctx.arc(ball.x, ball.y, ball.r * 1.7, 0, Math.PI * 2); ctx.stroke();
                 const at = cueAt(anchor);
                 drawText(ctx, word, at.x, at.y, size, '#facc15');
-              } else if (res.outcome === 'hit' && cyc.sinceArrival - res.at < BALL_TIMING[kind].outMs) {
+              } else if (now - hitShownAt < INCOMING_FLY_MS) {
                 const at = cueAt(anchor);
                 drawText(ctx, isHe ? 'יפה!' : 'Nice!', at.x, at.y, size, '#4ade80');
-              } else if (res.outcome === 'miss' && cyc.phase === 'after') {
-                const at = cueAt(anchor);
-                drawText(ctx, isHe ? 'פספסת — תזמן לפי הכדור' : 'Missed — time it with the ball', at.x, at.y, size * 0.8, '#f87171');
               }
             }
           } else if (mode === 'dribble') {

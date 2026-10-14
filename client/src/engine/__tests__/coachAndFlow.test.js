@@ -99,11 +99,12 @@ describe('Manual moves only — "next exercise" by tap or an EXPLICIT voice requ
     }
   });
 
-  it('never accepts what was heard while (or right after) the coach spoke', () => {
-    expect(acceptCommand({ coachSpeaking: true, sessionHeardCoach: false })).toBe(false);
-    expect(acceptCommand({ coachSpeaking: false, sessionHeardCoach: true })).toBe(false);
-    expect(acceptCommand({ coachSpeaking: false, sessionHeardCoach: false, isFinal: false })).toBe(false);
-    expect(acceptCommand({ coachSpeaking: false, sessionHeardCoach: false, isFinal: true })).toBe(true);
+  it('the coach can never move the trainee with its own words; the command of the trainee always works', () => {
+    // the coach said "הבא" in the last seconds → anything heard could be its echo → rejected
+    expect(acceptCommand({ isFinal: true, coachSaidCommandWord: true })).toBe(false);
+    expect(acceptCommand({ isFinal: false, coachSaidCommandWord: false })).toBe(false);
+    // the coach counted / corrected (no "הבא") → the trainee's explicit command is accepted
+    expect(acceptCommand({ isFinal: true, coachSaidCommandWord: false })).toBe(true);
   });
 });
 

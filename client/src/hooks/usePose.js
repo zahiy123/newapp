@@ -9,7 +9,8 @@ import { createLandmarkFilter, filterLandmarks } from '../engine/landmarkFilter'
 // detection fast on a phone (no dropped frames / skipped movements)
 const DETECT_MAX_SIDE = 640;
 // the skeleton drawn on the camera: only confident points inside the picture (a small edge margin)
-const SKELETON_MIN_VIS = 0.5;
+const SKELETON_MIN_VIS = 0.65;
+const MAX_BONE_TORSOS = 1.3;   // no bone (thigh / shin / arm) is longer — a longer line is a guess
 const SKELETON_EDGE = 0.02;
 
 // Key landmark indices
@@ -33,13 +34,26 @@ function midpoint(a, b) {
 }
 
 /**
- * The part of the skeleton that is drawn: confident points INSIDE the picture (not hidden), and
- * the connections whose two ends are both drawn.
+ * The part of the skeleton that is drawn — ONLY what the camera really sees (owner IRON RULE):
+ *   a point: confident (visibility — and presence, when the browser gives it — ≥ SKELETON_MIN_VIS)
+ *            AND inside the picture
+ *   a line:  both ends drawn AND anatomically possible — no bone is longer than ~1.3 torsos; a longer
+ *            line is a guessed joint by definition (the "huge lines across the screen")
+ * @param {number} [aspect] - the frame's width / height (lengths in real proportions)
  */
-export function drawableSkeleton(lm, connections, hidden = new Set()) {
-  const ok = (lm || []).map((pt, i) => !!pt && !hidden.has(i) && (pt.visibility ?? 1) >= SKELETON_MIN_VIS
+export function drawableSkeleton(lm, connections, hidden = new Set(), aspect = 1) {
+  const conf = (pt) => Math.min(pt.visibility ?? 1, pt.presence ?? 1);
+  const ok = (lm || []).map((pt, i) => !!pt && !hidden.has(i) && conf(pt) >= SKELETON_MIN_VIS
     && pt.x >= -SKELETON_EDGE && pt.x <= 1 + SKELETON_EDGE && pt.y >= -SKELETON_EDGE && pt.y <= 1 + SKELETON_EDGE);
-  return { points: (lm || []).filter((_, i) => ok[i]), connections: (connections || []).filter(c => ok[c.start] && ok[c.end]) };
+  const len = (a, b) => Math.hypot((a.x - b.x) * aspect, a.y - b.y);
+  const mid = (i, j) => (ok[i] && ok[j] ? { x: (lm[i].x + lm[j].x) / 2, y: (lm[i].y + lm[j].y) / 2 } : ok[i] ? lm[i] : ok[j] ? lm[j] : null);
+  const sh = mid(11, 12), hp = mid(23, 24);
+  const torso = sh && hp ? len(sh, hp) : null;
+  const maxBone = torso ? torso * MAX_BONE_TORSOS : null;
+  return {
+    points: (lm || []).filter((_, i) => ok[i]),
+    connections: (connections || []).filter(c => ok[c.start] && ok[c.end] && (maxBone == null || len(lm[c.start], lm[c.end]) <= maxBone)),
+  };
 }
 
 // Returns Set of landmark indices to hide for the amputated limb
@@ -193,7 +207,7 @@ export function usePose(canvasRef, beforeDrawRef, amputationProfile, enabled = t
       // picture; a line only between two such points. MediaPipe GUESSES the joints outside the
       // frame (a close-up / a cut body) — drawn, they made long green / cyan lines across the screen
       // that were not on the body (owner field report, 2026-10-14)
-      const sk = drawableSkeleton(lm, PoseLandmarker.POSE_CONNECTIONS, getAmputatedIndices(amputationProfile));
+      const sk = drawableSkeleton(lm, PoseLandmarker.POSE_CONNECTIONS, getAmputatedIndices(amputationProfile), videoEl.videoWidth / videoEl.videoHeight);
       drawingUtils.drawLandmarks(sk.points, { radius: 4, color: '#00FF00' });
       drawingUtils.drawConnectors(lm, sk.connections, { color: '#00FFFF', lineWidth: 2 });
     }

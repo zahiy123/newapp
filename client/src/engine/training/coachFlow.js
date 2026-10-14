@@ -105,7 +105,7 @@ const START_POSITION = {
 // Positioning acknowledgements are FACTUAL, never praise (owner: praise only for a verified correct
 // execution) — "I can see you", not "great"
 export const READY_DRIVE = {
-  first: { he: 'עכשיו אני רואה אותך — יאללה, מתחילים!', en: "Now I can see you — let's start!" },
+  first: { he: 'עכשיו אני רואה אותך — מתחילים.', en: "Now I can see you — let's start!" },
   again: { he: 'רואה אותך שוב — ממשיכים.', en: 'I can see you again — back at it.' },
   start: { he: 'אתה בעמדה — מתחילים!', en: "You're in position — let's start!" },
 };
@@ -118,7 +118,9 @@ export function driveLine(k, name, isHe) {
 
 /** A positioning instruction with drive in front of it. */
 export function withDrive(instruction, k, name, isHe) {
-  return `${driveLine(k, name, isHe)} ${instruction}`;
+  // PROFESSIONAL ONLY (owner, 2026-10-14): the precise, measured instruction — no generic energy
+  // line ("קום ותן בראש", "כל שנייה חשובה") in front of it
+  return instruction;
 }
 
 /** "Get into the start position" with drive. */
@@ -169,7 +171,7 @@ export function splitStartText(lp, isHe, mode = 'stand') {
 export function splitSwitchText(lp, isHe, mode = 'stand') {
   const { second } = splitLegOrder(lp);
   return isHe
-    ? `החלף רגל! עכשיו ${action(mode, true)}${legLabel(second, lp, true)}. יאללה!`
+    ? `החלף רגל! עכשיו ${action(mode, true)}${legLabel(second, lp, true)}.`
     : `Switch legs! Now ${action(mode, false)}${legLabel(second, lp, false)}. Let's go!`;
 }
 
@@ -193,7 +195,7 @@ export function legSetStartText(lp, isHe, mode, set) {
   if (isHe) {
     return half === 1
       ? `סט מלא: ${action(mode, true)}${leg}. בסט הבא מחליפים רגל.`
-      : `החלפנו רגל! סט מלא: ${action(mode, true)}${leg}. יאללה!`;
+      : `החלפנו רגל! סט מלא: ${action(mode, true)}${leg}.`;
   }
   return half === 1
     ? `A full set: ${action(mode, false)}${leg}. Next set we switch legs.`

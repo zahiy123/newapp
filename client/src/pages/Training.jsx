@@ -31,6 +31,8 @@ import { useVoiceCommand } from '../hooks/useVoiceCommand';
 import { READY_DRIVE, withDrive, splitLegOrder, legLabel, splitStartText, splitSwitchText, splitWorkingSide, setLegHalf, legSetStartText, legSetNextText, isStrikeMode } from '../engine/training/coachFlow';
 import { needsEquipmentCheck } from '../engine/training/equipmentNeed';
 import { createExerciseNav, navGo, navNext, navPrev, navUnchangedSince } from '../engine/training/exerciseNav';
+import { makeEvidenceGatedAnalyzer, makePresenceGatedAnalyzer, bodyInPicture } from '../engine/training/repEvidence';
+import { createMotivation, motivationLine } from '../engine/training/motivation';
 import { exerciseNeedsSetup } from '../engine/training/exerciseSetup';
 import DailyCheckIn from '../components/DailyCheckIn';
 import { applyCheckIn } from '../engine/training/dailyCheckIn';
@@ -133,6 +135,9 @@ const LOCATION_ICONS = { home: '\uD83C\uDFE0', yard: '\uD83C\uDF33', field: '\u2
 
 // The exercise's analyzer: by the movement itself (catalog exercises carry it), never by a long display name
 // the analyzer of an exercise; a seated trainee (a wheelchair) gets the drill's seated twin
+// a phone / tablet (one microphone listener at a time in its browser)
+const IS_MOBILE_DEVICE = typeof navigator !== 'undefined'
+  && (navigator.userAgentData?.mobile === true || /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent || ''));
 const analyzerFor = (ex, seated = false) => getAnalyzer(ex?.analyzerName || ex?.name, { seated });
 
 export default function Training() {
@@ -227,7 +232,13 @@ export default function Training() {
     if (['shooting', 'wheelchairShooting'].includes(cueKey))                 return `בצע זריקה ${repNum}`;
     if (['running', 'amputeeSprint', 'footwork'].includes(cueKey))           return `צא לסיבוב ${repNum}`;
     if (['dribbling', 'handDribble', 'wheelchairDribble'].includes(cueKey))  return `בצע כדרור ${repNum}`;
-    return `רד לחזרה ${repNum}`;
+    // precise by the movement (a pass is not "go down"): only lowering movements say "down"
+    if (['pass', 'crutchPass', 'chestPass', 'bouncePass', 'overheadPass', 'wheelchairPass'].includes(cueKey)) return `בצע מסירה ${repNum}`;
+    if (['stroke', 'volley', 'serve', 'smash', 'wheelchairStroke', 'wheelchairServe'].includes(cueKey)) return `בצע מכה ${repNum}`;
+    if (['headers', 'crutchHeader'].includes(cueKey))                        return `בצע נגיחה ${repNum}`;
+    if (['jump', 'jumpSquat', 'balanceHops'].includes(cueKey))               return `בצע קפיצה ${repNum}`;
+    if (['squat', 'miniSquat', 'lunge', 'push', 'pushUp', 'dip', 'deadlift', 'wallSit', 'bridge'].includes(cueKey)) return `רד לחזרה ${repNum}`;
+    return `חזרה ${repNum}`;
   }
 
   // Track active poll intervals for cleanup on unmount
@@ -394,6 +405,7 @@ export default function Training() {
   useEffect(() => { navRef.current.idx = currentIdx; if (window.__GHOST_DEBUG) window.__trainingIdx = currentIdx; }, [currentIdx]);
   const exerciseStateRef = useRef({});
   const [displayReps, setDisplayReps] = useState(0);
+  useEffect(() => { if (window.__GHOST_DEBUG) window.__trainingReps = displayReps; }, [displayReps]);
   const [feedback, setFeedback] = useState(null);
   const [aiAnalyzing, setAiAnalyzing] = useState(false);
   const [phase, _setPhaseRaw] = useState(PHASE.IDLE);
@@ -764,7 +776,9 @@ export default function Training() {
   }, [user?.uid, isHe]);
   // Layer 4 — the trainee's audible effort (the mic, on the device only), while the exercise runs
   const voiceEffortRef = useVoiceProsody({
-    enabled: FEATURES.VOICE_PROSODY && FEATURES.COACH_BRAIN && (phase === PHASE.EXERCISING || phase === PHASE.CALIBRATING),
+    // a phone's browser gives the mic to ONE listener: there the voice command ("תרגיל הבא") has it;
+    // the effort listening runs where both can share the mic (desktop browsers)
+    enabled: FEATURES.VOICE_PROSODY && FEATURES.COACH_BRAIN && !IS_MOBILE_DEVICE && (phase === PHASE.EXERCISING || phase === PHASE.CALIBRATING),
   });
   const execution = useExpertExecution({
     // From the briefing on: the trainee may start working while the coach still explains —
@@ -790,6 +804,8 @@ export default function Training() {
   const executionInViewRef = execution.inViewRef;
   // Exact counting source for the analyzer wrapper (expert rep exercises only)
   const profileRepsRef = useRef({ active: false, countRef: null });
+  const repEvidenceRef = useRef(null);
+  const motivationRef = useRef(createMotivation());   // the motivation lines' dose (engine/training/motivation)             // the kinematic evidence of the current rep (anti-ghost counting)
   profileRepsRef.current = {
     active: execution.active && execution.profile?.precision === 'expert' && (execution.profile?.kind === 'reps' || execution.profile?.kind === 'strike'),
     countRef: execution.repCountRef,
@@ -902,10 +918,16 @@ export default function Training() {
       const { analyze, type, cueKey, ballAware } = analyzerFor(currentExercise, !!limbProfile?.wheelchair);
       // Timed catalog exercises (intervals / holds): the target is seconds of REAL work, not reps.
       // Rep exercises: the count comes from the exact profile rep detector when there is one.
-      const isWorking = () => !workingSourceRef.current?.active || workingSourceRef.current.workingRef.current;
+      // ANTI-GHOST COUNTING (IRON RULE): seconds only while the body is REALLY in the picture (and
+      // working, when the expert module measures it); an older analyzer's rep only with kinematic
+      // evidence — a real joint range, confidently seen, over a real duration (engine/training/repEvidence)
+      const isWorking = () => bodyInPicture(poseLandmarksRef.current)
+        && (!workingSourceRef.current?.active || workingSourceRef.current.workingRef.current);
+      repEvidenceRef.current = null;
+      const gated = type === 'hold' ? makePresenceGatedAnalyzer(analyze) : makeEvidenceGatedAnalyzer(analyze, repEvidenceRef);
       analyzerRef.current = currentExercise.timed
         ? { analyze: makeTimedAnalyzer(analyze, isWorking), type: 'hold', cueKey, ballAware }
-        : { analyze: withRepOffset(makeProfileRepAnalyzer(analyze, profileRepsRef), earlyOffsetRef), type, cueKey, ballAware };
+        : { analyze: withRepOffset(makeProfileRepAnalyzer(gated, profileRepsRef), earlyOffsetRef), type, cueKey, ballAware };
       earlyOffsetRef.current = 0;
       exerciseStateRef.current = { _userProfile: userProfile };
       setDisplayReps(0);
@@ -1025,12 +1047,14 @@ export default function Training() {
     if (warmUpIdx < warmUpExercises.length - 1) setWarmUpIdx(warmUpIdx + 1);
     else finishWarmUp();
   };
-  const voiceNextAction = phase === PHASE.WARM_UP && warmUpAwaitNext ? 'warmup'
-    : phase === PHASE.EXERCISE_DONE ? 'exercise' : null;
+  // "תרגיל הבא" by voice works through the WHOLE workout (owner, 2026-10-14) — the warm-up, the
+  // briefing, the exercise, the rest, the end of the exercise — always the trainee's explicit command
+  const voiceNextAction = phase === PHASE.WARM_UP ? 'warmup'
+    : [PHASE.BRIEFING, PHASE.CHECKING_EQUIPMENT, PHASE.CALIBRATING, PHASE.EXERCISING, PHASE.PAUSED, PHASE.RESTING, PHASE.EXERCISE_DONE].includes(phase)
+      || (phase === PHASE.IDLE && warmUpDone && exercises.length > 0) ? 'exercise' : null;
   const voiceNext = useVoiceCommand({
     active: !!voiceNextAction,
     lang: isHe ? 'he-IL' : 'en-US',
-    isSpeaking,
     onNext: () => {
       // a move by voice is always shown, so it is never mistaken for an automatic skip
       setFeedback({ type: 'info', text: isHe ? '🎤 שמעתי "תרגיל הבא" — עוברים' : '🎤 Heard "next exercise" — moving on' });
@@ -1163,6 +1187,7 @@ export default function Training() {
         exerciseStartTimeRef.current = Date.now();
         lastNudgeTimeRef.current = 0;
         speakSetStart(currentSet, totalSets);
+        motivateLater(currentSet === 1 ? 'start' : 'set');
 
         // Start command coaching for rep-based exercises
         if (analyzerRef.current?.type !== 'hold') {
@@ -1514,7 +1539,7 @@ export default function Training() {
               const nextRep = fb.count + 1;
               const targetReps2 = parseInt(currentExercise?.reps) || 10;
               const fallbackCmd = nextRep <= targetReps2
-                ? `. עכשיו ${getCommandText(nextRep, analyzerRef.current?.cueKey, analyzerRef.current?.type) || `רד לחזרה ${nextRep}`}`
+                ? `. עכשיו ${getCommandText(nextRep, analyzerRef.current?.cueKey, analyzerRef.current?.type) || `חזרה ${nextRep}`}`
                 : '';
               speakPriority(`המשך ככה${fallbackCmd}`, { rate: 1.25 });
               if (nextRep <= targetReps2) {
@@ -2742,11 +2767,21 @@ export default function Training() {
     }
   }
 
+  // Warm, human encouragement in a SMART DOSE (engine/training/motivation): only at natural moments,
+  // at most one line every 45 s, never one of the last 4 again; calm instead of hype when the coach
+  // brain reads frustration / fatigue; said only when the coach is silent (never over another line)
+  function motivateLater(moment) {
+    const read = FEATURES.COACH_BRAIN && execution.brainRef?.current ? brainSummary(execution.brainRef.current, voiceEffortRef.current)?.state : null;
+    const strained = !!read && (read.frustration >= 0.4 || read.fatigue >= 0.5);
+    const line = motivationLine(motivationRef.current, { now: Date.now(), moment, name: playerName, he: isHe, strained });
+    if (line) setTimeout(() => { if (!isSpeaking()) speakIfIdle(line, { rate: 1.05 }); }, 1800);
+  }
+
   function startNextSet() {
     setCurrentSet(prev => {
       const nextSet = prev + 1;
       // Speak inside updater to avoid stale closure on currentSet
-      setTimeout(() => speakSetStart(nextSet, totalSets), 100);
+      setTimeout(() => { speakSetStart(nextSet, totalSets); motivateLater('resume'); }, 100);
       return nextSet;
     });
     const prevCal = exerciseStateRef.current._calibration;
@@ -3040,6 +3075,16 @@ export default function Training() {
           />
         )}
         {(phase === PHASE.EXERCISING || phase === PHASE.CALIBRATING) && <ExecutionHud execution={execution} isHe={isHe} />}
+        {/* the voice command's REAL state — the trainee sees whether "תרגיל הבא" is heard, and why not */}
+        {voiceNextAction && voiceNext.status !== 'off' && (
+          <div className={`absolute bottom-24 left-2 z-[18] pointer-events-none rounded-full text-white text-[11px] font-bold px-2.5 py-1 ${voiceNext.status === 'listening' ? 'bg-emerald-700/80' : 'bg-gray-800/80'}`} dir={isHe ? 'rtl' : 'ltr'}>
+            {'🎤'} {voiceNext.status === 'listening' ? (isHe ? 'אמור "תרגיל הבא"' : 'Say "next exercise"')
+              : voiceNext.status === 'denied' ? (isHe ? 'אין הרשאת מיקרופון — אפשר בהגדרות הדפדפן' : 'No mic permission — allow it in the browser settings')
+              : voiceNext.status === 'unsupported' ? (isHe ? 'הדפדפן לא תומך בפקודה קולית — השתמש בכפתור' : 'No voice commands in this browser — use the button')
+              : voiceNext.status === 'error' ? (isHe ? 'הפקודה הקולית לא זמינה כרגע — השתמש בכפתור' : 'Voice command unavailable — use the button')
+              : (isHe ? 'מפעיל מיקרופון…' : 'Starting the mic…')}
+          </div>
+        )}
         {/* Today's goal, said and shown the moment the workout starts */}
         {goalBanner && (
           <div className="absolute inset-x-0 top-1/3 z-[45] flex justify-center px-4 pointer-events-none">

@@ -4,7 +4,7 @@
 // PURE. A trainee without a real ball still trains every ball drill: a virtual ball appears in the
 // camera view at their body and reacts to their skeleton. One model, by drill type:
 //
-//   incoming   the ball comes TO a body point on the beat and is struck / met there
+//   incoming   the ball comes TO a body point, WAITS there, and moves only when struck / met there
 //              (kick, pass, first touch → the foot; header → the head; chest control → the chest;
 //               goalkeeper catch → the hands; racket strokes / serve → the racket hand)
 //   dribble    the ball rolls at the feet: every foot touch pushes it, it keeps close to the body
@@ -193,6 +193,9 @@ export const BALL_R = 0.07;                  // ball radius vs. the body height 
 const TOUCH_SPEED = 0.55;                    // a foot moving at least this fast (bodies/s) touches the ball
 const DRIBBLE_REACH = 0.42;                  // the ball stays within this (× body height) of the body center
 const FRICTION = 2.2;                        // rolling friction (1/s)
+const CONTACT_X = 1.25;                      // a touch = the toe within this × the ball radius of its center
+const CONTACT_SOLE = 0.05;                   // …with the sole within this × body height of the floor
+const FOOT_REACH = 2.6;                      // a dribbled ball stays within this × radius of the nearest foot
 
 /** A new dribble ball, resting in front of the feet. */
 export function dribbleInit(pts) {
@@ -218,10 +221,13 @@ export function dribbleStep(st, pts, footVel, dtMs, nowMs, frame, bodyVx = 0) {
   const dt = Math.min(0.1, Math.max(0, dtMs / 1000));
   let { x, vx, touches, lastTouchAt } = st;
   let touched = false;
-  for (const [f, v] of [[pts.footL, footVel?.L], [pts.footR, footVel?.R]]) {
+  const feet = [[pts.footL, footVel?.L, pts.soleL], [pts.footR, footVel?.R, pts.soleR]];
+  for (const [f, v, sole] of feet) {
     if (!f || !v) continue;
-    const near = Math.abs(f.x - x) < r * 1.9 && (pts.floorY == null || f.y > pts.floorY - B * 0.12);
-    if (!near || nowMs - lastTouchAt <= 180) continue;
+    // a REAL contact on the floor: the toe at the ball (within a ball's width) and the sole down
+    const atBall = Math.abs(f.x - x) < r * CONTACT_X;
+    const down = pts.floorY == null || (sole ?? f.y) >= pts.floorY - B * CONTACT_SOLE;
+    if (!atBall || !down || nowMs - lastTouchAt <= 180) continue;
     const side = Math.abs(v.vx) >= TOUCH_SPEED && Math.sign(v.vx) === Math.sign(x - f.x || v.vx);
     const tap = !side && (v.speed ?? Math.abs(v.vx)) >= TOUCH_SPEED * 1.4;     // a forward tap (toward the camera)
     if (side || tap) {
@@ -231,14 +237,24 @@ export function dribbleStep(st, pts, footVel, dtMs, nowMs, frame, bodyVx = 0) {
   }
   vx *= Math.exp(-FRICTION * dt);
   x += vx * dt;
-  // carried with the trainee: moving sideways → the ball goes with them, a step ahead of the feet
-  if (Math.abs(bodyVx) > 0.15 && nowMs - lastTouchAt > 150) {
-    const carryX = pts.centerX + Math.sign(bodyVx) * B * 0.16;
-    x += (carryX - x) * (1 - Math.exp(-dt / 0.12));
+  const toes = [pts.footL, pts.footR].filter(Boolean).map(f => f.x);
+  // carried with the trainee (a slalom / a carry): glued just in front of the LEADING foot's toe
+  if (Math.abs(bodyVx) > 0.15 && toes.length && nowMs - lastTouchAt > 150) {
+    const dir = Math.sign(bodyVx);
+    const lead = dir > 0 ? Math.max(...toes) : Math.min(...toes);
+    const carryX = lead + dir * r * 1.1;
+    x += (carryX - x) * (1 - Math.exp(-dt / 0.08));
+    vx = bodyVx * B;
   }
-  // kept close to the body
-  const reach = DRIBBLE_REACH * B, off = x - pts.centerX;
-  if (Math.abs(off) > reach) { x = pts.centerX + Math.sign(off) * reach; vx = -vx * 0.3; }
+  // within reach of the nearest foot (never far from the feet)
+  if (toes.length) {
+    const near = toes.reduce((a, t) => (Math.abs(t - x) < Math.abs(a - x) ? t : a), toes[0]);
+    const reach = r * FOOT_REACH;
+    if (Math.abs(x - near) > reach) { x = near + Math.sign(x - near) * reach; vx = -vx * 0.3; }
+  } else {
+    const off = x - pts.centerX, reach = DRIBBLE_REACH * B;
+    if (Math.abs(off) > reach) { x = pts.centerX + Math.sign(off) * reach; vx = -vx * 0.3; }
+  }
   if (frame) {
     if (x < frame.x0 + r) { x = frame.x0 + r; vx = Math.abs(vx) * 0.5; }
     if (x > frame.x1 - r) { x = frame.x1 - r; vx = -Math.abs(vx) * 0.5; }
@@ -382,4 +398,85 @@ export function ballLook(sport = '') {
  */
 export function realBallInPlay(hits, nowMs) {
   return (hits || []).filter(t => nowMs - t <= 2000).length >= 4;
+}
+
+// ---------------- incoming balls: they WAIT for the trainee (owner, 2026-10-14) ----------------
+// In every sport the ball behaves like a real one: it rolls / comes to the trainee, WAITS in place,
+// and moves ONLY at the moment the trainee acts (kicks / passes / heads / catches / strikes it) —
+// then the next ball comes. Never on a clock, never "missed" by timing.
+
+export const INCOMING_ROLL_MS = Object.freeze({ kick: 1800, pass: 2100 });
+export const INCOMING_FLY_MS = 650;
+export const INCOMING_GAP_MS = 700;
+const CONTACT_REACH = { foot: 2.2, head: 2.6, chest: 2.6, hand: 2.6, hands: 2.6 };
+
+/** A new incoming-ball cycle (the first ball starts rolling now). */
+export function createIncoming(now) {
+  return { phase: 'rolling', at: now, n: 0, arrived: 0, hits: 0, flyDir: { x: 0, y: -1 } };
+}
+
+/**
+ * One step of the incoming ball.
+ * @param {{ now, kind, contact: boolean, speed: number, threshold: number, moveDir?: {x,y} }} c
+ *   contact = the body point is AT the ball; speed = its speed (bodies/s); moveDir = its direction
+ * @returns {{ st, event: null | 'arrived' | 'hit' }}
+ */
+export function incomingStep(st, c) {
+  if (!st) return { st, event: null };
+  const roll = INCOMING_ROLL_MS[c.kind] || INCOMING_ROLL_MS.kick;
+  const since = c.now - st.at;
+  if (st.phase === 'rolling' && since >= roll) {
+    return { st: { ...st, phase: 'waiting', at: c.now, arrived: st.arrived + 1 }, event: 'arrived' };
+  }
+  if (st.phase === 'waiting' && c.contact && c.speed >= c.threshold) {
+    const d = c.moveDir && Math.hypot(c.moveDir.x, c.moveDir.y) > 1e-6 ? c.moveDir : { x: 0, y: -1 };
+    const n = Math.hypot(d.x, d.y) || 1;
+    return { st: { ...st, phase: 'flying', at: c.now, hits: st.hits + 1, flyDir: { x: d.x / n, y: d.y / n } }, event: 'hit' };
+  }
+  if (st.phase === 'flying' && since >= INCOMING_FLY_MS) return { st: { ...st, phase: 'gap', at: c.now }, event: null };
+  if (st.phase === 'gap' && since >= INCOMING_GAP_MS) return { st: { ...st, phase: 'rolling', at: c.now, n: st.n + 1 }, event: null };
+  return { st, event: null };
+}
+
+/** Is the body point at the ball (within reach for that target)? */
+export function atBall(point, ball, target = 'foot') {
+  if (!point || !ball) return false;
+  return Math.hypot(point.x - ball.x, point.y - ball.y) <= ball.r * (CONTACT_REACH[target] || 2.4);
+}
+
+/**
+ * The incoming ball on the screen (view px), or null in the gap.
+ * @param {{x,y}} anchor - where the ball waits (the foot on the floor / the hands / the head / the chest)
+ * @param {{x,y}} start - where it comes from (near the camera)
+ * @param {boolean} onFloor - a foot ball rolls on the floor (else it comes through the air)
+ */
+export function incomingBallAt(st, now, anchor, start, bodyPx, { kind = 'kick', onFloor = true, rScale = 1 } = {}) {
+  if (!st || !anchor || !start || !(bodyPx > 0)) return null;
+  const rRest = BALL_R * bodyPx * rScale, rStart = rRest * 2.2;
+  const since = now - st.at;
+  if (st.phase === 'rolling') {
+    const u = Math.min(1, since / (INCOMING_ROLL_MS[kind] || INCOMING_ROLL_MS.kick));
+    const e = 1 - (1 - u) ** 1.6;                       // slowing down as it arrives
+    const r = rStart + (rRest - rStart) * e;
+    const x = start.x + (anchor.x - start.x) * e;
+    const ground = start.y + (anchor.y - start.y) * e;
+    const arc = onFloor ? 0 : Math.sin(Math.PI * e) * bodyPx * 0.25;   // a pass through the air arcs
+    return { x, y: (onFloor ? ground - r : ground) - arc, r, alpha: Math.min(1, u * 5), shadowY: onFloor ? ground : null };
+  }
+  if (st.phase === 'waiting') {
+    // at rest where it arrived; an air ball (head / chest / hands) floats gently, as held up by a partner
+    const bob = onFloor ? 0 : Math.sin(since / 260) * bodyPx * 0.006;
+    return { x: anchor.x, y: (onFloor ? anchor.y - rRest : anchor.y) + bob, r: rRest, alpha: 1, shadowY: onFloor ? anchor.y : null };
+  }
+  if (st.phase === 'flying') {
+    // away along the trainee's own movement (a kick lifts it, a pass keeps it low), growing / fading
+    const v = Math.min(1, since / INCOMING_FLY_MS);
+    const d = st.flyDir || { x: 0, y: -1 };
+    const lift = kind === 'pass' || !onFloor ? 0 : Math.sin(Math.PI * Math.min(1, v * 1.1)) * bodyPx * 0.35;
+    const dist = bodyPx * 0.9 * v;
+    const r = rRest * (1 + 1.2 * v);
+    const baseY = onFloor ? anchor.y - rRest : anchor.y;
+    return { x: anchor.x + d.x * dist, y: baseY + d.y * dist * 0.4 - lift, r, alpha: 1 - v * v, shadowY: onFloor ? anchor.y + d.y * dist * 0.4 : null };
+  }
+  return null;
 }

@@ -16,7 +16,7 @@
 // coach says EXACTLY what to fix ("step back so I see you head to toe", "tilt the camera down",
 // "move a little to the left", "turn side-on") — immediately, then every few seconds — and
 // nothing counts. Once positioned right: "Great, now I can see you — let's start!".
-// Voice (critical-only policy): positioning (with DRIVE — energy words, rotated, with the name),
+// Voice (critical-only policy): positioning (the precise measured instruction only — no generic drive),
 // DANGER alerts, and a technique error that repeated COACH_AFTER times in a row is explained
 // ONCE per exercise (correction + why).
 // Start gate (coachFlow): startReadyRef opens only when positioned + measured reliably + in the
@@ -39,6 +39,7 @@ import {
   createStartGate, updateStartGate, isStartPosition, isValidRep, updateWork, withDrive, startPositionPrompt, READY_DRIVE,
 } from '../../engine/training/coachFlow';
 import { createClipRecorder, recordFrame } from '../../engine/validation/clipRecorder';
+import { createRepEvidence, evidenceFrame, evidenceOk, evidenceAccept } from '../../engine/training/repEvidence';
 import { createCoachBrain, brainFrame, brainAttempt, brainOfferCorrection, brainDecide, brainPolicyToSave } from '../../engine/coachBrain/brain';
 
 // The coach brain's learned correction styles, per trainee, on this device
@@ -154,6 +155,9 @@ export function useExpertExecution({
     let readySince = null; let announcedReady = false; let everReady = false; let flashUntil = 0;
     const recorder = recordClips ? createClipRecorder(profile) : null;
     const brain = brainOnRef.current ? createCoachBrain({ profile, exerciseName, savedPolicy: loadPolicy() }) : null;
+    // KINETIC COUNTING (IRON RULE): every count also needs the movement's kinetic evidence in space
+    // (range out-and-back + velocity + the end point's trajectory + one flowing movement)
+    const kinetic = createRepEvidence();
     brainRef.current = brain;
     setIssue(null); setAccuracy(null); setCadence(null); setUnsure(null); setSetup(null); setReadyFlash(null);
 
@@ -165,6 +169,7 @@ export function useExpertExecution({
         inViewRef.current = r.inView;
         if (recorder) recordFrame(recorder, lm, r, now);
         if (brain) brainFrame(brain, lm, now);
+        evidenceFrame(kinetic, lm, now);
 
         // ---- Start gate: positioned + reliable + in the START POSITION, held ----
         const inStart = r.inView && isStartPosition(profile, r.metrics);
@@ -180,9 +185,12 @@ export function useExpertExecution({
             if (brain && (ev.type === 'rep' || ev.type === 'strike')) {
               brainAttempt(brain, ev, { now, accuracy: r.accuracy, errorIds: (r.issues || []).map(i => i.id) });
             }
-            if (countsReps && profile.kind === 'reps' && isValidRep(ev)) { repCountRef.current += 1; earlyRef.current = true; }
-            if (countsReps && profile.kind === 'strike' && ev.type === 'strike' && r.quality?.confident !== false) {
-              repCountRef.current += 1; strikeCountRef.current += 1; earlyRef.current = true;
+            // a rep counts only when it was measured RELIABLY (anti-ghost counting) — like a strike
+            if (countsReps && profile.kind === 'reps' && isValidRep(ev) && r.quality?.confident !== false && evidenceOk(kinetic, now)) {
+              evidenceAccept(kinetic, now); repCountRef.current += 1; earlyRef.current = true;
+            }
+            if (countsReps && profile.kind === 'strike' && ev.type === 'strike' && r.quality?.confident !== false && evidenceOk(kinetic, now, { strike: true })) {
+              evidenceAccept(kinetic, now); repCountRef.current += 1; strikeCountRef.current += 1; earlyRef.current = true;
             }
           }
           if (profile.kind === 'cyclic' && workingRef.current) earlyRef.current = true;

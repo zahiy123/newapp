@@ -18,6 +18,20 @@ export function isSpeechOpen() { return speechOpen; }
 // waits in the queue and plays right after it (field test: the warm-up's first line cut the goal)
 let holdUntil = 0;
 export function holdSpeech(ms) { holdUntil = Date.now() + ms; }
+// The coach's recent lines (the voice command must never act on the coach's OWN words — the phone's
+// recognizer returns their text ~1 s after the audio)
+const coachLines = [];
+function noteCoachLine(text) {
+  const now = Date.now();
+  coachLines.push({ text: String(text || ''), at: now });
+  while (coachLines.length && now - coachLines[0].at > 20000) coachLines.shift();
+}
+/** Did the coach say something matching `re` within the last `ms` (the line still playing counts)? */
+export function coachSaidRecently(re, ms = 5000) {
+  const now = Date.now();
+  const playing = typeof window !== 'undefined' && !!window.speechSynthesis?.speaking;
+  return coachLines.some((l, i) => re.test(l.text) && (now - l.at <= ms || (playing && i === coachLines.length - 1)));
+}
 export function getCoachVoice() { return coachVoice; }
 export function setCoachVoice(gender) { coachVoice = gender === 'male' || gender === 'female' ? gender : null; }
 /** The coach's chosen / best device voice (explicit — from getVoices()), and whether it is surely of its gender. */
@@ -150,6 +164,7 @@ export function useSpeech(lang = 'he-IL', age) {
     }
     lastSpokenTextRef.current = text;
     lastSpokenTimeRef.current = now;
+    noteCoachLine(text);
 
     // Resume before every speak (Android/iOS requirement)
     try { window.speechSynthesis.resume(); } catch {}
@@ -432,8 +447,8 @@ export function useSpeech(lang = 'he-IL', age) {
 
     // Part 1: Energetic intro with exercise name
     const intro = isHe
-      ? `יאללה ${name}! עכשיו נעשה ${exerciseName}!`
-      : `Let's go ${name}! Now we're doing ${exerciseName}!`;
+      ? `${name}, התרגיל הבא: ${exerciseName}.`
+      : `${name}, next exercise: ${exerciseName}.`;
 
     // Part 2: How to do it (description) — chunked
     const desc = description
@@ -537,8 +552,8 @@ export function useSpeech(lang = 'he-IL', age) {
         : `Set ${setNum} of ${totalSets}. Take a deep breath and begin.`;
     } else {
       text = isHe
-        ? `סט ${setNum} מתוך ${totalSets}. יאללה!`
-        : `Set ${setNum} of ${totalSets}. Let's go!`;
+        ? `סט ${setNum} מתוך ${totalSets}.`
+        : `Set ${setNum} of ${totalSets}.`;
     }
     speak(text, { rate: 1.1 });
   }, [lang, speak, isHe, lifeStage]);
@@ -548,7 +563,7 @@ export function useSpeech(lang = 'he-IL', age) {
     const name = playerName || (isHe ? 'אלוף' : 'champ');
     const props = locationProps?.markers || (isHe ? 'הציוד' : 'the equipment');
     const text = isHe
-      ? `${name}, השעון רץ! סדר את ${props} ויאללה!`
+      ? `${name}, הזמן רץ — סדר את ${props} והתחל.`
       : `${name}, the clock is ticking! Position your ${props} and let's go!`;
     speak(text, { rate: 1.3, pitch: 1.1 });
   }, [lang, speak, isHe]);
@@ -622,24 +637,18 @@ export function useSpeech(lang = 'he-IL', age) {
     const name = playerName || (isHe ? 'אלוף' : 'champ');
     const equipment = locationProps?.markers || (isHe ? 'הציוד' : 'the equipment');
 
-    // Drive like a real sports coach; the equipment line only when the exercise uses equipment
+    // PROFESSIONAL ONLY (owner, 2026-10-14): said when NO movement is measured — what is seen + the
+    // exercise's own instruction; no generic drive lines
+    const how = exerciseDesc || '';
     const phrasesHe = [
-      `יאללה ${name}, קום ותן בראש!`,
-      `${name}, תגדיל את טווח התנועה — אני רוצה לראות עבודה אמיתית!`,
-      `${name}, אני מחכה לך — בוא נעלה הילוך!`,
-      locationProps ? `${name}, סדר את ${equipment} ויאללה לעבודה! ${exerciseDesc || ''}` : `${name}, ${exerciseDesc || 'תסתכל על הצללית ותתחיל לעבוד'} — יאללה!`,
-      `קדימה ${name}, תראה לי שאתה רעב!`,
-      `${name}, כל שנייה חשובה — בוא בוא בוא!`,
-      `${name}, נשימה עמוקה ויאללה — אני עוקב אחריך!`,
+      `${name}, אני לא מזהה תנועה. ${how || 'התחל את החזרה הראשונה כמו הצללית.'}`,
+      `${name}, עדיין אין חזרה נמדדת. ${how || 'בצע את התנועה בטווח מלא, כמו הצללית.'}`,
+      locationProps ? `${name}, סדר את ${equipment} והתחל. ${how}` : `${name}, אני מחכה לחזרה הראשונה. ${how || 'עקוב אחרי הצללית.'}`,
     ];
     const phrasesEn = [
-      `Come on ${name}, let's go all out!`,
-      `${name}, bigger range — I want to see real work!`,
-      `${name}, I'm waiting for you — let's step it up!`,
-      locationProps ? `${name}, set up your ${equipment} and get to work! ${exerciseDesc || ''}` : `${name}, ${exerciseDesc || 'watch the Ghost and get to work'} — let's go!`,
-      `Come on ${name}, show me you want it!`,
-      `${name}, every second counts — come on!`,
-      `${name}, deep breath and go — I'm watching you!`,
+      `${name}, I don't detect movement. ${how || 'Start the first rep like the Ghost.'}`,
+      `${name}, no rep measured yet. ${how || 'Do the full range, like the Ghost.'}`,
+      locationProps ? `${name}, set up your ${equipment} and start. ${how}` : `${name}, waiting for your first rep. ${how || 'Follow the Ghost.'}`,
     ];
 
     const phrases = isHe ? phrasesHe : phrasesEn;
@@ -664,8 +673,8 @@ export function useSpeech(lang = 'he-IL', age) {
       ? `${name}, אולי לא ברור לך איך להתחיל? בוא נסביר מהר.`
       : `${name}, maybe you're not sure how to start? Let me explain quickly.`;
     const howTo = locationProps
-      ? (isHe ? `${desc} סדר את ${equipment}. ${setup}. יאללה, עכשיו!` : `${desc} Set up your ${equipment}. ${setup}. Now let's go!`)
-      : (isHe ? `${desc} יאללה, עכשיו!` : `${desc} Now let's go!`);
+      ? (isHe ? `${desc} סדר את ${equipment}. ${setup}.` : `${desc} Set up your ${equipment}. ${setup}.`)
+      : (isHe ? `${desc}` : `${desc}`);
 
     // Chunk the howTo for stability
     const chunks = splitToChunks(howTo);
@@ -691,8 +700,8 @@ export function useSpeech(lang = 'he-IL', age) {
     const name = playerName || (isHe ? 'אלוף' : 'champ');
     const desc = description || '';
     const text = isHe
-      ? `${name}, בוא נתחיל ב${exerciseName}! ${desc}. יאללה, עקוב אחריי!`
-      : `${name}, let's start ${exerciseName}! ${desc}. Come on, follow me!`;
+      ? `${name}, ${exerciseName}. ${desc}. עקוב אחרי הצללית.`
+      : `${name}, ${exerciseName}. ${desc}. Follow the Ghost.`;
     speakPriority(text, { rate: 1.15 });
   }, [isHe, speakPriority]);
 
@@ -729,8 +738,8 @@ export function useSpeech(lang = 'he-IL', age) {
     const name = playerName || (isHe ? 'אלוף' : 'champ');
     const desc = description || '';
     const text = isHe
-      ? `${name}, אולי לא ברור? בוא נסביר שוב. ${exerciseName}: ${desc}. יאללה, עכשיו!`
-      : `${name}, maybe it's not clear? Let me explain again. ${exerciseName}: ${desc}. Now let's go!`;
+      ? `${name}, עוד לא נמדדה חזרה — הסבר נוסף. ${exerciseName}: ${desc}.`
+      : `${name}, no rep measured yet — once more. ${exerciseName}: ${desc}.`;
     speakPriority(text, { rate: 1.2 });
   }, [isHe, speakPriority]);
 
@@ -754,8 +763,8 @@ export function useSpeech(lang = 'he-IL', age) {
         ? `${name}, סובב יותר! תסובב את הכתפיים!`
         : `${name}, twist more! Rotate your shoulders!`,
       notMoving: isHe
-        ? `${name}, אני לא רואה תנועה! יאללה, זוז!`
-        : `${name}, I don't see movement! Come on, move!`,
+        ? `${name}, אני לא מזהה תנועה — התחל את החזרה.`
+        : `${name}, I don't detect movement — start the rep.`,
       kneeToChest: isHe
         ? `${name}, הרם את הברך יותר קרוב לחזה!`
         : `${name}, bring your knee closer to your chest!`,
@@ -939,8 +948,8 @@ export function useSpeech(lang = 'he-IL', age) {
         : `Everything looks safe. ${equipment.map(e => e.suggestion).join('. ')}`;
     } else {
       text = isHe
-        ? 'הסביבה נראית בטוחה. יאללה נתחיל!'
-        : 'The environment looks safe. Let\'s go!';
+        ? 'הסביבה נראית בטוחה.'
+        : 'The environment looks safe.';
     }
     speakPriority(text, { rate: 1.0 });
   }, [isHe, speakPriority]);
@@ -1037,7 +1046,7 @@ export function useSpeech(lang = 'he-IL', age) {
   const speakResumeWelcome = useCallback((playerName) => {
     const name = playerName || (isHe ? 'אלוף' : 'champ');
     const msg = isHe
-      ? `${name}! חזרת! יאללה נמשיך מאיפה שעצרנו`
+      ? `${name}, ממשיכים מהתרגיל שבו עצרנו.`
       : `${name}! Welcome back! Let's pick up where we left off`;
     speakPriority(msg, { rate: 1.2 });
   }, [isHe, speakPriority]);

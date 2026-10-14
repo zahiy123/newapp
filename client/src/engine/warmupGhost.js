@@ -916,7 +916,7 @@ export function drawGhostOverlay(ctx, spec, lp, nowMs, origin, scale, alpha = 0.
 // away from the body. Absent limbs are not drawn; a below-knee prosthesis is drawn as a pylon.
 // ============================================================
 
-const MIRROR_VIS = 0.5;
+const MIRROR_VIS = 0.65;            // the same confidence as the drawn skeleton (no guessed joints)
 const LIMBS = [
   ['left_leg', 'thigh', 23, 25], ['left_leg', 'shin', 25, 27], ['right_leg', 'thigh', 24, 26], ['right_leg', 'shin', 26, 28],
   ['left_arm', 'upperArm', 11, 13], ['left_arm', 'forearm', 13, 15], ['right_arm', 'upperArm', 12, 14], ['right_arm', 'forearm', 14, 16],
@@ -962,6 +962,8 @@ export function mirrorPoseFromSkeleton(landmarks, map, lp = {}) {
     }
     if (state === 'absent' || lp?.[limb]?.trainable === false) continue;
     if (!seen(a) || !seen(b)) continue;
+    // anatomically possible only: no limb segment is longer than ~1.3 torsos (a longer one = a guessed joint)
+    if (Math.hypot(at(a).x - at(b).x, at(a).y - at(b).y) > torsoPx * 1.3) continue;
     const isLegShin = part === 'shin';
     const dashed = isLegShin && state === 'prosthetic';
     const from = a === 23 ? lh : a === 24 ? rh : at(a);

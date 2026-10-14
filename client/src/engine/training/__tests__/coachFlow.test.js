@@ -113,7 +113,8 @@ describe('Drive voice', () => {
     const b = driveLine(1, 'זאהי', true);
     expect(a).not.toBe(b);
     expect(a).toContain('זאהי');
-    expect(withDrive('התרחק קצת מהמצלמה', 2, 'זאהי', true)).toMatch(/התרחק קצת מהמצלמה$/);
+    // professional only: the precise instruction, no generic energy line in front of it
+    expect(withDrive('התרחק קצת מהמצלמה', 2, 'זאהי', true)).toBe('התרחק קצת מהמצלמה');
     expect(startPositionPrompt(3, null, false)).toContain('start position');
   });
 });

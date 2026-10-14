@@ -13,6 +13,15 @@ describe('the skeleton shows only what the camera really sees', () => {
     expect(sk.points.length).toBe(3);                           // 11, 13, 23
     expect(sk.connections).toEqual([{ start: 11, end: 13 }]);
   });
+  it('an anatomically impossible line (a guessed joint) is never drawn', () => {
+    const lm = Array.from({ length: 33 }, () => ({ x: 0.5, y: 0.5, visibility: 0.1 }));
+    const set = (i, x, y) => { lm[i] = { x, y, visibility: 0.95 }; };
+    set(11, 0.45, 0.3); set(12, 0.55, 0.3); set(23, 0.46, 0.5); set(24, 0.54, 0.5);   // torso 0.2
+    set(13, 0.42, 0.42);                                     // a real upper arm (0.12)
+    set(15, 0.05, 0.98);                                     // a "forearm" across the whole screen
+    const sk = drawableSkeleton(lm, [{ start: 11, end: 13 }, { start: 13, end: 15 }]);
+    expect(sk.connections).toEqual([{ start: 11, end: 13 }]);
+  });
   it('the amputated side stays hidden', () => {
     const lm = Array.from({ length: 33 }, () => ({ x: 0.5, y: 0.5, visibility: 1 }));
     expect(drawableSkeleton(lm, conn, new Set([25, 27])).connections).toEqual([{ start: 11, end: 13 }, { start: 13, end: 15 }]);
