@@ -128,7 +128,9 @@ const scoreText = (mode, s, isHe) => {
  * @param {boolean} live - the exercise runs (counting, incoming balls on the beat)
  * @param {{ current }} [ballOutRef] - receives the ball like a detection ({ detected, x, y, w, h })
  */
-export default function VirtualBall({ mode = 'incoming', target = 'foot', kind = 'kick', side = 'right', look = 'football', landmarksRef, videoRef, isHe, live = true, ballOutRef = null }) {
+export default function VirtualBall({ mode = 'incoming', target = 'foot', kind = 'kick', side = 'right', look = 'football', landmarksRef, videoRef, isHe, live = true, ballOutRef = null, onBall = null }) {
+  const onBallRef = useRef(onBall);
+  onBallRef.current = onBall;
   const canvasRef = useRef(null);
   const audioRef = useRef(null);
   const [failed, setFailed] = useState(false);
@@ -145,7 +147,7 @@ export default function VirtualBall({ mode = 'incoming', target = 'foot', kind =
     let lastCueN = -1;
     let lastLm = null;
     let st = null, spin = 0, heldSince = 0, bothAt = -1e9;
-    let ground = null, feetAt = -1e9;                      // the steady floor line; when the feet were last seen
+    let ground = null, feetAt = -1e9, touchFlashAt = -1e9;                      // the steady floor line; when the feet were last seen
     const track = (name, p, now) => {
       const a = samples[name] || (samples[name] = []);
       // a lost point → no speed across the gap (a jump back is not a fast move)
@@ -220,9 +222,11 @@ export default function VirtualBall({ mode = 'incoming', target = 'foot', kind =
                 res.outcome = 'hit'; res.at = cyc.sinceArrival;
                 beep(audioRef, 1180);
                 setScore(s => ({ ...s, hits: s.hits + 1, balls: s.balls + 1 }));
+                onBallRef.current?.(true);
               } else if (!res.outcome && windowOver(cyc, kind)) {
                 res.outcome = 'miss';
                 setScore(s => ({ ...s, balls: s.balls + 1 }));
+                onBallRef.current?.(false);
               }
               ball = ballOnScreen(cyc, anchor, start, bodyPx, res.outcome, kind, res.at);
               if (ball && !isFoot) ball = { ...ball, shadowY: floorY };
@@ -247,13 +251,22 @@ export default function VirtualBall({ mode = 'incoming', target = 'foot', kind =
             }
           } else if (mode === 'dribble') {
             const vL = track('footL', pts.footL, now), vR = track('footR', pts.footR, now);
+            const vBody = track('center', { x: pts.centerX, y: 0 }, now);       // the trainee moving sideways
             if (!st) st = dribbleInit(pts);
             const prevTouches = st.touches;
-            st = dribbleStep(st, { ...pts, bodyPx, floorY }, { L: vL, R: vR }, dt, now, { x0: map.box.x, x1: map.box.x + map.box.w });
+            st = dribbleStep(st, { ...pts, bodyPx, floorY }, { L: vL, R: vR }, dt, now, { x0: map.box.x, x1: map.box.x + map.box.w }, vBody.vx);
+            if (st.touched) touchFlashAt = now;
             if (st.touches > prevTouches) { beep(audioRef, 660, 0.08); if (live) setScore(s => ({ ...s, touches: s.touches + 1 })); }
             spin += (st.vx * dt / 1000) / Math.max(1, r);
             ball = { x: st.x, y: floorY + r * 0.2 - r, r, alpha: 1, shadowY: floorY + r * 0.2 };
             drawBall(ctx, ball, spin, look);
+            // the touch is SEEN: a short ring around the ball (the movement reacted to the ball)
+            const since = now - touchFlashAt;
+            if (since < 260) {
+              ctx.strokeStyle = `rgba(74, 222, 128, ${1 - since / 260})`;
+              ctx.lineWidth = Math.max(2, r * 0.18);
+              ctx.beginPath(); ctx.arc(ball.x, ball.y, r * (1.15 + since / 600), 0, Math.PI * 2); ctx.stroke();
+            }
           } else if (mode === 'juggle') {
             const foot = targetPoint(pts, 'foot', side);
             const fv = track('foot', foot, now);

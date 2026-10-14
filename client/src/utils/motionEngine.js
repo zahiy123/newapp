@@ -103,11 +103,24 @@ export class LandmarkStabilizer {
 
 // ─── Layer 2: Biomechanics Engine ──────────────────────────────────
 
-/** 3D Euclidean distance between two landmarks */
+// ─── The DEVICE CAMERA's geometry (owner, 2026-10-14: the analysis must match what the camera
+// really sees) ───
+// MediaPipe landmarks are normalized: x by the frame WIDTH, y by its HEIGHT (z ≈ the x scale). On a
+// non-square camera (a phone in portrait is 960×1280) a unit of x is NOT a unit of y — every angle
+// computed in normalized units was distorted (a real 45° measured as ~53° in portrait). All the
+// angle / distance math works in REAL proportions: x and z scaled by the frame's width / height.
+let FRAME_ASPECT = 1;
+/** The camera frame's width / height — set from the live video on every detection. */
+export function setFrameAspect(aspect) {
+  if (Number.isFinite(aspect) && aspect > 0.2 && aspect < 5) FRAME_ASPECT = aspect;
+}
+export function frameAspect() { return FRAME_ASPECT; }
+
+/** 3D Euclidean distance between two landmarks, in REAL proportions (frame-height units) */
 function dist3D(p1, p2) {
-  const dx = p1.x - p2.x;
+  const dx = (p1.x - p2.x) * FRAME_ASPECT;
   const dy = p1.y - p2.y;
-  const dz = (p1.z || 0) - (p2.z || 0);
+  const dz = ((p1.z || 0) - (p2.z || 0)) * FRAME_ASPECT;
   return Math.sqrt(dx * dx + dy * dy + dz * dz);
 }
 

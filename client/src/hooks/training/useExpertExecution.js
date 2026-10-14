@@ -39,6 +39,12 @@ import {
   createStartGate, updateStartGate, isStartPosition, isValidRep, updateWork, withDrive, startPositionPrompt, READY_DRIVE,
 } from '../../engine/training/coachFlow';
 import { createClipRecorder, recordFrame } from '../../engine/validation/clipRecorder';
+import { createCoachBrain, brainFrame, brainAttempt, brainOfferCorrection, brainDecide, brainPolicyToSave } from '../../engine/coachBrain/brain';
+
+// The coach brain's learned correction styles, per trainee, on this device
+const POLICY_KEY = 'coachPolicy.v1';
+const loadPolicy = () => { try { return JSON.parse(localStorage.getItem(POLICY_KEY) || 'null'); } catch { return null; } };
+const savePolicy = (p) => { try { localStorage.setItem(POLICY_KEY, JSON.stringify(p)); } catch { /* storage blocked */ } };
 
 const TICK_MS = 50;
 const SETUP_SETTLE_MS = 500;               // a positioning fix is spoken once it is stable this long
@@ -68,6 +74,7 @@ export function buildExecutionProfile(cueKey, exerciseName, limbProfile, sportCo
 export function useExpertExecution({
   enabled, counting = false, quiet = false, cueKey, exerciseName, catalogId = null, sportContexts, limbProfile, landmarksRef,
   isHe, playerName = '', speakPriority, recordClips = false, onClips,
+  brainEnabled = false, effortRef = null,
 }) {
   const [failed, setFailed] = useState(false);
   const contextsKey = (sportContexts || []).join('+');
@@ -90,6 +97,11 @@ export function useExpertExecution({
   const nameRef = useRef(playerName);
   nameRef.current = playerName;
   const statsRef = useRef({ dangers: 0, errors: {} });
+  const brainRef = useRef(null);             // the coach brain of this exercise (Layers 1–4)
+  const brainOnRef = useRef(brainEnabled);
+  brainOnRef.current = brainEnabled;
+  const effortSrcRef = useRef(effortRef);
+  effortSrcRef.current = effortRef;
   const [missingPart, setMissingPart] = useState(null);
   const [issue, setIssue] = useState(null);
   const [accuracy, setAccuracy] = useState(null);
@@ -141,6 +153,8 @@ export function useExpertExecution({
     let setupCode = null; let setupSince = 0; let spokenCode = null; let spokenAt = 0;
     let readySince = null; let announcedReady = false; let everReady = false; let flashUntil = 0;
     const recorder = recordClips ? createClipRecorder(profile) : null;
+    const brain = brainOnRef.current ? createCoachBrain({ profile, exerciseName, savedPolicy: loadPolicy() }) : null;
+    brainRef.current = brain;
     setIssue(null); setAccuracy(null); setCadence(null); setUnsure(null); setSetup(null); setReadyFlash(null);
 
     const id = setInterval(() => {
@@ -150,6 +164,7 @@ export function useExpertExecution({
         const r = updateExecution(tracker, lm, now);
         inViewRef.current = r.inView;
         if (recorder) recordFrame(recorder, lm, r, now);
+        if (brain) brainFrame(brain, lm, now);
 
         // ---- Start gate: positioned + reliable + in the START POSITION, held ----
         const inStart = r.inView && isStartPosition(profile, r.metrics);
@@ -161,6 +176,10 @@ export function useExpertExecution({
         wasCounting = countingRef.current;
         if (countingRef.current && r.inView) {
           for (const ev of r.events) {
+            // the coach brain learns from every real attempt and the errors seen in it
+            if (brain && (ev.type === 'rep' || ev.type === 'strike')) {
+              brainAttempt(brain, ev, { now, accuracy: r.accuracy, errorIds: (r.issues || []).map(i => i.id) });
+            }
             if (countsReps && profile.kind === 'reps' && isValidRep(ev)) { repCountRef.current += 1; earlyRef.current = true; }
             if (countsReps && profile.kind === 'strike' && ev.type === 'strike' && r.quality?.confident !== false) {
               repCountRef.current += 1; strikeCountRef.current += 1; earlyRef.current = true;
@@ -233,9 +252,26 @@ export function useExpertExecution({
           statsRef.current.dangers += 1;
           speakAlwaysRef.current?.(isHeRef.current ? r.danger.msg.he : r.danger.msg.en, { rate: 1.1 });
         }
-        // A repeated technique error: the coach corrects AND explains it, once per exercise
+        // A repeated technique error: the coach corrects AND explains it, once per exercise. With the
+        // coach brain: it is held for the right moment (between attempts) and said in the style that
+        // works for this trainee; the brain also forecasts errors, reads intent and adapts to the state
         const coach = r.coaching?.[0];
-        if (coach && !r.danger && now - lastVoice > COACH_VOICE_GAP_MS) {
+        if (brain) {
+          if (coach && !r.danger) brainOfferCorrection(brain, coach);
+          if (!quietRef.current && !r.danger) {
+            const say = brainDecide(brain, {
+              now, sinceVoiceMs: now - lastVoice, coachSpeaking: !!window.speechSynthesis?.speaking,
+              effort: effortSrcRef.current?.current ?? null, he,
+            });
+            if (say) {
+              lastVoice = now;
+              if (say.kind === 'correction') statsRef.current.coached.push(coach?.id || say.kind);
+              speakRef.current?.(say.text, { rate: say.rate });
+            }
+          }
+          const learned = brainPolicyToSave(brain);
+          if (learned) savePolicy(learned);
+        } else if (coach && !r.danger && now - lastVoice > COACH_VOICE_GAP_MS) {
           lastVoice = now;
           statsRef.current.coached.push(coach.id);
           const text = `${he ? coach.msg.he : coach.msg.en}. ${coach.why ? (he ? coach.why.he : coach.why.en) : ''}`;
@@ -257,12 +293,12 @@ export function useExpertExecution({
       // Validation mode: hand the set's clips over for labelling
       if (recorder?.clips.length) onClipsRef.current?.(recorder.clips, profile);
     };
-  }, [active, profile, limbProfile, landmarksRef, recordClips]);
+  }, [active, profile, limbProfile, landmarksRef, recordClips, exerciseName]);
 
   const ghostSpec = useMemo(() => (active && profile?.ghost ? { profile } : null), [active, profile]);
 
   return {
-    active, profile, inViewRef, startReadyRef, repCountRef, workingRef, earlyRef, strikeCountRef,
+    active, profile, inViewRef, startReadyRef, repCountRef, workingRef, earlyRef, strikeCountRef, brainRef,
     missingPart, setup, readyFlash, startPrompt, issue, accuracy, cadence, unsure, ghostSpec, statsRef,
   };
 }

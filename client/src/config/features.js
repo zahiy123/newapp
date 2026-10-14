@@ -17,4 +17,11 @@ export const FEATURES = Object.freeze({
   // coherent goal-based sessions: the AI decides the week's structure / day focus, each day is
   // filled from the catalog. Off → the AI exercises as before (equipment-fitted).
   CATALOG_PLANS: true,
+  // The COACH BRAIN (owner, 2026-10-14): Behavioral AI (fatigue / frustration → pace, rest, mental
+  // cues), movement-intent recognition + error forecasting, expert-seeded correction policy that
+  // learns per trainee (RLEF). Off → the expert module coaches exactly as before.
+  COACH_BRAIN: true,
+  // Voice prosody: the trainee's audible effort from the microphone (on the device only, nothing
+  // recorded / sent) feeds the coach brain. Off → the brain works without the effort signal.
+  VOICE_PROSODY: true,
 });

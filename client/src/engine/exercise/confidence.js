@@ -11,6 +11,7 @@
 // ============================================================
 
 import { P, torsoLength } from './kinematics.js';
+import { frameAspect } from '../../utils/motionEngine.js';
 
 const FRONT_RATIO = 0.5;      // shoulder width / torso length ≥ this → facing the camera
 const SIDE_RATIO = 0.28;      // ≤ this → side-on
@@ -22,7 +23,7 @@ export function detectView(landmarks) {
   const l = landmarks?.[P.LEFT_SHOULDER], r = landmarks?.[P.RIGHT_SHOULDER];
   const t = torsoLength(landmarks);
   if (!l || !r || !t) return null;
-  const ratio = Math.abs(l.x - r.x) / t;
+  const ratio = Math.abs(l.x - r.x) * frameAspect() / t;   // real proportions
   if (ratio >= FRONT_RATIO) return 'front';
   if (ratio <= SIDE_RATIO) return 'side';
   return 'oblique';

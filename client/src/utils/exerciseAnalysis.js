@@ -25,7 +25,7 @@ import {
   analyzeRehabSLR, analyzeRehabSeatedKneeFlex, analyzeRehabMiniSquat,
   analyzeRehabReach, analyzeRehabWeightShift, analyzeRehabSitToStand
 } from './rehabAnalyzers';
-import { angleCosine } from './motionEngine';
+import { angleCosine, frameAspect } from './motionEngine';
 
 // Key landmark indices
 const LM = {
@@ -234,7 +234,7 @@ function getBodyTiltDeg(landmarks) {
   const hipMidX = (lHip.x + (rHip?.visibility > 0.3 ? rHip.x : lHip.x)) / 2;
   const hipMidY = (lHip.y + (rHip?.visibility > 0.3 ? rHip.y : lHip.y)) / 2;
 
-  const dx = Math.abs(hipMidX - shoulderMidX);
+  const dx = Math.abs(hipMidX - shoulderMidX) * frameAspect();     // real proportions (the camera's aspect)
   const dy = Math.abs(hipMidY - shoulderMidY);
 
   // atan2(vertical, horizontal) → 90° when vertical, 0° when horizontal
@@ -4339,10 +4339,31 @@ export function listAnalyzerCueKeys() {
   return [...new Set(ANALYZER_MAP.map(e => e.cueKey))];
 }
 
-export function getAnalyzer(exerciseName) {
+// Wheelchair-specific entries are matched FIRST: 'פורהנד כיסא' / 'מסירה כיסא גלגלים' also contain the
+// standing drill's keyword ('פורהנד' / 'מסירה'), which used to win — a seated trainee got a standing analyzer
+const isWheelchairEntry = (e) => e.keywords.some(k => /כיסא|wheelchair|^wc /.test(k));
+const ANALYZER_ORDER = [...ANALYZER_MAP.filter(isWheelchairEntry), ...ANALYZER_MAP.filter(e => !isWheelchairEntry(e))];
+
+// A seated trainee (a wheelchair) doing a drill named the standing way ('פורהנד מהכיסא', 'זריקה לסל')
+// gets the drill's SEATED twin analyzer
+const SEATED_TWIN = {
+  stroke: 'wheelchairStroke', volley: 'wheelchairStroke', serve: 'wheelchairServe', smash: 'wcSmash',
+  shooting: 'wheelchairShooting', layup: 'wheelchairShooting', hookShot: 'wheelchairShooting',
+  chestPass: 'wheelchairPass', overheadPass: 'wheelchairPass', bouncePass: 'wcBouncePass', pass: 'wheelchairPass',
+  handDribble: 'wheelchairDribble', crossover: 'wheelchairDribble', dribbling: 'wheelchairDribble',
+};
+
+/**
+ * @param {string} exerciseName
+ * @param {{ seated?: boolean }} [opts] - the trainee trains seated (a wheelchair): standing drills map to their seated twin
+ */
+export function getAnalyzer(exerciseName, opts = {}) {
   const name = (exerciseName || '').toLowerCase();
-  for (const entry of ANALYZER_MAP) {
+  for (let entry of ANALYZER_ORDER) {
     if (entry.keywords.some(kw => name.includes(kw))) {
+      if (opts.seated && entry.orientation !== O.SITTING && SEATED_TWIN[entry.cueKey]) {
+        entry = ANALYZER_ORDER.find(e => e.cueKey === SEATED_TWIN[entry.cueKey] && e.orientation === O.SITTING) || entry;
+      }
       const ballAware = entry.type === 'form'; // sport drills can use ball data
       return { analyze: entry.analyze, type: entry.type, cueKey: entry.cueKey, ballAware, orientation: entry.orientation || O.ANY, peakTrigger: entry.peakTrigger || null };
     }

@@ -3,6 +3,18 @@ import { getAgeExerciseFilter } from './ageAdaptive';
 const PLAN_KEY = 'training_plan';
 const PROGRESS_KEY = 'training_progress';
 
+// A SHORT keyword (≤ 3 letters, e.g. 'סל') matches only as a whole word (a one-letter Hebrew prefix
+// allowed: 'לסל') — as a substring it removed real drills ('סלאלום' contains 'סל'). Longer keywords
+// keep the substring match (it catches the inflected forms).
+const escapeRe = (w) => w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+export function keywordIn(text, kw) {
+  const t = String(text || '').toLowerCase();
+  const k = String(kw || '').toLowerCase();
+  if (!k) return false;
+  if ([...k].length > 3) return t.includes(k);
+  return new RegExp('(^|[^\\p{L}\\p{N}])[והבלמשכ]?' + escapeRe(k) + '($|[^\\p{L}\\p{N}])', 'u').test(t);
+}
+
 // === CLIENT-SIDE CROSS-SPORT FILTER ===
 // Mirrors server/services/claude.js BANNED_KEYWORDS_BY_SPORT
 const BANNED_KEYWORDS = {
@@ -10,7 +22,7 @@ const BANNED_KEYWORDS = {
     'כדור', 'שער', 'דריבל', 'דריבלינג', 'קליעה', 'בעיטה', 'בעיטות',
     'מסירה', 'מסירות', 'כדרור', 'חרוטים', 'קונוסים',
     'זריקה לסל', 'הנחתה', 'הגשה', 'סל', 'טניס', 'מחבט', 'פורהנד', 'בקהנד',
-    'גול', 'שוער', 'עמדת שוער', 'חסימה', 'נגיחה', 'פנדל', 'קורנר',
+    'גול', 'שוער', 'עמדת שוער', 'חסימה', 'נגיח', 'פנדל', 'קורנר',
     'ריצה עם כדור', 'שליטה בכדור', 'קבלת כדור',
   ],
   football: [
@@ -18,11 +30,11 @@ const BANNED_KEYWORDS = {
     'טניס', 'מחבט', 'פורהנד', 'בקהנד', 'רשת', 'כיסא גלגלים',
   ],
   basketball: [
-    'בעיטה', 'בעיטות', 'שער', 'גול', 'קורנר', 'פנדל', 'נגיחה', 'שוער', 'קביים',
+    'בעיטה', 'בעיטות', 'שער', 'גול', 'קורנר', 'פנדל', 'נגיח', 'שוער', 'קביים',
     'טניס', 'מחבט', 'פורהנד', 'בקהנד',
   ],
   tennis: [
-    'בעיטה', 'בעיטות', 'שער', 'גול', 'קורנר', 'פנדל', 'נגיחה', 'שוער',
+    'בעיטה', 'בעיטות', 'שער', 'גול', 'קורנר', 'פנדל', 'נגיח', 'שוער',
     'סל', 'קליעה לסל', 'חישוק', 'כדרור ביד', 'הנחתה', 'קביים',
   ],
 };
@@ -76,7 +88,7 @@ export function sanitizePlan(plan, sport, age) {
         const lower = (ex.name || '').toLowerCase();
 
         // Sport-based filter
-        const isSportBanned = sportBanned.length > 0 && sportBanned.some(kw => lower.includes(kw));
+        const isSportBanned = sportBanned.length > 0 && sportBanned.some(kw => keywordIn(lower, kw));
         if (isSportBanned) {
           dirty = true;
           console.warn(`[Client Filter][${resolved}] Removed: "${ex.name}"`);
@@ -91,7 +103,7 @@ export function sanitizePlan(plan, sport, age) {
         }
 
         // Age-based filter
-        const isAgeBanned = ageBanned.length > 0 && ageBanned.some(kw => lower.includes(kw));
+        const isAgeBanned = ageBanned.length > 0 && ageBanned.some(kw => keywordIn(lower, kw));
         if (isAgeBanned) {
           dirty = true;
           console.warn(`[Client Filter][age] Removed: "${ex.name}"`);

@@ -35,6 +35,8 @@ import DailyCheckIn from '../components/DailyCheckIn';
 import { applyCheckIn } from '../engine/training/dailyCheckIn';
 import { catalogGhostSpec, parseCatalogId } from '../engine/catalog/catalog';
 import VirtualBall from '../components/VirtualBall';
+import { useVoiceProsody } from '../hooks/useVoiceProsody';
+import { brainSummary, brainBall } from '../engine/coachBrain/brain';
 import { kickingSide } from '../engine/incomingBall';
 import { ballModeFor, virtualBallWanted, handSide, ballLook, realBallInPlay } from '../engine/virtualBall';
 import { rebuildPlanFromCatalog, planContext } from '../engine/catalog/planBuilder';
@@ -129,7 +131,8 @@ const OPTIMIZATION_TIPS = {
 const LOCATION_ICONS = { home: '\uD83C\uDFE0', yard: '\uD83C\uDF33', field: '\u26BD', gym: '\uD83C\uDFCB\uFE0F' };
 
 // The exercise's analyzer: by the movement itself (catalog exercises carry it), never by a long display name
-const analyzerFor = (ex) => getAnalyzer(ex?.analyzerName || ex?.name);
+// the analyzer of an exercise; a seated trainee (a wheelchair) gets the drill's seated twin
+const analyzerFor = (ex, seated = false) => getAnalyzer(ex?.analyzerName || ex?.name, { seated });
 
 export default function Training() {
   const { t } = useTranslation();
@@ -737,8 +740,8 @@ export default function Training() {
   // Stage 3.1 — Expert Execution Profile of the current exercise (isolated module, behind a flag):
   // required limbs in the frame, kinematic errors / danger, accuracy, and the Ghost of the same profile
   const exerciseCueKey = useMemo(
-    () => (currentExercise ? analyzerFor(currentExercise).cueKey : null),
-    [currentExercise?.name, currentExercise?.analyzerName],
+    () => (currentExercise ? analyzerFor(currentExercise, !!limbProfile?.wheelchair).cueKey : null),
+    [currentExercise?.name, currentExercise?.analyzerName, limbProfile?.wheelchair],
   );
   // Sport contexts (rehab / rehab + sport / sport) layer sport-specific technique on every profile
   const sportContexts = useMemo(
@@ -756,6 +759,10 @@ export default function Training() {
       .then(() => setFeedback({ type: 'info', text: isHe ? `נשמרו ${items.length} חזרות למאגר האימות` : `Saved ${items.length} reps to the validation set` }))
       .catch(err => console.error('[Validation] save failed:', err));
   }, [user?.uid, isHe]);
+  // Layer 4 — the trainee's audible effort (the mic, on the device only), while the exercise runs
+  const voiceEffortRef = useVoiceProsody({
+    enabled: FEATURES.VOICE_PROSODY && FEATURES.COACH_BRAIN && (phase === PHASE.EXERCISING || phase === PHASE.CALIBRATING),
+  });
   const execution = useExpertExecution({
     // From the briefing on: the trainee may start working while the coach still explains —
     // the module counts silently and the exercise starts at once (early start, below)
@@ -773,6 +780,9 @@ export default function Training() {
     speakPriority,
     recordClips: validationMode,
     onClips: handleValidationClips,
+    // the COACH BRAIN (behavior / intent / RLEF policy) + the audible effort (voice prosody)
+    brainEnabled: FEATURES.COACH_BRAIN,
+    effortRef: voiceEffortRef,
   });
   const executionInViewRef = execution.inViewRef;
   // Exact counting source for the analyzer wrapper (expert rep exercises only)
@@ -847,9 +857,9 @@ export default function Training() {
   // briefing / start position; counting in the exercise. A real ball seen in play hides it.
   const ballDrill = useMemo(() => {
     const pid = currentExercise?.catalogId ? parseCatalogId(currentExercise.catalogId)?.pattern : null;
-    const m = ballModeFor({ cueKey: exerciseCueKey, pattern: pid, name: currentExercise?.name, nameEn: currentExercise?.nameEn });
+    const m = ballModeFor({ cueKey: exerciseCueKey, pattern: pid, name: currentExercise?.name, nameEn: currentExercise?.nameEn, sport: userProfile?.sport });
     return m ? { ...m, pattern: pid } : null;
-  }, [currentExercise, exerciseCueKey]);
+  }, [currentExercise, exerciseCueKey, userProfile?.sport]);
   const [realBallSeen, setRealBallSeen] = useState(false);
   useEffect(() => {
     if (!ballDrill) { setRealBallSeen(false); return undefined; }
@@ -870,7 +880,7 @@ export default function Training() {
   // ROM gauge only for dynamic range-of-motion exercises (never static holds / ball drills / kicks / running)
   const showRomGauge = useMemo(() => {
     if (!currentExercise) return false;
-    const a = analyzerFor(currentExercise);
+    const a = analyzerFor(currentExercise, !!limbProfile?.wheelchair);
     const kind = buildExecutionProfile(a.cueKey, currentExercise.name, limbProfile, sportContexts, currentExercise.catalogId || null)?.kind;
     return showsRangeGauge({ analyzerType: a.type, profileKind: kind, exerciseName: currentExercise.name });
   }, [currentExercise?.name, limbProfile, sportContexts]);
@@ -886,7 +896,7 @@ export default function Training() {
   // Set up analyzer when exercise changes
   useEffect(() => {
     if (currentExercise) {
-      const { analyze, type, cueKey, ballAware } = analyzerFor(currentExercise);
+      const { analyze, type, cueKey, ballAware } = analyzerFor(currentExercise, !!limbProfile?.wheelchair);
       // Timed catalog exercises (intervals / holds): the target is seconds of REAL work, not reps.
       // Rep exercises: the count comes from the exact profile rep detector when there is one.
       const isWorking = () => !workingSourceRef.current?.active || workingSourceRef.current.workingRef.current;
@@ -2535,7 +2545,7 @@ export default function Training() {
   // Build briefing voice params from deterministic instruction map
   function doBriefingSpeech(exercise) {
     if (!exercise) return;
-    const instr = getExerciseInstruction(exercise.name, analyzerFor(exercise)?.cueKey);
+    const instr = getExerciseInstruction(exercise.name, analyzerFor(exercise, !!limbProfile?.wheelchair)?.cueKey);
     const voiceText = instr ? instr.steps.join('. ') : (exercise.voicePrompt || exercise.description);
     const safetyText = instr?.safety || exercise.tips;
     // Equipment set-up only for drills that really use it (never "two chairs" for a plank)
@@ -2705,12 +2715,19 @@ export default function Training() {
       }
     }
 
+    // The coach brain's read of the set (fatigue / frustration / readiness): the rest adapts, and the
+    // ONE mental cue is said in the rest (Layer 1 — never praise, measured only)
+    const brainRead = FEATURES.COACH_BRAIN && execution.brainRef?.current ? brainSummary(execution.brainRef.current, voiceEffortRef.current) : null;
+    const ad = brainRead?.adaptation || null;
+    if (brainRead) sessionDataRef.current.coachBrain = [...(sessionDataRef.current.coachBrain || []), { exercise: currentExercise?.name, set: currentSet, ...brainRead.state, pace: ad?.pace }];
+
     if (currentSet >= totalSets) {
       setPhase(PHASE.EXERCISE_DONE);
       speak(t('training.allSetsComplete'));
     } else {
       setPhase(PHASE.RESTING);
-      setRestTime(restDuration);
+      setRestTime(Math.max(15, restDuration + (ad?.restBonusSec || 0)));
+      if (ad?.mental) setTimeout(() => { if (phaseRef.current === PHASE.RESTING) speakPriority(isHe ? ad.mental.he : ad.mental.en, { rate: 0.95 }); }, 4500);
       if (currentExercise?.sideSwitch && currentExercise.splitBy === 'set') {
         // the next set is the OTHER leg — said clearly in the rest
         const next = legSetNextText(limbProfile, isHe, currentExercise.splitMode, currentSet + 1);
@@ -2996,6 +3013,7 @@ export default function Training() {
             look={ballLook(userProfile?.sport)}
             live={incomingLive}
             ballOutRef={virtualBallOutRef}
+            onBall={(hit) => { if (FEATURES.COACH_BRAIN && execution.brainRef?.current) brainBall(execution.brainRef.current, { now: performance.now(), hit }); }}
             side={ballDrill.target === 'hand' || ballDrill.target === 'hands' ? handSide(limbProfile)
               : kickingSide(limbProfile, currentExercise?.sideSwitch && isStrikeMode(currentExercise?.splitMode) ? splitSupport : null)}
             landmarksRef={poseLandmarksRef}
@@ -3178,7 +3196,7 @@ export default function Training() {
         {/* Briefing overlay — bottom sheet on mobile so camera stays visible */}
         {phase === PHASE.BRIEFING && (() => {
           // Deterministic Hebrew instructions from map (override AI-generated)
-          const analyzer = currentExercise ? analyzerFor(currentExercise) : null;
+          const analyzer = currentExercise ? analyzerFor(currentExercise, !!limbProfile?.wheelchair) : null;
           const instruction = getExerciseInstruction(currentExercise?.name, analyzer?.cueKey);
           const steps = instruction?.steps
             || (currentExercise?.instructions?.length > 0

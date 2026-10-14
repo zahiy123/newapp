@@ -9,7 +9,7 @@
 // (LEFT_* = the person's left). Angles use the same angleCosine as the rep analyzers.
 // ============================================================
 
-import { angleCosine } from '../../utils/motionEngine.js';
+import { angleCosine, frameAspect } from '../../utils/motionEngine.js';
 
 export const P = Object.freeze({
   LEFT_SHOULDER: 11, RIGHT_SHOULDER: 12,
@@ -61,7 +61,8 @@ export function torsoLength(landmarks) {
   const hp = midOf(landmarks, [P.LEFT_HIP, P.RIGHT_HIP]);
   if (!sh || !hp) return null;
   const z = (l, r) => { const v = [landmarks[l], landmarks[r]].filter(ok).map(p => p.z ?? 0); return v.length ? v.reduce((a, b) => a + b, 0) / v.length : 0; };
-  return Math.hypot(sh.x - hp.x, sh.y - hp.y, z(P.LEFT_SHOULDER, P.RIGHT_SHOULDER) - z(P.LEFT_HIP, P.RIGHT_HIP));
+  const k = frameAspect();                       // the camera's real proportions
+  return Math.hypot((sh.x - hp.x) * k, sh.y - hp.y, (z(P.LEFT_SHOULDER, P.RIGHT_SHOULDER) - z(P.LEFT_HIP, P.RIGHT_HIP)) * k);
 }
 
 // Approximate segment mass shares (Dempster-style, lumped on landmarks)
@@ -97,7 +98,7 @@ export function pelvisDrop(landmarks) {
   const l = landmarks?.[P.LEFT_HIP], r = landmarks?.[P.RIGHT_HIP];
   if (!ok(l) || !ok(r)) return null;
   const scale = torsoLength(landmarks);
-  const dx = Math.abs(l.x - r.x);
+  const dx = Math.abs(l.x - r.x) * frameAspect();                               // real proportions
   if (!scale || dx < 0.3 * scale) return null;
   return Math.atan2(Math.abs(l.y - r.y), dx) * 180 / Math.PI;
 }
@@ -135,6 +136,9 @@ export function jointAngleSide(landmarks, joint, side) {
         : { x: hp.x - sh.x, y: hp.y - sh.y, z: hpz - shz };     // from the shoulder down the trunk
       const limb = { x: c.x - b.x, y: c.y - b.y, z: (c.z ?? 0) - (b.z ?? 0) };
       if (joint === 'shoulder') { limb.x = a.x - b.x; limb.y = a.y - b.y; limb.z = (a.z ?? 0) - (b.z ?? 0); }
+      // the camera's REAL proportions (x and z are in frame-width units, y in frame-height units)
+      const k = frameAspect();
+      axis.x *= k; axis.z *= k; limb.x *= k; limb.z *= k;
       const n1 = Math.hypot(axis.x, axis.y, axis.z), n2 = Math.hypot(limb.x, limb.y, limb.z);
       if (n1 > 1e-6 && n2 > 1e-6) {
         const cos = (axis.x * limb.x + axis.y * limb.y + axis.z * limb.z) / (n1 * n2);
@@ -154,11 +158,11 @@ export function trunkLean(landmarks) {
   const sh = midOf(landmarks, [P.LEFT_SHOULDER, P.RIGHT_SHOULDER]);
   const hp = midOf(landmarks, [P.LEFT_HIP, P.RIGHT_HIP]);
   if (!sh || !hp) return null;
-  const dx = sh.x - hp.x;
+  const dx = (sh.x - hp.x) * frameAspect();   // real proportions (the camera's width / height)
   const dy = sh.y - hp.y;           // image y grows downward → upright trunk has dy < 0
   // depth too: facing the camera, a forward lean is in z (MediaPipe depth), not in x
   const zOf = (l, r) => { const v = [landmarks[l], landmarks[r]].filter(ok).map(p => p.z).filter(z => typeof z === 'number'); return v.length ? v.reduce((a, b) => a + b, 0) / v.length : 0; };
-  const dz = zOf(P.LEFT_SHOULDER, P.RIGHT_SHOULDER) - zOf(P.LEFT_HIP, P.RIGHT_HIP);
+  const dz = (zOf(P.LEFT_SHOULDER, P.RIGHT_SHOULDER) - zOf(P.LEFT_HIP, P.RIGHT_HIP)) * frameAspect();
   if (Math.hypot(dx, dy, dz) < 1e-6) return null;
   return Math.atan2(Math.hypot(dx, dz), -dy) * 180 / Math.PI;
 }

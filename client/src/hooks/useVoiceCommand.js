@@ -49,7 +49,11 @@ export function useVoiceCommand({ active, lang = 'he-IL', isSpeaking, onNext }) 
             return;
           }
         };
-        r.onerror = (e) => { if (e?.error === 'not-allowed' || e?.error === 'service-not-allowed') stopped = true; };
+        r.onerror = (e) => {
+          if (e?.error === 'not-allowed' || e?.error === 'service-not-allowed') stopped = true;
+          // the mic is held by another capture (the effort listener) → it yields; the command wins
+          if (e?.error === 'audio-capture') { try { window.dispatchEvent(new Event('voicecommand:audio-capture')); } catch { /* no window */ } }
+        };
         r.onend = () => {
           if (rec !== r) return;
           rec = null; running = false; setListening(false);

@@ -126,6 +126,25 @@ describe('dribble: the ball rolls with the feet', () => {
     expect(Math.abs(st.x - pts.centerX)).toBeLessThanOrEqual(0.42 * pts.bodyPx + 1e-6);
     expect(st.touches).toBe(1);
   });
+  it('slalom / carry: the trainee moving sideways takes the ball along, a step ahead of the feet', () => {
+    let st = dribbleInit(pts);
+    const moving = { ...pts };
+    for (let i = 0; i < 60; i++) {
+      moving.centerX = pts.centerX + i * 3;                    // walking right ~3 px / frame
+      st = dribbleStep(st, moving, { R: { vx: 0, vy: 0, speed: 0 }, L: { vx: 0, vy: 0, speed: 0 } }, 16, i * 16, frame, 0.6);
+    }
+    expect(st.x).toBeGreaterThan(moving.centerX);              // ahead, in the direction of movement
+    expect(st.x - moving.centerX).toBeLessThan(0.42 * pts.bodyPx);
+  });
+  it('a forward tap (toward the camera, no sideways move) touches it too', () => {
+    let st = { ...dribbleInit(pts), x: 560 };
+    st = dribbleStep(st, pts, { R: { vx: 0.1, vy: 1.2, speed: 1.2 }, L: { vx: 0, vy: 0, speed: 0 } }, 16, 1000, frame);
+    expect(st.touches).toBe(1);
+  });
+  it('a slalom / cones drill is a dribble drill', () => {
+    expect(ballModeFor({ name: 'סלאלום בין קונוסים' })?.mode).toBe('dribble');
+    expect(ballModeFor({ name: 'Cone slalom' })?.mode).toBe('dribble');
+  });
   it('a still foot never moves it', () => {
     let st = dribbleInit(pts);
     for (let i = 0; i < 60; i++) st = dribbleStep(st, pts, { R: { vx: 0.1, vy: 0 }, L: { vx: 0, vy: 0 } }, 16, i * 16, frame);

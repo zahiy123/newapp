@@ -34,6 +34,8 @@ export default function GhostOverlay({ spec, limbProfile, landmarksRef, videoRef
   const heightKRef = useRef(null);          // the trainee's height vs. the torso estimate (kept between readings)
   const lastLmRef = useRef(null);           // the last skeleton (bridges a short detection drop)
   const pinRef = useRef(null);              // the trainee's pelvis x on the screen (the guide is pinned to it)
+  const pinVelRef = useRef(0);              // its smoothed speed (adaptive smoothing)
+  const hipOffRef = useRef(null);           // hips − shoulders (x), kept for a moment the hips are not seen
   const lastAnchorAtRef = useRef(null);
   const shownAtRef = useRef(null);
   const modeRef = useRef({ mode: null, since: 0 });   // mirror / guide / none, and since when (fade on a switch)
@@ -114,11 +116,26 @@ export default function GhostOverlay({ spec, limbProfile, landmarksRef, videoRef
             place.scale = scaleRef.current;
             // the pelvis pin: the trainee's hip center NOW (the landmarks are already One-Euro filtered;
             // a 60 ms touch only removes the last pixel jitter) — no lag, no sideways drift
+            // hips lost for a moment → the shoulders + the hip offset measured last (never a jump to
+            // a different point)
             const lh = lm?.[23], rh = lm?.[24], ls = lm?.[11], rs = lm?.[12];
-            const pinN = vis(lh) && vis(rh) ? (lh.x + rh.x) / 2 : vis(ls) && vis(rs) ? (ls.x + rs.x) / 2 : null;
+            const hipN = vis(lh) && vis(rh) ? (lh.x + rh.x) / 2 : null;
+            const shN = vis(ls) && vis(rs) ? (ls.x + rs.x) / 2 : null;
+            if (hipN != null && shN != null) hipOffRef.current = hipN - shN;
+            const pinN = hipN != null ? hipN : shN != null ? shN + (hipOffRef.current ?? 0) : null;
             if (pinN != null) {
+              // One-Euro smoothing: strong while still (no jitter), light while moving fast (no lag)
               const px = map(pinN, 0.5).x;
-              pinRef.current = pinRef.current == null || dt == null ? px : pinRef.current + (1 - Math.exp(-Math.min(dt, 100) / 60)) * (px - pinRef.current);
+              const prev = pinRef.current;
+              if (prev == null || dt == null) { pinRef.current = px; pinVelRef.current = 0; }
+              else {
+                const d = Math.max(1, Math.min(dt, 100));
+                const v = (px - prev) / d;                                         // px / ms
+                pinVelRef.current += (1 - Math.exp(-d / 80)) * (v - pinVelRef.current);
+                const speed = Math.abs(pinVelRef.current) * 1000 / Math.max(1, place.scale);   // body units / s
+                const tau = Math.max(25, 140 / (1 + 6 * speed));                  // ms
+                pinRef.current = prev + (1 - Math.exp(-d / tau)) * (px - prev);
+              }
             }
             if (pinRef.current != null) place.body = { ...place.body, pinX: pinRef.current };
             drawGhostOverlay(ctx, spec, limbProfile, clk.ms, place.origin, place.scale, OVERLAY_ALPHA * fade, place.feetY, place.body);

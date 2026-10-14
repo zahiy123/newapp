@@ -48,21 +48,40 @@ const NAME_MODE = [
   [/כדרור|כדרור כדורסל|crossover|קרוסאובר|דריבל כדורסל|basketball dribbl|hand dribbl/, ['handDribble', 'hand']],
   [/מסירת חזה|מסירת ניתור|מסירה מעל הראש|chest pass|bounce pass|overhead pass|זריק|קליע|לייאפ|עליה לסל|layup|shoot|free throw/, ['throw', 'hands']],
   [/הגשה|serve|פורהנד|בקהנד|forehand|backhand|ווליי|volley|סמאש|smash/, ['incoming', 'hand']],
-  [/דריבל|הובלת כדור|הובלה|שליטה בכדור|הגנה על הכדור|dribbl|ball carry|ball control|shield/, ['dribble', 'feet']],
+  [/דריבל|הובלת כדור|הובלה|שליטה בכדור|הגנה על הכדור|סלאלום|קונוס|dribbl|ball carry|ball control|shield|slalom|cone/, ['dribble', 'feet']],
   [/מסיר|מסור|pass/, ['incoming', 'foot', 'pass']],
   [/בעיט|בעט|שער|kick|shot|שליטה ראשונית|first touch/, ['incoming', 'foot', 'kick']],
   // any other ball drill: the ball comes to the foot (stops, wall-ball, reaction drills)
   [/כדור|ball/, ['incoming', 'foot', 'pass']],
 ];
 // not a ball despite the word
-const FALSE_BALL = /כדור הארץ|כדורית|balls? of (the )?feet|balls? of (the )?foot|כרית כף הרגל/g;
+const FALSE_BALL = /כדור הארץ|כדורית|balls? of (the )?feet|balls? of (the )?foot|כרית כף הרגל|בעיטות ישבן|בעיטות פרפר|בעיטות חמור|בעיטות אחורה|בעיטת ישבן|butt kicks?|flutter kicks?|donkey kicks?|glute kicks?/g;
 
 /**
  * The virtual ball's behaviour for a drill, or null when it is not a ball drill.
  * @returns {{ mode: 'incoming'|'dribble'|'juggle'|'handDribble'|'throw', target: string, kind: 'kick'|'pass' } | null}
  *   kind = the incoming timing (a pass comes slower than a kick)
  */
-export function ballModeFor({ cueKey = null, pattern = null, name = '', nameEn = '' } = {}) {
+export function ballModeFor({ cueKey = null, pattern = null, name = '', nameEn = '', sport = null } = {}) {
+  return fitToSport(ballModeRaw({ cueKey, pattern, name, nameEn }), sport);
+}
+
+/**
+ * The ball's behaviour follows the SPORT the trainee chose (a safety net over the drill's analyzer):
+ * a hand sport never gets a foot ball (basketball: a pass = a throw, dribbling = a hand dribble;
+ * tennis: the ball comes to the racket hand); football never gets a hand dribble.
+ */
+export function fitToSport(m, sport) {
+  if (!m || !sport) return m;
+  const s = String(sport);
+  const footBall = m.mode === 'dribble' || m.mode === 'juggle' || (m.mode === 'incoming' && m.target === 'foot');
+  if (s.startsWith('basketball') && footBall) return m.mode === 'dribble' || m.mode === 'juggle' ? { ...m, mode: 'handDribble', target: 'hand' } : { ...m, mode: 'throw', target: 'hands' };
+  if (s.startsWith('tennis') && (footBall || m.mode === 'handDribble' || m.mode === 'throw')) return { ...m, mode: 'incoming', target: 'hand' };
+  if (s.startsWith('football') && m.mode === 'handDribble') return { ...m, mode: 'dribble', target: 'feet' };
+  return m;
+}
+
+function ballModeRaw({ cueKey = null, pattern = null, name = '', nameEn = '' } = {}) {
   const mk = ([mode, target, kind], fallbackKind) => ({ mode, target, kind: kind || fallbackKind || (cueKey === 'pass' || cueKey === 'crutchPass' ? 'pass' : 'kick') });
   if (pattern && PATTERN_MODE[pattern]) return mk(PATTERN_MODE[pattern]);
   const text = `${name || ''} ${nameEn || ''}`.toLowerCase().replace(FALSE_BALL, ' ');
@@ -182,14 +201,18 @@ export function dribbleInit(pts) {
 }
 
 /**
- * Dribble: the ball rolls on the floor line. A foot that reaches it and moves sideways pushes it
- * (a touch); rolling friction slows it; the trainee keeps it close (a soft pull to the body center
- * beyond the reach, as when they move with the ball); it never leaves the view.
- * @param {{ footL, footR, centerX, bodyPx }} pts
- * @param {{ L: {vx}, R: {vx} }} footVel - the feet's velocities (bodies/s)
+ * Dribble / slalom / ball carry: the ball rolls on the floor line like a real ball at the feet.
+ *   touch   a foot that reaches it and moves (sideways OR a tap toward the camera) pushes it — along
+ *           the foot's sideways direction, or away from the foot for a forward tap
+ *   carry   when the trainee MOVES sideways (a slalom, a carry), the ball travels with them, just
+ *           ahead of the feet in the direction of movement — like a ball kept close while dribbling
+ *   free    rolling friction slows it; it stays within reach of the body and inside the view
+ * @param {{ footL, footR, centerX, bodyPx, floorY }} pts
+ * @param {{ L: {vx, speed}, R: {vx, speed} }} footVel - the feet's velocities (bodies/s)
  * @param {{ x0, x1 }} frame - the view's picture box (px)
+ * @param {number} [bodyVx] - the trainee's own sideways speed (bodies/s)
  */
-export function dribbleStep(st, pts, footVel, dtMs, nowMs, frame) {
+export function dribbleStep(st, pts, footVel, dtMs, nowMs, frame, bodyVx = 0) {
   if (!st || !pts?.bodyPx) return st;
   const B = pts.bodyPx, r = BALL_R * B;
   const dt = Math.min(0.1, Math.max(0, dtMs / 1000));
@@ -198,14 +221,22 @@ export function dribbleStep(st, pts, footVel, dtMs, nowMs, frame) {
   for (const [f, v] of [[pts.footL, footVel?.L], [pts.footR, footVel?.R]]) {
     if (!f || !v) continue;
     const near = Math.abs(f.x - x) < r * 1.9 && (pts.floorY == null || f.y > pts.floorY - B * 0.12);
-    if (near && Math.abs(v.vx) >= TOUCH_SPEED && nowMs - lastTouchAt > 180 && Math.sign(v.vx) === Math.sign(x - f.x || v.vx)) {
-      vx = v.vx * B * 1.25;                   // pushed along the foot's direction, a bit faster than it
+    if (!near || nowMs - lastTouchAt <= 180) continue;
+    const side = Math.abs(v.vx) >= TOUCH_SPEED && Math.sign(v.vx) === Math.sign(x - f.x || v.vx);
+    const tap = !side && (v.speed ?? Math.abs(v.vx)) >= TOUCH_SPEED * 1.4;     // a forward tap (toward the camera)
+    if (side || tap) {
+      vx = side ? v.vx * B * 1.25 : Math.sign(x - f.x || 1) * B * 0.45;
       touches += 1; lastTouchAt = nowMs; touched = true;
     }
   }
   vx *= Math.exp(-FRICTION * dt);
   x += vx * dt;
-  // kept close to the body (they move with the ball)
+  // carried with the trainee: moving sideways → the ball goes with them, a step ahead of the feet
+  if (Math.abs(bodyVx) > 0.15 && nowMs - lastTouchAt > 150) {
+    const carryX = pts.centerX + Math.sign(bodyVx) * B * 0.16;
+    x += (carryX - x) * (1 - Math.exp(-dt / 0.12));
+  }
+  // kept close to the body
   const reach = DRIBBLE_REACH * B, off = x - pts.centerX;
   if (Math.abs(off) > reach) { x = pts.centerX + Math.sign(off) * reach; vx = -vx * 0.3; }
   if (frame) {

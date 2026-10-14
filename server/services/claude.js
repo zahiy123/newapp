@@ -2665,7 +2665,7 @@ const BANNED_KEYWORDS_BY_SPORT = {
     'כדור', 'שער', 'דריבל', 'דריבלינג', 'קליעה', 'בעיטה', 'בעיטות',
     'מסירה', 'מסירות', 'כדרור', 'חרוטים', 'קונוסים',
     'זריקה לסל', 'הנחתה', 'הגשה', 'סל', 'טניס', 'מחבט', 'פורהנד', 'בקהנד',
-    'גול', 'שוער', 'עמדת שוער', 'חסימה', 'נגיחה', 'פנדל', 'קורנר',
+    'גול', 'שוער', 'עמדת שוער', 'חסימה', 'נגיח', 'פנדל', 'קורנר',
     'ריצה עם כדור', 'שליטה בכדור', 'קבלת כדור',
     'dribble', 'dribbling', 'shoot', 'goal', 'pass', 'ball', 'kick', 'basket', 'racket', 'serve', 'cone',
   ],
@@ -2676,13 +2676,13 @@ const BANNED_KEYWORDS_BY_SPORT = {
     'basket', 'racket', 'serve', 'forehand', 'backhand', 'dunk', 'layup',
   ],
   basketball: [
-    'בעיטה', 'בעיטות', 'שער', 'גול', 'קורנר', 'פנדל', 'נגיחה', 'שוער',
+    'בעיטה', 'בעיטות', 'שער', 'גול', 'קורנר', 'פנדל', 'נגיח', 'שוער',
     'קביים', 'crutch',
     'טניס', 'מחבט', 'פורהנד', 'בקהנד',
     'kick', 'goal', 'corner', 'penalty', 'racket', 'serve', 'forehand', 'backhand',
   ],
   tennis: [
-    'בעיטה', 'בעיטות', 'שער', 'גול', 'קורנר', 'פנדל', 'נגיחה', 'שוער',
+    'בעיטה', 'בעיטות', 'שער', 'גול', 'קורנר', 'פנדל', 'נגיח', 'שוער',
     'סל', 'קליעה לסל', 'חישוק', 'כדרור ביד', 'הנחתה',
     'קביים', 'crutch',
     'kick', 'goal', 'corner', 'penalty', 'basket', 'dunk', 'layup',
@@ -2763,12 +2763,23 @@ function resolveSport(sport) {
   return SPORT_ALIAS[sport] || sport;
 }
 
-function hasBannedKeyword(text, bannedList) {
-  const lower = (text || '').toLowerCase();
-  return bannedList.some(kw => lower.includes(kw));
+// A SHORT keyword (≤ 3 letters, e.g. 'סל') matches only as a whole word (a one-letter Hebrew prefix
+// allowed: 'לסל') — as a substring it removed real drills ('סלאלום' contains 'סל'). Longer keywords
+// keep the substring match (it catches the inflected forms).
+const escapeRe = (w) => w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+export function keywordIn(text, kw) {
+  const t = String(text || '').toLowerCase();
+  const k = String(kw || '').toLowerCase();
+  if (!k) return false;
+  if ([...k].length > 3) return t.includes(k);
+  return new RegExp('(^|[^\\p{L}\\p{N}])[והבלמשכ]?' + escapeRe(k) + '($|[^\\p{L}\\p{N}])', 'u').test(t);
 }
 
-function filterCrossSportLeakage(weekData, sport) {
+function hasBannedKeyword(text, bannedList) {
+  return bannedList.some(kw => keywordIn(text, kw));
+}
+
+export function filterCrossSportLeakage(weekData, sport) {
   if (!weekData?.days) return weekData;
 
   const resolved = resolveSport(sport);

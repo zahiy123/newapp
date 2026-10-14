@@ -25,6 +25,7 @@
 import {
   P, jointAngleSide, sideUsable, centerOfMass, torsoLength, pelvisDrop, trunkLean,
 } from './kinematics.js';
+import { frameAspect } from '../../utils/motionEngine.js';
 
 const HISTORY_MS = 3000;
 const CADENCE_WINDOW_MS = 6000;
@@ -160,7 +161,7 @@ export function updateMotion(ms, landmarks, metrics, t) {
         peakHoldMs: r.departAt - r.arriveAt,
         returnMs: t - r.departAt,
         pelvisDropMax: drops.length ? Math.max(...drops) : null,
-        swayRatio: std(during.map(f => f.com?.x).filter(v => typeof v === 'number')) / scale,
+        swayRatio: std(during.map(f => f.com?.x).filter(v => typeof v === 'number')) * frameAspect() / scale,
         trunkRange: leans.length ? Math.max(...leans) - Math.min(...leans) : null,
         // the deepest point of the rep toward the peak (e.g. the highest knee drive)
         primaryPeak: prims.length ? (towardPeakIsDown ? Math.min(...prims) : Math.max(...prims)) : null,
@@ -224,7 +225,7 @@ export function updateMotion(ms, landmarks, metrics, t) {
         // No real proximal drive before the distal peak (e.g. a knee-only kick) → lead 0
         chainLeadMs: tProx === null || best < PROX_MIN_SPEED ? 0 : tDistal - tProx,
         distalSpeed: v0,
-        balance: plant && c ? Math.abs(c.x - plant.x) / scale : null,
+        balance: plant && c ? Math.abs(c.x - plant.x) * frameAspect() / scale : null,
         trunkLean: ms.hist[n - 2].lean,
       });
       ms.lastStrikeAt = t;
@@ -238,7 +239,7 @@ export function updateMotion(ms, landmarks, metrics, t) {
     const drops = ms.hist.map(f => f.pelvis).filter(v => typeof v === 'number');
     events.push({
       type: 'window',
-      swayRatio: std(ms.hist.map(f => f.com?.x).filter(v => typeof v === 'number')) / scale,
+      swayRatio: std(ms.hist.map(f => f.com?.x).filter(v => typeof v === 'number')) * frameAspect() / scale,
       pelvisDrop: drops.length ? Math.max(...drops) : null,
     });
   }

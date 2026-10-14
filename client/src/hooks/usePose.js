@@ -1,7 +1,7 @@
 import { useRef, useState, useCallback, useEffect } from 'react';
 import { PoseLandmarker, FilesetResolver, DrawingUtils } from '@mediapipe/tasks-vision';
 import { MEDIAPIPE_WASM_PATH, MEDIAPIPE_MODELS } from '../config/mediapipe';
-import { angleCosine } from '../utils/motionEngine';
+import { angleCosine, setFrameAspect } from '../utils/motionEngine';
 import { createLandmarkFilter, filterLandmarks } from '../engine/landmarkFilter';
 
 // Pose input size: the model works on a 256 px crop anyway — feeding it a downscaled frame (same
@@ -128,6 +128,8 @@ export function usePose(canvasRef, beforeDrawRef, amputationProfile, enabled = t
     if (videoEl.currentTime === lastVideoTimeRef.current) return;
     lastVideoTimeRef.current = videoEl.currentTime;
     const mpCanvas = mpCanvasRef.current;
+    // the analysis measures in the REAL proportions of THIS device's camera frame (portrait / landscape)
+    setFrameAspect(videoEl.videoWidth / videoEl.videoHeight);
     const k = Math.min(1, DETECT_MAX_SIDE / Math.max(videoEl.videoWidth, videoEl.videoHeight));
     const iw = Math.round(videoEl.videoWidth * k), ih = Math.round(videoEl.videoHeight * k);
     if (mpCanvas.width !== iw || mpCanvas.height !== ih) {
