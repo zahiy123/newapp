@@ -124,10 +124,11 @@ Readiness Rating (1-5 emoji, 3 seconds)
 | 25 | `checkpoint-2026-10-13-virtual-ball` | `334d833` | yes | + the equipment finder only for chair / bottle / can, the guide pinned to the trainee's pelvis, the smart virtual ball for every ball drill in every sport (ball drills kept without a real ball) — **awaiting the owner's check (NOT complete)** |
 | 26 | `checkpoint-2026-10-14-bk-warmup-floor` | `84db8d2` | yes | + the below-knee warm-up for both legs (the residual knee), the virtual ball on the real steady floor, the Knowledge Base — **awaiting the owner's check (NOT complete)** |
 | 27 | `checkpoint-2026-10-14-coach-brain` | `830250a` | yes | + the Coach Brain (Behavioral AI, Intent, RLEF, Voice prosody), device-camera calibration, the jump-free Ghost pin, dribble / slalom ball carry, all-sports verification + 4 cross-sport fixes — **awaiting the owner's check (NOT complete)** |
-| 28 | `checkpoint-2026-10-14-skeleton-real-only` | `cc64c1a` | **yes — the current production (2026-10-14)** | + the skeleton draws only confident in-picture points (no green / cyan lines across the screen), the floor guide only on a horizontal torso — **awaiting the owner's check (NOT complete)** |
+| 28 | `checkpoint-2026-10-14-skeleton-real-only` | `cc64c1a` | yes | + the skeleton draws only confident in-picture points (no green / cyan lines across the screen), the floor guide only on a horizontal torso — **awaiting the owner's check (NOT complete)** |
+| 29 | `checkpoint-2026-10-14-nav-iron-rule` | `8fe1b6d` | **yes — the current production (2026-10-14)** | + the navigation iron rule (a manual skip moves forward at once and stays; nothing moves the trainee back) — **awaiting the owner's check (NOT complete)** |
 
 **How to return to a checkpoint:**
-- **To a deployed point (#1, #2, #3, #5, #8, #9, #10, #11, #12, #13, #14, #15, #16, #17, #18, #19, #20, #21, #22, #23, #24, #25, #26, #27, #28): instant rollback with no code change** — Vercel → Deployments → the deployment of that commit → "Promote to Production".
+- **To a deployed point (#1, #2, #3, #5, #8, #9, #10, #11, #12, #13, #14, #15, #16, #17, #18, #19, #20, #21, #22, #23, #24, #25, #26, #27, #28, #29): instant rollback with no code change** — Vercel → Deployments → the deployment of that commit → "Promote to Production".
 - **To any point in the code:** `git checkout <tag>` to look at it, or create a branch from it (`git checkout -b restore-<n> <tag>`) and deploy that branch / merge it into `main` after approval.
 - Look at it without changing anything: `git checkout checkpoint-stage2-stable` (then `git checkout main` to come back).
 - Undo later work on `main` safely (keeps history): `git revert <commits after the checkpoint>`, then push → Vercel redeploys.
@@ -305,7 +306,7 @@ The platform coaches like a REAL coach for every sport: an exact kinematic analy
 | 10-14 | The full coaching vision: Behavioral AI, Intent recognition, RLEF, Voice prosody — binding architecture, and the system coaches through them | The Coach Brain (4 layers + orchestrator) integrated in the expert module and the set flow, behind flags; the vision section 0 + lessons | Deployed (`830250a`) — awaiting check |
 | 10-14 | Verify everything fits EVERY sport before the production deploy; then deploy | The all-sports verification (51 checks) found + fixed 4 cross-sport gaps; approved for production | Deployed (`830250a`) — awaiting check |
 | 10-14 | Critical: the Ghost appears as a huge green flat frame floating over the screen | The skeleton draws only real in-picture points; the floor guide only on a horizontal torso | Deployed (`cc64c1a`) — awaiting check |
-| 10-14 | IRON RULE: a manual skip moves forward and stays; nothing may move the trainee back | A live-index navigation module; next moves at once; the background adaptation never moves the trainee | Implemented — awaiting check |
+| 10-14 | IRON RULE: a manual skip moves forward and stays; nothing may move the trainee back | A live-index navigation module; next moves at once; the background adaptation never moves the trainee | Deployed (`8fe1b6d`) — awaiting check |
 
 ---
 
@@ -1546,3 +1547,4 @@ Two critical corrections to the existing onboarding (Stages 1B/1C), completed **
 - **2026-10-14:** Field bug (Ghost / skeleton as a huge green flat frame over the screen): the skeleton draws only confident in-picture points + their lines; the floor guide only on a horizontal torso. Lesson 18. Client 834 pass, 0 new failures; build OK. Awaiting the owner's check — NOT complete.
 - **2026-10-14:** Pushed `cc64c1a` → deployed, verified in the served bundle. Restore point `checkpoint-2026-10-14-skeleton-real-only` (#28). Awaiting the owner's check — NOT complete.
 - **2026-10-14:** IRON RULE navigation fix (the trainee was thrown back after a manual skip — "next" waited for the adaptation network call and used a stale index): `exerciseNav` live index, next moves at once, the adaptation in the background never moves the trainee. Lesson 19. Client 837 pass, 0 new failures; build OK. Awaiting the owner's check — NOT complete.
+- **2026-10-14:** Pushed `8fe1b6d` → deployed, verified in the served bundle. Restore point `checkpoint-2026-10-14-nav-iron-rule` (#29). Awaiting the owner's full check — NOT complete.
