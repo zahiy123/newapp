@@ -27,6 +27,7 @@ import CoachVoicePicker from '../components/CoachVoicePicker';
 import { pickCoachVoice } from '../engine/voicePick';
 import { coachMode, COACH_IDS } from '../engine/coachAvatar';
 import { setCoachVoice, setSpeechOpen, holdSpeech } from '../hooks/useSpeech';
+import { techniqueWhy } from '../utils/techniqueWhy';
 import { useVoiceCommand } from '../hooks/useVoiceCommand';
 import { READY_DRIVE, withDrive, splitLegOrder, legLabel, splitStartText, splitSwitchText, splitWorkingSide, setLegHalf, legSetStartText, legSetNextText, isStrikeMode } from '../engine/training/coachFlow';
 import { needsEquipmentCheck } from '../engine/training/equipmentNeed';
@@ -524,6 +525,12 @@ export default function Training() {
   const limbsInViewRef = useRef(false);
   const [missingPart, setMissingPart] = useState(null);     // 'legs' | 'arms' | 'upper' | null
   const lastViewPromptRef = useRef(0);
+  const viewPromptRepeatsRef = useRef(0);          // warm-up: not fixed → the next reminder later (10 → 20 → 40 → 60 s)
+  const orientBadSinceRef = useRef(0);
+  const lastWarningRef = useRef(null);             // the analyzer's last specific correction in this rep
+  const explainedRef = useRef({ key: null, ids: new Set() });   // corrections already explained in full, this exercise
+  const warmOutSinceRef = useRef(0);               // warm-up: out of the picture since
+  const orientSpokenAtRef = useRef(0);
   const warmUpDriveRef = useRef(Math.floor(Math.random() * 6));   // rotating energy lines
   const warmUpMovingMsRef = useRef(0);                      // accumulated moving time toward the next second
   // Real-time accuracy vs. the Ghost (range + position overlap), shown next to the movement indicator
@@ -886,6 +893,11 @@ export default function Training() {
   const guideLatchRef = useRef({ phase: null, on: false });
   const setupRef = useRef(null);                   // the expert module's positioning fix (null = positioned)
   setupRef.current = execution.setup;
+  // the expert module owns positioning: the older pipeline's view / distance lines stay silent while it runs
+  const expertOwnsViewRef = useRef(false);
+  expertOwnsViewRef.current = !!execution.active;
+  const expertCoachesRef = useRef(false);          // an expert profile coaches the technique itself
+  expertCoachesRef.current = !!execution.active && execution.profile?.precision === 'expert';
   const ghostIsGuide = useCallback(() => {
     const ph = phaseRef.current;
     const latch = guideLatchRef.current;
@@ -1389,7 +1401,7 @@ export default function Training() {
     if (newState.feedback?.type === 'visibility') {
       const now = Date.now();
       const isAnalyzing = commandPhaseRef.current === 'ANALYZING' || commandPhaseRef.current === 'SPEAKING_FEEDBACK';
-      if (!isAnalyzing && now - visibilityWarningTimeRef.current > 10000) {
+      if (!isAnalyzing && !expertOwnsViewRef.current && now - visibilityWarningTimeRef.current > 10000) {
         speakMissingBodyParts(newState.feedback.missingParts, playerName, newState.feedback.direction);
         visibilityWarningTimeRef.current = now;
         setFeedback({
@@ -1407,7 +1419,7 @@ export default function Training() {
     if (posture === 'unknown') {
       const now = Date.now();
       const isAnalyzing = commandPhaseRef.current === 'ANALYZING' || commandPhaseRef.current === 'SPEAKING_FEEDBACK';
-      if (!isAnalyzing && (!notVisibleWarnedRef.current || now - lastNudgeTimeRef.current > 8000)) {
+      if (!isAnalyzing && !expertOwnsViewRef.current && (!notVisibleWarnedRef.current || now - lastNudgeTimeRef.current > 8000)) {
         notVisibleWarnedRef.current = true;
         lastNudgeTimeRef.current = now;
         speakNotVisible(playerName);
@@ -1426,8 +1438,10 @@ export default function Training() {
     const orientCheck = checkOrientation(landmarks, orientation, prevState);
     if (!orientCheck.valid) {
       const now = Date.now();
-      if (now - lastNudgeTimeRef.current > 4000) {
-        lastNudgeTimeRef.current = now;
+      // said only when it PERSISTED (a passing frame never), and never again within 20 s
+      if (!orientBadSinceRef.current) orientBadSinceRef.current = now;
+      if (now - orientBadSinceRef.current >= 3000 && now - orientSpokenAtRef.current > 20000) {
+        orientSpokenAtRef.current = now;
         const msg = isHe ? orientCheck.feedback.text : orientCheck.feedback.textEn;
         speakPriority(msg, { rate: 1.3, pitch: 1.05 });
         setFeedback({ type: 'warning', text: msg });
@@ -1438,6 +1452,7 @@ export default function Training() {
     }
 
     // Orientation valid — clear warnings and proceed
+    orientBadSinceRef.current = 0;
     sittingWarnedRef.current = false;
     notVisibleWarnedRef.current = false;
 
@@ -1447,7 +1462,7 @@ export default function Training() {
     if (!perspCheck.valid) {
       const now = Date.now();
       const isAnalyzing = commandPhaseRef.current === 'ANALYZING' || commandPhaseRef.current === 'SPEAKING_FEEDBACK';
-      if (!isAnalyzing && now - perspectiveWarningTimeRef.current > 15000) {
+      if (!isAnalyzing && !expertOwnsViewRef.current && now - perspectiveWarningTimeRef.current > 15000) {
         perspectiveWarningTimeRef.current = now;
         speakSideCamera();
       }
@@ -1507,6 +1522,7 @@ export default function Training() {
         goodFormCountRef.current++;
       } else if (fb.type === 'warning' && isMoving) {
         badFormCountRef.current++;
+        if (typeof fb.text === 'string' && !/^[A-Za-z]+$/.test(fb.text)) lastWarningRef.current = fb;   // (not a TTS marker)
       } else if (fb.type !== 'good' && fb.type !== 'warning') {
         badFormCountRef.current = 0;
       }
@@ -1523,10 +1539,22 @@ export default function Training() {
           }
         }
         // Correction: speak after rep if bad form accumulated
-        if (badFormCountRef.current >= 5 && !formStoppedRef.current) {
+        // the exercise's OWN correction (what the analyzer saw), explained in full the first time —
+        // never a generic "good direction, let's refine"; an expert profile coaches through its own module
+        const wfb = lastWarningRef.current;
+        if (badFormCountRef.current >= 5 && !formStoppedRef.current && wfb && !expertCoachesRef.current) {
           formStoppedRef.current = true;
-          speakCorrection(currentExercise?.tips);
-          setFeedback({ type: 'info', text: isHe ? 'כיוון טוב! בוא נשפר קצת.' : 'Good direction! Let\'s refine.' });
+          const what = wfb.coaching ? (isHe ? wfb.coaching.he : wfb.coaching.en) : (isHe ? wfb.text : (wfb.textEn || wfb.text));
+          const why = techniqueWhy(wfb.text);
+          const ex = explainedRef.current;
+          if (ex.key !== currentIdx) { ex.key = currentIdx; ex.ids = new Set(); }
+          const first = !ex.ids.has(wfb.text);
+          ex.ids.add(wfb.text);
+          const line = first && why && !wfb.coaching ? `${what} ${isHe ? why.he : why.en}` : what;
+          holdSpeech(Math.round(line.length / 14 * 1000) + 400);
+          speakPriority(line, { rate: 1.05 });
+          setFeedback({ type: 'warning', text: what });
+          lastWarningRef.current = null;
           setTimeout(() => {
             formStoppedRef.current = false;
             badFormCountRef.current = 0;
@@ -1583,7 +1611,8 @@ export default function Training() {
               const fallbackCmd = nextRep <= targetReps2
                 ? `. עכשיו ${getCommandText(nextRep, analyzerRef.current?.cueKey, analyzerRef.current?.type) || `חזרה ${nextRep}`}`
                 : '';
-              speakPriority(`המשך ככה${fallbackCmd}`, { rate: 1.25 });
+              // no unverified praise ("keep it up") — just the next command
+              if (fallbackCmd) speakPriority(fallbackCmd.replace(/^\. /, ''), { rate: 1.25 });
               if (nextRep <= targetReps2) {
                 commandRepRef.current = nextRep;
                 commandPhaseRef.current = 'COMMANDING';
@@ -2044,6 +2073,7 @@ export default function Training() {
     lastActivityRef.current = 0;          // no movement yet — the timer waits for real, in-view movement
     warmUpMovingMsRef.current = 0;
     lastViewPromptRef.current = 0;
+    viewPromptRepeatsRef.current = 0;
 
     // Server wake-up: send first frame on first warm-up exercise to eliminate cold-start
     if (warmUpIdx === 0 && captureFrame && videoRef.current) {
@@ -2083,14 +2113,18 @@ export default function Training() {
       // 0) Required limbs not in view → frozen, clear prompt (no generic "start moving" nudges)
       if (!inView) {
         if (!warmUpPausedRef.current) { warmUpPausedRef.current = true; setWarmUpPaused(true); }
-        const sinceStart = now - warmUpInactivityStartRef.current;
-        if (sinceStart > 1500 && now - lastViewPromptRef.current > 10000) {
+        if (!warmOutSinceRef.current) warmOutSinceRef.current = now;
+        const sinceStart = now - warmOutSinceRef.current;
+        // out of the picture for more than 3 s — then a reminder that backs off (a small room is not nagged)
+        if (sinceStart > 3000 && now - lastViewPromptRef.current > Math.min(60000, 10000 * 2 ** viewPromptRepeatsRef.current)) {
           lastViewPromptRef.current = now;
+          viewPromptRepeatsRef.current += 1;
           const part = requiredPointsFor(currentWarmUp.ghost, limbProfile).part;
           speakPriority(withDrive(viewPromptText(part, isHe), warmUpDriveRef.current++, playerName, isHe), { rate: 1.12 });
         }
         return;
       }
+      warmOutSinceRef.current = 0;
 
       // 3) Movement Lock: timer ONLY counts down when moving
       if (!isMoving) {

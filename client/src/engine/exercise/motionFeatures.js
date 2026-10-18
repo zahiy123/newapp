@@ -32,6 +32,8 @@ const CADENCE_WINDOW_MS = 6000;
 // Rep tempo thresholds on rep progress (0 = rest, 1 = peak)
 const LEAVE = 0.1;
 const ARRIVE = 0.9;
+const PARTIAL_PROG = 0.3;         // a rep attempt that went this far toward the peak and turned back = a partial rep
+const PARTIAL_MIN_MS = 300;
 // Fast counting (the count is heard while the rep is still finishing, not after it):
 // a rep counts the moment the return passes COUNT_AT after the movement reached COUNT_PEAK
 const COUNT_ARM = 0.15;
@@ -163,9 +165,20 @@ export function updateMotion(ms, landmarks, metrics, t) {
       c.stage = 'counted';
     } else if (c.stage === 'counted' && prog <= COUNT_ARM) { c.stage = 'ready'; }
     const r = ms.rep;
-    if (r.stage === 'rest' && prog > LEAVE) { r.stage = 'going'; r.leaveAt = t; }
+    if (r.stage === 'going') r.maxProg = Math.max(r.maxProg || 0, prog);
+    if (r.stage === 'rest' && prog > LEAVE) { r.stage = 'going'; r.leaveAt = t; r.maxProg = prog; }
     else if (r.stage === 'going' && prog >= ARRIVE) { r.stage = 'peak'; r.arriveAt = t; }
-    else if (r.stage === 'going' && prog <= LEAVE * 0.5) { r.stage = 'rest'; }            // aborted rep
+    else if (r.stage === 'going' && prog <= LEAVE * 0.5) {
+      // a rep that turned back BEFORE the target (a shallow squat / a half push-up): never counted —
+      // reported, so the coach tells WHY it did not count ("go deeper") instead of staying silent
+      if ((r.maxProg || 0) >= PARTIAL_PROG && t - r.leaveAt >= PARTIAL_MIN_MS) {
+        const prims = ms.hist.filter(f => f.t >= r.leaveAt).map(f => f.primary).filter(v => typeof v === 'number');
+        const j = ms.profile.joints[ms.profile.primary];
+        const down = (j.peak[0] + j.peak[1]) < (j.rest[0] + j.rest[1]);
+        events.push({ type: 'partialRep', reached: r.maxProg, primaryPeak: prims.length ? (down ? Math.min(...prims) : Math.max(...prims)) : null });
+      }
+      r.stage = 'rest';
+    }
     else if (r.stage === 'peak' && prog < ARRIVE) { r.stage = 'returning'; r.departAt = t; }
     else if (r.stage === 'returning' && prog <= LEAVE) {
       const during = ms.hist.filter(f => f.t >= r.leaveAt);

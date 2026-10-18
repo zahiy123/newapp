@@ -96,6 +96,10 @@ export function renderCorrection(rule, style, he = true) {
   const msg = L(rule.msg);
   switch (style) {
     case 'why': return rule.why ? `${msg}. ${L(rule.why)}` : msg;
+    case 'full': {
+      const parts = [msg, rule.why ? L(rule.why) : null, rule.external ? (he ? `טיפ: ${L(rule.external)}` : `Tip: ${L(rule.external)}`) : null];
+      return parts.filter(Boolean).join('. ');
+    }
     case 'external': return rule.external ? L(rule.external) : msg;
     case 'calm': return he ? `בלי לחץ — רק דבר אחד: ${msg}` : `No pressure — just one thing: ${msg}`;
     default: return msg;

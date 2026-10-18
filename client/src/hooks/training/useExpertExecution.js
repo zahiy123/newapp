@@ -41,6 +41,11 @@ import {
 import { createClipRecorder, recordFrame } from '../../engine/validation/clipRecorder';
 import { createRepEvidence, evidenceFrame, evidenceOk, evidenceAccept, evidenceGroupFor } from '../../engine/training/repEvidence';
 import { holdSpeech } from '../useSpeech';
+import { ROOM_TIP } from '../../engine/exercise/setupCoach';
+
+// a small room: the framing tip is said ONCE per session (then the coach adapts and stays quiet)
+let roomTipGiven = false;
+const ROOM_TIP_AFTER_MS = 3000;
 
 /** How long a line takes to say (Hebrew TTS ≈ 14 characters / s at rate 1). */
 const estimateSpeechMs = (text, rate = 1) => Math.round((String(text || '').length / 14) * 1000 / (rate || 1)) + 400;
@@ -175,6 +180,7 @@ export function useExpertExecution({
     let setupCode = null; let setupSince = 0; let spokenCode = null; let spokenAt = 0;
     let problemSince = null; let okSince = null; let shownCode = null; let shownSetup = null;
     const spokenByCode = {}; let hadProblemShown = false; let lastReadyAt = -1e9; let lastSetupSpokenAt = -1e9; let setupRepeats = 0;
+    let hintSince = null;
     let readySince = null; let announcedReady = false; let everReady = false; let flashUntil = 0;
     const recorder = recordClips ? createClipRecorder(profile) : null;
     const brain = brainOnRef.current ? createCoachBrain({ profile, exerciseName, savedPolicy: loadPolicy() }) : null;
@@ -226,7 +232,7 @@ export function useExpertExecution({
         if (countingRef.current && r.inView && countOpenRef.current) {
           for (const ev of r.events) {
             // the coach brain learns from every real attempt and the errors seen in it
-            if (brain && (ev.type === 'rep' || ev.type === 'strike')) {
+            if (brain && (ev.type === 'rep' || ev.type === 'strike' || ev.type === 'partialRep')) {
               brainAttempt(brain, ev, { now, accuracy: r.accuracy, errorIds: (r.issues || []).map(i => i.id) });
             }
             // a rep counts only when it was measured RELIABLY (anti-ghost counting) — like a strike
@@ -283,6 +289,15 @@ export function useExpertExecution({
         }
         if (flashUntil && now > flashUntil) { flashUntil = 0; setReadyFlash(null); }
 
+        // A small room: a framing fix while everything measured IS in the picture → one tip per session,
+        // never during a set, never blocking (the measurement adapts to what the camera sees)
+        if (r.hint && !code) { if (hintSince === null) hintSince = now; } else hintSince = null;
+        if (!roomTipGiven && hintSince !== null && now - hintSince >= ROOM_TIP_AFTER_MS && !countingRef.current
+          && !quietRef.current && now - lastVoice > 4000) {
+          roomTipGiven = true; lastVoice = now;
+          speakRef.current?.(he ? ROOM_TIP.he : ROOM_TIP.en, { rate: 1.05 });
+        }
+
         // Positioned, but not in the start position (before the start / between reps of a hold):
         // tell them to take it, with drive — never "start" before they are in it
         const needStart = !code && r.inView && !inStart && !startReadyRef.current && !countingRef.current;
@@ -323,7 +338,9 @@ export function useExpertExecution({
         // A repeated technique error: the coach corrects AND explains it, once per exercise. With the
         // coach brain: it is held for the right moment (between attempts) and said in the style that
         // works for this trainee; the brain also forecasts errors, reads intent and adapts to the state
-        const coach = r.coaching?.[0];
+        // corrections only for real attempts: after the start position, during a set (never while walking
+        // into place / adjusting the camera)
+        const coach = countOpenRef.current && countingRef.current ? r.coaching?.[0] : null;
         if (brain) {
           if (coach && !r.danger) brainOfferCorrection(brain, coach);
           if (!quietRef.current && !r.danger) {

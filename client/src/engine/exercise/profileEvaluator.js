@@ -40,7 +40,17 @@ export const RULE_HOLD_MS = 400;   // a rule must hold this long before it is re
 const WINDOW_MS = 8000;            // accuracy window (a few reps) — at least 2 Ghost cycles at slow tempos
 const MIN_ACCURACY_SAMPLES = 20;   // ~1 s of in-view frames before a % is shown
 export const DYNAMIC_SHOW_MS = 2500;  // a violated dynamic rule stays on screen this long
-export const COACH_AFTER = 3;         // consecutive violations before the coach explains the rule
+export const COACH_AFTER = 3;         // consecutive violations before the coach explains a TEMPO / flow rule
+// A position error (a static rule: depth, knee line, body line, elbow, trunk) is a technique error of
+// the movement itself (owner, 2026-10-18: "every wrong movement — a professional explanation, at once"):
+// explained after it was seen in STATIC_COACH_AFTER reps in a row; in a hold / running, after it held
+// HOLD_COACH_MS. A rule may be explained again (MAX_COACH_PER_RULE per exercise) only after it came back
+// for a whole new streak — never nagging every rep.
+export const STATIC_COACH_AFTER = 2;
+export const HOLD_COACH_MS = 3000;
+export const MAX_COACH_PER_RULE = 3;
+const HOLD_RECOACH_GAP_MS = 20000;
+const REP_ERR_FRAMES = 3;            // ~150 ms of a rep in the wrong position = an error of that rep
 const STRIKE_WINDOW = 5;              // accuracy of strike exercises: the last N strikes
 
 const SIDE_POINTS = {
@@ -144,7 +154,9 @@ export function createExecutionTracker(profile, lp = {}) {
     motion: createMotionState(profile, lp),
     dynActive: {},          // rule id → { rule, until, value }
     dynStreak: {},          // rule id → consecutive violating events
-    coached: {},            // rule id → true once explained
+    coached: {},            // rule id → how many times it was explained
+    coachedAt: {},          // rule id → when it was last explained
+    repErr: {},             // static error rule id → frames it was violated since the last rep / strike
     strikes: [],            // { ok } of recent strikes
     conf: {},               // confidence hysteresis state
     cameraTilt: 0,          // the camera's tilt, measured on the upright trainee (calibrateUpright)
@@ -198,12 +210,17 @@ export function updateExecution(tracker, landmarks, nowMs) {
   const { profile } = tr;
 
   // 1. Positioned right + required limbs in view (hysteresis). Like a coach: one precise fix at a time
-  const setupNow = assessSetup(landmarks, profile, tr.lp);
-  let issueNow = setupNow.ok ? null : setupNow.issue;
-  if (!issueNow) {
-    const region = missingRegion(landmarks, tr.regions);
-    if (region) issueNow = region === 'arms' ? SETUP.arms : region === 'legs' ? SETUP.feetStepBack : { ...SETUP.noBody, region };
+  let setupNow = assessSetup(landmarks, profile, tr.lp);
+  const region = missingRegion(landmarks, tr.regions);
+  // a small room: a framing fix while the measured joints ARE in the picture is a tip, not a block —
+  // look past it for a real problem (orientation, light, distance)
+  let hint = null;
+  if (setupNow.issue?.soft && !region) {
+    hint = setupNow.issue;
+    setupNow = assessSetup(landmarks, profile, tr.lp, { skipSoft: true });
   }
+  let issueNow = setupNow.ok ? null : setupNow.issue;
+  if (!issueNow && region) issueNow = region === 'arms' ? SETUP.arms : region === 'legs' ? SETUP.feetStepBack : { ...SETUP.noBody, region };
   if (issueNow) tr.lastSetupIssue = issueNow;
   if (issueNow === null) { tr.inStreak += 1; tr.outStreak = 0; } else { tr.outStreak += 1; tr.inStreak = 0; }
   if (!tr.inView && tr.inStreak >= VISIBLE_ON_SAMPLES) tr.inView = true;
@@ -212,11 +229,12 @@ export function updateExecution(tracker, landmarks, nowMs) {
   const missing = setup ? setup.region : null;
 
   const quiet = (quality) => ({
-    tracker: tr, inView: tr.inView, missing, setup, metrics: {}, phase: 'any', issues: [], danger: null,
+    tracker: tr, inView: tr.inView, missing, setup, hint, metrics: {}, phase: 'any', issues: [], danger: null,
     accuracy: accuracyOf(profile, tr.samples, tr.strikes), events: [], coaching: [], live: {}, quality,
   });
   if (!tr.inView || !landmarks || profile.precision !== 'expert') {
     tr.ruleSince = {};
+    tr.repErr = {};
     if (!tr.inView) tr.motion = createMotionState(profile, tr.lp);   // no motion history across a gap
     return quiet({ confident: profile.precision === 'expert' ? false : true, reason: tr.inView ? null : 'limbs', view: null });
   }
@@ -235,6 +253,7 @@ export function updateExecution(tracker, landmarks, nowMs) {
   const quality = updateConfidence(tr.conf, profile, landmarks, metrics[profile.primary]);
   if (!quality.confident) {
     tr.ruleSince = {};
+    tr.repErr = {};
     tr.dynActive = {};
     tr.motion = createMotionState(profile, tr.lp);
     return { ...quiet(quality), metrics, phase };
@@ -247,7 +266,8 @@ export function updateExecution(tracker, landmarks, nowMs) {
   // (the hip-first chain: never from the front; the trunk lean: not in kick / pass drills from the front
   // — a squat's forward lean stays judged, it was designed for the frontal depth)
   const judged = (r) => {
-    if (r.view === 'front' && !frontal) return false;          // a frontal-only measure (the foot's turn-out)
+    if (r.view === 'front' && !frontal) return false;          // a frontal-only measure (the foot's turn-out, the knee line)
+    if (r.view === 'side' && frontal) return false;            // a side-only measure
     if (!frontal || r.severity === 'danger') return true;
     const m = r.metric || r.feature;
     if (m === 'chainLeadMs') return false;
@@ -265,7 +285,35 @@ export function updateExecution(tracker, landmarks, nowMs) {
   // 3b. Temporal analysis: events judged by the dynamic rules (profile + sport)
   const { events, live } = updateMotion(tr.motion, landmarks, metrics, nowMs);
   const coaching = [];
+  const canCoach = (id) => (tr.coached[id] || 0) < MAX_COACH_PER_RULE;
+  // a repeat explanation needs a LONGER streak each time (2 → 6 → 10 reps): the coach is patient
+  const need = (r, base) => (r.coachNow ? 1 : base) * (1 + 2 * (tr.coached[r.id] || 0));
+  const coachIt = (r) => { tr.coached[r.id] = (tr.coached[r.id] || 0) + 1; tr.coachedAt[r.id] = nowMs; tr.dynStreak[r.id] = 0; coaching.push(r); };
+  // (a peak is short: ≥ REP_ERR_FRAMES frames in this rep, not the full hold time)
+  for (const r of hits) if (r.severity === 'error') tr.repErr[r.id] = (tr.repErr[r.id] || 0) + 1;
   for (const ev of events) {
+    // the position errors of this rep / kick (static rules), judged per attempt
+    // a partial rep (turned back before the target): its range rules ("go deeper") are violated by definition
+    if (ev.type === 'partialRep') {
+      const j = profile.joints?.[profile.primary];
+      const down = j?.peak && (j.peak[0] + j.peak[1]) < (j.rest[0] + j.rest[1]);
+      for (const r of profile.rules || []) {
+        if (r.when === 'peak' && r.metric === profile.primary && r.severity === 'error' && r.op === (down ? '>' : '<') && judged(r)) {
+          tr.repErr[r.id] = REP_ERR_FRAMES;
+          tr.dynActive[r.id] = { rule: r, until: nowMs + DYNAMIC_SHOW_MS, value: ev.primaryPeak };
+        }
+      }
+    }
+    if (ev.type === 'rep' || ev.type === 'strike' || ev.type === 'partialRep') {
+      for (const r of profile.rules || []) {
+        if (r.severity !== 'error' || !judged(r)) continue;
+        if ((tr.repErr[r.id] || 0) >= REP_ERR_FRAMES) {
+          tr.dynStreak[r.id] = (tr.dynStreak[r.id] || 0) + 1;
+          if (tr.dynStreak[r.id] >= need(r, STATIC_COACH_AFTER) && canCoach(r.id)) coachIt(r);
+        } else tr.dynStreak[r.id] = 0;
+      }
+      tr.repErr = {};
+    }
     let clean = true;
     for (const r of profile.dynamics || []) {
       if (r.on !== ev.type || !judged(r)) continue;
@@ -274,7 +322,7 @@ export function updateExecution(tracker, landmarks, nowMs) {
         tr.dynActive[r.id] = { rule: r, until: nowMs + DYNAMIC_SHOW_MS, value: ev[r.feature] };
         tr.dynStreak[r.id] = (tr.dynStreak[r.id] || 0) + 1;
         // a technique error of the movement itself (coachNow) is corrected RIGHT AFTER the first time
-        if (tr.dynStreak[r.id] >= (r.coachNow ? 1 : COACH_AFTER) && !tr.coached[r.id]) { tr.coached[r.id] = true; coaching.push(r); }
+        if (tr.dynStreak[r.id] >= need(r, COACH_AFTER) && canCoach(r.id)) coachIt(r);
       } else if (typeof ev[r.feature] === 'number') {
         tr.dynStreak[r.id] = 0;
       }
@@ -282,6 +330,14 @@ export function updateExecution(tracker, landmarks, nowMs) {
     if (ev.type === 'strike') {
       tr.strikes.push({ ok: clean && issues.length === 0 });
       if (tr.strikes.length > STRIKE_WINDOW) tr.strikes.shift();
+    }
+  }
+  // a hold / running: a position error that HELD is explained (no reps to wait for)
+  if (profile.kind === 'hold' || profile.kind === 'cyclic') {
+    for (const r of issues) {
+      if (r.severity !== 'error' || !(profile.rules || []).includes(r)) continue;
+      const heldMs = nowMs - (tr.ruleSince[r.id] ?? nowMs);
+      if (heldMs >= HOLD_COACH_MS && canCoach(r.id) && nowMs - (tr.coachedAt[r.id] ?? -1e9) >= HOLD_RECOACH_GAP_MS) coachIt(r);
     }
   }
   for (const [id, d] of Object.entries(tr.dynActive)) {
@@ -301,7 +357,7 @@ export function updateExecution(tracker, landmarks, nowMs) {
   }
 
   return {
-    tracker: tr, inView: true, missing: null, setup: null, metrics, phase, issues, danger,
+    tracker: tr, inView: true, missing: null, setup: null, hint, metrics, phase, issues, danger,
     accuracy: accuracyOf(profile, tr.samples, tr.strikes), events, coaching, live, quality,
   };
 }

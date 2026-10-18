@@ -11,6 +11,12 @@
 // off-centre / cut at a side (move left / right) → too far → orientation (side-on /
 // facing) → clarity (light / hidden limbs).
 // Directions are as the trainee sees the screen (the camera view is mirrored).
+//
+// SMALL ROOMS (owner, 2026-10-18: "I train in a small room, I can't move the laptop back — stop
+// nagging"): the framing fixes (step back, feet / head cut, tilt, off-centre) are ROOM fixes — marked
+// `soft`. The evaluator treats a soft fix as a tip only while the joints the exercise measures are in
+// the picture (it adapts to what it sees); it blocks only when they are really out of view.
+// `assessSetup(lm, profile, lp, { skipSoft: true })` looks past the room fixes for a real problem.
 // ============================================================
 
 import { P, torsoLength, trunkLean, sideUsable } from './kinematics.js';
@@ -24,21 +30,28 @@ const TOO_FAR_TORSO = 0.11;       // shorter → too far
 const EDGE = 0.02;
 const CENTER_BAND = [0.22, 0.78];
 
-const say = (code, he, en, region = null) => ({ code, he, en, region });
+const say = (code, he, en, region = null, soft = false) => ({ code, he, en, region, soft });
+export const SOFT_CODES = Object.freeze(['step_back', 'feet_step_back', 'tilt_down', 'tilt_up', 'move_left', 'move_right']);
 
 export const SETUP = Object.freeze({
   noBody: say('no_body', 'עמוד מול המצלמה כך שאראה אותך', 'Stand in front of the camera so I can see you', 'body'),
-  stepBack: say('step_back', 'התרחק מהמצלמה כדי שאראה אותך מכף רגל ועד ראש', 'Step back so I can see you from head to toe', 'body'),
-  feetStepBack: say('feet_step_back', 'התרחק קצת — לא רואים את הרגליים. אני צריך לראות אותך מכף רגל ועד ראש', "Step back a little — I can't see your feet. I need you head to toe", 'legs'),
-  tiltDown: say('tilt_down', 'הטה את המצלמה קצת למטה — חותכים לי את הרגליים', 'Tilt the camera down a little — your feet are cut off', 'legs'),
-  tiltUp: say('tilt_up', 'הטה את המצלמה קצת למעלה — חותכים לי את הראש', 'Tilt the camera up a little — your head is cut off', 'body'),
-  moveLeft: say('move_left', 'זוז קצת שמאלה — אתה יוצא מהמסגרת', "Move a little to the left — you're leaving the frame", 'body'),
-  moveRight: say('move_right', 'זוז קצת ימינה — אתה יוצא מהמסגרת', "Move a little to the right — you're leaving the frame", 'body'),
+  stepBack: say('step_back', 'התרחק מהמצלמה כדי שאראה אותך מכף רגל ועד ראש', 'Step back so I can see you from head to toe', 'body', true),
+  feetStepBack: say('feet_step_back', 'אני לא רואה את הרגליים — הטה את המסך קצת למטה, או התרחק אם יש לך מקום', "I can't see your legs — tilt the screen down a little, or step back if you have room", 'legs', true),
+  tiltDown: say('tilt_down', 'הטה את המצלמה קצת למטה — חותכים לי את הרגליים', 'Tilt the camera down a little — your feet are cut off', 'legs', true),
+  tiltUp: say('tilt_up', 'הטה את המצלמה קצת למעלה — חותכים לי את הראש', 'Tilt the camera up a little — your head is cut off', 'body', true),
+  moveLeft: say('move_left', 'זוז קצת שמאלה — אתה יוצא מהמסגרת', "Move a little to the left — you're leaving the frame", 'body', true),
+  moveRight: say('move_right', 'זוז קצת ימינה — אתה יוצא מהמסגרת', "Move a little to the right — you're leaving the frame", 'body', true),
   stepCloser: say('step_closer', 'התקרב קצת למצלמה — אתה רחוק מדי', "Come a little closer — you're too far", 'body'),
   turnSide: say('turn_side', 'הסתובב עם הצד למצלמה — כך אמדוד את התנועה במדויק', "Turn side-on to the camera — that's how I measure this precisely", 'body'),
   turnFront: say('turn_front', 'עמוד עם הפנים למצלמה', 'Face the camera', 'body'),
   light: say('light', 'לא רואה אותך מספיק ברור — הוסף אור או הזז דברים שמסתירים אותך', "I can't see you clearly — add light or move whatever is hiding you", 'body'),
   arms: say('arms', 'לא רואים את הידיים — הרחק אותן מהגוף או התרחק קצת', "I can't see your arms — keep them clear of your body or step back a little", 'arms'),
+});
+
+// The ONE tip a small room gets for a framing fix (said once — then the coach adapts and stays quiet)
+export const ROOM_TIP = Object.freeze({
+  he: 'אם יש לך מקום — התרחק קצת מהמצלמה. אם החדר קטן, זה בסדר: אני מתאים את המדידה למה שאני רואה',
+  en: "If you have room, step back a little. If the room is small, that's fine — I adapt the measurement to what I see",
 });
 
 export const READY = Object.freeze({
@@ -55,7 +68,7 @@ const ok = (p, v = VIS) => p && (p.visibility ?? 1) >= v;
  * @param {Object} [lp] - limbProfile
  * @returns {{ ok: boolean, issue: null | { code, he, en, region } }}
  */
-export function assessSetup(landmarks, profile, lp = {}) {
+export function assessSetup(landmarks, profile, lp = {}, { skipSoft = false } = {}) {
   const fail = (issue) => ({ ok: false, issue });
   if (!landmarks) return fail(SETUP.noBody);
   const sh = [landmarks[P.LEFT_SHOULDER], landmarks[P.RIGHT_SHOULDER]].filter(p => ok(p, 0.3));
@@ -76,6 +89,7 @@ export function assessSetup(landmarks, profile, lp = {}) {
   };
   const feetCut = needFeet && feetSides.length > 0 && !feetSides.some(footInFrame);
 
+  if (!skipSoft) {
   // 1. Too close (or both ends cut)
   if ((headCut && feetCut) || torso > TOO_CLOSE_TORSO) return fail(SETUP.stepBack);
   // 2. Feet / head cut: tilt the camera if there is room on the other end, else step back
@@ -92,6 +106,7 @@ export function assessSetup(landmarks, profile, lp = {}) {
   const cx = (minX + maxX) / 2;
   if (minX < EDGE || (upright && cx < CENTER_BAND[0])) return fail(SETUP.moveLeft);
   if (maxX > 1 - EDGE || (upright && cx > CENTER_BAND[1])) return fail(SETUP.moveRight);
+  }
   // 4. Too far
   if (torso < TOO_FAR_TORSO) return fail(SETUP.stepCloser);
   // 5. Orientation for standing measurements

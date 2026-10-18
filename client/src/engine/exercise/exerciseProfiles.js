@@ -37,6 +37,20 @@ const UPRIGHT_TORSO = (value, severity = 'error') => ({
   why: msg('גב זקוף מחלק את העומס בין הירכיים לברכיים ושומר על עמוד השדרה ניטרלי',
     'An upright back shares the load between hips and knees and keeps the spine neutral'),
 });
+// upper-body drills: the trunk stays still (no swing / no arching) — its own words, not the squat's
+const STILL_TORSO = (value) => ({
+  id: 'trunk_lean', metric: 'trunkLean', op: '>', value, severity: 'error', when: 'any',
+  msg: msg('בלי לנדנד את הגוף — גב זקוף, בטן מהודקת', 'No swinging — back tall, abs braced'),
+  why: msg('תנופה או קשת בגב מרימות את המשקל במקום השריר שאתה מאמן, ודוחסות את החוליות בגב התחתון',
+    'Swinging or arching lifts the weight instead of the muscle you train, and compresses the lower-back vertebrae'),
+});
+// knees over the toes (frontal view): a knee caving inward
+const KNEE_VALGUS = (when = 'peak') => ({
+  id: 'knee_valgus', metric: 'kneeTrack', op: '<', value: 0.75, severity: 'error', when, view: 'front',
+  msg: msg('הברכיים נופלות פנימה — דחוף אותן החוצה, בכיוון האצבעות', 'Your knees cave in — push them out, over your toes'),
+  why: msg('ברך שקורסת פנימה מסובבת את המפרק ומעמיסה על הרצועה הצולבת ועל המניסקוס — ברך בקו האצבעות מעבירה את הכוח ישר',
+    'A knee caving inward twists the joint and loads the ACL and meniscus — a knee over the toes sends the force straight'),
+});
 const WHY_BACK = msg('קריסת הגב קדימה תחת עומס מעמיסה על הדיסקים בגב התחתון',
   'A back collapsing forward under load stresses the lower-back discs');
 const WHY_HIPS = msg('אגן שקורס מכופף את הגב התחתון לאחור ומעביר את העומס מהבטן לחוליות',
@@ -53,12 +67,15 @@ const RAW_EXPERT = {
     },
     rules: [
       { id: 'too_shallow', metric: 'knee', op: '>', value: 125, severity: 'error', when: 'peak',
-        msg: msg('רד עמוק יותר — ירכיים לכיוון מקביל לרצפה', 'Go deeper — thighs toward parallel') },
+        msg: msg('רד עמוק יותר — ירכיים לכיוון מקביל לרצפה', 'Go deeper — thighs toward parallel'),
+        why: msg('בעומק של מקביל הישבן והארבע ראשי עובדים בטווח המלא — חצי תנועה בונה חצי כוח', 'At parallel the glutes and quads work through the full range — half a movement builds half the strength') },
       { id: 'too_deep', metric: 'knee', op: '<', value: 45, severity: 'error', when: 'any',
-        msg: msg('עמוק מדי — עצור במקביל לרצפה', 'Too deep — stop at parallel') },
+        msg: msg('עמוק מדי — עצור במקביל לרצפה', 'Too deep — stop at parallel'),
+        why: msg('מתחת למקביל האגן מתגלגל פנימה והגב התחתון מתעגל — העומס עובר מהשרירים לרצועות ולדיסקים', 'Below parallel the pelvis tucks and the lower back rounds — the load moves from the muscles to the ligaments and discs') },
       UPRIGHT_TORSO(58),
       { id: 'trunk_collapse', metric: 'trunkLean', op: '>', value: 72, severity: 'danger', when: 'any',
         msg: msg('עצור! הגב נופל קדימה — סכנה לגב התחתון', 'Stop! Your back is collapsing forward — lower-back risk'), why: WHY_BACK },
+      KNEE_VALGUS('peak'),
     ],
     ghost: {
       view: 'side', base: 'stand', periodMs: 3200,
@@ -76,8 +93,10 @@ const RAW_EXPERT = {
     },
     rules: [
       { id: 'too_deep', metric: 'knee', op: '<', value: 105, severity: 'error', when: 'any',
-        msg: msg('זה מיני סקוואט — אל תרד יותר מרבע', 'This is a mini squat — only a quarter of the way down') },
+        msg: msg('זה מיני סקוואט — אל תרד יותר מרבע', 'This is a mini squat — only a quarter of the way down'),
+        why: msg('כאן עובדים בטווח קצר ובטוח לברך — ירידה עמוקה מוסיפה בדיוק את העומס שהתרגיל נועד לחסוך', 'This drill works a short, knee-safe range — going deep adds exactly the load it is meant to spare') },
       UPRIGHT_TORSO(40),
+      KNEE_VALGUS('peak'),
     ],
     ghost: {
       view: 'side', base: 'stand', periodMs: 3200,
@@ -94,9 +113,11 @@ const RAW_EXPERT = {
     },
     rules: [
       { id: 'too_shallow', metric: 'knee', op: '>', value: 130, severity: 'error', when: 'peak',
-        msg: msg('רד עד שהברך הקדמית ב-90 מעלות', 'Lower until the front knee is at 90 degrees') },
+        msg: msg('רד עד שהברך הקדמית ב-90 מעלות', 'Lower until the front knee is at 90 degrees'),
+        why: msg('ב-90 מעלות הירך הקדמית מקבילה לרצפה — שם הישבן והארבע ראשי מקבלים את העבודה המלאה', 'At 90 degrees the front thigh is parallel to the floor — that is where the glutes and quads get the full work') },
       { id: 'too_deep', metric: 'knee', op: '<', value: 60, severity: 'error', when: 'any',
-        msg: msg('אל תקרוס — עצור ב-90 מעלות', "Don't collapse — stop at 90 degrees") },
+        msg: msg('אל תקרוס — עצור ב-90 מעלות', "Don't collapse — stop at 90 degrees"),
+        why: msg('קריסה מתחת ל-90 דוחפת את הברך קדימה מעבר לאצבעות ומעמיסה על גיד הפיקה', 'Collapsing below 90 drives the knee past the toes and loads the patellar tendon') },
       UPRIGHT_TORSO(35),
     ],
     ghost: {
@@ -115,8 +136,10 @@ const RAW_EXPERT = {
     },
     rules: [
       { id: 'too_high', metric: 'knee', op: '>', value: 125, severity: 'error', when: 'any',
-        msg: msg('רד נמוך יותר — ברכיים ב-90 מעלות', 'Slide lower — knees at 90 degrees') },
+        msg: msg('רד נמוך יותר — ברכיים ב-90 מעלות', 'Slide lower — knees at 90 degrees'),
+        why: msg('ב-90 מעלות הארבע ראשי מחזיק את כל המשקל — גבוה יותר זו מנוחה, לא אימון', 'At 90 degrees the quads hold your whole weight — higher is resting, not training') },
       UPRIGHT_TORSO(30),
+      KNEE_VALGUS('any'),
     ],
     ghost: {
       view: 'side', base: 'stand', periodMs: 4000,
@@ -133,7 +156,8 @@ const RAW_EXPERT = {
     },
     rules: [
       { id: 'squatting', metric: 'knee', op: '<', value: 120, severity: 'error', when: 'any',
-        msg: msg('זו הטיה מהאגן, לא סקוואט — ברכיים כמעט ישרות', "It's a hinge, not a squat — knees almost straight") },
+        msg: msg('זו הטיה מהאגן, לא סקוואט — ברכיים כמעט ישרות', "It's a hinge, not a squat — knees almost straight"),
+        why: msg('בהטיה מהאגן העבודה של הירך האחורית והישבן — כיפוף ברכיים מעביר אותה לארבע ראשי ומפספס את מטרת התרגיל', 'In a hinge the hamstrings and glutes do the work — bending the knees hands it to the quads and misses the point') },
       { id: 'over_bend', metric: 'trunkLean', op: '>', value: 100, severity: 'danger', when: 'any',
         msg: msg('עצור! ירדת נמוך מדי — סכנה לגב', 'Stop! Too low — back risk'), why: WHY_BACK },
     ],
@@ -154,11 +178,13 @@ const RAW_EXPERT = {
     },
     rules: [
       { id: 'body_line', metric: 'bodyLine', op: '<', value: 158, severity: 'error', when: 'any',
-        msg: msg('גוף בקו ישר — הדק בטן וישבן', 'Straight body line — brace abs and glutes') },
+        msg: msg('גוף בקו ישר — הדק בטן וישבן', 'Straight body line — brace abs and glutes'),
+        why: msg('בטן וישבן מהודקים הופכים את הגוף ליחידה אחת — הכוח עובר מהידיים לרצפה בלי לקרוס בגב התחתון', 'Braced abs and glutes make the body one unit — the force goes from the hands to the floor without the lower back sagging') },
       { id: 'hip_sag', metric: 'bodyLine', op: '<', value: 140, severity: 'danger', when: 'any',
         msg: msg('עצור! האגן קורס — סכנה לגב התחתון', 'Stop! Hips are sagging — lower-back risk'), why: WHY_HIPS },
       { id: 'too_shallow', metric: 'elbow', op: '>', value: 125, severity: 'error', when: 'peak',
-        msg: msg('רד נמוך יותר — מרפקים ל-90 מעלות', 'Go lower — elbows to 90 degrees') },
+        msg: msg('רד נמוך יותר — מרפקים ל-90 מעלות', 'Go lower — elbows to 90 degrees'),
+        why: msg('ב-90 מעלות החזה והטרייספס עובדים בטווח המלא — ירידה חלקית מחזקת רק חצי מהתנועה', 'At 90 degrees the chest and triceps work the full range — a partial rep strengthens only half the movement') },
     ],
     ghost: {
       view: 'side', base: 'prone', support: 'hands', periodMs: 2800,
@@ -175,7 +201,8 @@ const RAW_EXPERT = {
     },
     rules: [
       { id: 'body_line', metric: 'bodyLine', op: '<', value: 158, severity: 'error', when: 'any',
-        msg: msg('גוף בקו ישר — אל תוריד ואל תרים את האגן', "Straight line — don't drop or lift your hips") },
+        msg: msg('גוף בקו ישר — אל תוריד ואל תרים את האגן', "Straight line — don't drop or lift your hips"),
+        why: msg('אגן נמוך מעמיס על הגב התחתון ואגן גבוה מוריד את העבודה מהבטן — רק קו ישר מחזק את שרירי הליבה', 'Low hips load the lower back and high hips take the work off the abs — only a straight line trains the core') },
       { id: 'hip_sag', metric: 'bodyLine', op: '<', value: 140, severity: 'danger', when: 'any',
         msg: msg('עצור! האגן קורס — סכנה לגב התחתון', 'Stop! Hips are sagging — lower-back risk'), why: WHY_HIPS },
     ],
@@ -193,7 +220,8 @@ const RAW_EXPERT = {
     },
     rules: [
       { id: 'too_low', metric: 'hip', op: '<', value: 150, severity: 'error', when: 'peak',
-        msg: msg('הרם את האגן עד קו ישר מהכתפיים לברכיים', 'Lift your hips to a straight line from shoulders to knees') },
+        msg: msg('הרם את האגן עד קו ישר מהכתפיים לברכיים', 'Lift your hips to a straight line from shoulders to knees'),
+        why: msg('רק בקו ישר מהכתפיים לברכיים הישבן מתכווץ עד הסוף — חצי גובה משאיר את העבודה לגב התחתון', 'Only at a straight shoulder-to-knee line do the glutes contract fully — half height leaves the work to the lower back') },
     ],
     ghost: {
       view: 'side', base: 'supine', periodMs: 3000,
@@ -212,8 +240,9 @@ const RAW_EXPERT = {
     },
     rules: [
       { id: 'partial', metric: 'elbow', op: '<', value: 135, severity: 'error', when: 'peak',
-        msg: msg('יישר את הידיים עד הסוף למעלה', 'Fully extend your arms overhead') },
-      UPRIGHT_TORSO(15),
+        msg: msg('יישר את הידיים עד הסוף למעלה', 'Fully extend your arms overhead'),
+        why: msg('יישור מלא מפעיל את הכתף בכל הטווח ומחזק את המייצבים של השכמה', 'Full lockout works the shoulder through its whole range and strengthens the shoulder-blade stabilizers') },
+      STILL_TORSO(15),
     ],
     ghost: {
       view: 'front', base: 'stand', periodMs: 2800,
@@ -231,10 +260,12 @@ const RAW_EXPERT = {
     },
     rules: [
       { id: 'too_high', metric: 'shoulder', op: '>', value: 118, severity: 'error', when: 'any',
-        msg: msg('רק עד גובה הכתפיים', 'Only up to shoulder height') },
+        msg: msg('רק עד גובה הכתפיים', 'Only up to shoulder height'),
+        why: msg('מעל גובה הכתף הטרפז משתלט על התנועה ויש לחץ על גידי הכתף — הדלתא עובדת עד הגובה הזה', 'Above shoulder height the traps take over and the shoulder tendons get pinched — the deltoid works up to this height') },
       { id: 'bent_arms', metric: 'elbow', op: '<', value: 125, severity: 'error', when: 'any',
-        msg: msg('ידיים כמעט ישרות', 'Keep your arms almost straight') },
-      UPRIGHT_TORSO(15),
+        msg: msg('ידיים כמעט ישרות', 'Keep your arms almost straight'),
+        why: msg('יד כמעט ישרה מרחיקה את המשקל מהכתף וכך הדלתא עובדת באמת — יד כפופה מקצרת את המנוף ומקלה מדי', 'A nearly straight arm keeps the load away from the shoulder so the deltoid really works — a bent arm shortens the lever and makes it too easy') },
+      STILL_TORSO(15),
     ],
     ghost: {
       view: 'front', base: 'stand', periodMs: 3000,
@@ -252,8 +283,9 @@ const RAW_EXPERT = {
     },
     rules: [
       { id: 'too_high', metric: 'shoulder', op: '>', value: 120, severity: 'error', when: 'any',
-        msg: msg('רק עד גובה הכתפיים', 'Only up to shoulder height') },
-      UPRIGHT_TORSO(18),
+        msg: msg('רק עד גובה הכתפיים', 'Only up to shoulder height'),
+        why: msg('מעל גובה הכתף הטרפז משתלט על התנועה ויש לחץ על גידי הכתף — הדלתא עובדת עד הגובה הזה', 'Above shoulder height the traps take over and the shoulder tendons get pinched — the deltoid works up to this height') },
+      STILL_TORSO(18),
     ],
     ghost: {
       view: 'side', base: 'stand', periodMs: 3000,
@@ -270,8 +302,9 @@ const RAW_EXPERT = {
     },
     rules: [
       { id: 'too_high', metric: 'shoulder', op: '>', value: 110, severity: 'error', when: 'any',
-        msg: msg('לאט ורק עד גובה הכתף', 'Slowly, and only up to shoulder height') },
-      UPRIGHT_TORSO(15),
+        msg: msg('לאט ורק עד גובה הכתף', 'Slowly, and only up to shoulder height'),
+        why: msg('בשיקום הכתף בונים טווח בהדרגה — מעל גובה הכתף העומס על הגידים עולה לפני שהם מוכנים', 'In shoulder rehab the range is built gradually — above shoulder height the tendon load rises before they are ready') },
+      STILL_TORSO(15),
     ],
     ghost: {
       view: 'side', base: 'stand', periodMs: 4000,
@@ -289,8 +322,9 @@ const RAW_EXPERT = {
     },
     rules: [
       { id: 'elbow_drift', metric: 'shoulder', op: '>', value: 42, severity: 'error', when: 'any',
-        msg: msg('מרפקים צמודים לגוף — אל תזיז את הכתף', 'Elbows pinned to your sides — keep the shoulder still') },
-      UPRIGHT_TORSO(18),
+        msg: msg('מרפקים צמודים לגוף — אל תזיז את הכתף', 'Elbows pinned to your sides — keep the shoulder still'),
+        why: msg('כשהמרפק צמוד הדו-ראשי עושה את כל העבודה — מרפק שזז מעביר אותה לכתף ומקצר את הטווח', 'With the elbow pinned the biceps does all the work — a moving elbow hands it to the shoulder and shortens the range') },
+      STILL_TORSO(18),
     ],
     ghost: {
       view: 'side', base: 'stand', periodMs: 2600,

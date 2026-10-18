@@ -31,6 +31,8 @@ export const EXTERNAL_CUES = Object.freeze({
   balance: { he: 'רגל העמידה ננעצת ברצפה ליד הכדור', en: 'Plant the standing foot into the floor beside the ball' },
   swayRatio: { he: 'הראש שקט, כאילו הוא נושא כוס מים', en: 'Keep your head still, as if carrying a glass of water' },
   cadence: { he: 'צעדים קצרים ומהירים, שקטים על הרצפה', en: 'Short, quick, quiet steps' },
+  kneeTrack: { he: 'פתח את הרצפה עם הרגליים, כאילו אתה קורע אותה לשניים', en: 'Spread the floor apart with your feet, as if tearing it in two' },
+  footOpen: { he: 'פנים כף הרגל פוגש את הכדור כמו מחבט', en: 'The inside of your foot meets the ball like a paddle' },
 });
 
 const BETWEEN_MIN_MS = 250, BETWEEN_MAX_MS = 3500;   // "between attempts" = right after an attempt ended
@@ -52,6 +54,7 @@ export function createCoachBrain({ profile, exerciseName = '', savedPolicy = nul
     wanted: profile?.kind === 'strike' ? drillIntent('', `${exerciseName} ${profile?.id || ''}`) : null,
     lastAttemptAt: null, attempts: 0,
     candidate: null,                // a correction waiting for its moment
+    explained: {},                  // rule id → explained in full once (the what + the why + the feel)
     intentNote: null,               // an intent mismatch waiting for its moment
     lastForecastId: null, lastForecastAttempt: -99,
     lastMentalAt: -1e9,
@@ -79,7 +82,11 @@ export function brainFrame(brain, lm, now) {
 
 /** A repeated error the evaluator wants corrected → it waits for the right moment. */
 export function brainOfferCorrection(brain, rule) {
-  if (brain && rule?.id && rule.severity !== 'danger') brain.candidate = withExternal(rule);
+  if (!brain || !rule?.id || rule.severity === 'danger') return brain;
+  // one correction at a time, the foundation first: a POSITION error (a static rule) before a tempo /
+  // flow error (a dynamic rule) — a waiting position correction is never replaced by a finer one
+  const rank = (r) => ((brain.profile?.rules || []).some(x => x.id === r.id) ? 1 : 2);
+  if (!brain.candidate || rank(rule) <= rank(brain.candidate)) brain.candidate = withExternal(rule);
   return brain;
 }
 
@@ -123,7 +130,9 @@ export function brainDecide(brain, c) {
     const fb = intentFeedback(brain.wanted, r);
     if (fb) brain.intentNote = fb;
   }
-  const between = brain.lastAttemptAt != null && c.now - brain.lastAttemptAt >= BETWEEN_MIN_MS && c.now - brain.lastAttemptAt <= BETWEEN_MAX_MS;
+  // a hold / running has no attempts to wait between: the moment is any quiet moment
+  const continuous = brain.profile?.kind === 'hold' || brain.profile?.kind === 'cyclic';
+  const between = continuous || brain.lastAttemptAt != null && c.now - brain.lastAttemptAt >= BETWEEN_MIN_MS && c.now - brain.lastAttemptAt <= BETWEEN_MAX_MS;
   if (!timingOk({ sinceVoiceMs: c.sinceVoiceMs, betweenAttempts: between, coachSpeaking: c.coachSpeaking })) return null;
   const state = behaviorState(brain.behavior, c.effort ?? null);
   const situation = situationOf(state);
@@ -131,8 +140,12 @@ export function brainDecide(brain, c) {
   if (brain.candidate) {
     const rule = brain.candidate;
     brain.candidate = null;
-    const style = chooseStyle(brain.policy, situation, { hasWhy: !!rule.why, hasExternal: !!rule.external }, c.rnd);
-    policyGiven(brain.policy, { ruleId: rule.id, style, situation });
+    // the FIRST time an error is corrected in this exercise, the coach explains it in full — what to do,
+    // why (the biomechanics) and how it should feel; after that, the style that works for this trainee
+    const first = !brain.explained[rule.id];
+    brain.explained[rule.id] = true;
+    const style = first ? 'full' : chooseStyle(brain.policy, situation, { hasWhy: !!rule.why, hasExternal: !!rule.external }, c.rnd);
+    policyGiven(brain.policy, { ruleId: rule.id, style: first ? (rule.why ? 'why' : 'direct') : style, situation });
     return { text: renderCorrection(rule, style, he), kind: 'correction', rate: situation === 'frustrated' ? 0.95 : 1.0, style };
   }
   if (brain.intentNote) {

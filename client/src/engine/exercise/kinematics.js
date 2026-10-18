@@ -39,7 +39,7 @@ export const JOINTS = Object.freeze({
 });
 
 /** Every metric name a profile may use (the joints + trunk lean + pelvic drop). */
-export const METRICS = Object.freeze([...Object.keys(JOINTS), 'trunkLean', 'pelvisDrop']);
+export const METRICS = Object.freeze([...Object.keys(JOINTS), 'trunkLean', 'pelvisDrop', 'kneeTrack']);
 
 const MIN_VIS = 0.5;
 export const ok = (p) => p && (p.visibility ?? 1) >= MIN_VIS;
@@ -101,6 +101,22 @@ export function pelvisDrop(landmarks) {
   const dx = Math.abs(l.x - r.x) * frameAspect();                               // real proportions
   if (!scale || dx < 0.3 * scale) return null;
   return Math.atan2(Math.abs(l.y - r.y), dx) * 180 / Math.PI;
+}
+
+/**
+ * Knee tracking (frontal view): the knees' width / the ankles' width. ~1 = the knees over the feet;
+ * < 0.75 = the knees cave inward (valgus). Null unless both natural legs are seen clearly from the
+ * front with the feet apart (a side view, feet together, a prosthetic leg → never judged).
+ */
+export function kneeTrack(landmarks, lp = {}) {
+  if (['left_leg', 'right_leg'].some(k => lp?.[k] && (lp[k].state === 'prosthetic' || lp[k].state === 'absent'))) return null;
+  const [lk, rk, la, ra] = [P.LEFT_KNEE, P.RIGHT_KNEE, P.LEFT_ANKLE, P.RIGHT_ANKLE].map(i => landmarks?.[i]);
+  if (![lk, rk, la, ra].every(p => p && (p.visibility ?? 1) >= 0.7)) return null;
+  const scale = torsoLength(landmarks);
+  const k = frameAspect();
+  const ankles = Math.abs(la.x - ra.x) * k, knees = Math.abs(lk.x - rk.x) * k;
+  if (!scale || ankles < 0.3 * scale) return null;
+  return knees / ankles;
 }
 
 /**
@@ -175,6 +191,7 @@ export function trunkLean(landmarks) {
 export function measureMetric(landmarks, metric, lp = {}, combine = 'min') {
   if (metric === 'trunkLean') return trunkLean(landmarks);
   if (metric === 'pelvisDrop') return pelvisDrop(landmarks);
+  if (metric === 'kneeTrack') return kneeTrack(landmarks, lp);
   const def = JOINTS[metric];
   if (!def) return null;
   const vals = ['left', 'right']
