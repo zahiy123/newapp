@@ -19,6 +19,7 @@ import {
   bodyPoints, steadyFloor, targetPoint, pointVelocity, BALL_R, toDetection,
   dribbleInit, dribbleStep, juggleInit, juggleStep, handDribbleInit, handDribbleStep,
   throwInit, throwStep, throwFlight, createIncoming, incomingStep, incomingBallAt, atBall, INCOMING_FLY_MS,
+  createKickSide, kickSideStep,
 } from '../engine/virtualBall';
 
 const SAMPLE_MS = 160;                       // a body point's speed over this recent span
@@ -128,9 +129,11 @@ const scoreText = (mode, s, isHe) => {
  * @param {boolean} live - the exercise runs (counting, incoming balls on the beat)
  * @param {{ current }} [ballOutRef] - receives the ball like a detection ({ detected, x, y, w, h })
  */
-export default function VirtualBall({ mode = 'incoming', target = 'foot', kind = 'kick', side = 'right', look = 'football', landmarksRef, videoRef, isHe, live = true, ballOutRef = null, onBall = null }) {
+export default function VirtualBall({ mode = 'incoming', target = 'foot', kind = 'kick', side = 'right', look = 'football', landmarksRef, videoRef, isHe, live = true, ballOutRef = null, onBall = null, onKickSide = null, strikeCountRef = null }) {
   const onBallRef = useRef(onBall);
   onBallRef.current = onBall;
+  const onKickSideRef = useRef(onKickSide);
+  onKickSideRef.current = onKickSide;
   const canvasRef = useRef(null);
   const audioRef = useRef(null);
   const [failed, setFailed] = useState(false);
@@ -144,7 +147,10 @@ export default function VirtualBall({ mode = 'incoming', target = 'foot', kind =
     const samples = {};                                   // body point → recent [{t,x,y}]
     let lastLm = null;
     let st = null, spin = 0, heldSince = 0, bothAt = -1e9;
-    let ground = null, feetAt = -1e9, touchFlashAt = -1e9, hitShownAt = -1e9;                      // the steady floor line; when the feet were last seen
+    let ground = null, feetAt = -1e9, touchFlashAt = -1e9, hitShownAt = -1e9;
+    let ks = createKickSide(side);                         // the kicking leg — detected, the plan's is a guess
+    let trackedSide = side;
+    let strikesSeen = strikeCountRef?.current ?? 0;      // the expert module's REAL kicks (kinetic, counted)                      // the steady floor line; when the feet were last seen
     const track = (name, p, now) => {
       const a = samples[name] || (samples[name] = []);
       // a lost point → no speed across the gap (a jump back is not a fast move)
@@ -184,7 +190,7 @@ export default function VirtualBall({ mode = 'incoming', target = 'foot', kind =
             if (window.__GHOST_DEBUG) window.__ballDebug = { mode, live, hidden: 'no-feet', at: now };
             const box = map.box;
             drawText(ctx, isHe ? 'הכדור מופיע כשכפות הרגליים בתמונה' : 'The ball shows when your feet are in the picture',
-              box.x + box.w / 2, box.y + box.h * 0.24, bodyPx * 0.045, '#fde68a');   // above the bottom HUD
+              box.x + box.w / 2, box.y + box.h * 0.7, bodyPx * 0.045, '#fde68a');   // below the top cards, above the bottom HUD
             out(null, map); raf = requestAnimationFrame(draw); return;
           }
           const floorY = Math.min(map.box.y + map.box.h - r * 0.3, ground);
@@ -193,8 +199,18 @@ export default function VirtualBall({ mode = 'incoming', target = 'foot', kind =
           let ball = null;
 
           if (mode === 'incoming') {
-            const tp = targetPoint(pts, target, side);
             const isFoot = target === 'foot';
+            // a foot ball: the leg the trainee REALLY kicks with (a swing of the other leg moves the ball to it)
+            let footV = null;
+            if (isFoot) {
+              footV = { L: track('kfootL', pts.footL, now), R: track('kfootR', pts.footR, now) };
+              const kd = kickSideStep(ks, { now, speedL: footV.L.speed, speedR: footV.R.speed });
+              ks = kd.ks;
+              if (kd.burst) onKickSideRef.current?.(kd.burst);
+            }
+            const kSide = isFoot ? ks.active : side;
+            if (kSide !== trackedSide) { trackedSide = kSide; samples.target = []; }   // no speed across a switch of feet
+            const tp = targetPoint(pts, target, kSide);
             // a foot ball meets the foot ON THE FLOOR, just in front of the toe (toward the camera)
             const tT = tp ? { x: tp.x, y: isFoot ? floorY + r * 0.2 : tp.y } : anchor;
             if (!tT) { out(null, map); raf = requestAnimationFrame(draw); return; }
@@ -220,8 +236,28 @@ export default function VirtualBall({ mode = 'incoming', target = 'foot', kind =
               if (!st) st = createIncoming(now);
               const rScale = r / (BALL_R * bodyPx);
               const before = incomingBallAt(st, now, anchor, start, bodyPx, { kind, onFloor: isFoot, rScale });
-              const contact = st.phase === 'waiting' && atBall(tp, before, target);
-              const step = incomingStep(st, { now, kind, contact, speed: tv.speed, threshold: isFoot ? HIT_SPEED : MEET_SPEED, moveDir: { x: tv.vx, y: tv.vy } });
+              // contact with EITHER foot (a kick with the "other" leg plays the ball too)
+              let contact = st.phase === 'waiting' && atBall(tp, before, target);
+              let hitV = tv;
+              if (isFoot && st.phase === 'waiting' && footV) {
+                // a real foot, or — when the foot is below the picture — the foot from the knee line
+                for (const [f, v] of [[pts.footL || pts.footGuessL, footV.L], [pts.footR || pts.footGuessR, footV.R]]) {
+                  if (f && atBall(f, before, 'foot') && v.speed >= HIT_SPEED && v.speed >= hitV.speed) { contact = true; hitV = v; }
+                }
+              }
+              // THE SAME KICK THAT COUNTS THE REP plays the ball (field video: reps 3/6 but balls 0/1 —
+              // the feet were below the picture, so no foot was "at" the ball)
+              const strikes = strikeCountRef?.current ?? 0;
+              if (strikes < strikesSeen) strikesSeen = strikes;           // a new set counts from zero
+              if (isFoot && strikes > strikesSeen) {
+                strikesSeen = strikes;
+                if (st.phase === 'waiting') {
+                  const v = footV ? (ks.active === 'left' ? footV.L : footV.R) : null;
+                  contact = true;
+                  hitV = { speed: Math.max(HIT_SPEED, v?.speed || 0), vx: v?.vx || 0, vy: v && Math.hypot(v.vx, v.vy) > 0.2 ? v.vy : -1 };
+                }
+              }
+              const step = incomingStep(st, { now, kind, contact, speed: hitV.speed, threshold: isFoot ? HIT_SPEED : MEET_SPEED, moveDir: { x: hitV.vx, y: hitV.vy } });
               st = step.st;
               if (step.event === 'arrived') { beep(audioRef, 880); setScore(s => ({ ...s, balls: s.balls + 1 })); }
               if (step.event === 'hit') {
@@ -325,7 +361,7 @@ export default function VirtualBall({ mode = 'incoming', target = 'foot', kind =
     };
     raf = requestAnimationFrame(draw);
     return () => { cancelAnimationFrame(raf); if (ballOutRef) ballOutRef.current = { detected: false }; };
-  }, [mode, target, kind, side, look, landmarksRef, videoRef, isHe, failed, live, ballOutRef]);
+  }, [mode, target, kind, side, look, landmarksRef, videoRef, isHe, failed, live, ballOutRef, strikeCountRef]);
 
   if (failed) return null;
   const shown = mode === 'incoming' ? score.balls > 0 : score.touches > 0 || score.drops > 0;

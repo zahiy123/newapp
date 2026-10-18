@@ -259,3 +259,23 @@ describe('REAL ball physics: it comes, WAITS, and moves only when the trainee ac
     expect(atBall({ x: 800, y: 880 }, { x: 500, y: 870, r: 56 }, 'foot')).toBe(false);
   });
 });
+
+import { createKickSide, kickSideStep, KICK_BURST } from '../virtualBall';
+
+describe('The kicking leg is DETECTED from the real movement (owner, 2026-10-18)', () => {
+  it('starts from the plan\'s guess; a fast swing of the OTHER foot switches to it', () => {
+    let ks = createKickSide('right');
+    expect(ks.active).toBe('right');
+    const r = kickSideStep(ks, { now: 1000, speedL: KICK_BURST + 0.5, speedR: 0.1 });
+    expect(r.burst).toBe('left');
+    expect(r.ks.active).toBe('left');
+    ks = r.ks;
+    // and back again when the right leg kicks
+    expect(kickSideStep(ks, { now: 2000, speedL: 0.1, speedR: KICK_BURST + 1 }).ks.active).toBe('right');
+  });
+  it('a hop / running (both feet fast) or a slow move is not a kick', () => {
+    const ks = createKickSide('right');
+    expect(kickSideStep(ks, { now: 1000, speedL: 2, speedR: 1.8 }).burst).toBe(null);
+    expect(kickSideStep(ks, { now: 1000, speedL: 0.4, speedR: 0.1 }).burst).toBe(null);
+  });
+});

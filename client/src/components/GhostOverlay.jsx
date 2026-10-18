@@ -16,6 +16,20 @@ const OVERLAY_ALPHA = 0.9;          // the outline's opacity; the body fill is l
 const FADE_IN_MS = 250;
 const MODE_FADE_MS = 300;          // a soft switch between the mirror and the guide
 const LOST_GRACE_MS = 1100;        // the Ghost stays this long through a detection drop
+const GHOST_TORSO_UNITS = 1.4;     // the Ghost's hip center → shoulders, in body units
+const GHOST_FULL_HEIGHT_UNITS = 3.9;   // the Ghost's head top → floor, in body units
+
+/** px per Ghost body unit that makes the Ghost's torso equal the trainee's real torso (or null). */
+function traineeTorsoScale(lm, map) {
+  const ok = (p) => p && Math.min(p.visibility ?? 1, p.presence ?? 1) >= 0.65 && p.x >= 0 && p.x <= 1 && p.y >= 0 && p.y <= 1;
+  const ls = lm?.[11], rs = lm?.[12], lh = lm?.[23], rh = lm?.[24];
+  if (!map || !ok(ls) || !ok(rs) || !(ok(lh) || ok(rh))) return null;
+  const hips = [lh, rh].filter(ok);
+  const sh = map((ls.x + rs.x) / 2, (ls.y + rs.y) / 2);
+  const hp = map(hips.reduce((a, p) => a + p.x, 0) / hips.length, hips.reduce((a, p) => a + p.y, 0) / hips.length);
+  const torsoPx = Math.hypot(sh.x - hp.x, sh.y - hp.y);
+  return torsoPx > 10 ? torsoPx / GHOST_TORSO_UNITS : null;
+}
 const MAX_DPR = 1.5;               // a full-view canvas at 3× density is ~9× the work — 1.5× is sharp enough
 
 const debugOn = () => {
@@ -36,6 +50,9 @@ export default function GhostOverlay({ spec, limbProfile, landmarksRef, videoRef
   const pinRef = useRef(null);              // the trainee's pelvis x on the screen (the guide is pinned to it)
   const pinVelRef = useRef(0);              // its smoothed speed (adaptive smoothing)
   const hipOffRef = useRef(null);           // hips − shoulders (x), kept for a moment the hips are not seen
+  const hipOffYRef = useRef(null);          // hips − shoulders (y), likewise
+  const pinYRef = useRef(null);             // the trainee's pelvis height on the screen
+  const feetWRef = useRef(1);               // 1 = the Ghost stands on the real feet, 0 = hangs on the pelvis
   const lastAnchorAtRef = useRef(null);
   const shownAtRef = useRef(null);
   const modeRef = useRef({ mode: null, since: 0 });   // mirror / guide / none, and since when (fade on a switch)
@@ -113,7 +130,13 @@ export default function GhostOverlay({ spec, limbProfile, landmarksRef, videoRef
                 heightKRef.current = heightKRef.current == null ? k : heightKRef.current + 0.08 * (k - heightKRef.current);
               }
             }
-            const target = place.scale * (heightKRef.current ?? 1);
+            let target = place.scale * (heightKRef.current ?? 1);
+            // ABSOLUTE proportion guard (owner, 2026-10-18 — "the Ghost still shows huge"): the guide's
+            // size is locked to the trainee's REAL torso in the picture (shoulders ↔ hips, from the
+            // skeleton): 0.85 … 1.2 of it — and its full height never exceeds the picture
+            const tScale = traineeTorsoScale(lm, map);
+            if (tScale) target = Math.min(Math.max(target, tScale * 0.85), tScale * 1.2);
+            target = Math.min(target, map.box.h / GHOST_FULL_HEIGHT_UNITS);
             const sm = scaleRef.current;
             scaleRef.current = sm == null || dt == null ? target : sm + (1 - Math.exp(-Math.min(dt, 100) / 400)) * (target - sm);
             place.scale = scaleRef.current;
@@ -126,6 +149,19 @@ export default function GhostOverlay({ spec, limbProfile, landmarksRef, videoRef
             const shN = vis(ls) && vis(rs) ? (ls.x + rs.x) / 2 : null;
             if (hipN != null && shN != null) hipOffRef.current = hipN - shN;
             const pinN = hipN != null ? hipN : shN != null ? shN + (hipOffRef.current ?? 0) : null;
+            // the pelvis HEIGHT too (the same hips → shoulders fallback): the Ghost hangs on the real pelvis
+            // whenever the feet are not really seen (a guessed floor put the Ghost too low — field video)
+            const hipYN = vis(lh) && vis(rh) ? (lh.y + rh.y) / 2 : null;
+            const shYN = vis(ls) && vis(rs) ? (ls.y + rs.y) / 2 : null;
+            if (hipYN != null && shYN != null) hipOffYRef.current = hipYN - shYN;
+            const pinYN = hipYN != null ? hipYN : shYN != null && hipOffYRef.current != null ? shYN + hipOffYRef.current : null;
+            if (pinYN != null && pinN != null) {
+              const py = map(pinN, pinYN).y;
+              pinYRef.current = pinYRef.current == null || dt == null ? py : pinYRef.current + (1 - Math.exp(-Math.max(1, Math.min(dt, 100)) / 70)) * (py - pinYRef.current);
+            }
+            // the feet weight: 1 = stand on the REAL feet, 0 = hang on the pelvis — eased, never a jump
+            const feetReal = !!anchorRef.current?.footReal && place.feetY != null;
+            feetWRef.current += (1 - Math.exp(-Math.max(1, Math.min(dt ?? 16, 100)) / 350)) * ((feetReal ? 1 : 0) - feetWRef.current);
             if (pinN != null) {
               // One-Euro smoothing: strong while still (no jitter), light while moving fast (no lag)
               const px = map(pinN, 0.5).x;
@@ -141,6 +177,7 @@ export default function GhostOverlay({ spec, limbProfile, landmarksRef, videoRef
               }
             }
             if (pinRef.current != null) place.body = { ...place.body, pinX: pinRef.current };
+            if (pinYRef.current != null) place.body = { ...place.body, pinY: pinYRef.current, feetW: feetWRef.current };
             drawGhostOverlay(ctx, spec, limbProfile, clk.ms, place.origin, place.scale, OVERLAY_ALPHA * fade, place.feetY, place.body);
           } else if (mode === 'mirror') {
             drawGhostMirror(ctx, lm, map, limbProfile, OVERLAY_ALPHA * fade);

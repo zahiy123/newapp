@@ -871,7 +871,12 @@ export function drawGhostOverlay(ctx, spec, lp, nowMs, origin, scale, alpha = 0.
       const gx = hips.length ? hips.reduce((a, x) => a + x, 0) / hips.length : 0;
       ox = body.pinX - gx * scale;
     }
-    P = (p) => ({ x: ox + p.x * scale, y: feetY + (p.y - fitted.floorY) * scale });
+    // HEIGHT: on the trainee's REAL feet when they are seen; on the trainee's real PELVIS when the
+    // feet are only guessed (a guessed floor put the Ghost too low) — blended by body.feetW, no jump
+    const pelvisOnFeet = feetY - fitted.floorY * scale;
+    const w = typeof body?.pinY === 'number' ? Math.max(0, Math.min(1, body.feetW ?? 1)) : 1;
+    const pelvisY = w * pelvisOnFeet + (1 - w) * (body?.pinY ?? pelvisOnFeet);
+    P = (p) => ({ x: ox + p.x * scale, y: pelvisY + p.y * scale });
   } else {
     if (lying && body?.frame) {
       // FLOOR exercise: fitted to the box of the trainee's body points in the picture and kept

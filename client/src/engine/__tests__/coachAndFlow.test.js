@@ -94,9 +94,17 @@ describe('Virtual coach — male / female, at the side of the screen', () => {
 describe('Manual moves only — "next exercise" by tap or an EXPLICIT voice request', () => {
   it('only the explicit "תרגיל הבא" / "next exercise" counts — single words do not', () => {
     for (const s of ['תרגיל הבא', 'יאללה תרגיל הבא', 'עבור לתרגיל הבא', 'Next exercise']) expect(isNextCommand(s), s).toBe(true);
-    for (const s of ['', 'הבא', 'ממשיכים', 'עבור', 'next', 'הלאה', 'הבאתי את הכדור', 'כל הכבוד סיימת את התרגיל כשאתה מוכן לחץ על הכפתור או אמור תרגיל הבא']) {
+    for (const s of ['', 'הבא', 'ממשיכים', 'עבור', 'next', 'הלאה', 'הבאתי את הכדור', 'בסט הבא מחליפים רגל', 'תרגיל הבא הוא סקוואט ואז נמשיך עם עוד כמה חזרות']) {
       expect(isNextCommand(s), s).toBe(false);
     }
+  });
+  it('field video (laptop): the words of the coach + the command of the trainee in ONE result → the command is found', () => {
+    expect(isNextCommand('בלי לחץ רק דבר אחד התחל את התנועה מהירך תרגיל הבא')).toBe(true);
+  });
+  it('the OWN "…אמור תרגיל הבא" of the coach is found as a phrase — and rejected as its echo', () => {
+    const coachLine = 'כל הכבוד סיימת את התרגיל כשאתה מוכן לחץ על הכפתור או אמור תרגיל הבא';
+    expect(isNextCommand(coachLine)).toBe(true);
+    expect(acceptCommand({ isFinal: true, coachSaidCommandWord: true })).toBe(false);
   });
 
   it('the coach can never move the trainee with its own words; the command of the trainee always works', () => {

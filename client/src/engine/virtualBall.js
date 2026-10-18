@@ -480,3 +480,33 @@ export function incomingBallAt(st, now, anchor, start, bodyPx, { kind = 'kick', 
   }
   return null;
 }
+
+// ---------------- the kicking leg, DETECTED (owner, 2026-10-18) ----------------
+// The kicking leg is what the trainee REALLY does — never assumed from the plan: a fast swing of a foot
+// (a strike burst) marks it, and the ball waits in front of THAT foot next. The plan's leg is only the
+// starting guess.
+
+export const KICK_BURST = 0.9;              // a foot this fast (body heights / s) = a kick / swing
+
+/** The kicking-leg tracker, starting from the plan's guess. */
+export function createKickSide(expected = 'right') {
+  return { active: expected === 'left' ? 'left' : 'right', lastBurstAt: -1e9, lastSide: null, kicks: { left: 0, right: 0 } };
+}
+
+/**
+ * One frame: a foot's strike burst switches the active leg to it (a kick with the other leg moves the
+ * ball there). Both feet moving fast (a hop / running) is not a kick.
+ * @param {{ now, speedL, speedR }} c - the feet's speeds (bodies / s)
+ * @returns {{ ks, burst: null | 'left' | 'right' }}
+ */
+export function kickSideStep(ks, c) {
+  if (!ks) return { ks, burst: null };
+  const l = c.speedL || 0, r = c.speedR || 0;
+  const strong = Math.max(l, r), weak = Math.min(l, r);
+  if (strong < KICK_BURST || weak > strong * 0.6 || c.now - ks.lastBurstAt < 500) return { ks, burst: null };
+  const side = l > r ? 'left' : 'right';
+  return {
+    ks: { ...ks, active: side, lastBurstAt: c.now, lastSide: side, kicks: { ...ks.kicks, [side]: ks.kicks[side] + 1 } },
+    burst: side,
+  };
+}

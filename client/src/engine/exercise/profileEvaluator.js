@@ -23,7 +23,7 @@
 //                 no accuracy samples — the UI asks to fix the camera instead
 // ============================================================
 
-import { JOINTS, measureMetric, sideUsable } from './kinematics.js';
+import { JOINTS, measureMetric, sideUsable, trunkLean, uprightLeanProfile, calibratedLean, MAX_CAMERA_TILT_DEG } from './kinematics.js';
 import { createMotionState, updateMotion } from './motionFeatures.js';
 import { updateConfidence } from './confidence.js';
 import { assessSetup, SETUP } from './setupCoach.js';
@@ -143,6 +143,8 @@ export function createExecutionTracker(profile, lp = {}) {
     coached: {},            // rule id → true once explained
     strikes: [],            // { ok } of recent strikes
     conf: {},               // confidence hysteresis state
+    cameraTilt: 0,          // the camera's tilt, measured on the upright trainee (calibrateUpright)
+    leanRaw: null,
   };
 }
 
@@ -215,8 +217,14 @@ export function updateExecution(tracker, landmarks, nowMs) {
     return quiet({ confident: profile.precision === 'expert' ? false : true, reason: tr.inView ? null : 'limbs', view: null });
   }
 
-  // 2. Kinematics
+  // 2. Kinematics — the trunk lean calibrated to this camera (the trainee's own upright = 0)
   const metrics = measureProfile(profile, landmarks, tr.lp);
+  const leanRaw = trunkLean(landmarks);
+  tr.leanRaw = leanRaw;
+  const upright = uprightLeanProfile(profile);
+  const lean = upright ? calibratedLean(leanRaw, tr.cameraTilt) : leanRaw;
+  if ('trunkLean' in metrics) metrics.trunkLean = lean;
+  metrics.__lean = lean;
   const phase = phaseOf(repProgress(profile, metrics[profile.primary]));
 
   // 2b. Silence when unsure — no judging on an untrustworthy measurement
@@ -284,4 +292,16 @@ export function updateExecution(tracker, landmarks, nowMs) {
 /** Joint names the profile measures (for UI / tests). */
 export function profileJointNames(profile) {
   return Object.keys(profile?.joints || {}).filter(j => JOINTS[j]);
+}
+
+
+/**
+ * Calibrate the camera's tilt ONCE, on the trainee verified UPRIGHT (the start position of an upright
+ * drill, when the start gate opens): the raw trunk lean the camera sees then is the camera's tilt.
+ * Only for drills whose trunk rules are "don't lean" maxima (uprightLeanProfile). Returns the tilt.
+ */
+export function calibrateUpright(tr) {
+  if (!tr || !uprightLeanProfile(tr.profile) || typeof tr.leanRaw !== 'number') return tr?.cameraTilt ?? 0;
+  tr.cameraTilt = Math.max(0, Math.min(MAX_CAMERA_TILT_DEG, tr.leanRaw));
+  return tr.cameraTilt;
 }

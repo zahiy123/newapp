@@ -2777,6 +2777,23 @@ export default function Training() {
     if (line) setTimeout(() => { if (!isSpeaking()) speakIfIdle(line, { rate: 1.05 }); }, 1800);
   }
 
+  // The leg the trainee REALLY kicks with (detected by the ball). In a split set (a full set per leg,
+  // by the plan) a kick with the other leg is told precisely, once per set; otherwise the detected leg
+  // simply leads — the coach never insists on a leg the trainee is not using
+  const kickSideWarnRef = useRef({ key: null });
+  function handleKickSide(detected) {
+    if (!(currentExercise?.sideSwitch && isStrikeMode(currentExercise?.splitMode)) || phaseRef.current !== PHASE.EXERCISING) return;
+    if (detected === splitSupport) return;
+    const key = `${currentIdx}:${currentSet}:${splitHalf}`;
+    if (kickSideWarnRef.current.key === key) return;
+    kickSideWarnRef.current.key = key;
+    const line = isHe
+      ? `בחצי הזה בועטים ב${legLabel(splitSupport, limbProfile, true)} — זיהיתי בעיטה ב${legLabel(detected, limbProfile, true)}.`
+      : `This half is for your ${legLabel(splitSupport, limbProfile, false)} — I saw a kick with your ${legLabel(detected, limbProfile, false)}.`;
+    speakIfIdle(line, { rate: 1.0 });
+    setFeedback({ type: 'info', text: `🦵 ${line}` });
+  }
+
   function startNextSet() {
     setCurrentSet(prev => {
       const nextSet = prev + 1;
@@ -3067,6 +3084,8 @@ export default function Training() {
             live={incomingLive}
             ballOutRef={virtualBallOutRef}
             onBall={(hit) => { if (FEATURES.COACH_BRAIN && execution.brainRef?.current) brainBall(execution.brainRef.current, { now: performance.now(), hit }); }}
+            onKickSide={handleKickSide}
+            strikeCountRef={execution.strikeCountRef}
             side={ballDrill.target === 'hand' || ballDrill.target === 'hands' ? handSide(limbProfile)
               : kickingSide(limbProfile, currentExercise?.sideSwitch && isStrikeMode(currentExercise?.splitMode) ? splitSupport : null)}
             landmarksRef={poseLandmarksRef}
@@ -3077,8 +3096,11 @@ export default function Training() {
         {(phase === PHASE.EXERCISING || phase === PHASE.CALIBRATING) && <ExecutionHud execution={execution} isHe={isHe} />}
         {/* the voice command's REAL state — the trainee sees whether "תרגיל הבא" is heard, and why not */}
         {voiceNextAction && voiceNext.status !== 'off' && (
-          <div className={`absolute bottom-24 left-2 z-[18] pointer-events-none rounded-full text-white text-[11px] font-bold px-2.5 py-1 ${voiceNext.status === 'listening' ? 'bg-emerald-700/80' : 'bg-gray-800/80'}`} dir={isHe ? 'rtl' : 'ltr'}>
+          <div
+            onClick={voiceNext.status === 'listening' ? undefined : () => voiceNext.arm()}
+            className={`absolute bottom-24 left-2 z-[18] rounded-full text-white text-[11px] font-bold px-2.5 py-1 ${voiceNext.status === 'listening' ? 'pointer-events-none bg-emerald-700/80' : 'cursor-pointer bg-gray-800/85 underline'}`} dir={isHe ? 'rtl' : 'ltr'}>
             {'🎤'} {voiceNext.status === 'listening' ? (isHe ? 'אמור "תרגיל הבא"' : 'Say "next exercise"')
+              : voiceNext.status === 'needsTap' ? (isHe ? 'הקש כאן להפעלת המיקרופון' : 'Tap here to turn the mic on')
               : voiceNext.status === 'denied' ? (isHe ? 'אין הרשאת מיקרופון — אפשר בהגדרות הדפדפן' : 'No mic permission — allow it in the browser settings')
               : voiceNext.status === 'unsupported' ? (isHe ? 'הדפדפן לא תומך בפקודה קולית — השתמש בכפתור' : 'No voice commands in this browser — use the button')
               : voiceNext.status === 'error' ? (isHe ? 'הפקודה הקולית לא זמינה כרגע — השתמש בכפתור' : 'Voice command unavailable — use the button')

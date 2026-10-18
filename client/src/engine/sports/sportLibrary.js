@@ -131,6 +131,17 @@ export const SPORT_LIBRARY = Object.freeze({
       strikeChain(WHY.kickChain), strikeBalance(WHY.ampKickBalance),
       { id: 'strike_trunk', on: 'strike', feature: 'trunkLean', op: '>', value: 30, severity: 'error', appliesTo: ['strike'],
         msg: msg('חזה מעל הכדור והקביים — אל תיפול אחורה', 'Chest over the ball and crutches — don\'t lean back'), why: WHY.ampKickBalance }],
+    // the SAME sport played on a PROSTHESIS today (no crutches): no crutch words — the base is the
+    // support leg (owner field video, 2026-10-18: crutch cues to a trainee standing on a prosthesis)
+    noCrutches: {
+      emphasis: [E('supportBase', 'משקל מעל רגל התמיכה, חזה מעל הכדור', 'Weight over the support leg, chest over the ball'),
+        E('core', 'ליבה חזקה — הגו מייצב את הבעיטה', 'Strong core — the trunk stabilizes the kick'),
+        E('chain', 'בעיטה מהירך, לא מהברך', 'Kick from the hip, not the knee', ['strike'])],
+      rules: [...loweringTempo(600, WHY.eccentric), pelvisLevel(10, ['lowerBody', 'singleLeg'], WHY.fieldPelvis),
+        strikeChain(WHY.kickChain), strikeBalance(WHY.kickBalance),
+        { id: 'strike_trunk', on: 'strike', feature: 'trunkLean', op: '>', value: 30, severity: 'error', appliesTo: ['strike'],
+          msg: msg('חזה מעל הכדור — אל תיפול אחורה', "Chest over the ball — don't lean back"), why: WHY.kickBalance }],
+    },
   },
   footballAmputeeGK: {
     id: 'footballAmputeeGK', family: 'field', name: msg('שוער כדורגל קטועים', 'Amputee football goalkeeper'), tempoScale: 1,
@@ -204,9 +215,12 @@ function saferRule(a, b) {
  * scales the Ghost's tempo (the slowest context wins, so the Ghost always demonstrates a tempo
  * that passes every tempo rule), and attaches the sport emphasis for coaching / the AI coach.
  */
-export function applySportContext(profile, contexts = ['fitness']) {
+export function applySportContext(profile, contexts = ['fitness'], { crutches = null } = {}) {
   if (!profile) return profile;
-  const sports = contexts.map(c => SPORT_LIBRARY[c]).filter(Boolean);
+  // a sport with a no-crutches version (amputee football on a prosthesis today) uses it unless the
+  // trainee really trains on crutches
+  const sports = contexts.map(c => SPORT_LIBRARY[c]).filter(Boolean)
+    .map(sp => (sp.noCrutches && crutches === false ? { ...sp, ...sp.noCrutches } : sp));
   if (!sports.length) return profile;
   const tags = new Set(profile.tags || []);
   const byId = new Map((profile.dynamics || []).map(r => [r.id, r]));

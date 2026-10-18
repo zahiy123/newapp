@@ -184,3 +184,24 @@ export function measureMetric(landmarks, metric, lp = {}, combine = 'min') {
   if (!vals.length) return null;
   return combine === 'max' ? Math.max(...vals) : Math.min(...vals);
 }
+
+
+// ---- Camera calibration of the trunk lean (owner field video, 2026-10-18) ----
+// A camera on a desk / tilted down (a laptop) sees an UPRIGHT trainee as "leaning" (the 2D trunk line
+// tilts, the depth estimate drifts): a fixed "lean > 35°" rule fired the whole exercise and every pass
+// was marked wrong (accuracy 0 %). The camera's tilt is measured ONCE, at the moment the trainee is
+// verified upright — the start position of an upright drill (the start gate) — and only the "don't
+// lean" (maximum) rules measure from it; a drill whose technique REQUIRES a lean is never re-zeroed.
+export const MAX_CAMERA_TILT_DEG = 45;
+
+/** Does this profile judge only a MAXIMUM trunk lean (an upright drill) — so a camera tilt matters? */
+export function uprightLeanProfile(profile) {
+  const rules = [...(profile?.rules || []), ...(profile?.dynamics || [])].filter(r => r.metric === 'trunkLean' || r.feature === 'trunkLean');
+  return rules.length > 0 && rules.every(r => r.op === '>');
+}
+
+/** The calibrated lean: the raw lean minus the camera tilt measured on the upright trainee. */
+export function calibratedLean(raw, cameraTilt = 0) {
+  if (typeof raw !== 'number') return null;
+  return Math.max(0, raw - Math.max(0, Math.min(MAX_CAMERA_TILT_DEG, cameraTilt || 0)));
+}

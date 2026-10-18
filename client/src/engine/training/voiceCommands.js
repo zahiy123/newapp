@@ -14,18 +14,25 @@ const NEXT = ['תרגיל הבא', 'התרגיל הבא', 'לתרגיל הבא',
 
 const norm = (s) => String(s || '').toLowerCase().replace(/[.,!?'"״׳]/g, ' ').replace(/\s+/g, ' ').trim();
 
-/** Does this recognized text explicitly ask for the next exercise? */
+/**
+ * Does this recognized text explicitly ask for the next exercise? The phrase must be among the LAST
+ * words heard (owner field video, 2026-10-18: on a laptop the mic also hears the coach from the
+ * speakers, so one result = the coach's words + the trainee's "תרגיל הבא" — a ≤ 5-words rule rejected it).
+ */
+export const COMMAND_TAIL_WORDS = 6;
 export function isNextCommand(text) {
   const n = norm(text);
-  if (!n || n.split(' ').length > 5) return false;          // a short command, not a sentence
-  return NEXT.some(p => ` ${n} `.includes(` ${p} `));
+  if (!n) return false;
+  const tail = n.split(' ').slice(-COMMAND_TAIL_WORDS).join(' ');
+  return NEXT.some(p => ` ${tail} `.includes(` ${p} `));
 }
 
 export const MIC_REOPEN_MS = 1500;           // (legacy) the old mic re-open delay after the coach spoke
 export const ECHO_WINDOW_MS = 5000;          // a coach line with "הבא" this recent may be echoing back
 
-/** The words of the command that could come back as an echo of the coach's own line. */
-export const COMMAND_ECHO_RE = /הבא|next/i;
+/** The command PHRASE that could come back as an echo of the coach's own line ("עוברים לתרגיל הבא").
+ *  Only the phrase — "בסט הבא" / "החזרה הבאה" in the coach's words never block the trainee. */
+export const COMMAND_ECHO_RE = /תרגיל הבא|next exercise/i;
 
 /**
  * Accept a command (owner, 2026-10-14: "the voice command must work"): the mic stays OPEN through the

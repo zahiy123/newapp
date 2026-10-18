@@ -34,12 +34,16 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { getExerciseProfile, personalizeProfile } from '../../engine/exercise/exerciseProfiles';
 import { variationProfile } from '../../engine/catalog/catalog';
 import { applySportContext } from '../../engine/sports/sportLibrary';
-import { createExecutionTracker, updateExecution } from '../../engine/exercise/profileEvaluator';
+import { createExecutionTracker, updateExecution, calibrateUpright } from '../../engine/exercise/profileEvaluator';
 import {
   createStartGate, updateStartGate, isStartPosition, isValidRep, updateWork, withDrive, startPositionPrompt, READY_DRIVE,
 } from '../../engine/training/coachFlow';
 import { createClipRecorder, recordFrame } from '../../engine/validation/clipRecorder';
 import { createRepEvidence, evidenceFrame, evidenceOk, evidenceAccept } from '../../engine/training/repEvidence';
+import { holdSpeech } from '../useSpeech';
+
+/** How long a line takes to say (Hebrew TTS ≈ 14 characters / s at rate 1). */
+const estimateSpeechMs = (text, rate = 1) => Math.round((String(text || '').length / 14) * 1000 / (rate || 1)) + 400;
 import { createCoachBrain, brainFrame, brainAttempt, brainOfferCorrection, brainDecide, brainPolicyToSave } from '../../engine/coachBrain/brain';
 
 // The coach brain's learned correction styles, per trainee, on this device
@@ -69,7 +73,8 @@ export function buildExecutionProfile(cueKey, exerciseName, limbProfile, sportCo
   const ctx = sportContexts?.length ? sportContexts : ['fitness'];
   // A catalog exercise carries its exact pattern + variation profile (tempo / range / side)
   const base = (catalogId && variationProfile(catalogId)) || getExerciseProfile(cueKey, exerciseName);
-  return applySportContext(personalizeProfile(base, limbProfile || {}), ctx);
+  // crutch cues only to a trainee who really trains on crutches today (a prosthesis user: the support-leg version)
+  return applySportContext(personalizeProfile(base, limbProfile || {}), ctx, { crutches: !!limbProfile?.crutches });
 }
 
 export function useExpertExecution({
@@ -139,6 +144,7 @@ export function useExpertExecution({
     strikeCountRef.current = 0;
     earlyRef.current = false;
     const gate = createStartGate();
+    let tiltCalibrated = false;
     const work = {};
     let wasCounting = countingRef.current;
     let notStartSince = null; let startSpokenAt = 0; let lastStartPrompt = false;
@@ -173,7 +179,10 @@ export function useExpertExecution({
 
         // ---- Start gate: positioned + reliable + in the START POSITION, held ----
         const inStart = r.inView && isStartPosition(profile, r.metrics);
+        const wasReady = startReadyRef.current;
         startReadyRef.current = updateStartGate(gate, { positioned: r.inView, confident: r.quality?.confident, inStart }, now);
+        // the camera's tilt, measured ONCE on the trainee verified upright in the start position
+        if (startReadyRef.current && !wasReady && !tiltCalibrated) { calibrateUpright(tracker); tiltCalibrated = true; }
         workingRef.current = updateWork(work, profile, r, now);
 
         // ---- Exact rep counting (a new set starts from zero) ----
@@ -274,6 +283,9 @@ export function useExpertExecution({
             if (say) {
               lastVoice = now;
               if (say.kind === 'correction') statsRef.current.coached.push(coach?.id || say.kind);
+              // a correction is never cut in the middle (field video: the rep count cut it) — the count
+              // waits in the queue and plays right after it
+              holdSpeech(estimateSpeechMs(say.text, say.rate));
               speakRef.current?.(say.text, { rate: say.rate });
             }
           }

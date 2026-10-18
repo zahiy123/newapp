@@ -113,7 +113,8 @@ export function updateMotion(ms, landmarks, metrics, t) {
   const com = centerOfMass(landmarks);
   const pd = pelvisDrop(landmarks);
 
-  const frame = { t, com, pelvis: pd, lean: trunkLean(landmarks), primary: metrics?.[ms.profile?.primary], ankles: {}, knee: {}, chain: {} };
+  // the trunk lean calibrated to this camera (profileEvaluator) when available
+  const frame = { t, com, pelvis: pd, lean: typeof metrics?.__lean === 'number' ? metrics.__lean : trunkLean(landmarks), primary: metrics?.[ms.profile?.primary], ankles: {}, knee: {}, chain: {} };
   for (const s of SIDES) {
     const a = landmarks[ANKLE[s]];
     frame.ankles[s] = a && (a.visibility ?? 1) >= 0.5 && sideUsable('leg', s, ms.lp) ? a : null;
