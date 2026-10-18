@@ -10,7 +10,9 @@ import { cameraViewHint } from '../engine/training/viewPrompts';
 
 export default function ExecutionHud({ execution, isHe }) {
   if (!execution?.active) return null;
-  const { profile, setup, readyFlash, startPrompt, issue, accuracy, cadence, unsure } = execution;
+  // the accuracy shown = the REAL reps' accuracy only ("—" until the first counted rep)
+  const { profile, setup, readyFlash, startPrompt, issue, repAccuracy, cadence, unsure } = execution;
+  const accuracy = typeof repAccuracy === 'number' ? repAccuracy : null;
   // The most specific sport's first focus (rehab + sport → the sport's)
   const lastSport = profile.sportContexts?.[profile.sportContexts.length - 1];
   const emphasis = profile.sportEmphasis?.find(e => e.sport === lastSport);
@@ -60,11 +62,13 @@ export default function ExecutionHud({ execution, isHe }) {
         {profile.precision === 'expert' && (
           <div className="rounded-full px-3 py-1 text-xs font-bold bg-black/55 text-white">
             {'🎯'} {isHe ? profile.name.he : profile.name.en}
-            {accuracy !== null && (
+            {accuracy !== null ? (
               <span className={`mx-1 px-2 py-0.5 rounded-full ${
                 level === 'good' ? 'bg-green-600' : level === 'mid' ? 'bg-yellow-500' : 'bg-red-600'}`}>
                 {isHe ? `${accuracy}% דיוק` : `${accuracy}% accuracy`}
               </span>
+            ) : (
+              <span className="mx-1 px-2 py-0.5 rounded-full bg-gray-600">{isHe ? '— דיוק' : '— accuracy'}</span>
             )}
           </div>
         )}

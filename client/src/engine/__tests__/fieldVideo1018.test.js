@@ -101,3 +101,45 @@ describe('today\'s mobility as the camera sees it (a crutch profile standing on 
     expect(no.seen).toBe(false);
   });
 });
+
+import { kickInPlace } from '../training/repEvidence';
+import { footOpenness } from '../exercise/motionFeatures';
+import { EXPERT_PROFILES } from '../exercise/exerciseProfiles';
+
+describe('3rd field video: walking is NOT a pass; a toe-poke is told', () => {
+  // frames: the pelvis at hipX, the knees bent by kL / kR
+  const frame = (hipX, kL, kR) => {
+    const lm = body({ kneeDeg: 178 });
+    const dx = hipX - 0.5;
+    const out = lm.map(p => ({ ...p, x: p.x + dx }));
+    const bend = (i0, i1, i2, deg) => { const t = ((180 - deg) * Math.PI) / 180; out[i2] = { ...out[i2], x: out[i1].x - 0.2 * Math.sin(t), y: out[i1].y + 0.2 * Math.cos(t) }; };
+    bend(23, 25, 27, kL); bend(24, 26, 28, kR);
+    return out;
+  };
+  it('walking across the room (the pelvis travels, both legs bend) is rejected', () => {
+    const ev = createRepEvidence('legs');
+    let t = 0;
+    for (let i = 0; i < 12; i++) evidenceFrame(ev, frame(0.3 + i * 0.03, i % 2 ? 130 : 175, i % 2 ? 175 : 130), (t += 120));
+    expect(kickInPlace(ev)).toBe(false);
+    expect(evidenceOk(ev, t, { strike: true, kick: true })).toBe(false);
+  });
+  it('a real pass in place (the pelvis still, ONE leg swings) is accepted', () => {
+    const ev = createRepEvidence('legs');
+    let t = 0;
+    for (const k of [178, 150, 115, 90, 120, 160, 178]) evidenceFrame(ev, frame(0.5, 178, k), (t += 100));
+    expect(kickInPlace(ev)).toBe(true);
+    expect(evidenceOk(ev, t, { strike: true, kick: true })).toBe(true);
+  });
+  it('the foot: turned out (inside of the foot) is open; pointed at the camera (toes) is not', () => {
+    const lm = body();
+    lm[30] = { x: 0.53, y: 0.92, visibility: 0.9 }; lm[32] = { x: 0.62, y: 0.93, visibility: 0.9 };   // turned out
+    expect(footOpenness(lm, 'right')).toBeGreaterThan(0.45);
+    lm[30] = { x: 0.55, y: 0.91, visibility: 0.9 }; lm[32] = { x: 0.556, y: 0.95, visibility: 0.9 };  // pointed forward
+    expect(footOpenness(lm, 'right')).toBeLessThan(0.45);
+  });
+  it('the pass profile tells a toe-poke right after the rep, from the front only', () => {
+    const r = EXPERT_PROFILES.shadowPass.dynamics.find(d => d.id === 'pass_toe');
+    expect(r).toMatchObject({ feature: 'footOpen', op: '<', view: 'front', coachNow: true });
+    expect(r.msg.he).toContain('פתח את כף הרגל');
+  });
+});

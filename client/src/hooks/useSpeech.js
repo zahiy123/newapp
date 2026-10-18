@@ -45,6 +45,8 @@ function coachDeviceVoice(lang) {
 export function useSpeech(lang = 'he-IL', age) {
   const speaking = useRef(false);
   const queueRef = useRef([]);
+  const currentSidRef = useRef(null);       // the id of the sentence playing (its chunks share it)
+  const sidSeqRef = useRef(0);
   const currentUtteranceRef = useRef(null);
   const speechStartedAtRef = useRef(0);
   const audioUnlockedRef = useRef(false);
@@ -164,6 +166,7 @@ export function useSpeech(lang = 'he-IL', age) {
     }
     lastSpokenTextRef.current = text;
     lastSpokenTimeRef.current = now;
+    currentSidRef.current = options?.__sid ?? null;             // which sentence is playing now
     noteCoachLine(text);
 
     // Resume before every speak (Android/iOS requirement)
@@ -288,7 +291,9 @@ export function useSpeech(lang = 'he-IL', age) {
     if (queueRef.current.length === 0) return;
     if (speaking.current) return;
     processingQueueRef.current = true;
-    const next = queueRef.current.shift();
+    let next = queueRef.current.shift();
+    // a rep count that waited too long is no longer true — skip it (the next one will come)
+    while (next?.count && Date.now() - (next.at || 0) > 3000) next = queueRef.current.shift();
     processingQueueRef.current = false;
     if (next) _utterSpeak(next.text, next.options);
   }, [_utterSpeak]);
@@ -312,15 +317,22 @@ export function useSpeech(lang = 'he-IL', age) {
     }
   }, []);
 
-  // Internal helper: cancel previous speech, clear queue, then speak
-  // Used ONLY for priority/urgent messages
-  // Uses setTimeout(50ms) after cancel() to avoid browser "interrupted" onerror
+  // Internal helper for urgent lines (a rep count, a critical line).
+  // MUTEX (owner, 2026-10-18): a coach sentence that has STARTED is never cut — an urgent line waits
+  // in the queue after it and plays once the sentence ends. A count replaces an older queued
+  // count (only the latest number matters) and a stale count is skipped (processQueue).
   const _doSpeak = useCallback((text, options = {}) => {
     if (!window.speechSynthesis || !text) return;
     if (!speechOpen) return;                                      // the setup screens are silent
-    if (Date.now() < holdUntil && speaking.current) {
-      // a protected line is playing: queue instead of cutting it
-      for (const c of splitToChunks(text)) queueRef.current.push({ text: c, options });
+    unstickSpeaking();
+    // (also between the chunks of one sentence: its rest is queued — never cleared)
+    if (speaking.current || queueRef.current.length) {
+      const isCount = /^\d+!?$/.test(String(text).trim());
+      if (isCount) queueRef.current = queueRef.current.filter(q => !q.count);
+      // AFTER the queued rest of the sentence (never between its chunks)
+      const items = splitToChunks(text).map(c => ({ text: c, options, count: isCount, at: Date.now() }));
+      queueRef.current = [...queueRef.current, ...items];
+      if (!speaking.current) processQueueRef.current?.();
       return;
     }
     unstickSpeaking();
@@ -344,8 +356,9 @@ export function useSpeech(lang = 'he-IL', age) {
 
   // Default speak: queues text WITHOUT canceling current speech
   // If nothing is playing, starts immediately. If busy, adds to queue.
-  const speak = useCallback((text, options = {}) => {
+  const speak = useCallback((text, opts = {}) => {
     if (!window.speechSynthesis || !text) return;
+    const options = { ...opts, __sid: ++sidSeqRef.current };       // one sentence = one id for its chunks
     // Full-text dedup: skip if exact same text was requested within 10s
     const now = Date.now();
     if (text === lastSpokenTextRef.current && now - lastSpokenTimeRef.current < DEDUP_WINDOW_MS) {
@@ -371,8 +384,9 @@ export function useSpeech(lang = 'he-IL', age) {
 
   // Priority speak: queues at front if busy, only soft-cancels if stuck
   // Does NOT hard-cancel current speech — avoids interrupted/onerror loops
-  const speakPriority = useCallback((text, options = {}) => {
+  const speakPriority = useCallback((text, opts = {}) => {
     if (!window.speechSynthesis || !text) return;
+    const options = { ...opts, __sid: ++sidSeqRef.current };
     // Full-text dedup: skip if exact same text was requested within 10s
     const now = Date.now();
     if (text === lastSpokenTextRef.current && now - lastSpokenTimeRef.current < DEDUP_WINDOW_MS) {
@@ -382,7 +396,14 @@ export function useSpeech(lang = 'he-IL', age) {
     unstickSpeaking();
     const chunks = splitToChunks(text);
     if (chunks.length === 0) return;
-    if (!speaking.current) {
+    if (!speaking.current && queueRef.current.length && queueRef.current[0].options?.__sid != null && queueRef.current[0].options.__sid === currentSidRef.current) {
+      // between the chunks of a sentence (the briefing!): its rest is NEVER cleared — wait after it
+      const sid = currentSidRef.current;
+      let k = 0;
+      while (k < queueRef.current.length && queueRef.current[k].options?.__sid === sid) k++;
+      queueRef.current = [...queueRef.current.slice(0, k), ...chunks.map(c => ({ text: c, options })), ...queueRef.current.slice(k)];
+      processQueueRef.current?.();
+    } else if (!speaking.current) {
       // Not speaking — start immediately, queue rest
       queueRef.current = []; // clear pending low-priority items
       for (let i = 1; i < chunks.length; i++) {
@@ -390,9 +411,13 @@ export function useSpeech(lang = 'he-IL', age) {
       }
       _utterSpeak(chunks[0], options);
     } else {
-      // Currently speaking — prepend to front of queue (plays after current utterance ends)
+      // Currently speaking — ahead of the other waiting lines, but AFTER the rest of the sentence that
+      // is playing (its remaining chunks share its id — a sentence is never split by another line)
+      const sid = currentSidRef.current;
+      let k = 0;
+      while (sid != null && k < queueRef.current.length && queueRef.current[k].options?.__sid === sid) k++;
       const newItems = chunks.map(c => ({ text: c, options }));
-      queueRef.current = [...newItems, ...queueRef.current];
+      queueRef.current = [...queueRef.current.slice(0, k), ...newItems, ...queueRef.current.slice(k)];
     }
   }, [_utterSpeak, splitToChunks, unstickSpeaking]);
 
@@ -457,7 +482,7 @@ export function useSpeech(lang = 'he-IL', age) {
 
     // Part 3: Safety tip
     const safetyText = tips
-      ? (isHe ? `דגש בטיחות: ${tips}.` : `Safety note: ${tips}.`)
+      ? (isHe ? `הדגש החשוב: ${tips}.` : `The key point: ${tips}.`)
       : '';
 
     // Part 4: Setup instruction
@@ -470,11 +495,13 @@ export function useSpeech(lang = 'he-IL', age) {
       ? `אני צופה בך. בוא נתחיל!`
       : `I'm watching you. Let's start!`;
 
-    // Queue all segments — chunk each one for stability
+    // Queue all segments — chunk each one for stability. The whole briefing is ONE sentence id: no
+    // other line is ever placed inside it (the technique explanation is heard in full)
+    const sid = ++sidSeqRef.current;
     const queueChunked = (text, options = {}) => {
       const chunks = splitToChunks(text);
       for (const chunk of chunks) {
-        queueRef.current.push({ text: chunk, options });
+        queueRef.current.push({ text: chunk, options: { ...options, __sid: sid } });
       }
     };
 
@@ -482,7 +509,7 @@ export function useSpeech(lang = 'he-IL', age) {
     if (safetyText) queueChunked(safetyText);
     if (setupText) queueChunked(setupText);
     queueChunked(startCue, { rate: 1.1 });
-    _utterSpeak(intro, { rate: 1.1 });
+    _utterSpeak(intro, { rate: 1.1, __sid: sid });
   }, [lang, _utterSpeak, isHe, splitToChunks]);
 
   // Encouragement for good form (only when actively moving) - low priority, don't cut

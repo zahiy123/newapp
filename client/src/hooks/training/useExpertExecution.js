@@ -52,8 +52,14 @@ const loadPolicy = () => { try { return JSON.parse(localStorage.getItem(POLICY_K
 const savePolicy = (p) => { try { localStorage.setItem(POLICY_KEY, JSON.stringify(p)); } catch { /* storage blocked */ } };
 
 const TICK_MS = 50;
-const SETUP_SETTLE_MS = 500;               // a positioning fix is spoken once it is stable this long
-const SETUP_REPEAT_MS = 7000;              // …and repeated while it is not fixed
+// Positioning with AUTHORITY, not nagging (owner, 2026-10-18): a fix is shown / said only when a
+// positioning problem lasted SETUP_SETTLE_MS in a row; the same instruction never again within
+// SETUP_REPEAT_MS; the card leaves only after SETUP_CLEAR_MS of good positioning (no flicker)
+const SETUP_SETTLE_MS = 3000;
+const SETUP_REPEAT_MS = 20000;
+const SETUP_CLEAR_MS = 1500;
+const SETUP_ANY_GAP_MS = 10000;           // at most ONE positioning line (of any kind) this often
+const READY_AGAIN_GAP_MS = 20000;          // "I see you again" at most this often
 const READY_SETTLE_MS = 700;               // positioned right this long → "now I can see you"
 const READY_FLASH_MS = 2500;
 const DANGER_VOICE_EVERY_MS = 6000;
@@ -80,8 +86,10 @@ export function buildExecutionProfile(cueKey, exerciseName, limbProfile, sportCo
 export function useExpertExecution({
   enabled, counting = false, quiet = false, cueKey, exerciseName, catalogId = null, sportContexts, limbProfile, landmarksRef,
   isHe, playerName = '', speakPriority, recordClips = false, onClips,
-  brainEnabled = false, effortRef = null,
+  brainEnabled = false, effortRef = null, onStrikeSide = null,
 }) {
+  const onStrikeSideRef = useRef(onStrikeSide);
+  onStrikeSideRef.current = onStrikeSide;
   const [failed, setFailed] = useState(false);
   const contextsKey = (sportContexts || []).join('+');
   const profile = useMemo(
@@ -92,6 +100,7 @@ export function useExpertExecution({
 
   const inViewRef = useRef(true);            // open by default: an inactive module never blocks anything
   const startReadyRef = useRef(true);        // the start gate (open by default when inactive)
+  const countOpenRef = useRef(true);         // counting allowed: the start position was reached + positioned now
   const repCountRef = useRef(0);             // real reps of this set (profile-based)
   const workingRef = useRef(true);           // the trainee is working right now (timed exercises)
   const countingRef = useRef(counting);
@@ -111,6 +120,8 @@ export function useExpertExecution({
   const [missingPart, setMissingPart] = useState(null);
   const [issue, setIssue] = useState(null);
   const [accuracy, setAccuracy] = useState(null);
+  // the set's REAL accuracy: the mean over the reps actually counted (null = no rep yet → "—")
+  const [repAccuracy, setRepAccuracy] = useState(null);
   const [cadence, setCadence] = useState(null);
   const [unsure, setUnsure] = useState(null);   // null | 'view' | 'tracking' — measurement not reliable
   const [setup, setSetup] = useState(null);     // positioning fix { code, he, en } or null
@@ -131,6 +142,7 @@ export function useExpertExecution({
     if (!active) {
       inViewRef.current = true;
       startReadyRef.current = true;
+      countOpenRef.current = true;
       workingRef.current = true;
       setStartPrompt(false);
       setMissingPart(null); setIssue(null); setAccuracy(null); setCadence(null); setUnsure(null);
@@ -144,6 +156,8 @@ export function useExpertExecution({
     strikeCountRef.current = 0;
     earlyRef.current = false;
     const gate = createStartGate();
+    let startedOnce = false;                   // no rep counts before the trainee first reached the start position
+    countOpenRef.current = false;
     let tiltCalibrated = false;
     const tiltSamples = [];
     const work = {};
@@ -159,12 +173,22 @@ export function useExpertExecution({
     let unsureSince = null; let lastUnsure = null;
     // Positioning state
     let setupCode = null; let setupSince = 0; let spokenCode = null; let spokenAt = 0;
+    let problemSince = null; let okSince = null; let shownCode = null; let shownSetup = null;
+    const spokenByCode = {}; let hadProblemShown = false; let lastReadyAt = -1e9; let lastSetupSpokenAt = -1e9; let setupRepeats = 0;
     let readySince = null; let announcedReady = false; let everReady = false; let flashUntil = 0;
     const recorder = recordClips ? createClipRecorder(profile) : null;
     const brain = brainOnRef.current ? createCoachBrain({ profile, exerciseName, savedPolicy: loadPolicy() }) : null;
     // KINETIC COUNTING (IRON RULE): every count also needs the movement's kinetic evidence in space
     // (range out-and-back + velocity + the end point's trajectory + one flowing movement)
     const kinetic = createRepEvidence(evidenceGroupFor({ profile, cueKey }));   // a kick: only the legs prove it
+    // each counted rep's accuracy (the profile's measure at that rep, an error in it = lower)
+    const repScores = [];
+    const noteRepScore = (res) => {
+      const a = typeof res.accuracy === 'number' ? res.accuracy : null;
+      if (a === null) return;
+      repScores.push((res.issues || []).length ? Math.min(a, 60) : a);
+      setRepAccuracy(Math.round(repScores.reduce((x, y) => x + y, 0) / repScores.length));
+    };
     brainRef.current = brain;
     setIssue(null); setAccuracy(null); setCadence(null); setUnsure(null); setSetup(null); setReadyFlash(null);
 
@@ -181,6 +205,10 @@ export function useExpertExecution({
         // ---- Start gate: positioned + reliable + in the START POSITION, held ----
         const inStart = r.inView && isStartPosition(profile, r.metrics);
         startReadyRef.current = updateStartGate(gate, { positioned: r.inView, confident: r.quality?.confident, inStart }, now);
+        if (startReadyRef.current) startedOnce = true;
+        // walking in / out of the picture, adjusting the camera: nothing counts (the positioning card is up)
+        countOpenRef.current = startedOnce && !r.setup && r.inView;
+        if (!countOpenRef.current) evidenceAccept(kinetic, now);    // movement before / outside never carries into a rep
         // the camera's tilt (a laptop on a desk), measured ONCE on the trainee upright and STILL in the
         // start position: the median of a stable ~1.5 s stretch (a lean / a glitch never calibrates it)
         if (!tiltCalibrated) {
@@ -193,9 +221,9 @@ export function useExpertExecution({
         workingRef.current = updateWork(work, profile, r, now);
 
         // ---- Exact rep counting (a new set starts from zero) ----
-        if (countingRef.current && !wasCounting) { repCountRef.current = 0; strikeCountRef.current = 0; earlyRef.current = false; }
+        if (countingRef.current && !wasCounting) { repCountRef.current = 0; strikeCountRef.current = 0; earlyRef.current = false; repScores.length = 0; setRepAccuracy(null); }
         wasCounting = countingRef.current;
-        if (countingRef.current && r.inView) {
+        if (countingRef.current && r.inView && countOpenRef.current) {
           for (const ev of r.events) {
             // the coach brain learns from every real attempt and the errors seen in it
             if (brain && (ev.type === 'rep' || ev.type === 'strike')) {
@@ -204,9 +232,13 @@ export function useExpertExecution({
             // a rep counts only when it was measured RELIABLY (anti-ghost counting) — like a strike
             if (countsReps && profile.kind === 'reps' && isValidRep(ev) && r.quality?.confident !== false && evidenceOk(kinetic, now)) {
               evidenceAccept(kinetic, now); repCountRef.current += 1; earlyRef.current = true;
+              noteRepScore(r);
             }
-            if (countsReps && profile.kind === 'strike' && ev.type === 'strike' && r.quality?.confident !== false && evidenceOk(kinetic, now, { strike: true })) {
+            // a kick / pass: a real strike, IN PLACE, by ONE leg (walking is never a pass)
+            if (countsReps && profile.kind === 'strike' && ev.type === 'strike' && r.quality?.confident !== false && evidenceOk(kinetic, now, { strike: true, kick: true })) {
               evidenceAccept(kinetic, now); repCountRef.current += 1; strikeCountRef.current += 1; earlyRef.current = true;
+              noteRepScore(r);
+              if (ev.side === 'left' || ev.side === 'right') onStrikeSideRef.current?.(ev.side);   // the leg of a REAL counted kick
             }
           }
           if (profile.kind === 'cyclic' && workingRef.current) earlyRef.current = true;
@@ -215,20 +247,32 @@ export function useExpertExecution({
         // ---- Positioning: one precise instruction at a time, then "now I can see you" ----
         const he = isHeRef.current;
         const code = r.setup?.code || null;
-        if (code !== setupCode) { setupCode = code; setupSince = now; setSetup(r.setup || null); }
+        // the persistence of ANY positioning problem (a change of its kind / a short flicker never restarts it)
+        if (code) { okSince = null; if (problemSince === null) problemSince = now; }
+        else if (okSince === null) okSince = now;
+        if (!code && okSince !== null && now - okSince >= SETUP_CLEAR_MS) { problemSince = null; setupRepeats = 0; }
+        const problemSettled = !!code && problemSince !== null && now - problemSince >= SETUP_SETTLE_MS;
+        // the card: shown once settled, kept until the positioning is good for SETUP_CLEAR_MS
+        const showCode = problemSettled ? code : (shownCode && !(okSince !== null && now - okSince >= SETUP_CLEAR_MS) ? shownCode : null);
+        if (showCode !== shownCode) { shownCode = showCode; setSetup(showCode ? r.setup || shownSetup : null); if (showCode) shownSetup = r.setup; }
         if (code) {
           readySince = null;
           announcedReady = false;
-          const settled = now - setupSince >= SETUP_SETTLE_MS;
-          if (settled && !quietRef.current && (code !== spokenCode || now - spokenAt >= SETUP_REPEAT_MS)) {
-            spokenCode = code; spokenAt = now; lastVoice = now;
-            // drive + the precise instruction, a different energy line every time
-            speakRef.current?.(withDrive(he ? r.setup.he : r.setup.en, driveK++, nameRef.current, he), { rate: 1.12 });
+          if (problemSettled && !quietRef.current && now - (spokenByCode[code] || -1e9) >= SETUP_REPEAT_MS
+            && now - lastSetupSpokenAt >= Math.min(60000, SETUP_ANY_GAP_MS * 2 ** setupRepeats) && now - lastVoice > 4000) {
+            spokenByCode[code] = now; spokenCode = code; spokenAt = now; lastVoice = now; hadProblemShown = true; lastSetupSpokenAt = now;
+            setupRepeats += 1;                       // not fixed → the next reminder comes later (10 → 20 → 40 → 60 s)
+            // the precise instruction only — said once, with authority
+            speakRef.current?.(withDrive(he ? r.setup.he : r.setup.en, driveK++, nameRef.current, he), { rate: 1.05 });
           }
         } else {
           if (readySince === null) readySince = now;
+          // "now I can see you" once; "I see you again" only after an instruction was really given, and rarely
+          const sayReady = !everReady || (hadProblemShown && now - lastReadyAt >= READY_AGAIN_GAP_MS);
+          if (!announcedReady && !quietRef.current && now - readySince >= READY_SETTLE_MS && !sayReady) announcedReady = true;
           if (!announcedReady && !quietRef.current && now - readySince >= READY_SETTLE_MS) {
             announcedReady = true;
+            hadProblemShown = false; lastReadyAt = now;
             const msg = everReady ? READY_DRIVE.again : READY_DRIVE.first;
             everReady = true;
             spokenCode = null; lastVoice = now;
@@ -325,7 +369,7 @@ export function useExpertExecution({
   const ghostSpec = useMemo(() => (active && profile?.ghost ? { profile } : null), [active, profile]);
 
   return {
-    active, profile, inViewRef, startReadyRef, repCountRef, workingRef, earlyRef, strikeCountRef, brainRef,
-    missingPart, setup, readyFlash, startPrompt, issue, accuracy, cadence, unsure, ghostSpec, statsRef,
+    active, profile, inViewRef, startReadyRef, countOpenRef, repCountRef, workingRef, earlyRef, strikeCountRef, brainRef,
+    missingPart, setup, readyFlash, startPrompt, issue, accuracy, repAccuracy, cadence, unsure, ghostSpec, statsRef,
   };
 }

@@ -828,13 +828,16 @@ export default function Training() {
     onClips: handleValidationClips,
     // the COACH BRAIN (behavior / intent / RLEF policy) + the audible effort (voice prosody)
     brainEnabled: FEATURES.COACH_BRAIN,
+    // the kicking leg of a REAL counted kick (never a weight shift) — the split-set leg notice
+    onStrikeSide: (side) => handleKickSideRef.current?.(side),
     effortRef: voiceEffortRef,
   });
   const executionInViewRef = execution.inViewRef;
   // Exact counting source for the analyzer wrapper (expert rep exercises only)
   const profileRepsRef = useRef({ active: false, countRef: null });
-  const repEvidenceRef = useRef(null);
-  const motivationRef = useRef(createMotivation());   // the motivation lines' dose (engine/training/motivation)             // the kinematic evidence of the current rep (anti-ghost counting)
+  const repEvidenceRef = useRef(null);             // the kinematic evidence of the current rep (anti-ghost counting)
+  const motivationRef = useRef(createMotivation()); // the motivation lines' dose (engine/training/motivation)
+  const handleKickSideRef = useRef(null);          // the split-set leg notice (set below, called by the expert module)
   profileRepsRef.current = {
     active: execution.active && execution.profile?.precision === 'expert' && (execution.profile?.kind === 'reps' || execution.profile?.kind === 'strike'),
     countRef: execution.repCountRef,
@@ -960,7 +963,10 @@ export default function Training() {
       repEvidenceRef.current = null;
       // the rep's evidence only from the exercise's own limbs (a kick / pass: the legs, never a hand swing)
       const evGroup = evidenceGroupFor({ profile: execution.profile, cueKey });
-      const gated = type === 'hold' ? makePresenceGatedAnalyzer(analyze) : makeEvidenceGatedAnalyzer(analyze, repEvidenceRef, () => Date.now(), evGroup);
+      // a kick / pass drill: in place, one leg; nothing counts before the start position / while not positioned
+      const isKickDrill = ['kick', 'amputeeKick', 'pass', 'crutchPass', 'firstTouch'].includes(cueKey) || execution.profile?.kind === 'strike';
+      const gated = type === 'hold' ? makePresenceGatedAnalyzer(analyze)
+        : makeEvidenceGatedAnalyzer(analyze, repEvidenceRef, () => Date.now(), evGroup, { kick: isKickDrill, canCount: () => execution.countOpenRef?.current !== false });
       analyzerRef.current = currentExercise.timed
         ? { analyze: makeTimedAnalyzer(analyze, isWorking), type: 'hold', cueKey, ballAware }
         : { analyze: withRepOffset(makeProfileRepAnalyzer(gated, profileRepsRef), earlyOffsetRef), type, cueKey, ballAware };
@@ -1049,7 +1055,7 @@ export default function Training() {
   // unsure / wrong → no praise: the coach says what to fix.
   const PRAISE_ACCURACY = 75;
   const verifiedGood = () => !!execution.active && !!executionInViewRef.current && !execution.unsure
-    && (execution.accuracy ?? 0) >= PRAISE_ACCURACY && !execution.issue;
+    && (execution.repAccuracy ?? 0) >= PRAISE_ACCURACY && !execution.issue;
   // the set's real quality: its accuracy readings + its most frequent error (for the set summary)
   const setQualityRef = useRef({ sum: 0, n: 0, errors: {} });
   useEffect(() => {
@@ -2703,7 +2709,8 @@ export default function Training() {
 
     // the set's real quality: the expert module's measured accuracy over the set (when it measures)
     const sq = setQualityRef.current;
-    const setAcc = sq.n ? sq.sum / sq.n : null;
+    // the set's accuracy = the mean over its REAL counted reps (never a time average of standing around)
+    const setAcc = typeof execution.repAccuracy === 'number' ? execution.repAccuracy : null;
     const measured = execution.active && setAcc !== null;
     const wasGood = measured ? setAcc >= 75 : badFormCountRef.current < 3;
     const wasPerfect = measured ? setAcc >= 90 : (badFormCountRef.current === 0 && goodFormCountRef.current > 3);
@@ -2828,7 +2835,9 @@ export default function Training() {
       : `This half is for your ${legLabel(splitSupport, limbProfile, false)} — I saw a kick with your ${legLabel(detected, limbProfile, false)}.`;
     speakIfIdle(line, { rate: 1.0 });
     setFeedback({ type: 'info', text: `🦵 ${line}` });
+    setTimeout(() => setFeedback(f => (f?.text === `🦵 ${line}` ? null : f)), 4000);
   }
+  handleKickSideRef.current = handleKickSide;
 
   function startNextSet() {
     setCurrentSet(prev => {
@@ -3081,7 +3090,8 @@ export default function Training() {
         {/* The WHOLE camera frame is shown (contain): what the camera sees = what the trainee sees =
             where the skeleton and the big Ghost are drawn (cover cut ~35% of an upright phone frame) */}
         <video ref={videoRef} className="w-full h-full object-contain" playsInline muted style={{ transform: 'scaleX(-1)' }} />
-        <canvas ref={canvasRef} className="absolute inset-0 w-full h-full object-contain" style={{ transform: 'scaleX(-1)' }} />
+        {/* the skeleton: hidden on the rest / done screens (nothing over the rest data, the grade, the buttons) */}
+        <canvas ref={canvasRef} className="absolute inset-0 w-full h-full object-contain" style={{ transform: 'scaleX(-1)', visibility: phase === PHASE.RESTING || phase === PHASE.EXERCISE_DONE ? 'hidden' : 'visible' }} />
 
         {/* Warm-up demo figure (Ghost): own canvas, always visible, not stretched, not covered by the banner */}
         {phase === PHASE.WARM_UP && warmUpGhostOn && ghostSpec && !overlayActive && (
@@ -3120,7 +3130,6 @@ export default function Training() {
             live={incomingLive}
             ballOutRef={virtualBallOutRef}
             onBall={(hit) => { if (FEATURES.COACH_BRAIN && execution.brainRef?.current) brainBall(execution.brainRef.current, { now: performance.now(), hit }); }}
-            onKickSide={handleKickSide}
             strikeCountRef={execution.strikeCountRef}
             repShownRef={displayRepsRef}
             hidden={!!execution.setup}

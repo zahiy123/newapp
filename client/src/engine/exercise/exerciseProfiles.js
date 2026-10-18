@@ -520,6 +520,12 @@ RAW_EXPERT.jumpSquat = {
 RAW_EXPERT.shadowPass = {
   ...RAW_EXPERT.footballKick,
   id: 'shadowPass', name: msg('מסירה בצל', 'Shadow pass'),
+  // the pass's own technique check (owner, 2026-10-18): a toe-poke instead of the inside of the foot is
+  // told RIGHT AFTER the rep (frontal view only — there the foot's turn-out is visible)
+  dynamics: [...(RAW_EXPERT.footballKick.dynamics || []),
+    { id: 'pass_toe', on: 'strike', feature: 'footOpen', op: '<', value: 0.45, severity: 'error', view: 'front', coachNow: true,
+      msg: msg('שים לב — מסרת עם האצבעות. פתח את כף הרגל החוצה ופגע עם הפנים', 'Careful — you passed with your toes. Turn the foot out and strike with the inside'),
+      why: msg('פנים כף הרגל הוא המשטח הרחב והשטוח — הוא נותן למסירה כיוון מדויק', 'The inside of the foot is the wide, flat surface — it gives the pass an accurate direction') }],
   ghost: {
     view: 'side', base: 'stride', periodMs: 1800, restT: 0, contactT: 0.48, foot: 'inside',
     // A real side-foot pass: the leg turns out from the hip so the INSIDE of the foot faces the

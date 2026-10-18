@@ -267,7 +267,11 @@ export default function VirtualBall({ mode = 'incoming', target = 'foot', kind =
               owedKicks += newReps;
               if (owedKicks > 0 && (st.phase === 'waiting' || st.phase === 'rolling')) {
                 owedKicks -= 1;
-                if (st.phase === 'rolling') st = { ...st, phase: 'waiting', at: now, arrived: st.arrived + 1 };
+                if (st.phase === 'rolling') {
+                  // it arrives now (counted as an arrival — the score is always played ≤ arrived)
+                  st = { ...st, phase: 'waiting', at: now, arrived: st.arrived + 1 };
+                  setScore(sc => ({ ...sc, balls: sc.balls + 1 }));
+                }
                 const v = footV ? (ks.active === 'left' ? footV.L : footV.R) : tv;
                 contact = true;
                 hitV = { speed: Math.max(isFoot ? HIT_SPEED : MEET_SPEED, v?.speed || 0), vx: v?.vx || 0, vy: v && Math.hypot(v.vx, v.vy) > 0.2 ? v.vy : -1 };

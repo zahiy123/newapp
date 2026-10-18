@@ -86,7 +86,8 @@ export function evidenceFrame(ev, lm, t) {
   const sh = [lm[11], lm[12]].filter(seen), hp = [lm[23], lm[24]].filter(seen);
   const avg = (ps) => ({ x: ps.reduce((s, p) => s + p.x, 0) / ps.length * k, y: ps.reduce((s, p) => s + p.y, 0) / ps.length });
   const torso = sh.length && hp.length ? Math.hypot(avg(sh).x - avg(hp).x, avg(sh).y - avg(hp).y) : null;
-  ev.frames.push({ t, a, e, torso });
+  const hip = hp.length ? avg(hp) : null;                       // the pelvis (does the body travel?)
+  ev.frames.push({ t, a, e, torso, hip });
   while (ev.frames.length && t - ev.frames[0].t > WINDOW_MS) ev.frames.shift();
   return ev;
 }
@@ -135,11 +136,33 @@ export function evidenceRange(ev, returnShare = RETURN_SHARE) {
   return best;
 }
 
+/**
+ * A KICK / PASS stands in place: the pelvis stays put (≤ KICK_MAX_TRAVEL torsos) and ONE leg kicks —
+ * the other leg's knee stays steady (≤ KICK_OTHER_KNEE_DEG). Walking moves the pelvis and both legs.
+ */
+export const KICK_MAX_TRAVEL = 0.25;
+export const KICK_OTHER_KNEE_DEG = 20;
+export function kickInPlace(ev) {
+  const fr = ev?.frames || [];
+  const hips = fr.map(f => f.hip).filter(Boolean);
+  const torsos = fr.map(f => f.torso).filter(Number.isFinite);
+  const torso = torsos.length ? torsos.reduce((a, b) => a + b, 0) / torsos.length : null;
+  if (hips.length >= 2 && torso) {
+    const travel = Math.hypot(Math.max(...hips.map(h => h.x)) - Math.min(...hips.map(h => h.x)), Math.max(...hips.map(h => h.y)) - Math.min(...hips.map(h => h.y)));
+    if (travel > KICK_MAX_TRAVEL * torso) return false;
+  }
+  // knees: indices 6 (left) / 7 (right) — the kicking knee is the one that moved most
+  const range = (j) => { const v = fr.map(f => f.a[j]).filter(x => typeof x === 'number'); return v.length >= 2 ? Math.max(...v) - Math.min(...v) : 0; };
+  const l = range(6), r = range(7);
+  return Math.min(l, r) <= KICK_OTHER_KNEE_DEG;
+}
+
 /** Does the movement since the last counted rep prove a real rep (range + velocity + trajectory + flow)? */
-export function evidenceOk(ev, t, { strike = false } = {}) {
+export function evidenceOk(ev, t, { strike = false, kick = false } = {}) {
   if (!ev) return false;
   const first = ev.frames[0]?.t ?? t;
   const since = ev.lastAt == null ? t - first : t - ev.lastAt;
+  if (kick && !kickInPlace(ev)) return false;                    // walking is not a pass
   // a strike is judged at the contact, while the leg still swings through — a partial return is enough
   return since >= MIN_REP_MS && evidenceRange(ev, strike ? STRIKE_RETURN_SHARE : RETURN_SHARE) >= MIN_RANGE_DEG;
 }
@@ -161,7 +184,11 @@ export function bodyInPicture(lm) {
  * @param {(lm, prev, ball) => Object} base
  * @param {{ current: Object }} evRef - holds the evidence record (reset per set by the page)
  */
-export function makeEvidenceGatedAnalyzer(base, evRef, now = () => Date.now(), group = 'all') {
+/**
+ * @param {{ kick?: boolean, canCount?: () => boolean }} [opts] - kick = a kick / pass drill (in place, one
+ *   leg); canCount = the trainee is in the exercise (the start position was reached, positioned now)
+ */
+export function makeEvidenceGatedAnalyzer(base, evRef, now = () => Date.now(), group = 'all', opts = {}) {
   return (lm, prev = {}, ball) => {
     const t = now();
     if (!evRef.current) evRef.current = createRepEvidence(group);
@@ -169,7 +196,9 @@ export function makeEvidenceGatedAnalyzer(base, evRef, now = () => Date.now(), g
     const st = base(lm, prev, ball);
     const before = prev.reps || 0;
     if ((st.reps || 0) <= before) return st;
-    if (evidenceOk(evRef.current, t)) { evidenceAccept(evRef.current, t); return st; }
+    const open = !opts.canCount || opts.canCount();
+    if (open && evidenceOk(evRef.current, t, { strike: !!opts.kick, kick: !!opts.kick })) { evidenceAccept(evRef.current, t); return st; }
+    if (!open) evidenceAccept(evRef.current, t);                   // movement before the start never carries over
     return { ...st, reps: before, lastRepTime: prev.lastRepTime, feedback: st.feedback?.type === 'count' ? null : st.feedback, ghostRepBlocked: true };
   };
 }

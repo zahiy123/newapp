@@ -103,6 +103,24 @@ function speedAt(hist, i, side, metric, dir) {
  * @param {number} t - ms
  * @returns {{ events: Object[], live: { cadence: number|null, com: Object|null, pelvisDrop: number|null } }}
  */
+/**
+ * How OPEN the kicking foot is at the strike (owner, 2026-10-18: "you kicked with the toes — open the
+ * inside of the foot"): seen from the FRONT, an inside-foot pass turns the foot out, so the heel → toe
+ * line lies across the picture; a toe-poke points the foot at the camera (a short line). The heel → toe
+ * width in real proportions over the expected foot length (≈ 0.3 of the hip → ankle leg). null when
+ * the foot points are not confidently seen.
+ */
+export function footOpenness(landmarks, side) {
+  const [hip, ankle, heel, toe] = side === 'left' ? [23, 27, 29, 31] : [24, 28, 30, 32];
+  const ok = (p) => p && (p.visibility ?? 1) >= 0.6;
+  const H = landmarks?.[hip], A = landmarks?.[ankle], E = landmarks?.[heel], T = landmarks?.[toe];
+  if (!ok(H) || !ok(A) || !ok(E) || !ok(T)) return null;
+  const k = frameAspect();
+  const leg = Math.hypot((A.x - H.x) * k, A.y - H.y);
+  if (!(leg > 1e-4)) return null;
+  return Math.abs(T.x - E.x) * k / (0.3 * leg);
+}
+
 export function updateMotion(ms, landmarks, metrics, t) {
   const events = [];
   if (!landmarks) return { events, live: { cadence: cadenceOf(ms, t), com: null, pelvisDrop: null } };
@@ -228,6 +246,7 @@ export function updateMotion(ms, landmarks, metrics, t) {
         distalSpeed: v0,
         balance: plant && c ? Math.abs(c.x - plant.x) * frameAspect() / scale : null,
         trunkLean: ms.hist[n - 2].lean,
+        footOpen: footOpenness(landmarks, s),
       });
       ms.lastStrikeAt = t;
       break;

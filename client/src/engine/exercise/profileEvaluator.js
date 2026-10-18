@@ -247,6 +247,7 @@ export function updateExecution(tracker, landmarks, nowMs) {
   // (the hip-first chain: never from the front; the trunk lean: not in kick / pass drills from the front
   // — a squat's forward lean stays judged, it was designed for the frontal depth)
   const judged = (r) => {
+    if (r.view === 'front' && !frontal) return false;          // a frontal-only measure (the foot's turn-out)
     if (!frontal || r.severity === 'danger') return true;
     const m = r.metric || r.feature;
     if (m === 'chainLeadMs') return false;
@@ -272,7 +273,8 @@ export function updateExecution(tracker, landmarks, nowMs) {
         clean = false;
         tr.dynActive[r.id] = { rule: r, until: nowMs + DYNAMIC_SHOW_MS, value: ev[r.feature] };
         tr.dynStreak[r.id] = (tr.dynStreak[r.id] || 0) + 1;
-        if (tr.dynStreak[r.id] >= COACH_AFTER && !tr.coached[r.id]) { tr.coached[r.id] = true; coaching.push(r); }
+        // a technique error of the movement itself (coachNow) is corrected RIGHT AFTER the first time
+        if (tr.dynStreak[r.id] >= (r.coachNow ? 1 : COACH_AFTER) && !tr.coached[r.id]) { tr.coached[r.id] = true; coaching.push(r); }
       } else if (typeof ev[r.feature] === 'number') {
         tr.dynStreak[r.id] = 0;
       }
