@@ -16,6 +16,12 @@ function frameAt(ghostProfile, ms, lp = lpOk, periodMs = ghostProfile.ghost.peri
     .map(p => (p.visibility ? { ...p, x: 0.5 + p.x * 0.17, y: 0.5 + p.y * 0.17, z: (p.z ?? 0) * 0.17 } : p));
 }
 
+/** The same frame seen OBLIQUELY (the camera turned 45°: half the depth shows in the picture's x). */
+function sideFrame(lm) {
+  const c = Math.SQRT1_2;
+  return lm.map(p => (p.visibility ? { ...p, x: 0.5 + ((p.x - 0.5) + (p.z ?? 0)) * c, z: ((p.z ?? 0) - (p.x - 0.5)) * c } : p));
+}
+
 /** Evaluate `profile` on frames from `frameFn(ms)` for `totalMs` at 20 Hz. */
 function run(profile, frameFn, totalMs, lp = lpOk) {
   const tr = createExecutionTracker(profile, lp);
@@ -181,14 +187,17 @@ describe('Kick — kinetic chain and weight transfer', () => {
       if (k.t === 0.48) return { ...k, a: { ...k.a, 'B.thigh': -20, 'B.knee': 168 } };
       return k;
     });
-    const res = run(kick, ms => frameAt(kneeFirst, ms), 4 * 2000);
+    // judged from the SIDE (the hip drive is in depth — from the front it is not judged, field video)
+    const res = run(kick, ms => sideFrame(frameAt(kneeFirst, ms)), 4 * 2000);
     expect(res.issues.has('strike_chain')).toBe(true);
     expect(res.last.accuracy).toBeLessThan(60);
+    const front = run(kick, ms => frameAt(kneeFirst, ms), 4 * 2000);
+    expect(front.issues.has('strike_chain')).toBe(false);
   });
 
   it('leaning back while kicking is flagged', () => {
     const back = withKeyframes(EXPERT_PROFILES.footballKick, k => ({ ...k, a: { ...k.a, trunk: -45 } }));
-    const res = run(kick, ms => frameAt(back, ms), 2 * 2000);
+    const res = run(kick, ms => sideFrame(frameAt(back, ms)), 2 * 2000);
     expect(res.issues.has('lean_back')).toBe(true);
   });
 

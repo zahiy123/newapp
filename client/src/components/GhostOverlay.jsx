@@ -53,6 +53,7 @@ export default function GhostOverlay({ spec, limbProfile, landmarksRef, videoRef
   const hipOffYRef = useRef(null);          // hips − shoulders (y), likewise
   const pinYRef = useRef(null);             // the trainee's pelvis height on the screen
   const feetWRef = useRef(1);               // 1 = the Ghost stands on the real feet, 0 = hangs on the pelvis
+  const torsoSeenRef = useRef(false);       // the trainee's real torso measured at least once (sizes the guide)
   const lastAnchorAtRef = useRef(null);
   const shownAtRef = useRef(null);
   const modeRef = useRef({ mode: null, since: 0 });   // mirror / guide / none, and since when (fade on a switch)
@@ -109,6 +110,10 @@ export default function GhostOverlay({ spec, limbProfile, landmarksRef, videoRef
           const lyingNow = !!box && !!anchorRef.current?.lying;
           let mode = !lm || !map ? 'none' : (isGuideRef.current ? isGuideRef.current() : true) ? 'guide' : 'mirror';
           if (mode === 'guide' && floorSpec && !lyingNow) mode = 'mirror';     // a floor guide only on a lying body
+          // no guide before its size is MEASURED from the trainee's real torso (field video: a huge guide
+          // flashed on the very first frame) — the mirror of the skeleton until then
+          if (map && traineeTorsoScale(lm, map)) torsoSeenRef.current = true;
+          if (mode === 'guide' && !floorSpec && !torsoSeenRef.current) mode = 'mirror';
           if (mode !== modeRef.current.mode) modeRef.current = { mode, since: now };
           if (shownAtRef.current === null) shownAtRef.current = now;
           const fade = Math.min(1, (now - shownAtRef.current) / FADE_IN_MS, (now - modeRef.current.since) / MODE_FADE_MS);

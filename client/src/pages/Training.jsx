@@ -31,8 +31,9 @@ import { useVoiceCommand } from '../hooks/useVoiceCommand';
 import { READY_DRIVE, withDrive, splitLegOrder, legLabel, splitStartText, splitSwitchText, splitWorkingSide, setLegHalf, legSetStartText, legSetNextText, isStrikeMode } from '../engine/training/coachFlow';
 import { needsEquipmentCheck } from '../engine/training/equipmentNeed';
 import { createExerciseNav, navGo, navNext, navPrev, navUnchangedSince } from '../engine/training/exerciseNav';
-import { makeEvidenceGatedAnalyzer, makePresenceGatedAnalyzer, bodyInPicture } from '../engine/training/repEvidence';
+import { makeEvidenceGatedAnalyzer, makePresenceGatedAnalyzer, bodyInPicture, evidenceGroupFor } from '../engine/training/repEvidence';
 import { createMotivation, motivationLine } from '../engine/training/motivation';
+import { createMobilitySeen, mobilityFrame } from '../engine/training/mobilitySeen';
 import { exerciseNeedsSetup } from '../engine/training/exerciseSetup';
 import DailyCheckIn from '../components/DailyCheckIn';
 import { applyCheckIn } from '../engine/training/dailyCheckIn';
@@ -152,7 +153,13 @@ export default function Training() {
   const playerName = userProfile?.name || '';
   // Daily check-in (where / ball / prosthesis or crutches TODAY) → the effective profile of this workout
   const [checkIn, setCheckIn] = useState(null);
-  const todayProfile = useMemo(() => applyCheckIn(userProfile, checkIn), [userProfile, checkIn]);
+  // today's mobility as the CAMERA sees it overrides an assumed one (a crutch profile standing on a
+  // prosthesis today — engine/training/mobilitySeen)
+  const [seenMobility, setSeenMobility] = useState(null);
+  const todayProfile = useMemo(() => {
+    const p = applyCheckIn(userProfile, checkIn);
+    return seenMobility && p ? { ...p, todayMobility: seenMobility } : p;
+  }, [userProfile, checkIn, seenMobility]);
   const planSourceRef = useRef(null);       // { plan, data, weekIdx, dayIdx } — rebuilt after the check-in
   const currentLocation = todayProfile?.trainingLocation || todayProfile?.currentLocation || 'field';
   const locationProps = getLocationProps(currentLocation, isHe, userProfile?.sport);
@@ -405,6 +412,9 @@ export default function Training() {
   useEffect(() => { navRef.current.idx = currentIdx; if (window.__GHOST_DEBUG) window.__trainingIdx = currentIdx; }, [currentIdx]);
   const exerciseStateRef = useRef({});
   const [displayReps, setDisplayReps] = useState(0);
+  // the rep counter ON THE SCREEN, for the ball (every counted rep plays a ball)
+  const displayRepsRef = useRef(0);
+  displayRepsRef.current = displayReps;
   useEffect(() => { if (window.__GHOST_DEBUG) window.__trainingReps = displayReps; }, [displayReps]);
   const [feedback, setFeedback] = useState(null);
   const [aiAnalyzing, setAiAnalyzing] = useState(false);
@@ -474,6 +484,25 @@ export default function Training() {
   const [warmUpGhostOn, setWarmUpGhostOn] = useState(true);    // ghost shown by default in the warm-up
   // The limbs AS THEY TRAIN: on crutches the prosthesis is not worn (safety — trainingLimbs)
   const limbProfile = useMemo(() => trainingLimbs(getLimbProfile(todayProfile), todayProfile?.todayMobility), [todayProfile]);
+  // Assumed crutches, but the camera sees the trainee standing on BOTH feet (the amputated side too) →
+  // a prosthesis day: switch once, and say it (no crutch cues, no crutch start position)
+  useEffect(() => {
+    if (seenMobility || !limbProfile?.trainsOnCrutches) return undefined;
+    const side = ['left', 'right'].find(s => limbProfile[`${s}_leg`]?.prosthesisOffForTraining);
+    if (!side) return undefined;
+    const ms = createMobilitySeen();
+    const id = setInterval(() => {
+      mobilityFrame(ms, poseLandmarksRef.current, side, performance.now());
+      if (ms.seen) {
+        clearInterval(id);
+        setSeenMobility('prosthesis');
+        const line = isHe ? 'אני רואה שאתה עומד על הפרוטזה — מתאים את האימון לפרוטזה.' : "I can see you're standing on your prosthesis — adapting the training to it.";
+        speakIfIdle(line, { rate: 1.0 });
+        setFeedback({ type: 'info', text: `🦿 ${line}` });
+      }
+    }, 200);
+    return () => clearInterval(id);
+  }, [limbProfile, seenMobility]);
   const warmUpExercises = useMemo(() => planWarmUp(todayProfile, { hasBall: typeof ballAnswer === 'boolean' ? ballAnswer : todayProfile?.hasBall === true }), [todayProfile, ballAnswer]);
 
   // Ghost Overlay & Progressive Range Challenge (opt-in, behind FEATURES.GHOST_OVERLAY).
@@ -852,6 +881,8 @@ export default function Training() {
   // MIRROR → GUIDE (owner): the big Ghost mirrors the trainee until they are in the exercise's start
   // position (the start gate), then it performs the exercise on them; in the exercise it guides
   const guideLatchRef = useRef({ phase: null, on: false });
+  const setupRef = useRef(null);                   // the expert module's positioning fix (null = positioned)
+  setupRef.current = execution.setup;
   const ghostIsGuide = useCallback(() => {
     const ph = phaseRef.current;
     const latch = guideLatchRef.current;
@@ -860,6 +891,9 @@ export default function Training() {
     const runUp = ph === PHASE.BRIEFING || ph === PHASE.CHECKING_EQUIPMENT || ph === PHASE.CALIBRATING || ph === PHASE.EXERCISING;
     if (!runUp) latch.on = false;
     latch.phase = ph;
+    // not positioned right (too close / out of the picture — the coach's card says what to fix):
+    // only the mirror of the real skeleton, never a guide sized on a partial body
+    if (setupRef.current) return false;
     if (ph === PHASE.EXERCISING) return true;
     if (ph === PHASE.BRIEFING || ph === PHASE.CHECKING_EQUIPMENT || ph === PHASE.CALIBRATING) {
       // once the trainee is in the start position the guide STAYS (no flip-flop on every knee bend)
@@ -924,7 +958,9 @@ export default function Training() {
       const isWorking = () => bodyInPicture(poseLandmarksRef.current)
         && (!workingSourceRef.current?.active || workingSourceRef.current.workingRef.current);
       repEvidenceRef.current = null;
-      const gated = type === 'hold' ? makePresenceGatedAnalyzer(analyze) : makeEvidenceGatedAnalyzer(analyze, repEvidenceRef);
+      // the rep's evidence only from the exercise's own limbs (a kick / pass: the legs, never a hand swing)
+      const evGroup = evidenceGroupFor({ profile: execution.profile, cueKey });
+      const gated = type === 'hold' ? makePresenceGatedAnalyzer(analyze) : makeEvidenceGatedAnalyzer(analyze, repEvidenceRef, () => Date.now(), evGroup);
       analyzerRef.current = currentExercise.timed
         ? { analyze: makeTimedAnalyzer(analyze, isWorking), type: 'hold', cueKey, ballAware }
         : { analyze: withRepOffset(makeProfileRepAnalyzer(gated, profileRepsRef), earlyOffsetRef), type, cueKey, ballAware };
@@ -3064,7 +3100,7 @@ export default function Training() {
         {/* Exercise Ghost generated from the Expert Execution Profile (Stage 3.1): shown from the
             briefing (top, above the instructions card) through calibration and the exercise —
             the panel, or the full overlay on the body for standing exercises */}
-        {demoGhostPhase && showDemoGhost && !demoOnBody && (
+        {demoGhostPhase && showDemoGhost && !demoOnBody && phase !== PHASE.RESTING && (
           <WarmupGhostPanel
             spec={demoSpecShown} limbProfile={limbProfile} isHe={isHe}
             placement={phase === PHASE.BRIEFING || phase === PHASE.CHECKING_EQUIPMENT || phase === PHASE.RESTING ? 'top' : 'middle'}
@@ -3072,7 +3108,7 @@ export default function Training() {
             label={demoLabel}
           />
         )}
-        {demoGhostPhase && showDemoGhost && demoOnBody && (
+        {demoGhostPhase && showDemoGhost && demoOnBody && phase !== PHASE.RESTING && (
           <GhostOverlay spec={ghostViewSpec} limbProfile={limbProfile} landmarksRef={poseLandmarksRef} videoRef={videoRef} onError={handleOverlayError} isGuide={ghostIsGuide} />
         )}
         {incomingShown && (
@@ -3086,6 +3122,8 @@ export default function Training() {
             onBall={(hit) => { if (FEATURES.COACH_BRAIN && execution.brainRef?.current) brainBall(execution.brainRef.current, { now: performance.now(), hit }); }}
             onKickSide={handleKickSide}
             strikeCountRef={execution.strikeCountRef}
+            repShownRef={displayRepsRef}
+            hidden={!!execution.setup}
             side={ballDrill.target === 'hand' || ballDrill.target === 'hands' ? handSide(limbProfile)
               : kickingSide(limbProfile, currentExercise?.sideSwitch && isStrikeMode(currentExercise?.splitMode) ? splitSupport : null)}
             landmarksRef={poseLandmarksRef}
@@ -3730,7 +3768,7 @@ export default function Training() {
           status={(() => {
             const on = phase === PHASE.WARM_UP ? warmUpGhostOn : exerciseGhostOn;
             if (!on) return null;
-            const bigShown = (phase === PHASE.WARM_UP && warmUpGhostOn && ghostSpec && overlayActive) || (demoGhostPhase && showDemoGhost && demoOnBody);
+            const bigShown = (phase === PHASE.WARM_UP && warmUpGhostOn && ghostSpec && overlayActive) || (demoGhostPhase && showDemoGhost && demoOnBody && phase !== PHASE.RESTING);
             const smallShown = (phase === PHASE.WARM_UP && warmUpGhostOn && ghostSpec && !overlayActive) || (demoGhostPhase && showDemoGhost && !demoOnBody);
             if (bigShown) {
               if (phase === PHASE.WARM_UP || ghostIsGuide()) return isHe ? '✓ הצללית מדגימה את התרגיל עליך — עקוב אחריה' : '✓ The Ghost performs the exercise on you — follow it';

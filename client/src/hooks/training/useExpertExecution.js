@@ -34,12 +34,12 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { getExerciseProfile, personalizeProfile } from '../../engine/exercise/exerciseProfiles';
 import { variationProfile } from '../../engine/catalog/catalog';
 import { applySportContext } from '../../engine/sports/sportLibrary';
-import { createExecutionTracker, updateExecution, calibrateUpright } from '../../engine/exercise/profileEvaluator';
+import { createExecutionTracker, updateExecution, calibrateUpright, stableUpright } from '../../engine/exercise/profileEvaluator';
 import {
   createStartGate, updateStartGate, isStartPosition, isValidRep, updateWork, withDrive, startPositionPrompt, READY_DRIVE,
 } from '../../engine/training/coachFlow';
 import { createClipRecorder, recordFrame } from '../../engine/validation/clipRecorder';
-import { createRepEvidence, evidenceFrame, evidenceOk, evidenceAccept } from '../../engine/training/repEvidence';
+import { createRepEvidence, evidenceFrame, evidenceOk, evidenceAccept, evidenceGroupFor } from '../../engine/training/repEvidence';
 import { holdSpeech } from '../useSpeech';
 
 /** How long a line takes to say (Hebrew TTS ≈ 14 characters / s at rate 1). */
@@ -145,6 +145,7 @@ export function useExpertExecution({
     earlyRef.current = false;
     const gate = createStartGate();
     let tiltCalibrated = false;
+    const tiltSamples = [];
     const work = {};
     let wasCounting = countingRef.current;
     let notStartSince = null; let startSpokenAt = 0; let lastStartPrompt = false;
@@ -163,7 +164,7 @@ export function useExpertExecution({
     const brain = brainOnRef.current ? createCoachBrain({ profile, exerciseName, savedPolicy: loadPolicy() }) : null;
     // KINETIC COUNTING (IRON RULE): every count also needs the movement's kinetic evidence in space
     // (range out-and-back + velocity + the end point's trajectory + one flowing movement)
-    const kinetic = createRepEvidence();
+    const kinetic = createRepEvidence(evidenceGroupFor({ profile, cueKey }));   // a kick: only the legs prove it
     brainRef.current = brain;
     setIssue(null); setAccuracy(null); setCadence(null); setUnsure(null); setSetup(null); setReadyFlash(null);
 
@@ -179,10 +180,16 @@ export function useExpertExecution({
 
         // ---- Start gate: positioned + reliable + in the START POSITION, held ----
         const inStart = r.inView && isStartPosition(profile, r.metrics);
-        const wasReady = startReadyRef.current;
         startReadyRef.current = updateStartGate(gate, { positioned: r.inView, confident: r.quality?.confident, inStart }, now);
-        // the camera's tilt, measured ONCE on the trainee verified upright in the start position
-        if (startReadyRef.current && !wasReady && !tiltCalibrated) { calibrateUpright(tracker); tiltCalibrated = true; }
+        // the camera's tilt (a laptop on a desk), measured ONCE on the trainee upright and STILL in the
+        // start position: the median of a stable ~1.5 s stretch (a lean / a glitch never calibrates it)
+        if (!tiltCalibrated) {
+          if (startReadyRef.current && typeof tracker.leanRaw === 'number') {
+            tiltSamples.push(tracker.leanRaw);
+            if (tiltSamples.length > 60) tiltSamples.shift();
+            if (stableUpright(tiltSamples)) { calibrateUpright(tracker, tiltSamples.slice(-30)); tiltCalibrated = true; }
+          } else tiltSamples.length = 0;
+        }
         workingRef.current = updateWork(work, profile, r, now);
 
         // ---- Exact rep counting (a new set starts from zero) ----

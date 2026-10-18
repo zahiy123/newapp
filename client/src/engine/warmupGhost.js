@@ -754,12 +754,12 @@ function lyingGhostBox(spec, lp) {
 const OVERLAY_LOOK = Object.freeze({
   palette: {
     skin: ['#a5f3fc', '#06b6d4'], jersey: ['#22d3ee', '#0891b2'], shorts: '#155e75', boot: '#083344',
-    outline: 'rgba(2, 6, 23, 0.9)', far: 'rgba(2, 6, 23, 0.3)',
+    outline: 'rgba(2, 6, 23, 0.8)', far: 'rgba(2, 6, 23, 0.25)',
   },
-  outlineScale: 2.6,
-  // a training model, not an obstacle: the trainee sees themself through the body, the outline
-  // and the limbs show the correct movement
-  fillAlpha: 0.45,
+  outlineScale: 2.0,
+  // a see-through MIRROR-like training model (owner field video, 2026-10-18: it hid the trainee): a
+  // light fill and a crisp outline — the trainee sees themself through it, the outline shows the movement
+  fillAlpha: 0.2,
 });
 
 const LEG_SIDES = ['left', 'right'];

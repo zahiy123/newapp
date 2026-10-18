@@ -25,7 +25,11 @@
 
 import { JOINTS, measureMetric, sideUsable, trunkLean, uprightLeanProfile, calibratedLean, MAX_CAMERA_TILT_DEG } from './kinematics.js';
 import { createMotionState, updateMotion } from './motionFeatures.js';
-import { updateConfidence } from './confidence.js';
+import { updateConfidence, detectView } from './confidence.js';
+
+// measures that live in DEPTH when the trainee faces the camera (owner field video, 2026-10-18: "start
+// the movement from the hip" on every pass, seen from the front)
+const SAGITTAL = new Set(['chainLeadMs', 'trunkLean', 'trunkRange']);
 import { assessSetup, SETUP } from './setupCoach.js';
 
 const MIN_VISIBILITY = 0.5;
@@ -236,8 +240,19 @@ export function updateExecution(tracker, landmarks, nowMs) {
     return { ...quiet(quality), metrics, phase };
   }
 
-  // 3. Rules with persistence
-  const hits = violatedRules(profile, metrics, phase);
+  // 3. Rules with persistence. Facing the camera, a forward / backward measure (the hip leading the
+  // kick, the trunk leaning toward / away from the camera) is in DEPTH — it cannot be judged reliably
+  // from the front: those error rules are not judged in a frontal view (dangers always are)
+  const frontal = detectView(landmarks) === 'front';
+  // (the hip-first chain: never from the front; the trunk lean: not in kick / pass drills from the front
+  // — a squat's forward lean stays judged, it was designed for the frontal depth)
+  const judged = (r) => {
+    if (!frontal || r.severity === 'danger') return true;
+    const m = r.metric || r.feature;
+    if (m === 'chainLeadMs') return false;
+    return !(profile.kind === 'strike' && SAGITTAL.has(m));
+  };
+  const hits = violatedRules(profile, metrics, phase).filter(judged);
   const hitIds = new Set(hits.map(r => r.id));
   for (const id of Object.keys(tr.ruleSince)) if (!hitIds.has(id)) delete tr.ruleSince[id];
   const issues = [];
@@ -252,7 +267,7 @@ export function updateExecution(tracker, landmarks, nowMs) {
   for (const ev of events) {
     let clean = true;
     for (const r of profile.dynamics || []) {
-      if (r.on !== ev.type) continue;
+      if (r.on !== ev.type || !judged(r)) continue;
       if (dynamicViolation(r, ev)) {
         clean = false;
         tr.dynActive[r.id] = { rule: r, until: nowMs + DYNAMIC_SHOW_MS, value: ev[r.feature] };
@@ -296,12 +311,23 @@ export function profileJointNames(profile) {
 
 
 /**
- * Calibrate the camera's tilt ONCE, on the trainee verified UPRIGHT (the start position of an upright
- * drill, when the start gate opens): the raw trunk lean the camera sees then is the camera's tilt.
- * Only for drills whose trunk rules are "don't lean" maxima (uprightLeanProfile). Returns the tilt.
+ * Calibrate the camera's tilt ONCE, on the trainee verified UPRIGHT and STILL in the start position of
+ * an upright drill: the median of the raw trunk lean over a stable stretch (`samples`, ~1.5 s with
+ * < 4° spread) is the camera's tilt. Only for drills whose trunk rules are "don't lean" maxima.
+ * @param {number[]} [samples] - raw leans of the stable stretch (default: the current frame)
+ * @returns {number} the tilt in use
  */
-export function calibrateUpright(tr) {
-  if (!tr || !uprightLeanProfile(tr.profile) || typeof tr.leanRaw !== 'number') return tr?.cameraTilt ?? 0;
-  tr.cameraTilt = Math.max(0, Math.min(MAX_CAMERA_TILT_DEG, tr.leanRaw));
+export function calibrateUpright(tr, samples = null) {
+  if (!tr || !uprightLeanProfile(tr.profile)) return tr?.cameraTilt ?? 0;
+  const v = (samples && samples.length ? samples : [tr.leanRaw]).filter(x => typeof x === 'number').sort((a, b) => a - b);
+  if (!v.length) return tr.cameraTilt ?? 0;
+  tr.cameraTilt = Math.max(0, Math.min(MAX_CAMERA_TILT_DEG, v[Math.floor(v.length / 2)]));
   return tr.cameraTilt;
+}
+
+/** A stretch of raw leans is a stable upright stance (enough samples, a small spread)? */
+export function stableUpright(samples, n = 30, spreadDeg = 4) {
+  if (!samples || samples.length < n) return false;
+  const last = samples.slice(-n);
+  return Math.max(...last) - Math.min(...last) < spreadDeg;
 }

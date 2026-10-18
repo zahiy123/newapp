@@ -41,9 +41,36 @@ const JOINTS = [
 
 const seen = (p) => p && Math.min(p.visibility ?? 1, p.presence ?? 1) >= CONF && p.x >= 0 && p.x <= 1 && p.y >= 0 && p.y <= 1;
 
-/** A new evidence record for one exercise / set. */
-export function createRepEvidence() {
-  return { frames: [], lastAt: null };
+// Which joints may prove a rep: a kick / pass / leg drill only by the LEGS (a hand swing or a small
+// shift in place never counts a kick — owner field video, 2026-10-18); an arm drill only by the arms
+const GROUPS = { arms: [0, 1, 2, 3], legs: [4, 5, 6, 7], all: [0, 1, 2, 3, 4, 5, 6, 7] };
+const LEG_CUES = new Set(['kick', 'amputeeKick', 'pass', 'crutchPass', 'firstTouch', 'dribbling', 'crutchDribble', 'shieldBall',
+  'squat', 'miniSquat', 'lunge', 'highKnees', 'singleLegHighKnee', 'forwardKicks', 'running', 'amputeeSprint', 'jump', 'jumpSquat',
+  'balanceHops', 'march', 'footwork', 'sideSteps', 'defensiveSlide', 'stepUp', 'bridge', 'deadlift', 'calfRaise', 'wallSit', 'juggle', 'headers']);
+const ARM_CUES = new Set(['push', 'pushUp', 'bicep', 'tricep', 'shoulder', 'lateral', 'frontRaise', 'row', 'punches', 'armCircles',
+  'chestPass', 'bouncePass', 'overheadPass', 'shooting', 'layup', 'hookShot', 'handDribble', 'crossover', 'stroke', 'serve', 'volley', 'smash',
+  'wheelchairShooting', 'wheelchairPass', 'wheelchairDribble', 'wheelchairStroke', 'wheelchairServe', 'rehabElbowFlex', 'rehabFrontRaise', 'dip']);
+
+/**
+ * The joints that may prove a rep of this exercise: from its profile (a strike / leg joints → legs;
+ * arm joints → arms) or its analyzer cue.
+ */
+export function evidenceGroupFor({ profile = null, cueKey = null } = {}) {
+  if (profile?.kind === 'strike') return 'legs';
+  const js = Object.keys(profile?.joints || {});
+  if (js.length) {
+    const legs = js.some(j => j === 'knee' || j === 'hip' || j === 'bodyLine'), arms = js.some(j => j === 'elbow' || j === 'shoulder');
+    if (legs && !arms) return 'legs';
+    if (arms && !legs) return 'arms';
+  }
+  if (LEG_CUES.has(cueKey)) return 'legs';
+  if (ARM_CUES.has(cueKey)) return 'arms';
+  return 'all';
+}
+
+/** A new evidence record for one exercise / set; `group` = the joints that may prove a rep. */
+export function createRepEvidence(group = 'all') {
+  return { frames: [], lastAt: null, joints: GROUPS[group] || GROUPS.all };
 }
 
 /** One frame: per joint — its angle and its end point (real proportions), when really seen; the torso. */
@@ -101,7 +128,7 @@ export function kineticRep(k) {
 /** The largest joint range that is a REAL kinetic rep since the last counted one (degrees; 0 = none). */
 export function evidenceRange(ev, returnShare = RETURN_SHARE) {
   let best = 0;
-  for (let j = 0; j < JOINTS.length; j++) {
+  for (const j of ev.joints || GROUPS.all) {
     const k = jointKinetics(ev, j, returnShare);
     if (kineticRep(k)) best = Math.max(best, k.range);
   }
@@ -134,10 +161,10 @@ export function bodyInPicture(lm) {
  * @param {(lm, prev, ball) => Object} base
  * @param {{ current: Object }} evRef - holds the evidence record (reset per set by the page)
  */
-export function makeEvidenceGatedAnalyzer(base, evRef, now = () => Date.now()) {
+export function makeEvidenceGatedAnalyzer(base, evRef, now = () => Date.now(), group = 'all') {
   return (lm, prev = {}, ball) => {
     const t = now();
-    if (!evRef.current) evRef.current = createRepEvidence();
+    if (!evRef.current) evRef.current = createRepEvidence(group);
     evidenceFrame(evRef.current, lm, t);
     const st = base(lm, prev, ball);
     const before = prev.reps || 0;
