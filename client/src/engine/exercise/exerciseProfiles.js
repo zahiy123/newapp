@@ -421,7 +421,7 @@ const RAW_EXPERT = {
       { id: 'strike_chain', on: 'strike', feature: 'chainLeadMs', op: '<', value: 15, severity: 'error',
         msg: msg('התחל את התנועה מהירך — ואז הברך', 'Start the swing from the hip — then the knee'),
         why: msg('הכוח עובר בשרשרת ירך → ברך → כף רגל', 'Power flows hip → knee → foot') },
-      { id: 'kick_toe', on: 'strike', feature: 'contactToe', op: '>', value: 0.5, severity: 'error', view: 'front', coachNow: true,
+      { id: 'kick_toe', on: 'strike', feature: 'contactToe', op: '>', value: 0.5, severity: 'error', view: 'front', confirm: 2, only: ['footballKick'],
         cue: msg('קצה הנעל — כוון את האצבעות למטה!', 'Toe-poke — point the toes down!'),
         msg: msg('בעטת עם קצה הנעל. כוון את האצבעות למטה, נעל את הקרסול ופגע עם השרוכים', 'You kicked with the tip of the boot. Point the toes down, lock the ankle, strike with the laces'),
         why: msg('קצה הנעל הוא נקודה קטנה — הכדור עף לכיוון אקראי והאצבעות סופגות מכה. השרוכים נותנים משטח קשיח, כוח וכיוון', 'The tip of the boot is a tiny point — the ball flies off at random and the toes take the hit. The laces give a firm surface, power and direction'),
@@ -583,17 +583,17 @@ RAW_EXPERT.shadowPass = {
   // the pass's own technique check (owner, 2026-10-18): a toe-poke instead of the inside of the foot is
   // told RIGHT AFTER the rep (frontal view only — there the foot's turn-out is visible)
   dynamics: [...(RAW_EXPERT.footballKick.dynamics || []),
-    { id: 'pass_toe', on: 'strike', feature: 'contactToe', op: '>', value: 0.5, severity: 'error', view: 'front', coachNow: true,
+    { id: 'pass_toe', on: 'strike', feature: 'contactToe', op: '>', value: 0.5, severity: 'error', view: 'front', confirm: 2, only: ['shadowPass'],
       cue: msg('מסרת עם האצבעות — פתח את כף הרגל!', 'Toes — open the foot!'),
       msg: msg('שים לב — מסרת עם האצבעות. פתח את כף הרגל החוצה ופגע עם הפנים', 'Careful — you passed with your toes. Turn the foot out and strike with the inside'),
       why: msg('פנים כף הרגל הוא המשטח הרחב והשטוח — הוא נותן למסירה כיוון מדויק; האצבעות הן נקודה קטנה ועגולה, והכדור בורח לצדדים', 'The inside of the foot is the wide, flat surface — it gives the pass an accurate direction; the toes are a small round point, and the ball skews off'),
       how: msg('הסובב את הרגל מהירך החוצה עוד לפני הבעיטה, כך שהקשת של כף הרגל עומדת מול הכדור', 'Turn the leg out from the hip before the swing, so the arch of the foot faces the ball') },
-    { id: 'pass_laces', on: 'strike', feature: 'contactLaces', op: '>', value: 0.5, severity: 'error', view: 'front', coachNow: true,
+    { id: 'pass_laces', on: 'strike', feature: 'contactLaces', op: '>', value: 0.5, severity: 'error', view: 'front', confirm: 2, only: ['shadowPass'],
       cue: msg('זה היה עם השרוכים — מסירה עם הפנים!', 'That was the laces — pass with the inside!'),
       msg: msg('פגעת עם החלק המלא של כף הרגל — השרוכים. במסירה פותחים את כף הרגל ופוגשים עם הפנים', 'You struck with the full instep — the laces. In a pass, open the foot and meet the ball with the inside'),
       why: msg('השרוכים נותנים כוח, לא כיוון — הכדור יוצא חזק אבל לא מדויק. פנים כף הרגל נותן משטח רחב וכיוון שליטה', 'The laces give power, not direction — the ball goes hard but off target. The inside of the foot gives a wide surface and control'),
       how: msg('ברך הרגל הבועטת פונה החוצה, כף הרגל בזווית ישרה לכיוון המסירה, והתנועה קצרה — כמו מטוטלת', 'The kicking knee turns out, the foot square to the pass direction, and a short swing — like a pendulum') },
-    { id: 'pass_ankle', on: 'strike', feature: 'ankleDeg', op: '>', value: 150, severity: 'error', view: 'front', coachNow: true,
+    { id: 'pass_ankle', on: 'strike', feature: 'ankleDeg', op: '>', value: 150, severity: 'error', view: 'front', confirm: 2, only: ['shadowPass'],
       cue: msg('נעל את הקרסול — אצבעות למעלה!', 'Lock the ankle — toes up!'),
       msg: msg('הקרסול לא נעול — האצבעות צנחו למטה ברגע המגע. נעל את הקרסול, אצבעות למעלה', 'The ankle is not locked — the toes dropped at contact. Lock the ankle, toes up'),
       why: msg('קרסול רפוי בולע את המכה — הכדור יוצא חלש ובכיוון לא צפוי. קרסול נעול הופך את כף הרגל למשטח קשיח ויציב', 'A loose ankle absorbs the strike — the ball comes off weak and unpredictable. A locked ankle makes the foot a firm, stable surface'),
@@ -750,7 +750,10 @@ const HOW = {
 export const EXPERT_PROFILES = Object.freeze(Object.fromEntries(
   Object.entries(RAW_EXPERT).map(([id, p]) => [id, Object.freeze({
     dynamics: [], ...p, tags: TAGS[id] || [],
-    rules: (p.rules || []).map(r => (HOW[`${id}.${r.id}`] && !r.how ? { ...r, how: HOW[`${id}.${r.id}`] } : r)),
+    // ISOLATION (owner, 2026-10-19): a rule of ONE exercise (`only`) never leaks into another built on it
+    // (a pass inherits the kick's chain + balance, never "strike with the laces")
+    rules: (p.rules || []).filter(r => !r.only || r.only.includes(id)).map(r => (HOW[`${id}.${r.id}`] && !r.how ? { ...r, how: HOW[`${id}.${r.id}`] } : r)),
+    dynamics: (p.dynamics || []).filter(r => !r.only || r.only.includes(id)),
   })]),
 ));
 

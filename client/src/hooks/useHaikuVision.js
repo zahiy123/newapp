@@ -283,7 +283,8 @@ export function useHaikuVision({ onVisionFeedback } = {}) {
         const anticipatedRep = repCountRef.current + 1;
         earlySentRepRef.current = anticipatedRep;
         console.log(`[HaikuVision] 🎯 KINETIC PEAK: trigger=${snapshot.triggerId} | type=${snapshot.triggerType} | rep #${anticipatedRep}${snapshot.extremeValue != null ? ' | value=' + (typeof snapshot.extremeValue === 'number' ? snapshot.extremeValue.toFixed(1) : snapshot.extremeValue) : ''}`);
-        const f1 = startFrameRef.current || snapshot.frame;
+        // ONE focused frame at the PEAK of the movement (owner, 2026-10-19): half the image tokens, faster
+        const f1 = null;
         const f2 = snapshot.frame;
         sendToServer(f1, f2, anticipatedRep, startAnglesRef.current, snapshot.angles, startLandmarksRef.current, snapshot.landmarks, snapshot.timestamp, snapshot.equipmentData);
       }

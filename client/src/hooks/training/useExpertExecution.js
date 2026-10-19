@@ -123,6 +123,7 @@ export function useExpertExecution({
   nameRef.current = playerName;
   const statsRef = useRef({ dangers: 0, errors: {} });
   const setLogRef = useRef(null);            // the current set's measured log (the rest's debrief)
+  const lastRepCleanRef = useRef(null);      // the last counted kick / pass was measured clean (the ball's "Nice!")
   const brainRef = useRef(null);             // the coach brain of this exercise (Layers 1–4)
   const brainOnRef = useRef(brainEnabled);
   brainOnRef.current = brainEnabled;
@@ -161,6 +162,7 @@ export function useExpertExecution({
       return undefined;
     }
     const tracker = createExecutionTracker(profile, limbProfile || {});
+    tracker.requireTilt = true;                // the live camera: no "don't lean" verdict before its tilt is calibrated
     setLogRef.current = tracker.log;
     inViewRef.current = false;
     startReadyRef.current = false;
@@ -210,7 +212,7 @@ export function useExpertExecution({
     // the AI is late / unreachable. One cue at a time; never after the set ended; never the same words twice
     let disposed = false; let cueInFlight = false;
     const recentCues = [];
-    const sayCorrection = (rule, localText, rate, he) => {
+    const sayCorrection = (rule, localText, rate, he, tone = null) => {
       const local = () => { holdSpeech(estimateSpeechMs(localText, rate)); speakRef.current?.(localText, { rate }); recentCues.push(localText); };
       if (!rule || cueInFlight) { local(); return; }
       cueInFlight = true;
@@ -218,6 +220,7 @@ export function useExpertExecution({
         rule, profile, lp: limbProfile || {}, exercise: exerciseName, sport: contextsKey,
         name: nameRef.current, he, rep: repCountRef.current || null, times: tracker.log?.rules?.[rule.id]?.n ?? null, recent: recentCues,
       });
+      if (tone) facts.tone = tone;
       aiCue(facts).then((ai) => {
         cueInFlight = false;
         if (disposed || !countingRef.current) return;
@@ -297,7 +300,9 @@ export function useExpertExecution({
         // the camera's tilt (a laptop on a desk), measured ONCE on the trainee upright and STILL in the
         // start position: the median of a stable ~1.5 s stretch (a lean / a glitch never calibrates it)
         if (!tiltCalibrated) {
-          if (startReadyRef.current && typeof tracker.leanRaw === 'number') {
+          // (the start gate — or, in a kick / pass, the trainee standing still at the ball: the exercise may
+          // start on the first pass, the camera is still calibrated from the quiet standing moments)
+          if ((startReadyRef.current || (stance?.still && stance.standing)) && typeof tracker.leanRaw === 'number') {
             tiltSamples.push(tracker.leanRaw);
             if (tiltSamples.length > 60) tiltSamples.shift();
             if (stableUpright(tiltSamples)) { calibrateUpright(tracker, tiltSamples.slice(-30)); tiltCalibrated = true; }
@@ -323,6 +328,7 @@ export function useExpertExecution({
             if (countsReps && profile.kind === 'strike' && ev.type === 'strike' && r.quality?.confident !== false && evidenceOk(kinetic, now, { strike: true, kick: true })) {
               evidenceAccept(kinetic, now); repCountRef.current += 1; strikeCountRef.current += 1; earlyRef.current = true;
               noteRepScore(r);
+              lastRepCleanRef.current = !(r.issues || []).some(i => i.severity === 'error' || i.severity === 'danger');
               if (ev.side === 'left' || ev.side === 'right') onStrikeSideRef.current?.(ev.side);   // the leg of a REAL counted kick
             }
           }
@@ -432,7 +438,7 @@ export function useExpertExecution({
               if (say.kind === 'correction') statsRef.current.coached.push(coach?.id || say.kind);
               // a correction is never cut in the middle (field video: the rep count cut it) — the count
               // waits in the queue and plays right after it; a technique line is worded by the AI coach
-              if (say.rule && (say.kind === 'correction' || say.kind === 'forecast')) sayCorrection(say.rule, say.text, say.rate, he);
+              if (say.rule && (say.kind === 'correction' || say.kind === 'forecast')) sayCorrection(say.rule, say.text, say.rate, he, say.style === 'calm' ? 'calm' : null);
               else { holdSpeech(estimateSpeechMs(say.text, say.rate)); speakRef.current?.(say.text, { rate: say.rate }); }
             }
           }
@@ -466,7 +472,7 @@ export function useExpertExecution({
   const ghostSpec = useMemo(() => (active && profile?.ghost ? { profile } : null), [active, profile]);
 
   return {
-    active, profile, setLogRef, inViewRef, startReadyRef, countOpenRef, repCountRef, workingRef, earlyRef, strikeCountRef, brainRef,
+    active, profile, setLogRef, lastRepCleanRef, inViewRef, startReadyRef, countOpenRef, repCountRef, workingRef, earlyRef, strikeCountRef, brainRef,
     missingPart, setup, readyFlash, startPrompt, issue, accuracy, repAccuracy, cadence, unsure, ghostSpec, statsRef,
   };
 }

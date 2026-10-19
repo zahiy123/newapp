@@ -3237,6 +3237,7 @@ export default function Training() {
             onBall={(hit) => { if (FEATURES.COACH_BRAIN && execution.brainRef?.current) brainBall(execution.brainRef.current, { now: performance.now(), hit }); }}
             strikeCountRef={execution.strikeCountRef}
             repShownRef={displayRepsRef}
+            cleanRef={execution.lastRepCleanRef}
             hidden={!!execution.setup}
             side={ballDrill.target === 'hand' || ballDrill.target === 'hands' ? handSide(limbProfile)
               : kickingSide(limbProfile, currentExercise?.sideSwitch && isStrikeMode(currentExercise?.splitMode) ? splitSupport : null)}

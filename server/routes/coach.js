@@ -201,8 +201,9 @@ router.post('/realtime-feedback', async (req, res) => {
 // live-cue: one short sideline correction during the set; set-debrief: the rest's expert analysis.
 // An empty answer = the device says its own measured line (never silence on a correction).
 router.post('/live-cue', async (req, res) => {
-  const key = `cue-${String(req.body?.name || '')}`;
-  if (shouldThrottle(key, 1500)) return res.json({ cue: null });
+  // a guard against floods only — per kind of line (a correction never blocks a positioning / start line)
+  const key = `cue-${String(req.body?.name || '')}-${String(req.body?.mode || 'cue')}`;
+  if (shouldThrottle(key, 700)) return res.json({ cue: null });
   try {
     res.json({ cue: await generateCue(req.body || {}) });
   } catch (error) {

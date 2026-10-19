@@ -164,6 +164,8 @@ export function createExecutionTracker(profile, lp = {}) {
     strikes: [],            // { ok } of recent strikes
     conf: {},               // confidence hysteresis state
     cameraTilt: 0,          // the camera's tilt, measured on the upright trainee (calibrateUpright)
+    tiltReady: false,       // calibrated (until then a "don't lean" rule is not judged — on the live camera: requireTilt)
+    requireTilt: false,
     leanRaw: null,
   };
 }
@@ -287,6 +289,9 @@ export function updateExecution(tracker, landmarks, nowMs) {
   const judged = (r) => {
     if (r.view === 'front' && !frontal) return false;          // a frontal-only measure (the foot's turn-out, the knee line)
     if (r.view === 'side' && frontal) return false;            // a side-only measure
+    // the trunk lean of an upright drill is judged only once THIS camera's tilt was calibrated on the
+    // trainee standing still (a laptop looking down reads an upright trainee as leaning) — dangers always
+    if ((r.metric || r.feature) === 'trunkLean' && r.severity !== 'danger' && tr.requireTilt && uprightLeanProfile(profile) && !tr.tiltReady) return false;
     if (!frontal || r.severity === 'danger') return true;
     const m = r.metric || r.feature;
     if (m === 'chainLeadMs') return false;
@@ -364,14 +369,18 @@ export function updateExecution(tracker, landmarks, nowMs) {
     let clean = true;
     for (const r of profile.dynamics || []) {
       if (r.on !== ev.type || !judged(r)) continue;
-      if (typeof ev[r.feature] === 'number') logRule(tr.log, r, dynamicViolation(r, ev), ev[r.feature]);
       if (dynamicViolation(r, ev)) {
+        tr.dynStreak[r.id] = (tr.dynStreak[r.id] || 0) + 1;
+        // a rule that needs CONFIRMATION (the foot / ankle — a fine measure) shows, counts and is coached only
+        // when seen in `confirm` attempts in a row: one doubtful reading never raises an alarm
+        if (r.confirm && tr.dynStreak[r.id] < r.confirm) continue;
+        if (typeof ev[r.feature] === 'number') logRule(tr.log, r, true, ev[r.feature]);
         clean = false;
         tr.dynActive[r.id] = { rule: r, until: nowMs + DYNAMIC_SHOW_MS, value: ev[r.feature] };
-        tr.dynStreak[r.id] = (tr.dynStreak[r.id] || 0) + 1;
         // a technique error of the movement itself (coachNow) is corrected RIGHT AFTER the first time
         if (tr.dynStreak[r.id] >= need(r, COACH_AFTER) && canCoach(r.id)) coachIt(r, ev[r.feature], ev.side || null);
       } else if (typeof ev[r.feature] === 'number') {
+        logRule(tr.log, r, false, ev[r.feature]);
         tr.dynStreak[r.id] = 0;
       }
     }
@@ -428,6 +437,7 @@ export function calibrateUpright(tr, samples = null) {
   const v = (samples && samples.length ? samples : [tr.leanRaw]).filter(x => typeof x === 'number').sort((a, b) => a - b);
   if (!v.length) return tr.cameraTilt ?? 0;
   tr.cameraTilt = Math.max(0, Math.min(MAX_CAMERA_TILT_DEG, v[Math.floor(v.length / 2)]));
+  tr.tiltReady = true;
   return tr.cameraTilt;
 }
 

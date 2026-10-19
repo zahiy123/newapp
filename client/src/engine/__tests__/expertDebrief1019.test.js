@@ -56,7 +56,7 @@ describe('the contact surface of a pass / kick — told precisely', () => {
     expect(EXPERT_PROFILES.footballKick.dynamics.some(d => d.id === 'kick_toe')).toBe(true);
     for (const id of ['pass_toe', 'pass_laces', 'pass_ankle']) {
       const r = EXPERT_PROFILES.shadowPass.dynamics.find(d => d.id === id);
-      expect(r).toMatchObject({ view: 'front', coachNow: true });
+      expect(r).toMatchObject({ view: 'front', confirm: 2, only: ['shadowPass'] });   // a fine measure: confirmed, never on one reading
       expect(r.why && r.how && r.cue).toBeTruthy();
     }
   });

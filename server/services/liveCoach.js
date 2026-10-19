@@ -119,6 +119,7 @@ Do not repeat or paraphrase closely any of the recent lines listed. Output ONLY 
   }
   const system = `${COACH_PERSONA(he)}
 NOW: the trainee is IN THE MIDDLE OF A SET. Give ONE immediate correction, like a shout from the sideline: warm, sharp, specific to THIS error and THIS rep — at most 9 words, one sentence. It must tell them what to do on the very next rep — exactly the instruction of "what" / "how", nothing else. ${f.name ? `You may use the name ${clip(f.name, 20)} (not every time).` : ''}
+${f.tone === 'calm' ? 'The trainee is tired / frustrated right now: say it calmly and supportively, one simple thing.' : ''}
 Do not repeat or paraphrase closely any of the recent cues listed. Output ONLY the spoken sentence.`;
   const user = JSON.stringify({
     exercise: clip(f.exercise, 80), sport: clip(f.sport, 40), body: clip(f.body, 120),

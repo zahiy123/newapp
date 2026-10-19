@@ -123,7 +123,7 @@ export const LACES_DELTA = 0.12, TOE_DELTA = 0.04;   // toes pointed down vs. le
 export function strikeContact(landmarks, side, base = null) {
   const out = { footOpen: null, ankleDeg: null, toeDrop: null, contactToe: null, contactLaces: null };
   const [hip, knee, ankle, toe] = side === 'left' ? [23, 25, 27, 31] : [24, 26, 28, 32];
-  const ok = (p) => p && (p.visibility ?? 1) >= 0.6;
+  const ok = (p) => p && (p.visibility ?? 1) >= 0.75;      // a contact verdict only on a clearly seen foot
   const H = landmarks?.[hip], K = landmarks?.[knee], A = landmarks?.[ankle], T = landmarks?.[toe];
   const open = footOpenness(landmarks, side);
   if (open === null || !ok(H) || !ok(A) || !ok(T)) return out;

@@ -24,7 +24,7 @@ const PRIOR = {
   tired:       { direct: [4, 1], why: [1, 3], external: [2, 2], calm: [3, 2] },
 };
 
-export const MIN_GAP_MS = 4500;      // never two corrections closer than this (short sideline cues)
+export const MIN_GAP_MS = 3500;      // never two corrections closer than this (short sideline cues)
 export const REWARD_ATTEMPTS = 3;    // the outcome of a correction = the next attempts
 
 /** The situation the trainee is in (from the behavior layer). */
@@ -114,7 +114,7 @@ export function renderCorrection(rule, style, he = true) {
       return parts.filter(Boolean).join('. ');
     }
     case 'external': return rule.external ? L(rule.external) : liveCue(rule, he);
-    case 'calm': return he ? `בלי לחץ — רק דבר אחד: ${liveCue(rule, he)}` : `No pressure — just one thing: ${liveCue(rule, he)}`;
+    case 'calm': return liveCue(rule, he);                       // (the calm TONE is the AI's — no fixed template)
     case 'cue': return liveCue(rule, he);
     default: return msg;
   }

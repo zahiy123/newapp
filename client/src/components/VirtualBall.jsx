@@ -129,7 +129,7 @@ const scoreText = (mode, s, isHe) => {
  * @param {boolean} live - the exercise runs (counting, incoming balls on the beat)
  * @param {{ current }} [ballOutRef] - receives the ball like a detection ({ detected, x, y, w, h })
  */
-export default function VirtualBall({ mode = 'incoming', target = 'foot', kind = 'kick', side = 'right', look = 'football', landmarksRef, videoRef, isHe, live = true, ballOutRef = null, onBall = null, onKickSide = null, strikeCountRef = null, repShownRef = null, hidden = false }) {
+export default function VirtualBall({ mode = 'incoming', target = 'foot', kind = 'kick', side = 'right', look = 'football', landmarksRef, videoRef, isHe, live = true, ballOutRef = null, onBall = null, onKickSide = null, strikeCountRef = null, repShownRef = null, hidden = false, cleanRef = null }) {
   const onBallRef = useRef(onBall);
   onBallRef.current = onBall;
   const onKickSideRef = useRef(onKickSide);
@@ -295,7 +295,8 @@ export default function VirtualBall({ mode = 'incoming', target = 'foot', kind =
                 ctx.beginPath(); ctx.arc(ball.x, ball.y, ball.r * 1.7, 0, Math.PI * 2); ctx.stroke();
                 const at = cueAt(anchor);
                 drawText(ctx, word, at.x, at.y, size, '#facc15');
-              } else if (now - hitShownAt < INCOMING_FLY_MS) {
+              } else if (now - hitShownAt < INCOMING_FLY_MS && cleanRef?.current !== false) {
+                // "Nice!" only for a pass the coach measured clean (never over "the ankle was not locked")
                 const at = cueAt(anchor);
                 drawText(ctx, isHe ? 'יפה!' : 'Nice!', at.x, at.y, size, '#4ade80');
               }

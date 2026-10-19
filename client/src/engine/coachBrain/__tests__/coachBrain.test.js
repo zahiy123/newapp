@@ -103,7 +103,8 @@ describe('Layer 3 — RLEF: the expert prior + learning which correction style w
     const rule = { msg: { he: 'הברך מעל כף הרגל', en: 'Knee over the foot' }, why: { he: 'שומר על הרצועות', en: 'Protects the ligaments' }, external: EXTERNAL_CUES.knee };
     expect(renderCorrection(rule, 'why')).toContain('שומר על הרצועות');
     expect(renderCorrection(rule, 'external')).toBe(EXTERNAL_CUES.knee.he);
-    expect(renderCorrection(rule, 'calm')).toContain('בלי לחץ');
+    expect(renderCorrection(rule, 'calm')).not.toContain('בלי לחץ');          // no fixed template — the calm TONE is the AI's
+    expect(renderCorrection(rule, 'calm')).toBe('הברך מעל כף הרגל');
     expect(situationOf({ frustration: 0.6 })).toBe('frustrated');
   });
 });
