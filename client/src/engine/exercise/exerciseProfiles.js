@@ -580,6 +580,7 @@ RAW_EXPERT.jumpSquat = {
 RAW_EXPERT.shadowPass = {
   ...RAW_EXPERT.footballKick,
   id: 'shadowPass', name: msg('מסירה בצל', 'Shadow pass'),
+  strikeByFoot: true,          // a pendulum from the hip: the strike is found by the foot's speed (the knee hardly straightens)
   // the pass's own technique check (owner, 2026-10-18): a toe-poke instead of the inside of the foot is
   // told RIGHT AFTER the rep (frontal view only — there the foot's turn-out is visible)
   dynamics: [...(RAW_EXPERT.footballKick.dynamics || []),

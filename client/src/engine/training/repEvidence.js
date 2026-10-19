@@ -163,7 +163,8 @@ export function kickInPlace(ev) {
   }
   // knees: indices 6 (left) / 7 (right) — the kicking knee is the one that moved most
   const range = (j) => spread(fr.map(f => f.a[j]).filter(x => typeof x === 'number'));
-  const l = range(6), r = range(7);
+  // each leg's motion = its hip OR its knee (a pass swings from the hip with an almost straight knee)
+  const l = Math.max(range(4), range(6)), r = Math.max(range(5), range(7));
   const kick = Math.max(l, r), other = Math.min(l, r);
   return other <= Math.max(KICK_OTHER_KNEE_DEG, KICK_DOMINANCE * kick);
 }

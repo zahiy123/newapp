@@ -49,6 +49,11 @@ const STRIKE_MIN_SPEED = 250;   // deg/s of the distal joint
 const STRIKE_LOOKBACK_MS = 600;
 const STRIKE_DEBOUNCE_MS = 600;
 const PROX_MIN_SPEED = 120;      // deg/s: below this the proximal segment did not drive the strike
+// A PASS is a pendulum from the hip — the knee hardly straightens (field video 2026-10-19: controlled
+// inside-foot passes never reached the knee's 250°/s, 1 count in 40 s). The strike is ALSO found by the
+// kicking FOOT's speed through the ball (torso lengths / s), with the other foot planted.
+export const FOOT_STRIKE_SPEED = 2.2;
+const PLANT_MAX_SPEED = 0.9;
 
 const SIDES = ['left', 'right'];
 const ANKLE = { left: P.LEFT_ANKLE, right: P.RIGHT_ANKLE };
@@ -146,6 +151,24 @@ export function strikeContact(landmarks, side, base = null) {
     }
   }
   return out;
+}
+
+/** Foot speed (torso lengths / s) between history frames i-1 → i, or null. */
+function footSpeedAt(hist, i, side, scale) {
+  const a = hist[i - 1]?.ankles?.[side], b = hist[i]?.ankles?.[side];
+  if (!a || !b || !(scale > 0) || hist[i].t <= hist[i - 1].t) return null;
+  return Math.hypot((b.x - a.x) * frameAspect(), b.y - a.y) / scale / ((hist[i].t - hist[i - 1].t) / 1000);
+}
+
+/** The kicking foot's speed peaked (rising, then falling) above FOOT_STRIKE_SPEED, the other foot planted → its speed, else 0. */
+export function footStrikePeak(hist, n, side, scale) {
+  if (n < 4) return 0;
+  const v0 = footSpeedAt(hist, n - 2, side, scale), v1 = footSpeedAt(hist, n - 1, side, scale), vp = footSpeedAt(hist, n - 3, side, scale);
+  if (v0 === null || v1 === null || vp === null || v0 < FOOT_STRIKE_SPEED || v1 >= v0 || vp >= v0) return 0;
+  const other = side === 'left' ? 'right' : 'left';
+  const o = footSpeedAt(hist, n - 2, other, scale);
+  if (o !== null && o > PLANT_MAX_SPEED) return 0;          // both feet moving = a step, not a pass
+  return v0;
 }
 
 /** The standing foot's toe-drop reference (median of its still frames), or null before enough of them. */
@@ -300,7 +323,10 @@ export function updateMotion(ms, landmarks, metrics, t) {
       // Peak of the distal speed = it was rising and now falls, above the strike threshold
       const v0 = speedAt(ms.hist, n - 2, s, distal.metric, distal.dir);
       const v1 = speedAt(ms.hist, n - 1, s, distal.metric, distal.dir);
-      if (v0 === null || v1 === null || v0 < STRIKE_MIN_SPEED || v1 >= v0) continue;
+      const kneePeak = v0 !== null && v1 !== null && v0 >= STRIKE_MIN_SPEED && v1 < v0;
+      // (a pass is found by the foot; a power kick by its knee snap — each exercise by its own mechanics)
+      const footPeak = ms.profile?.strikeByFoot ? footStrikePeak(ms.hist, n, s, scale) : 0;
+      if (!kneePeak && !footPeak) continue;
       const tDistal = ms.hist[n - 2].t;
       let best = -Infinity, tProx = null;
       for (let i = 1; i < n - 1; i++) {
@@ -317,6 +343,7 @@ export function updateMotion(ms, landmarks, metrics, t) {
         // No real proximal drive before the distal peak (e.g. a knee-only kick) → lead 0
         chainLeadMs: tProx === null || best < PROX_MIN_SPEED ? 0 : tDistal - tProx,
         distalSpeed: v0,
+        footSpeed: footPeak || null,
         balance: plant && c ? Math.abs(c.x - plant.x) * frameAspect() / scale : null,
         trunkLean: ms.hist[n - 2].lean,
         ...strikeContact(landmarks, s, footBaseOf(ms, s)),   // footOpen, ankleDeg, toeDrop, contactToe, contactLaces

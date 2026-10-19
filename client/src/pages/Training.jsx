@@ -319,7 +319,8 @@ export default function Training() {
     }
 
     // === AI-DRIVEN REP COUNTER: update displayReps immediately when AI confirms ===
-    if (repConfirmed) {
+    // ONE count source: in an exercise the expert module counts, the vision module never raises the count
+    if (repConfirmed && !expertCoachesRef.current) {
       setDisplayReps(prev => {
         const newCount = Math.max(prev, repNumber);
         console.log(`[CMD] AI confirmed rep #${repNumber} → displayReps: ${prev} → ${newCount}`);
@@ -1252,8 +1253,9 @@ export default function Training() {
         speakSetStart(currentSet, totalSets);
         motivateLater(currentSet === 1 ? 'start' : 'set');
 
-        // Start command coaching for rep-based exercises
-        if (analyzerRef.current?.type !== 'hold') {
+        // Start command coaching for rep-based exercises — NOT in an exercise the expert + AI coach runs: its
+        // "command → wait → vision → next command" loop broke the flow (field video 2026-10-19)
+        if (analyzerRef.current?.type !== 'hold' && !expertCoachesRef.current) {
           commandPhaseRef.current = 'COMMANDING';
           commandRepRef.current = 1;
           setTimeout(() => speakCommandAndWait(1), 1500);
@@ -1600,7 +1602,8 @@ export default function Training() {
           speakCountNow(fb.count);
 
           if (cmdPhase === 'IDLE' || isHoldExercise) {
-            if (coachingText) {
+            // (the older analyzer's fixed coaching line — only where the expert + AI coach does not coach)
+            if (coachingText && !expertCoachesRef.current) {
               const now = Date.now();
               if (now - lastCoachingTimeRef.current > 10000) {
                 lastCoachingTimeRef.current = now;

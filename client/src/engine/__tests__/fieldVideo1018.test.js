@@ -201,3 +201,52 @@ describe('field video 2026-10-19 (counter stayed 0): a real pass counts even wit
     expect(kickInPlace(ev)).toBe(false);
   });
 });
+
+import { createMotionState, updateMotion, FOOT_STRIKE_SPEED } from '../exercise/motionFeatures';
+
+describe('field video 2026-10-19 (1 count in 40 s): a controlled inside-foot pass is a strike — found by the FOOT, not only the knee', () => {
+  const profile = EXPERT_PROFILES.shadowPass;
+  // a pendulum pass: the right knee stays ~165°, the right ankle swings fast across, the left foot planted
+  const passFrame = (ax) => {
+    const lm = body({ kneeDeg: 178 });
+    lm[28] = { x: ax, y: 0.88, visibility: 0.95 };
+    lm[26] = { x: 0.55 + (ax - 0.55) * 0.5, y: 0.7, visibility: 0.95 };
+    return lm;
+  };
+  const run = (xs, dt) => {
+    const ms = createMotionState(profile, {});
+    const ev = [];
+    let t = 0;
+    for (const x of xs) { t += dt; const lm = passFrame(x); ev.push(...updateMotion(ms, lm, { knee: 165 }, t).events); }
+    return ev.filter(e => e.type === 'strike');
+  };
+  it('the foot swinging through the ball fast (the knee hardly moving) → one strike', () => {
+    const xs = [0.55, 0.55, 0.55, 0.53, 0.5, 0.45, 0.39, 0.34, 0.31, 0.3, 0.3, 0.3];
+    const s = run(xs, 50);
+    expect(s.length).toBe(1);
+    expect(s[0].footSpeed).toBeGreaterThan(FOOT_STRIKE_SPEED);
+  });
+  it('a slow foot drift is not a strike', () => {
+    const xs = Array.from({ length: 14 }, (_, i) => 0.55 - i * 0.002);
+    expect(run(xs, 50).length).toBe(0);
+  });
+});
+
+describe('field video 2026-10-19: a pendulum pass (straight knee, the hip swings) with a noisy prosthetic support knee is in place', () => {
+  it('the kicking leg dominates by its HIP swing — accepted; walking still rejected', () => {
+    const ev = createRepEvidence('legs');
+    let t = 0;
+    const thigh = [0, -15, -30, -10, 20, 35, 15, 0];                 // the right thigh swings back → through
+    thigh.forEach((deg, i) => {
+      const lm = body({ kneeDeg: 178 });
+      const a = (deg * Math.PI) / 180;
+      lm[26] = { x: 0.55 + 0.2 * Math.sin(a), y: 0.5 + 0.2 * Math.cos(a), visibility: 0.95 };
+      lm[28] = { x: 0.55 + 0.4 * Math.sin(a), y: 0.5 + 0.4 * Math.cos(a), visibility: 0.95 };
+      // the left (prosthetic) knee reading jitters ±12°
+      const k = ((180 - (165 + (i % 2 ? 12 : -12))) * Math.PI) / 180;
+      lm[27] = { x: 0.45 - 0.2 * Math.sin(k), y: 0.7 + 0.2 * Math.cos(k), visibility: 0.95 };
+      evidenceFrame(ev, lm, (t += 100));
+    });
+    expect(kickInPlace(ev)).toBe(true);
+  });
+});
