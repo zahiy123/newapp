@@ -54,7 +54,6 @@ export function createCoachBrain({ profile, exerciseName = '', savedPolicy = nul
     wanted: profile?.kind === 'strike' ? drillIntent('', `${exerciseName} ${profile?.id || ''}`) : null,
     lastAttemptAt: null, attempts: 0,
     candidate: null,                // a correction waiting for its moment
-    explained: {},                  // rule id → explained in full once (the what + the why + the feel)
     intentNote: null,               // an intent mismatch waiting for its moment
     lastForecastId: null, lastForecastAttempt: -99,
     lastMentalAt: -1e9,
@@ -140,13 +139,15 @@ export function brainDecide(brain, c) {
   if (brain.candidate) {
     const rule = brain.candidate;
     brain.candidate = null;
-    // the FIRST time an error is corrected in this exercise, the coach explains it in full — what to do,
-    // why (the biomechanics) and how it should feel; after that, the style that works for this trainee
-    const first = !brain.explained[rule.id];
-    brain.explained[rule.id] = true;
-    const style = first ? 'full' : chooseStyle(brain.policy, situation, { hasWhy: !!rule.why, hasExternal: !!rule.external }, c.rnd);
-    policyGiven(brain.policy, { ruleId: rule.id, style: first ? (rule.why ? 'why' : 'direct') : style, situation });
-    return { text: renderCorrection(rule, style, he), kind: 'correction', rate: situation === 'frustrated' ? 0.95 : 1.0, style };
+    // DURING THE SET: a short, warm, immediate cue (the sideline shout) — the full why / how is the rest's
+    // debrief. The learned style picks between the cue, an external-focus cue and a calm single cue
+    const style0 = chooseStyle(brain.policy, situation, { hasWhy: false, hasExternal: !!rule.external }, c.rnd);
+    const style = style0 === 'direct' ? 'cue' : style0;
+    policyGiven(brain.policy, { ruleId: rule.id, style: style0, situation });
+    brain.cues = (brain.cues || 0) + 1;
+    // warm: the trainee's name on every third cue
+    const named = c.name && brain.cues % 3 === 1 && style !== 'calm' ? `${c.name}, ` : '';
+    return { text: named + renderCorrection(rule, style, he), kind: 'correction', rate: situation === 'frustrated' ? 0.95 : 1.1, style };
   }
   if (brain.intentNote) {
     const n = brain.intentNote;

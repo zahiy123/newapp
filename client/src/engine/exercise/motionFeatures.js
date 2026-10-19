@@ -106,6 +106,41 @@ function speedAt(hist, i, side, metric, dir) {
  * @returns {{ events: Object[], live: { cadence: number|null, com: Object|null, pelvisDrop: number|null } }}
  */
 /**
+ * The CONTACT SURFACE of a kick / pass at the strike (owner, 2026-10-18: "an inside-foot pass hit with
+ * the full instep, or a wrongly locked ankle — told with surgical precision"). Seen from the front:
+ *   - the foot turned OUT (footOpen ≥ OPEN_FOOT): the inside of the foot faces the ball; its ankle angle
+ *     (knee → ankle → toe, in the picture's plane) tells a LOCKED ankle (toes up, ≈ 90–120°) from a
+ *     dropped / pointed one (> 140°)
+ *   - the foot pointing at the camera (footOpen < CLOSED_FOOT): toes dropped well below the ankle
+ *     (toeDrop ≥ LACES_DROP) = the laces / instep; toes level = a toe-poke
+ *   - in between: not judged (honest — the picture cannot tell)
+ * @returns {{ footOpen, ankleDeg, toeDrop, contactToe, contactLaces }} (null fields when not seen)
+ */
+export const OPEN_FOOT = 0.45, CLOSED_FOOT = 0.35, LACES_DROP = 0.18, TOE_DROP = 0.1;
+export function strikeContact(landmarks, side) {
+  const out = { footOpen: null, ankleDeg: null, toeDrop: null, contactToe: null, contactLaces: null };
+  const [hip, knee, ankle, toe] = side === 'left' ? [23, 25, 27, 31] : [24, 26, 28, 32];
+  const ok = (p) => p && (p.visibility ?? 1) >= 0.6;
+  const H = landmarks?.[hip], K = landmarks?.[knee], A = landmarks?.[ankle], T = landmarks?.[toe];
+  const open = footOpenness(landmarks, side);
+  if (open === null || !ok(H) || !ok(A) || !ok(T)) return out;
+  out.footOpen = open;
+  const k = frameAspect();
+  const leg = Math.hypot((A.x - H.x) * k, A.y - H.y);
+  if (open >= OPEN_FOOT && ok(K)) {
+    const v1 = { x: (K.x - A.x) * k, y: K.y - A.y }, v2 = { x: (T.x - A.x) * k, y: T.y - A.y };
+    const n1 = Math.hypot(v1.x, v1.y), n2 = Math.hypot(v2.x, v2.y);
+    if (n1 > 1e-6 && n2 > 1e-6) out.ankleDeg = Math.acos(Math.max(-1, Math.min(1, (v1.x * v2.x + v1.y * v2.y) / (n1 * n2)))) * 180 / Math.PI;
+  }
+  if (open < CLOSED_FOOT && leg > 1e-4) {
+    out.toeDrop = (T.y - A.y) / leg;
+    out.contactLaces = out.toeDrop >= LACES_DROP ? 1 : 0;
+    out.contactToe = out.toeDrop < TOE_DROP ? 1 : 0;
+  }
+  return out;
+}
+
+/**
  * How OPEN the kicking foot is at the strike (owner, 2026-10-18: "you kicked with the toes — open the
  * inside of the foot"): seen from the FRONT, an inside-foot pass turns the foot out, so the heel → toe
  * line lies across the picture; a toe-poke points the foot at the camera (a short line). The heel → toe
@@ -259,7 +294,7 @@ export function updateMotion(ms, landmarks, metrics, t) {
         distalSpeed: v0,
         balance: plant && c ? Math.abs(c.x - plant.x) * frameAspect() / scale : null,
         trunkLean: ms.hist[n - 2].lean,
-        footOpen: footOpenness(landmarks, s),
+        ...strikeContact(landmarks, s),          // footOpen, ankleDeg, toeDrop, contactToe, contactLaces
       });
       ms.lastStrikeAt = t;
       break;

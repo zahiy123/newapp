@@ -34,7 +34,8 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { getExerciseProfile, personalizeProfile } from '../../engine/exercise/exerciseProfiles';
 import { variationProfile } from '../../engine/catalog/catalog';
 import { applySportContext } from '../../engine/sports/sportLibrary';
-import { createExecutionTracker, updateExecution, calibrateUpright, stableUpright } from '../../engine/exercise/profileEvaluator';
+import { createExecutionTracker, updateExecution, calibrateUpright, stableUpright, resetSetLog } from '../../engine/exercise/profileEvaluator';
+import { liveCue } from '../../engine/coachBrain/policy';
 import {
   createStartGate, updateStartGate, isStartPosition, isValidRep, updateWork, withDrive, startPositionPrompt, READY_DRIVE,
 } from '../../engine/training/coachFlow';
@@ -117,6 +118,7 @@ export function useExpertExecution({
   const nameRef = useRef(playerName);
   nameRef.current = playerName;
   const statsRef = useRef({ dangers: 0, errors: {} });
+  const setLogRef = useRef(null);            // the current set's measured log (the rest's debrief)
   const brainRef = useRef(null);             // the coach brain of this exercise (Layers 1–4)
   const brainOnRef = useRef(brainEnabled);
   brainOnRef.current = brainEnabled;
@@ -155,6 +157,7 @@ export function useExpertExecution({
       return undefined;
     }
     const tracker = createExecutionTracker(profile, limbProfile || {});
+    setLogRef.current = tracker.log;
     inViewRef.current = false;
     startReadyRef.current = false;
     repCountRef.current = 0;
@@ -227,7 +230,7 @@ export function useExpertExecution({
         workingRef.current = updateWork(work, profile, r, now);
 
         // ---- Exact rep counting (a new set starts from zero) ----
-        if (countingRef.current && !wasCounting) { repCountRef.current = 0; strikeCountRef.current = 0; earlyRef.current = false; repScores.length = 0; setRepAccuracy(null); }
+        if (countingRef.current && !wasCounting) { setLogRef.current = resetSetLog(tracker); repCountRef.current = 0; strikeCountRef.current = 0; earlyRef.current = false; repScores.length = 0; setRepAccuracy(null); }
         wasCounting = countingRef.current;
         if (countingRef.current && r.inView && countOpenRef.current) {
           for (const ev of r.events) {
@@ -346,7 +349,7 @@ export function useExpertExecution({
           if (!quietRef.current && !r.danger) {
             const say = brainDecide(brain, {
               now, sinceVoiceMs: now - lastVoice, coachSpeaking: !!window.speechSynthesis?.speaking,
-              effort: effortSrcRef.current?.current ?? null, he,
+              effort: effortSrcRef.current?.current ?? null, he, name: nameRef.current,
             });
             if (say) {
               lastVoice = now;
@@ -362,8 +365,8 @@ export function useExpertExecution({
         } else if (coach && !r.danger && now - lastVoice > COACH_VOICE_GAP_MS) {
           lastVoice = now;
           statsRef.current.coached.push(coach.id);
-          const text = `${he ? coach.msg.he : coach.msg.en}. ${coach.why ? (he ? coach.why.he : coach.why.en) : ''}`;
-          speakRef.current?.(text, { rate: 1.0 });
+          // during the set: the short sideline cue (the full why / how is the rest's debrief)
+          speakRef.current?.(liveCue(coach, he), { rate: 1.1 });
         }
       } catch (err) {
         console.error('[ExpertExecution] disabled after a runtime error — falling back to the previous pipeline:', err);
@@ -386,7 +389,7 @@ export function useExpertExecution({
   const ghostSpec = useMemo(() => (active && profile?.ghost ? { profile } : null), [active, profile]);
 
   return {
-    active, profile, inViewRef, startReadyRef, countOpenRef, repCountRef, workingRef, earlyRef, strikeCountRef, brainRef,
+    active, profile, setLogRef, inViewRef, startReadyRef, countOpenRef, repCountRef, workingRef, earlyRef, strikeCountRef, brainRef,
     missingPart, setup, readyFlash, startPrompt, issue, accuracy, repAccuracy, cadence, unsure, ghostSpec, statsRef,
   };
 }

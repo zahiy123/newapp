@@ -139,7 +139,7 @@ describe('3rd field video: walking is NOT a pass; a toe-poke is told', () => {
   });
   it('the pass profile tells a toe-poke right after the rep, from the front only', () => {
     const r = EXPERT_PROFILES.shadowPass.dynamics.find(d => d.id === 'pass_toe');
-    expect(r).toMatchObject({ feature: 'footOpen', op: '<', view: 'front', coachNow: true });
+    expect(r).toMatchObject({ feature: 'contactToe', op: '>', view: 'front', coachNow: true });
     expect(r.msg.he).toContain('פתח את כף הרגל');
   });
 });

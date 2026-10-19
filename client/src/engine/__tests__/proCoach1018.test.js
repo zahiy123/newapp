@@ -50,18 +50,18 @@ describe('every correction in every exercise and sport carries its professional 
     expect(t).toContain('טיפ: דחוף את הרצפה');
   });
 
-  it('the coach brain explains in full the first time, and a position error comes before a tempo error', () => {
+  it('DURING the set the coach brain gives a SHORT cue (no lecture); a position error comes before a tempo error', () => {
     const p = EXPERT_PROFILES.squat;
     const brain = createCoachBrain({ profile: p, savedPolicy: null });
     const shallow = p.rules.find(r => r.id === 'too_shallow');
     brainOfferCorrection(brain, shallow);
     brainOfferCorrection(brain, { id: 'tempo_lowering', severity: 'error', msg: { he: 'לאט', en: 'slow' }, feature: 'lowerMs' });
     brainAttempt(brain, { type: 'rep' }, { now: 1000, errorIds: ['too_shallow'] });
-    const say = brainDecide(brain, { now: 1500, sinceVoiceMs: 99999, he: true });
+    const say = brainDecide(brain, { now: 1500, sinceVoiceMs: 99999, he: true, rnd: () => 0.5 });
     expect(say.kind).toBe('correction');
-    expect(say.style).toBe('full');
-    expect(say.text).toContain(shallow.msg.he);
-    expect(say.text).toContain(shallow.why.he);
+    expect(say.text).not.toContain(shallow.why.he);          // the why waits for the rest
+    expect(say.text.length).toBeLessThan(60);
+    expect(say.text).not.toContain('לאט');                   // the foundation first
   });
 
   it('a HOLD (plank) is coached too — there are no reps to wait between', () => {
@@ -77,11 +77,16 @@ describe('position errors are coached by voice (not only shown) — patiently', 
   // a squat that never reaches depth: the Ghost's peak knee at 135° (too shallow)
   const p = EXPERT_PROFILES.squat;
   const shallow = { ...p, ghost: { ...p.ghost, peak: { ...p.ghost.peak, knee: 135, hip: 120 } } };
-  it(`a squat too shallow in ${STATIC_COACH_AFTER} reps in a row → explained once; not every rep`, () => {
+  it('a squat too shallow → a cue RIGHT AFTER the first shallow rep, then patiently (not every rep)', () => {
     const tr = createExecutionTracker(p, lpOk);
-    const coached = [];
-    for (let ms = 0; ms <= 7 * p.ghost.periodMs; ms += 50) coached.push(...updateExecution(tr, frameAt(shallow, ms), ms).coaching.map(r => r.id));
-    expect(coached.filter(id => id === 'too_shallow').length).toBe(1);
+    const at = [];
+    for (let ms = 0; ms <= 7 * p.ghost.periodMs; ms += 50) {
+      if (updateExecution(tr, frameAt(shallow, ms), ms).coaching.some(r => r.id === 'too_shallow')) at.push(ms);
+    }
+    expect(STATIC_COACH_AFTER).toBe(1);
+    expect(at.length).toBeGreaterThanOrEqual(1);
+    expect(at.length).toBeLessThanOrEqual(2);
+    expect(at[0]).toBeLessThan(1.5 * p.ghost.periodMs);          // in the first rep
   });
   it('a clean squat is never coached', () => {
     const tr = createExecutionTracker(p, lpOk);

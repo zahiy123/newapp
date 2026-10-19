@@ -40,17 +40,17 @@ export const RULE_HOLD_MS = 400;   // a rule must hold this long before it is re
 const WINDOW_MS = 8000;            // accuracy window (a few reps) — at least 2 Ghost cycles at slow tempos
 const MIN_ACCURACY_SAMPLES = 20;   // ~1 s of in-view frames before a % is shown
 export const DYNAMIC_SHOW_MS = 2500;  // a violated dynamic rule stays on screen this long
-export const COACH_AFTER = 3;         // consecutive violations before the coach explains a TEMPO / flow rule
+export const COACH_AFTER = 2;         // consecutive violations before the coach cues a TEMPO / flow rule
 // A position error (a static rule: depth, knee line, body line, elbow, trunk) is a technique error of
-// the movement itself (owner, 2026-10-18: "every wrong movement — a professional explanation, at once"):
-// explained after it was seen in STATIC_COACH_AFTER reps in a row; in a hold / running, after it held
-// HOLD_COACH_MS. A rule may be explained again (MAX_COACH_PER_RULE per exercise) only after it came back
-// for a whole new streak — never nagging every rep.
-export const STATIC_COACH_AFTER = 2;
-export const HOLD_COACH_MS = 3000;
-export const MAX_COACH_PER_RULE = 3;
+// the movement itself (owner, 2026-10-18: "a short, immediate cue during the set — the full analysis in
+// the rest"): cued RIGHT AFTER the first rep it was seen in; in a hold / running, after it held
+// HOLD_COACH_MS. A rule is cued again (MAX_COACH_PER_RULE per exercise) only after a longer streak
+// (1 → 3 → 5 reps) — never nagging every rep. Every attempt is LOGGED (tr.log) for the rest's debrief.
+export const STATIC_COACH_AFTER = 1;
+export const HOLD_COACH_MS = 1500;
+export const MAX_COACH_PER_RULE = 4;
 const HOLD_RECOACH_GAP_MS = 20000;
-const REP_ERR_FRAMES = 3;            // ~150 ms of a rep in the wrong position = an error of that rep
+const REP_ERR_FRAMES = 4;            // ~200 ms of a rep in the wrong position = an error of that rep
 const STRIKE_WINDOW = 5;              // accuracy of strike exercises: the last N strikes
 
 const SIDE_POINTS = {
@@ -157,11 +157,26 @@ export function createExecutionTracker(profile, lp = {}) {
     coached: {},            // rule id → how many times it was explained
     coachedAt: {},          // rule id → when it was last explained
     repErr: {},             // static error rule id → frames it was violated since the last rep / strike
+    repJudged: {},          // static rule id → frames it could be judged since the last rep / strike
+    repWorst: {},           // static rule id → the worst value in this rep
+    log: createSetLog(profile),   // the set's attempts, per rule (the rest's debrief)
     strikes: [],            // { ok } of recent strikes
     conf: {},               // confidence hysteresis state
     cameraTilt: 0,          // the camera's tilt, measured on the upright trainee (calibrateUpright)
     leanRaw: null,
   };
+}
+
+/** A new, empty set log. unit: 'reps' (reps / kicks) or 'sec' (holds, running: one entry per second). */
+export function createSetLog(profile) {
+  return { attempts: 0, partial: 0, unit: profile?.kind === 'hold' || profile?.kind === 'cyclic' ? 'sec' : 'reps', rules: {} };
+}
+/** Start a new set's log (a new set starts from zero). */
+export function resetSetLog(tr) { if (tr) tr.log = createSetLog(tr.profile); return tr?.log; }
+function logRule(log, r, violated, value) {
+  const e = log.rules[r.id] || (log.rules[r.id] = { rule: r, judged: 0, n: 0, values: [] });
+  e.judged += 1;
+  if (violated) { e.n += 1; if (typeof value === 'number') e.values.push(value); }
 }
 
 /** Value of a dynamic rule's feature in an event violates the rule? */
@@ -234,7 +249,7 @@ export function updateExecution(tracker, landmarks, nowMs) {
   });
   if (!tr.inView || !landmarks || profile.precision !== 'expert') {
     tr.ruleSince = {};
-    tr.repErr = {};
+    tr.repErr = {}; tr.repJudged = {}; tr.repWorst = {};
     if (!tr.inView) tr.motion = createMotionState(profile, tr.lp);   // no motion history across a gap
     return quiet({ confident: profile.precision === 'expert' ? false : true, reason: tr.inView ? null : 'limbs', view: null });
   }
@@ -253,7 +268,7 @@ export function updateExecution(tracker, landmarks, nowMs) {
   const quality = updateConfidence(tr.conf, profile, landmarks, metrics[profile.primary]);
   if (!quality.confident) {
     tr.ruleSince = {};
-    tr.repErr = {};
+    tr.repErr = {}; tr.repJudged = {}; tr.repWorst = {};
     tr.dynActive = {};
     tr.motion = createMotionState(profile, tr.lp);
     return { ...quiet(quality), metrics, phase };
@@ -290,7 +305,16 @@ export function updateExecution(tracker, landmarks, nowMs) {
   const need = (r, base) => (r.coachNow ? 1 : base) * (1 + 2 * (tr.coached[r.id] || 0));
   const coachIt = (r) => { tr.coached[r.id] = (tr.coached[r.id] || 0) + 1; tr.coachedAt[r.id] = nowMs; tr.dynStreak[r.id] = 0; coaching.push(r); };
   // (a peak is short: ≥ REP_ERR_FRAMES frames in this rep, not the full hold time)
-  for (const r of hits) if (r.severity === 'error') tr.repErr[r.id] = (tr.repErr[r.id] || 0) + 1;
+  for (const r of hits) {
+    tr.repErr[r.id] = (tr.repErr[r.id] || 0) + 1;
+    const v = metrics[r.metric], w = tr.repWorst[r.id];
+    if (typeof v === 'number') tr.repWorst[r.id] = w === undefined ? v : (r.op === '>' ? Math.max(w, v) : Math.min(w, v));
+  }
+  for (const r of profile.rules || []) {
+    if (r.when === 'peak' && phase !== 'peak') continue;
+    if (r.when === 'rest' && phase !== 'rest') continue;
+    if (typeof metrics[r.metric] === 'number' && judged(r)) tr.repJudged[r.id] = (tr.repJudged[r.id] || 0) + 1;
+  }
   for (const ev of events) {
     // the position errors of this rep / kick (static rules), judged per attempt
     // a partial rep (turned back before the target): its range rules ("go deeper") are violated by definition
@@ -300,11 +324,29 @@ export function updateExecution(tracker, landmarks, nowMs) {
       for (const r of profile.rules || []) {
         if (r.when === 'peak' && r.metric === profile.primary && r.severity === 'error' && r.op === (down ? '>' : '<') && judged(r)) {
           tr.repErr[r.id] = REP_ERR_FRAMES;
+          tr.repJudged[r.id] = REP_ERR_FRAMES;
+          if (typeof ev.primaryPeak === 'number') tr.repWorst[r.id] = ev.primaryPeak;
           tr.dynActive[r.id] = { rule: r, until: nowMs + DYNAMIC_SHOW_MS, value: ev.primaryPeak };
         }
       }
     }
-    if (ev.type === 'rep' || ev.type === 'strike' || ev.type === 'partialRep') {
+    const attempt = ev.type === 'rep' || ev.type === 'strike' || ev.type === 'partialRep';
+    if (attempt && tr.log.unit === 'reps') {
+      tr.log.attempts += 1;
+      if (ev.type === 'partialRep') tr.log.partial += 1;
+      for (const r of profile.rules || []) {
+        if ((tr.repJudged[r.id] || 0) >= REP_ERR_FRAMES) logRule(tr.log, r, (tr.repErr[r.id] || 0) >= REP_ERR_FRAMES, tr.repWorst[r.id]);
+      }
+    }
+    // a hold / running: one log entry per second of work
+    if (ev.type === 'window' && tr.log.unit === 'sec') {
+      tr.log.attempts += 1;
+      for (const r of profile.rules || []) {
+        if ((tr.repJudged[r.id] || 0) >= 5) logRule(tr.log, r, (tr.repErr[r.id] || 0) >= 0.5 * tr.repJudged[r.id], tr.repWorst[r.id]);
+      }
+      tr.repErr = {}; tr.repJudged = {}; tr.repWorst = {};
+    }
+    if (attempt) {
       for (const r of profile.rules || []) {
         if (r.severity !== 'error' || !judged(r)) continue;
         if ((tr.repErr[r.id] || 0) >= REP_ERR_FRAMES) {
@@ -312,11 +354,12 @@ export function updateExecution(tracker, landmarks, nowMs) {
           if (tr.dynStreak[r.id] >= need(r, STATIC_COACH_AFTER) && canCoach(r.id)) coachIt(r);
         } else tr.dynStreak[r.id] = 0;
       }
-      tr.repErr = {};
+      tr.repErr = {}; tr.repJudged = {}; tr.repWorst = {};
     }
     let clean = true;
     for (const r of profile.dynamics || []) {
       if (r.on !== ev.type || !judged(r)) continue;
+      if (typeof ev[r.feature] === 'number') logRule(tr.log, r, dynamicViolation(r, ev), ev[r.feature]);
       if (dynamicViolation(r, ev)) {
         clean = false;
         tr.dynActive[r.id] = { rule: r, until: nowMs + DYNAMIC_SHOW_MS, value: ev[r.feature] };

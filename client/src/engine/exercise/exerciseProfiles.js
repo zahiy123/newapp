@@ -36,6 +36,7 @@ const UPRIGHT_TORSO = (value, severity = 'error') => ({
   msg: msg('שמור על גב זקוף — חזה למעלה', 'Keep your back upright — chest up'),
   why: msg('גב זקוף מחלק את העומס בין הירכיים לברכיים ושומר על עמוד השדרה ניטרלי',
     'An upright back shares the load between hips and knees and keeps the spine neutral'),
+  how: msg('הדק את הבטן לפני הירידה, הסתכל קדימה ולא לרצפה, ושלח את הישבן אחורה במקום את החזה קדימה', 'Brace your abs before you go down, look ahead not at the floor, and send the hips back instead of the chest forward'),
 });
 // upper-body drills: the trunk stays still (no swing / no arching) — its own words, not the squat's
 const STILL_TORSO = (value) => ({
@@ -43,6 +44,23 @@ const STILL_TORSO = (value) => ({
   msg: msg('בלי לנדנד את הגוף — גב זקוף, בטן מהודקת', 'No swinging — back tall, abs braced'),
   why: msg('תנופה או קשת בגב מרימות את המשקל במקום השריר שאתה מאמן, ודוחסות את החוליות בגב התחתון',
     'Swinging or arching lifts the weight instead of the muscle you train, and compresses the lower-back vertebrae'),
+  how: msg('עמוד עם ברכיים רכות, הדק בטן וישבן לפני כל חזרה, ואם צריך לנדנד — המשקל כבד מדי', 'Stand with soft knees, brace abs and glutes before each rep — if you need to swing, the weight is too heavy'),
+});
+// the heels stay down (side / oblique view): the weight on the whole foot
+const HEEL_LIFT = (when = 'peak') => ({
+  id: 'heel_lift', metric: 'heelLift', op: '>', value: 0.07, severity: 'error', when, view: 'side',
+  cue: msg('עקבים לרצפה!', 'Heels down!'),
+  msg: msg('העקבים עולים מהרצפה — לחץ את הרצפה דרך העקבים', 'Your heels lift — press the floor through your heels'),
+  why: msg('עקב שעולה מעביר את המשקל לאצבעות ודוחף את הברך קדימה — העומס עובר מהישבן לגיד הפיקה והאיזון נפגע', 'A lifting heel shifts the weight onto the toes and drives the knee forward — the load moves from the glutes to the patellar tendon and balance suffers'),
+  how: msg('הרגש את כל כף הרגל על הרצפה, את המשקל באמצע ועד העקב; שלח את הישבן אחורה לפני שהברכיים מתכופפות', 'Feel the whole foot on the floor, the weight from mid-foot to heel; send the hips back before the knees bend'),
+});
+// single leg (frontal): the standing knee drifting toward the midline
+const KNEE_IN = () => ({
+  id: 'knee_in', metric: 'kneeIn', op: '>', value: 0.1, severity: 'error', when: 'peak', view: 'front',
+  cue: msg('ברך מעל האצבעות!', 'Knee over the toes!'),
+  msg: msg('הברך של רגל העמידה נופלת פנימה — כוון אותה מעל האצבע השנייה', 'Your standing knee caves in — aim it over your second toe'),
+  why: msg('ברך שנופלת פנימה על רגל אחת היא המנגנון של קרע ברצועה הצולבת — היא סימן לישבן צדדי חלש', 'A knee caving in on one leg is the ACL injury mechanism — a sign of a weak side glute'),
+  how: msg('הדק את הישבן של רגל העמידה, האגן ישר, ודחוף את הברך קלות החוצה לאורך כל הירידה', 'Squeeze the standing-side glute, keep the pelvis level, and push the knee slightly out all the way down'),
 });
 // knees over the toes (frontal view): a knee caving inward
 const KNEE_VALGUS = (when = 'peak') => ({
@@ -50,6 +68,7 @@ const KNEE_VALGUS = (when = 'peak') => ({
   msg: msg('הברכיים נופלות פנימה — דחוף אותן החוצה, בכיוון האצבעות', 'Your knees cave in — push them out, over your toes'),
   why: msg('ברך שקורסת פנימה מסובבת את המפרק ומעמיסה על הרצועה הצולבת ועל המניסקוס — ברך בקו האצבעות מעבירה את הכוח ישר',
     'A knee caving inward twists the joint and loads the ACL and meniscus — a knee over the toes sends the force straight'),
+  how: msg('כפות הרגליים ברוחב הכתפיים, אצבעות מעט החוצה; בירידה ובעלייה דחוף את הברכיים לכיוון האצבע השנייה', 'Feet shoulder-width, toes slightly out; going down and up, push the knees toward the second toe'),
 });
 const WHY_BACK = msg('קריסת הגב קדימה תחת עומס מעמיסה על הדיסקים בגב התחתון',
   'A back collapsing forward under load stresses the lower-back discs');
@@ -76,6 +95,7 @@ const RAW_EXPERT = {
       { id: 'trunk_collapse', metric: 'trunkLean', op: '>', value: 72, severity: 'danger', when: 'any',
         msg: msg('עצור! הגב נופל קדימה — סכנה לגב התחתון', 'Stop! Your back is collapsing forward — lower-back risk'), why: WHY_BACK },
       KNEE_VALGUS('peak'),
+      HEEL_LIFT('peak'),
     ],
     ghost: {
       view: 'side', base: 'stand', periodMs: 3200,
@@ -97,6 +117,7 @@ const RAW_EXPERT = {
         why: msg('כאן עובדים בטווח קצר ובטוח לברך — ירידה עמוקה מוסיפה בדיוק את העומס שהתרגיל נועד לחסוך', 'This drill works a short, knee-safe range — going deep adds exactly the load it is meant to spare') },
       UPRIGHT_TORSO(40),
       KNEE_VALGUS('peak'),
+      HEEL_LIFT('peak'),
     ],
     ghost: {
       view: 'side', base: 'stand', periodMs: 3200,
@@ -400,6 +421,11 @@ const RAW_EXPERT = {
       { id: 'strike_chain', on: 'strike', feature: 'chainLeadMs', op: '<', value: 15, severity: 'error',
         msg: msg('התחל את התנועה מהירך — ואז הברך', 'Start the swing from the hip — then the knee'),
         why: msg('הכוח עובר בשרשרת ירך → ברך → כף רגל', 'Power flows hip → knee → foot') },
+      { id: 'kick_toe', on: 'strike', feature: 'contactToe', op: '>', value: 0.5, severity: 'error', view: 'front', coachNow: true,
+        cue: msg('קצה הנעל — כוון את האצבעות למטה!', 'Toe-poke — point the toes down!'),
+        msg: msg('בעטת עם קצה הנעל. כוון את האצבעות למטה, נעל את הקרסול ופגע עם השרוכים', 'You kicked with the tip of the boot. Point the toes down, lock the ankle, strike with the laces'),
+        why: msg('קצה הנעל הוא נקודה קטנה — הכדור עף לכיוון אקראי והאצבעות סופגות מכה. השרוכים נותנים משטח קשיח, כוח וכיוון', 'The tip of the boot is a tiny point — the ball flies off at random and the toes take the hit. The laces give a firm surface, power and direction'),
+        how: msg('הברך מעל הכדור ברגע המגע, כף הרגל מתוחה למטה כמו בלרינה, והשרוכים פוגעים במרכז הכדור', 'The knee over the ball at contact, the foot pointed down like a ballerina, the laces through the middle of the ball') },
       { id: 'strike_balance', on: 'strike', feature: 'balance', op: '>', value: 0.45, severity: 'error',
         msg: msg('משקל מעל רגל התמיכה', 'Weight over the support foot'),
         why: msg('בלי משקל מעל רגל התמיכה הבעיטה לא מדויקת והגוף נופל', 'Without weight over the support foot the kick is inaccurate and you lose balance') },
@@ -557,9 +583,21 @@ RAW_EXPERT.shadowPass = {
   // the pass's own technique check (owner, 2026-10-18): a toe-poke instead of the inside of the foot is
   // told RIGHT AFTER the rep (frontal view only — there the foot's turn-out is visible)
   dynamics: [...(RAW_EXPERT.footballKick.dynamics || []),
-    { id: 'pass_toe', on: 'strike', feature: 'footOpen', op: '<', value: 0.45, severity: 'error', view: 'front', coachNow: true,
+    { id: 'pass_toe', on: 'strike', feature: 'contactToe', op: '>', value: 0.5, severity: 'error', view: 'front', coachNow: true,
+      cue: msg('מסרת עם האצבעות — פתח את כף הרגל!', 'Toes — open the foot!'),
       msg: msg('שים לב — מסרת עם האצבעות. פתח את כף הרגל החוצה ופגע עם הפנים', 'Careful — you passed with your toes. Turn the foot out and strike with the inside'),
-      why: msg('פנים כף הרגל הוא המשטח הרחב והשטוח — הוא נותן למסירה כיוון מדויק', 'The inside of the foot is the wide, flat surface — it gives the pass an accurate direction') }],
+      why: msg('פנים כף הרגל הוא המשטח הרחב והשטוח — הוא נותן למסירה כיוון מדויק; האצבעות הן נקודה קטנה ועגולה, והכדור בורח לצדדים', 'The inside of the foot is the wide, flat surface — it gives the pass an accurate direction; the toes are a small round point, and the ball skews off'),
+      how: msg('הסובב את הרגל מהירך החוצה עוד לפני הבעיטה, כך שהקשת של כף הרגל עומדת מול הכדור', 'Turn the leg out from the hip before the swing, so the arch of the foot faces the ball') },
+    { id: 'pass_laces', on: 'strike', feature: 'contactLaces', op: '>', value: 0.5, severity: 'error', view: 'front', coachNow: true,
+      cue: msg('זה היה עם השרוכים — מסירה עם הפנים!', 'That was the laces — pass with the inside!'),
+      msg: msg('פגעת עם החלק המלא של כף הרגל — השרוכים. במסירה פותחים את כף הרגל ופוגשים עם הפנים', 'You struck with the full instep — the laces. In a pass, open the foot and meet the ball with the inside'),
+      why: msg('השרוכים נותנים כוח, לא כיוון — הכדור יוצא חזק אבל לא מדויק. פנים כף הרגל נותן משטח רחב וכיוון שליטה', 'The laces give power, not direction — the ball goes hard but off target. The inside of the foot gives a wide surface and control'),
+      how: msg('ברך הרגל הבועטת פונה החוצה, כף הרגל בזווית ישרה לכיוון המסירה, והתנועה קצרה — כמו מטוטלת', 'The kicking knee turns out, the foot square to the pass direction, and a short swing — like a pendulum') },
+    { id: 'pass_ankle', on: 'strike', feature: 'ankleDeg', op: '>', value: 140, severity: 'error', view: 'front', coachNow: true,
+      cue: msg('נעל את הקרסול — אצבעות למעלה!', 'Lock the ankle — toes up!'),
+      msg: msg('הקרסול לא נעול — האצבעות צנחו למטה ברגע המגע. נעל את הקרסול, אצבעות למעלה', 'The ankle is not locked — the toes dropped at contact. Lock the ankle, toes up'),
+      why: msg('קרסול רפוי בולע את המכה — הכדור יוצא חלש ובכיוון לא צפוי. קרסול נעול הופך את כף הרגל למשטח קשיח ויציב', 'A loose ankle absorbs the strike — the ball comes off weak and unpredictable. A locked ankle makes the foot a firm, stable surface'),
+      how: msg('משוך את האצבעות אל השוק והחזק אותן כך עד אחרי המגע; העקב קצת נמוך מהאצבעות', 'Pull the toes toward the shin and hold them there until after contact; the heel slightly lower than the toes') }],
   ghost: {
     view: 'side', base: 'stride', periodMs: 1800, restT: 0, contactT: 0.48, foot: 'inside',
     // A real side-foot pass: the leg turns out from the hip so the INSIDE of the foot faces the
@@ -588,6 +626,7 @@ RAW_EXPERT.singleLegSquat = {
       msg: msg('רד עוד קצת — לאט ובשליטה', 'A little lower — slowly, with control'),
       why: msg('הטווח בונה את הכוח של רגל התמיכה', 'The range builds the support leg\'s strength') },
     UPRIGHT_TORSO(50),
+    KNEE_IN(),
   ],
   dynamics: [],
   ghost: {
@@ -608,6 +647,7 @@ RAW_EXPERT.singleLegLunge = {
       msg: msg('רד עד שהברך קרובה ל-90 מעלות', 'Lower until the knee is near 90 degrees'),
       why: msg('ירידה מלאה מחזקת את הירך והישבן של הרגל העובדת', 'A full descent strengthens the working leg\'s thigh and glutes') },
     UPRIGHT_TORSO(40),
+    KNEE_IN(),
   ],
   dynamics: [],
   ghost: {
@@ -685,8 +725,33 @@ RAW_EXPERT.highKnees = {
 TAGS.highKnees = TAGS.runInPlace;
 
 /** @type {Object<string, Object>} */
+// HOW to fix — the coach's practical instruction for the rest's analysis (the what + the why are in the rule)
+const HOW = {
+  'squat.too_shallow': msg('שלח את הישבן אחורה ולמטה כאילו אתה מתיישב על כיסא נמוך, החזה למעלה, ועצור רק כשהירכיים מקבילות לרצפה', 'Send the hips back and down as if sitting on a low chair, chest up, and stop only when the thighs are parallel'),
+  'squat.too_deep': msg('דמיין כיסא בגובה הברכיים — גע בו בישבן וקום, בלי לשקוע מתחתיו', 'Imagine a knee-height chair — touch it with your hips and stand, without sinking below it'),
+  'miniSquat.too_deep': msg('רד רק כמו שמתחילים להתיישב, רבע מהדרך, ועלה מיד', 'Go down only as if starting to sit, a quarter of the way, and come straight up'),
+  'lunge.too_shallow': msg('צעד ארוך מספיק, והורד את הברך האחורית ישר למטה עד שהיא כמעט נוגעת ברצפה', 'Take a long enough step and lower the back knee straight down until it almost touches the floor'),
+  'lunge.too_deep': msg('עצור כשהברך האחורית במרחק כף יד מהרצפה, והמשקל על העקב הקדמי', 'Stop with the back knee a hand above the floor, the weight on the front heel'),
+  'wallSit.too_high': msg('החלק את הגב במורד הקיר עד שהירכיים מקבילות לרצפה, הברכיים מעל הקרסוליים', 'Slide your back down the wall until the thighs are parallel, knees over the ankles'),
+  'hipHinge.squatting': msg('ברכיים רכות ונעולות במקום, ושלח את הישבן אחורה אל הקיר שמאחוריך — הגב ישר, החזה יורד מעצמו', 'Soft, fixed knees; push the hips back toward the wall behind you — back flat, the chest lowers by itself'),
+  'pushUp.body_line': msg('לפני כל חזרה כווץ את הישבן ומשוך את הטבור פנימה, וחשוב על קרש אחד מהראש עד העקבים', 'Before each rep squeeze the glutes and pull the navel in — one board from head to heels'),
+  'pushUp.too_shallow': msg('רד עד שהחזה במרחק אגרוף מהרצפה; אם זה קשה — שכיבות סמיכה על הברכיים בטווח מלא', 'Lower until your chest is a fist from the floor; if that is hard — knee push-ups through the full range'),
+  'plank.body_line': msg('מרפקים מתחת לכתפיים, ישבן מכווץ, טבור פנימה — והסתכל על הרצפה בין כפות הידיים', 'Elbows under the shoulders, glutes squeezed, navel in — and look at the floor between your hands'),
+  'gluteBridge.too_low': msg('דחוף דרך העקבים והעלה את האגן עד קו ישר, החזק שנייה למעלה עם ישבן מכווץ', 'Drive through the heels up to a straight line, hold a second at the top with the glutes squeezed'),
+  'shoulderPress.partial': msg('דחוף עד שהמרפקים ישרים והידיים מעל האוזניים, הבטן מהודקת', 'Press until the elbows are straight and the hands above the ears, abs braced'),
+  'lateralRaise.too_high': msg('עצור כשהידיים בגובה הכתפיים, כאילו אתה נוגע בקירות משני הצדדים', 'Stop with the hands at shoulder height, as if touching the walls on both sides'),
+  'lateralRaise.bent_arms': msg('מרפק כמעט ישר ונעול לאורך כל התנועה — הרם עם המרפקים ולא עם כפות הידיים', 'A nearly straight elbow locked through the movement — lift with the elbows, not the hands'),
+  'frontRaise.too_high': msg('עצור כשהידיים בגובה הכתפיים, מול העיניים', 'Stop with the hands at shoulder height, at eye level'),
+  'rehabFrontRaise.too_high': msg('עלה לאט עד גובה הכתף ולא מעבר, ספור שתיים למעלה ושלוש למטה', 'Rise slowly to shoulder height and no more — two counts up, three down'),
+  'bicepCurl.elbow_drift': msg('הצמד את המרפקים לצלעות כאילו אתה מחזיק עיתון מתחת לבית השחי', 'Pin the elbows to your ribs as if holding a newspaper under each armpit'),
+  'singleLegSquat.too_shallow': msg('רד לאט, עם שליטה, עד שהברך בכ-90 מעלות — אחוז במשהו יציב אם צריך', 'Lower slowly, under control, to about 90° at the knee — hold something steady if needed'),
+  'singleLegLunge.too_shallow': msg('הורד את האגן ישר למטה עד שהברך הקדמית קרובה ל-90 מעלות', 'Lower the hips straight down until the front knee is near 90°'),
+};
 export const EXPERT_PROFILES = Object.freeze(Object.fromEntries(
-  Object.entries(RAW_EXPERT).map(([id, p]) => [id, Object.freeze({ dynamics: [], ...p, tags: TAGS[id] || [] })]),
+  Object.entries(RAW_EXPERT).map(([id, p]) => [id, Object.freeze({
+    dynamics: [], ...p, tags: TAGS[id] || [],
+    rules: (p.rules || []).map(r => (HOW[`${id}.${r.id}`] && !r.how ? { ...r, how: HOW[`${id}.${r.id}`] } : r)),
+  })]),
 ));
 
 // ---- Family coverage (precision 'basic'): required limbs only, no Ghost yet ----

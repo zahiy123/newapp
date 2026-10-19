@@ -24,7 +24,7 @@ const PRIOR = {
   tired:       { direct: [4, 1], why: [1, 3], external: [2, 2], calm: [3, 2] },
 };
 
-export const MIN_GAP_MS = 6000;      // never two corrections closer than this
+export const MIN_GAP_MS = 4500;      // never two corrections closer than this (short sideline cues)
 export const REWARD_ATTEMPTS = 3;    // the outcome of a correction = the next attempts
 
 /** The situation the trainee is in (from the behavior layer). */
@@ -90,6 +90,19 @@ export function timingOk(c) {
   return !c.coachSpeaking && c.betweenAttempts && c.sinceVoiceMs >= MIN_GAP_MS;
 }
 
+/**
+ * The SHORT live cue of a correction — said during the set, right after the attempt, like a shout from
+ * the sideline (owner, 2026-10-18): the rule's own `cue`, else the first clause of its correction.
+ * The full what / why / how waits for the rest between sets (debrief.js).
+ */
+export function liveCue(rule, he = true) {
+  const L = (o) => (o ? (he ? o.he : o.en) : '');
+  if (rule?.cue) return L(rule.cue);
+  const m = L(rule?.msg);
+  const first = m.split(/ — | - |\. /)[0].trim();
+  return first.length >= 6 && !/^(שים לב|careful)$/i.test(first) ? first : m;
+}
+
 /** The correction's words in the chosen style. rule: { msg:{he,en}, why?:{he,en}, external?:{he,en} } */
 export function renderCorrection(rule, style, he = true) {
   const L = (o) => (o ? (he ? o.he : o.en) : '');
@@ -100,8 +113,9 @@ export function renderCorrection(rule, style, he = true) {
       const parts = [msg, rule.why ? L(rule.why) : null, rule.external ? (he ? `טיפ: ${L(rule.external)}` : `Tip: ${L(rule.external)}`) : null];
       return parts.filter(Boolean).join('. ');
     }
-    case 'external': return rule.external ? L(rule.external) : msg;
-    case 'calm': return he ? `בלי לחץ — רק דבר אחד: ${msg}` : `No pressure — just one thing: ${msg}`;
+    case 'external': return rule.external ? L(rule.external) : liveCue(rule, he);
+    case 'calm': return he ? `בלי לחץ — רק דבר אחד: ${liveCue(rule, he)}` : `No pressure — just one thing: ${liveCue(rule, he)}`;
+    case 'cue': return liveCue(rule, he);
     default: return msg;
   }
 }

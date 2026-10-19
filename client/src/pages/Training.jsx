@@ -42,6 +42,7 @@ import { catalogGhostSpec, parseCatalogId } from '../engine/catalog/catalog';
 import VirtualBall from '../components/VirtualBall';
 import { useVoiceProsody } from '../hooks/useVoiceProsody';
 import { brainSummary, brainBall } from '../engine/coachBrain/brain';
+import { buildDebrief } from '../engine/coachBrain/debrief';
 import { kickingSide } from '../engine/incomingBall';
 import { ballModeFor, virtualBallWanted, handSide, ballLook, realBallInPlay } from '../engine/virtualBall';
 import { rebuildPlanFromCatalog, planContext } from '../engine/catalog/planBuilder';
@@ -575,6 +576,8 @@ export default function Training() {
 
   // Set grade display (A+/A/B) — shown briefly after set completion
   const [setGrade, setSetGrade] = useState(null); // { grade: 'A+', color: '#...' }
+  const [restDebrief, setRestDebrief] = useState(null);   // the rest's analysis card (debrief.js)
+  const legacySetLogRef = useRef({ counts: {} });   // the older analyzers' corrections seen in this set
   const gradeTimerRef = useRef(null);
 
   // Feedback tracking
@@ -1082,7 +1085,7 @@ export default function Training() {
     e.n += 1;
     q.errors[execution.issue.id] = e;
   }, [execution.issue, phase]);
-  useEffect(() => { setQualityRef.current = { sum: 0, n: 0, errors: {} }; }, [currentSet, currentIdx]);
+  useEffect(() => { setQualityRef.current = { sum: 0, n: 0, errors: {} }; legacySetLogRef.current = { counts: {} }; }, [currentSet, currentIdx]);
   const lastSetGoodRef = useRef(false);
 
   // The coach celebrates ONLY a good set (its measured accuracy), then stands ready
@@ -1544,15 +1547,11 @@ export default function Training() {
         const wfb = lastWarningRef.current;
         if (badFormCountRef.current >= 5 && !formStoppedRef.current && wfb && !expertCoachesRef.current) {
           formStoppedRef.current = true;
-          const what = wfb.coaching ? (isHe ? wfb.coaching.he : wfb.coaching.en) : (isHe ? wfb.text : (wfb.textEn || wfb.text));
-          const why = techniqueWhy(wfb.text);
-          const ex = explainedRef.current;
-          if (ex.key !== currentIdx) { ex.key = currentIdx; ex.ids = new Set(); }
-          const first = !ex.ids.has(wfb.text);
-          ex.ids.add(wfb.text);
-          const line = first && why && !wfb.coaching ? `${what} ${isHe ? why.he : why.en}` : what;
-          holdSpeech(Math.round(line.length / 14 * 1000) + 400);
-          speakPriority(line, { rate: 1.05 });
+          // during the set: the analyzer's own short correction (the full why / how is the rest's debrief)
+          const what = isHe ? wfb.text : (wfb.textEn || wfb.text);
+          legacySetLogRef.current.counts[wfb.text] = (legacySetLogRef.current.counts[wfb.text] || 0) + 1;
+          holdSpeech(Math.round(what.length / 14 * 1000) + 400);
+          speakPriority(what, { rate: 1.1 });
           setFeedback({ type: 'warning', text: what });
           lastWarningRef.current = null;
           setTimeout(() => {
@@ -1636,9 +1635,9 @@ export default function Training() {
             handleSetComplete();
             return;
           }
-        } else if (fb.type === 'warning' && coachingText && isNewRep && !isSpeaking()) {
-          // For warnings, speak coaching text ONLY on new rep and not during server feedback
-          speakPriority(coachingText, { rate: 1.2, pitch: 1.05 });
+        } else if (fb.type === 'warning' && coachingText && isNewRep && !isSpeaking() && !expertCoachesRef.current && !formStoppedRef.current) {
+          // during the set: the SHORT correction only (its full explanation is the rest's debrief)
+          speakPriority(isHe ? fb.text : (fb.textEn || fb.text), { rate: 1.15, pitch: 1.05 });
           lastSpokenRef.current = fb.text;
         }
         // Removed: generic speakIfIdle for non-count feedback — was causing loops
@@ -2734,6 +2733,8 @@ export default function Training() {
     }
   }
 
+  // (dev only — the local harness ends a set to check the rest's analysis on the real screen; stripped in production)
+  if (import.meta.env.DEV) window.__dbgSetComplete = () => handleSetComplete();
   function handleSetComplete() {
     clearInterval(timerRef.current);
     // Reset command coaching state
@@ -2784,21 +2785,22 @@ export default function Training() {
 
     setSetsPerformance(prev => [...prev, { set: currentSet, quality: wasPerfect ? 'perfect' : wasGood ? 'good' : 'needs_work', avgScore: Math.round(setAvgScore * 10) / 10, grade }]);
 
-    if (measured && !wasGood) {
-      // not right: say it, with the one thing to fix (no praise)
-      const fix = topError ? (isHe ? topError.msg?.he : topError.msg?.en) : null;
-      const line = isHe
-        ? `הסט הסתיים, הדיוק ${Math.round(setAcc)} אחוז — עוד לא מספיק. ${fix ? `בסט הבא: ${fix}.` : 'בסט הבא: לאט ובטווח מלא, בדיוק כמו הצללית.'}`
-        : `Set done, ${Math.round(setAcc)}% accuracy — not there yet. ${fix ? `Next set: ${fix}.` : 'Next set: slow and full range, exactly like the Ghost.'}`;
-      speakPriority(line, { rate: 1.0 });
-      setFeedback({ type: 'warning', text: line });
-    } else if (wasPerfect) {
-      const langKey = isHe ? 'he' : 'en';
-      const exType = analyzerRef.current?.cueKey || 'default';
-      speakOptimization(OPTIMIZATION_TIPS[langKey][exType] || OPTIMIZATION_TIPS[langKey].default);
-    } else if (wasGood) {
-      speakEncouragement();
-    }
+    // THE REST = the expert's analysis (owner, 2026-10-18): the set in numbers, the main fix with the
+    // measured value vs. the target, why it matters and how to fix it, what was good (measured), and one
+    // goal for the next set — from the set's measured log (never a generic "good direction")
+    const lastSet = currentSet >= totalSets;
+    const nextLeg = !lastSet && currentExercise?.sideSwitch && currentExercise.splitBy === 'set'
+      ? legSetNextText(limbProfile, isHe, currentExercise.splitMode, currentSet + 1) : null;
+    const debrief = buildDebrief({
+      log: execution.setLogRef?.current || null, profile: execution.profile, reps: displayReps, accuracy: setAcc,
+      setNo: currentSet, he: isHe, name: playerName, lastSet,
+      legacy: legacySetLogRef.current, whyOf: techniqueWhy,
+      // the coach brain's one mental cue for the rest (fatigue / frustration) closes the analysis
+      extra: [nextLeg, lastSet ? t('training.allSetsComplete') : null, (() => { const m = FEATURES.COACH_BRAIN && execution.brainRef?.current ? brainSummary(execution.brainRef.current, voiceEffortRef.current)?.adaptation?.mental : null; return m ? (isHe ? m.he : m.en) : null; })()],
+    });
+    setRestDebrief(debrief.card);
+    speakPriority(debrief.speech, { rate: 1.0 });
+    const debriefSec = Math.ceil(debrief.speech.length / 14) + 8;
 
     // Level-Up check for 51+ longevity athletes
     const playerAge = userProfile?.age;
@@ -2828,19 +2830,11 @@ export default function Training() {
 
     if (currentSet >= totalSets) {
       setPhase(PHASE.EXERCISE_DONE);
-      speak(t('training.allSetsComplete'));
     } else {
       setPhase(PHASE.RESTING);
-      setRestTime(Math.max(15, restDuration + (ad?.restBonusSec || 0)));
-      if (ad?.mental) setTimeout(() => { if (phaseRef.current === PHASE.RESTING) speakPriority(isHe ? ad.mental.he : ad.mental.en, { rate: 0.95 }); }, 4500);
-      if (currentExercise?.sideSwitch && currentExercise.splitBy === 'set') {
-        // the next set is the OTHER leg — said clearly in the rest
-        const next = legSetNextText(limbProfile, isHe, currentExercise.splitMode, currentSet + 1);
-        speakPriority(next, { rate: 1.05 });
-        setFeedback({ type: 'info', text: `🔄 ${next}` });
-      } else {
-        speakRestTip(currentExercise?.tips || '');
-      }
+      // the rest is long enough to hear the whole analysis (+ a breath)
+      setRestTime(Math.max(15, restDuration + (ad?.restBonusSec || 0), debriefSec));
+      if (nextLeg) setFeedback({ type: 'info', text: `🔄 ${nextLeg}` });
     }
   }
 
@@ -3648,7 +3642,19 @@ export default function Training() {
               <div className="text-white text-lg font-medium">{t('training.restBetweenSets')}</div>
               <div className="text-7xl font-bold text-white">{restTime}</div>
               <div className="text-white/70 text-sm">{t('training.set')} {currentSet}/{totalSets} {t('training.setComplete')}</div>
-              {currentExercise?.tips && (
+              {restDebrief?.items?.length > 0 && (
+                <div dir={isHe ? 'rtl' : 'ltr'} className="bg-white/10 rounded-xl px-4 py-3 text-white/90 text-sm max-w-sm mx-auto space-y-2 text-start max-h-[45vh] overflow-y-auto">
+                  {restDebrief.items.map((it, i) => (
+                    <div key={i}>
+                      <div className={`font-semibold ${it.kind === 'fix' ? 'text-amber-300' : it.kind === 'good' ? 'text-emerald-300' : it.kind === 'focus' ? 'text-sky-300' : 'text-white/80'}`}>
+                        {it.kind === 'fix' ? '🔧 ' : it.kind === 'good' ? '✅ ' : it.kind === 'focus' ? '🎯 ' : ''}{it.title}
+                      </div>
+                      {(it.detail || []).map((d, k) => <div key={k} className="text-white/75 text-xs mt-0.5">{d}</div>)}
+                    </div>
+                  ))}
+                </div>
+              )}
+              {!restDebrief?.items?.length && currentExercise?.tips && (
                 <div className="bg-white/10 rounded-xl px-4 py-3 text-white/90 text-sm max-w-xs mx-auto">{currentExercise.tips}</div>
               )}
               <button onClick={handleSkipRest} className="px-6 py-2 bg-white/20 text-white rounded-lg hover:bg-white/30 transition text-sm">
@@ -3664,6 +3670,18 @@ export default function Training() {
             <div className="text-center space-y-4">
               <div className="text-6xl">&#127881;</div>
               <div className="text-white text-2xl font-bold">{t('training.allSetsComplete')}</div>
+              {restDebrief?.items?.length > 0 && (
+                <div dir={isHe ? 'rtl' : 'ltr'} className="bg-white/10 rounded-xl px-4 py-3 text-white/90 text-sm max-w-sm mx-auto space-y-2 text-start max-h-[45vh] overflow-y-auto">
+                  {restDebrief.items.map((it, i) => (
+                    <div key={i}>
+                      <div className={`font-semibold ${it.kind === 'fix' ? 'text-amber-300' : it.kind === 'good' ? 'text-emerald-300' : it.kind === 'focus' ? 'text-sky-300' : 'text-white/80'}`}>
+                        {it.kind === 'fix' ? '🔧 ' : it.kind === 'good' ? '✅ ' : it.kind === 'focus' ? '🎯 ' : ''}{it.title}
+                      </div>
+                      {(it.detail || []).map((d, k) => <div key={k} className="text-white/75 text-xs mt-0.5">{d}</div>)}
+                    </div>
+                  ))}
+                </div>
+              )}
               <div className="flex gap-2 justify-center">
                 {setsPerformance.map((sp, i) => (
                   <div key={i} className={`w-10 h-10 rounded-full flex items-center justify-center text-white font-bold ${

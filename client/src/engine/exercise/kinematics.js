@@ -39,7 +39,7 @@ export const JOINTS = Object.freeze({
 });
 
 /** Every metric name a profile may use (the joints + trunk lean + pelvic drop). */
-export const METRICS = Object.freeze([...Object.keys(JOINTS), 'trunkLean', 'pelvisDrop', 'kneeTrack']);
+export const METRICS = Object.freeze([...Object.keys(JOINTS), 'trunkLean', 'pelvisDrop', 'kneeTrack', 'heelLift', 'kneeIn']);
 
 const MIN_VIS = 0.5;
 export const ok = (p) => p && (p.visibility ?? 1) >= MIN_VIS;
@@ -119,6 +119,48 @@ export function kneeTrack(landmarks, lp = {}) {
   return knees / ankles;
 }
 
+const naturalLeg = (lp, s) => !(lp?.[`${s}_leg`] && (lp[`${s}_leg`].state === 'prosthetic' || lp[`${s}_leg`].state === 'absent'));
+const legLen = (H, A, k) => Math.hypot((A.x - H.x) * k, A.y - H.y);
+
+/**
+ * Heel lift (side / oblique view): how far the heel rose above the toes, over the leg length — the
+ * weight went onto the toes (a squat / lunge). The highest of the natural, clearly seen feet; null
+ * when no foot is seen (a prosthetic foot is never judged).
+ */
+export function heelLift(landmarks, lp = {}) {
+  const k = frameAspect();
+  const vals = [];
+  for (const [s, hip, ankle, heel, toe] of [['left', 23, 27, 29, 31], ['right', 24, 28, 30, 32]]) {
+    if (!naturalLeg(lp, s)) continue;
+    const [H, A, E, T] = [hip, ankle, heel, toe].map(i => landmarks?.[i]);
+    if (![H, A, E, T].every(p => p && (p.visibility ?? 1) >= 0.7)) continue;
+    const L = legLen(H, A, k);
+    if (L > 1e-4) vals.push((T.y - E.y) / L);
+  }
+  return vals.length ? Math.max(...vals) : null;
+}
+
+/**
+ * Single-leg knee collapse (frontal view): the STANDING leg's knee drifting toward the body's midline,
+ * off the hip → ankle line, over the leg length (dynamic valgus — the physio's single-leg squat test).
+ * The standing leg = the lower ankle; null unless it is a natural leg seen clearly from the front.
+ */
+export function kneeIn(landmarks, lp = {}) {
+  const k = frameAspect();
+  const la = landmarks?.[27], ra = landmarks?.[28];
+  if (!la || !ra) return null;
+  const s = (la.y >= ra.y) ? 'left' : 'right';
+  if (!naturalLeg(lp, s)) return null;
+  const [H, K, A] = (s === 'left' ? [23, 25, 27] : [24, 26, 28]).map(i => landmarks[i]);
+  const O = landmarks[s === 'left' ? 24 : 23];
+  if (![H, K, A, O].every(p => p && (p.visibility ?? 1) >= 0.7)) return null;
+  const L = legLen(H, A, k);
+  if (!(L > 1e-4) || Math.abs(A.y - H.y) < 1e-4) return null;
+  const lineX = H.x + (A.x - H.x) * ((K.y - H.y) / (A.y - H.y));
+  const towardMid = Math.sign(O.x - H.x) || 1;
+  return ((K.x - lineX) * towardMid * k) / L;
+}
+
 /**
  * Can this side's limb be measured for a joint? Absent / above-knee prosthetic legs and
  * absent / non-trainable arms are never measured (Iron Rule). A below-knee prosthesis keeps
@@ -192,6 +234,8 @@ export function measureMetric(landmarks, metric, lp = {}, combine = 'min') {
   if (metric === 'trunkLean') return trunkLean(landmarks);
   if (metric === 'pelvisDrop') return pelvisDrop(landmarks);
   if (metric === 'kneeTrack') return kneeTrack(landmarks, lp);
+  if (metric === 'heelLift') return heelLift(landmarks, lp);
+  if (metric === 'kneeIn') return kneeIn(landmarks, lp);
   const def = JOINTS[metric];
   if (!def) return null;
   const vals = ['left', 'right']
