@@ -96,8 +96,10 @@ export function buildExecutionProfile(cueKey, exerciseName, limbProfile, sportCo
 export function useExpertExecution({
   enabled, counting = false, quiet = false, cueKey, exerciseName, catalogId = null, sportContexts, limbProfile, landmarksRef,
   isHe, playerName = '', speakPriority, recordClips = false, onClips,
-  brainEnabled = false, effortRef = null, onStrikeSide = null,
+  brainEnabled = false, effortRef = null, onStrikeSide = null, onCount = null,
 }) {
+  const onCountRef = useRef(onCount);
+  onCountRef.current = onCount;
   const onStrikeSideRef = useRef(onStrikeSide);
   onStrikeSideRef.current = onStrikeSide;
   const [failed, setFailed] = useState(false);
@@ -246,8 +248,10 @@ export function useExpertExecution({
         if (disposed) return;
         const text = ai || localText;
         recentLines.push(text); if (recentLines.length > 6) recentLines.shift();
-        holdSpeech(estimateSpeechMs(text, rate));
-        speakRef.current?.(text, { rate });
+        // a ready / start line is LIGHT — the count of a kick may cut it (never a positioning fix)
+        const light = mode === 'ready' || mode === 'start';
+        if (!light) holdSpeech(estimateSpeechMs(text, rate));
+        speakRef.current?.(text, { rate, filler: light });
       });
     };
     setIssue(null); setAccuracy(null); setCadence(null); setUnsure(null); setSetup(null); setReadyFlash(null);
@@ -323,12 +327,14 @@ export function useExpertExecution({
             if (countsReps && profile.kind === 'reps' && isValidRep(ev) && r.quality?.confident !== false && evidenceOk(kinetic, now)) {
               evidenceAccept(kinetic, now); repCountRef.current += 1; earlyRef.current = true;
               noteRepScore(r);
+              onCountRef.current?.(repCountRef.current);
             }
             // a kick / pass: a real strike, IN PLACE, by ONE leg (walking is never a pass)
             if (countsReps && profile.kind === 'strike' && ev.type === 'strike' && r.quality?.confident !== false && evidenceOk(kinetic, now, { strike: true, kick: true })) {
               evidenceAccept(kinetic, now); repCountRef.current += 1; strikeCountRef.current += 1; earlyRef.current = true;
               noteRepScore(r);
               lastRepCleanRef.current = !(r.issues || []).some(i => i.severity === 'error' || i.severity === 'danger');
+              onCountRef.current?.(repCountRef.current);                          // the count AT the contact
               if (ev.side === 'left' || ev.side === 'right') onStrikeSideRef.current?.(ev.side);   // the leg of a REAL counted kick
             }
           }

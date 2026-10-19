@@ -120,18 +120,18 @@ export function jointKinetics(ev, j, returnShare = RETURN_SHARE) {
   return { range, back, peakVel, path: torso ? path / torso : 0, reversals };
 }
 
-/** Is this joint's movement a real, complete kinetic rep? */
-export function kineticRep(k) {
-  return !!k && k.range >= MIN_RANGE_DEG && k.back && k.peakVel >= MIN_PEAK_DEG_S
+/** Is this joint's movement a real, complete kinetic rep? (needBack: false = a strike judged at the contact) */
+export function kineticRep(k, needBack = true) {
+  return !!k && k.range >= MIN_RANGE_DEG && (k.back || !needBack) && k.peakVel >= MIN_PEAK_DEG_S
     && k.path >= MIN_PATH_TORSO && k.reversals <= MAX_REVERSALS;
 }
 
 /** The largest joint range that is a REAL kinetic rep since the last counted one (degrees; 0 = none). */
-export function evidenceRange(ev, returnShare = RETURN_SHARE) {
+export function evidenceRange(ev, returnShare = RETURN_SHARE, needBack = true) {
   let best = 0;
   for (const j of ev.joints || GROUPS.all) {
     const k = jointKinetics(ev, j, returnShare);
-    if (kineticRep(k)) best = Math.max(best, k.range);
+    if (kineticRep(k, needBack)) best = Math.max(best, k.range);
   }
   return best;
 }
@@ -176,7 +176,10 @@ export function evidenceOk(ev, t, { strike = false, kick = false } = {}) {
   const since = ev.lastAt == null ? t - first : t - ev.lastAt;
   if (kick && !kickInPlace(ev)) return false;                    // walking is not a pass
   // a strike is judged at the contact, while the leg still swings through — a partial return is enough
-  return since >= MIN_REP_MS && evidenceRange(ev, strike ? STRIKE_RETURN_SHARE : RETURN_SHARE) >= MIN_RANGE_DEG;
+  // a strike is counted AT the contact (field video 2026-10-19: a pendulum pass's hip is still at its far end
+  // when the foot meets the ball — "it came back" failed, the pass was missed or counted late): its swing
+  // proves it; walking is still rejected by kickInPlace
+  return since >= MIN_REP_MS && evidenceRange(ev, strike ? STRIKE_RETURN_SHARE : RETURN_SHARE, !strike) >= MIN_RANGE_DEG;
 }
 
 /** A rep was counted: the next one needs its OWN evidence. */
