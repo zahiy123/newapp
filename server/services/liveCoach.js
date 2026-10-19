@@ -68,6 +68,13 @@ export function directionsKept(text, facts) {
   return true;
 }
 
+/** Readable text (real Hebrew / English letters — a garbled encoding arrives as ??? / mojibake). */
+export function readable(t) {
+  const str = String(t || '');
+  const letters = (str.match(/[א-תA-Za-z]/g) || []).length;
+  return letters >= 3 && (str.match(/[?�]/g) || []).length <= letters / 4;
+}
+
 /** The words contain no number that was not measured (small counting words like 1–3 are allowed). */
 export function numbersGrounded(text, facts) {
   const allowed = factNumbers(facts);
@@ -80,6 +87,8 @@ Ground rules — never break them:
 - The expert knowledge given for each error ("what" / "why" / "how") is the ONLY technique truth. Say the SAME instruction in your own fresh words — never add another instruction, never change a direction (in / out, up / down, forward / back, left / right), never reverse it. If unsure, stay closer to the given words.
 - Never praise anything the facts do not show as clean. No generic filler ("good job", "keep going") without a concrete point.
 - The trainee may have an amputation / a prosthesis (given in the facts): respect it precisely, never ask a missing limb to do anything.
+- Address the trainee ONLY by the given name (or no name) — never any other name.
+- If the facts are unclear, garbled or missing, output exactly: SKIP
 - Never assume the device (a phone, a laptop) — say "the camera".
 - The trainee may train in a SMALL ROOM: never ask them to move the camera or themselves meters away; to be seen better, suggest tilting the camera / keeping the feet in the picture.
 - Write every number in DIGITS (e.g. 131, never as words). Mention a body SIDE only if "side" is given, and only that side.
@@ -144,12 +153,14 @@ async function ask(model, { system, user }, maxTokens, timeoutMs, effort = null)
 const isModelError = (err) => /model|not_found|404|not supported/i.test(String(err?.message || err));
 
 export async function generateCue(facts, { timeoutMs = 3500, askFn = ask } = {}) {
+  // garbled / empty facts → the AI would guess: never (the device says its own measured line)
+  if (!readable(facts?.error?.what)) return null;
   const prompt = buildCuePrompt(facts);
   for (const model of CUE_MODELS) {
     let raw;
     try { raw = await askFn(model, prompt, 300, timeoutMs, 'low'); } catch (err) { if (isModelError(err)) continue; throw err; }
     const text = String(raw || '').replace(/["“”«»]/g, '').replace(/\s+/g, ' ').trim();
-    if (!text || text.length > MAX_CUE_CHARS || !numbersGrounded(text, facts) || !directionsKept(text, facts)) return null;
+    if (!text || /^SKIP/i.test(text) || text.length > MAX_CUE_CHARS || !numbersGrounded(text, facts) || !directionsKept(text, facts)) return null;
     if ((facts.recent || []).some(r => r && r.trim() === text)) return null;   // never the same words twice
     return text;
   }
@@ -158,13 +169,14 @@ export async function generateCue(facts, { timeoutMs = 3500, askFn = ask } = {})
 
 /** The rest's analysis { speech, card }, or null. */
 export async function generateDebrief(facts, { timeoutMs = 25000, askFn = ask } = {}) {
+  if ((facts?.errors || []).some(e => !readable(e?.what)) || (facts?.name && !readable(facts.name) && String(facts.name).length > 0 && /[?�]/.test(facts.name))) return null;
   const prompt = buildDebriefPrompt(facts);
   for (const model of DEBRIEF_MODELS) {
     try {
       const raw = await askFn(model, prompt, 1500, timeoutMs, 'low');
       const m = raw.match(/\{[\s\S]*\}/);
       const j = m ? JSON.parse(m[0]) : null;
-      if (!j || typeof j.speech !== 'string' || j.speech.length < 20) return null;
+      if (!j || typeof j.speech !== 'string' || j.speech.length < 20 || /^SKIP/i.test(j.speech)) return null;
       if (!numbersGrounded(j.speech, facts) || !directionsKept(j.speech, facts)) return null;
       const card = (Array.isArray(j.card) ? j.card : []).slice(0, 5)
         .filter(it => it && typeof it.title === 'string')

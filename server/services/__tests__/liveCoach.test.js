@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { buildCuePrompt, buildDebriefPrompt, numbersGrounded, directionsKept, generateCue, generateDebrief, CUE_MODEL, DEBRIEF_MODELS } from '../liveCoach.js';
+import { buildCuePrompt, buildDebriefPrompt, numbersGrounded, directionsKept, readable, generateCue, generateDebrief, CUE_MODEL, DEBRIEF_MODELS } from '../liveCoach.js';
 
 const cueFacts = {
   lang: 'he', name: 'זהי', exercise: 'מסירה בצל', sport: 'footballAmputee', body: 'left below-knee prosthesis',
@@ -73,4 +73,17 @@ test('a model this key cannot use → the next model', async () => {
   const d = await generateDebrief(setFacts, { askFn: async (m) => { tried.push(m); if (m === DEBRIEF_MODELS[0]) throw new Error('404 not_found_error: model'); return JSON.stringify({ speech: 'זהי, סט טוב עם דיוק 72 אחוז ונקודה אחת לעומק.', card: [] }); } });
   assert.deepEqual(tried, DEBRIEF_MODELS);
   assert.ok(d.speech.includes('72'));
+});
+
+test('garbled facts (a broken encoding) never reach the AI; SKIP is honoured', async () => {
+  assert.equal(readable('הקרסול לא נעול'), true);
+  assert.equal(readable('??? ?? ????'), false);
+  let called = false;
+  const garbled = { ...cueFacts, error: { ...cueFacts.error, what: '??? ?? ???? — ?????' } };
+  assert.equal(await generateCue(garbled, { askFn: async () => { called = true; return 'x'; } }), null);
+  assert.equal(called, false);
+  assert.equal(await generateCue(cueFacts, { askFn: async () => 'SKIP' }), null);
+  const g2 = { ...setFacts, errors: [{ ...setFacts.errors[0], what: '?????' }] };
+  assert.equal(await generateDebrief(g2, { askFn: async () => { called = true; return '{}'; } }), null);
+  assert.equal(called, false);
 });
