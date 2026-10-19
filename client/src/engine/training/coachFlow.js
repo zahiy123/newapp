@@ -21,14 +21,50 @@ export const MIN_TO_PEAK_MS = 180;     // a rep's way to the peak cannot be fast
 export const MIN_RETURN_MS = 80;       // …nor the first part of its way back (counted mid-return)
 const CYCLIC_WORK_WINDOW_MS = 1500;    // running / skipping: a stride or landing this recently = working
 
-/** Is the trainee in the exercise's start position? (metrics = profile metrics of the frame) */
-export function isStartPosition(profile, metrics) {
+// The READY STANCE of a kick / pass (owner field video, 2026-10-19: a laptop close up and looking down read
+// the standing knees as 85–160° and the kicking leg's ankle was often unseen — "knee ≥ 145°" never held,
+// the exercise never started, the coach only talked about the camera). A coach sees readiness as: standing,
+// the feet STILL for a moment next to the ball — measured from the feet's positions, not from knee angles
+// the camera's perspective distorts.
+export const READY_STILL_MS = 600;
+export const READY_STILL_TORSO = 0.12;     // the feet move less than this share of the torso length
+
+/**
+ * Feet still for READY_STILL_MS? hist: [{ t, l: {x,y}|null, r: {x,y}|null, torso }] (newest last).
+ * Every foot seen through the window must stay within READY_STILL_TORSO of its mean; at least one seen.
+ */
+export function feetStill(hist, now) {
+  const w = (hist || []).filter(h => now - h.t <= READY_STILL_MS);
+  if (w.length < 5 || now - w[0].t < READY_STILL_MS * 0.75) return false;
+  const torsos = w.map(h => h.torso).filter(v => v > 0).sort((a, b) => a - b);
+  if (!torsos.length) return false;
+  const lim = READY_STILL_TORSO * torsos[Math.floor(torsos.length / 2)];
+  let seen = false;
+  for (const side of ['l', 'r']) {
+    const pts = w.map(h => h[side]).filter(Boolean);
+    if (pts.length < 0.6 * w.length) continue;
+    const mx = pts.reduce((a, p) => a + p.x, 0) / pts.length, my = pts.reduce((a, p) => a + p.y, 0) / pts.length;
+    if (pts.some(p => Math.hypot(p.x - mx, p.y - my) > lim)) return false;
+    seen = true;
+  }
+  return seen;
+}
+
+/**
+ * Is the trainee in the exercise's start position? (metrics = profile metrics of the frame)
+ * @param {{ still?: boolean, standing?: boolean }} [ctx] - for kicks / passes: the feet still + standing
+ */
+export function isStartPosition(profile, metrics, ctx = null) {
   if (!profile || profile.precision !== 'expert') return true;            // family profiles: positioning is the gate
   const j = profile.joints?.[profile.primary];
   const v = metrics?.[profile.primary];
+  if (profile.kind === 'strike' && ctx && typeof ctx.still === 'boolean') return ctx.still && ctx.standing !== false;
   if (!j || typeof v !== 'number') return false;
   if (profile.kind === 'hold') return v >= j.rest[0] - 8 && v <= j.rest[1] + 8;
-  if (profile.kind === 'strike') return v >= 145;                           // standing tall before the kick
+  if (profile.kind === 'strike') {
+    if (ctx && typeof ctx.still === 'boolean') return ctx.still && ctx.standing !== false;   // the ready stance
+    return v >= 145;                                                        // (no stance data: standing tall)
+  }
   const p = repProgress(profile, v);
   return p !== null && p <= 0.3;                                            // at (or near) the rest position
 }
@@ -98,6 +134,11 @@ const DRIVE = {
     'Come on, come on — every second counts!',
   ],
 };
+// a kick / pass: the ready stance at the ball — or simply start passing (the first real pass starts it)
+const START_POSITION_STRIKE = {
+  he: 'עמוד ליד הכדור, רגל התמיכה במקום — ותתחיל למסור.',
+  en: 'Stand by the ball, support foot planted — and start passing.',
+};
 const START_POSITION = {
   he: 'קח עמדת פתיחה — בדיוק כמו הצללית.',
   en: 'Get into the start position — exactly like the Ghost.',
@@ -124,8 +165,9 @@ export function withDrive(instruction, k, name, isHe) {
 }
 
 /** "Get into the start position" with drive. */
-export function startPositionPrompt(k, name, isHe) {
-  return withDrive(isHe ? START_POSITION.he : START_POSITION.en, k, name, isHe);
+export function startPositionPrompt(k, name, isHe, kind = null) {
+  const t = kind === 'strike' ? START_POSITION_STRIKE : START_POSITION;
+  return withDrive(isHe ? t.he : t.en, k, name, isHe);
 }
 
 // ---- Split balance sets: half a set on each leg, the coach calls the switch ----

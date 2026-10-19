@@ -143,3 +143,27 @@ describe('3rd field video: walking is NOT a pass; a toe-poke is told', () => {
     expect(r.msg.he).toContain('פתח את כף הרגל');
   });
 });
+
+import { feetStill, isStartPosition, READY_STILL_MS, startPositionPrompt } from '../training/coachFlow';
+
+describe('field video 2026-10-19: a pass starts from the ready stance, not from a knee angle the camera distorts', () => {
+  const p = EXPERT_PROFILES.shadowPass;
+  const hist = (jitter) => Array.from({ length: 20 }, (_, i) => ({ t: i * 50, l: { x: 0.45 + (i % 2) * jitter, y: 0.9 }, r: null, torso: 0.3 }));
+  it('the feet still for 0.6 s while standing = the start position (the knee may read 120° from above)', () => {
+    expect(feetStill(hist(0.005), 950)).toBe(true);
+    expect(isStartPosition(p, { knee: 120 }, { still: true, standing: true })).toBe(true);
+  });
+  it('a foot moving (mid-kick, walking) is not the start position; crouching is not either', () => {
+    expect(feetStill(hist(0.08), 950)).toBe(false);
+    expect(isStartPosition(p, { knee: 170 }, { still: false, standing: true })).toBe(false);
+    expect(isStartPosition(p, { knee: 170 }, { still: true, standing: false })).toBe(false);
+  });
+  it('too short a stretch, or no foot seen, is not still', () => {
+    expect(feetStill(hist(0).slice(0, 4), 150)).toBe(false);
+    expect(feetStill(hist(0).map(h => ({ ...h, l: null })), 950)).toBe(false);
+    expect(READY_STILL_MS).toBe(600);
+  });
+  it('the start prompt of a pass talks about the ball, not the Ghost', () => {
+    expect(startPositionPrompt(0, '', true, 'strike')).toContain('ליד הכדור');
+  });
+});

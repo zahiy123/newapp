@@ -513,6 +513,20 @@ export function useSpeech(lang = 'he-IL', age) {
   }, [lang, _utterSpeak, isHe, splitToChunks]);
 
   // Encouragement for good form (only when actively moving) - low priority, don't cut
+  // The AI coach's briefing (worded for this exercise and trainee) — protected like the written one:
+  // it replaces what is playing, and its chunks are one sentence id (never cut, never split)
+  const speakBriefingText = useCallback((text) => {
+    if (!window.speechSynthesis || !text) return;
+    try { window.speechSynthesis.resume(); } catch {}
+    window.speechSynthesis.cancel();
+    queueRef.current = [];
+    speaking.current = false;
+    const sid = ++sidSeqRef.current;
+    const chunks = splitToChunks(text);
+    for (const chunk of chunks.slice(1)) queueRef.current.push({ text: chunk, options: { __sid: sid } });
+    _utterSpeak(chunks[0], { __sid: sid });
+  }, [_utterSpeak, splitToChunks]);
+
   const speakEncouragement = useCallback(() => {
     let phrases;
     if (lifeStage === 'kids') {
@@ -1143,6 +1157,7 @@ export function useSpeech(lang = 'he-IL', age) {
     speakIfIdle,
     speakQueued,
     speakBriefing,
+    speakBriefingText,
     speakEncouragement,
     speakCorrection,
     speakOptimization,

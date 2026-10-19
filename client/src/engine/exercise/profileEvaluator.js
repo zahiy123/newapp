@@ -32,10 +32,11 @@ import { updateConfidence, detectView } from './confidence.js';
 const SAGITTAL = new Set(['chainLeadMs', 'trunkLean', 'trunkRange']);
 import { assessSetup, SETUP } from './setupCoach.js';
 
-const MIN_VISIBILITY = 0.5;
+// (0.4: a prosthesis / a foot at the frame's edge reads lower — the measurement's own confidence gate still judges)
+const MIN_VISIBILITY = 0.4;
 const FRAME_MARGIN = 0.02;
 const VISIBLE_ON_SAMPLES = 3;      // ~150 ms in view → visible
-const VISIBLE_OFF_SAMPLES = 10;    // ~500 ms out of view → not visible
+const VISIBLE_OFF_SAMPLES = 20;    // ~1 s out of view → not visible (a flicker never drops the trainee)
 export const RULE_HOLD_MS = 400;   // a rule must hold this long before it is reported
 const WINDOW_MS = 8000;            // accuracy window (a few reps) — at least 2 Ghost cycles at slow tempos
 const MIN_ACCURACY_SAMPLES = 20;   // ~1 s of in-view frames before a % is shown
@@ -236,6 +237,9 @@ export function updateExecution(tracker, landmarks, nowMs) {
   }
   let issueNow = setupNow.ok ? null : setupNow.issue;
   if (!issueNow && region) issueNow = region === 'arms' ? SETUP.arms : region === 'legs' ? SETUP.feetStepBack : { ...SETUP.noBody, region };
+  // a room fix while the measured joints really ARE out: the instruction a small room can do for THAT part
+  // (the legs: tilt the screen down) — never "step back so I see you head to toe"
+  if (issueNow?.code === 'step_back' && region) issueNow = region === 'arms' ? SETUP.arms : region === 'legs' ? SETUP.feetStepBack : issueNow;
   if (issueNow) tr.lastSetupIssue = issueNow;
   if (issueNow === null) { tr.inStreak += 1; tr.outStreak = 0; } else { tr.outStreak += 1; tr.inStreak = 0; }
   if (!tr.inView && tr.inStreak >= VISIBLE_ON_SAMPLES) tr.inView = true;

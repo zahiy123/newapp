@@ -29,7 +29,7 @@ const getClient = () => (client ||= new Anthropic({ apiKey: process.env.ANTHROPI
 export const CUE_MODELS = ['claude-sonnet-5', 'claude-opus-5-5'];
 export const CUE_MODEL = CUE_MODELS[0];
 export const DEBRIEF_MODELS = ['claude-opus-5-5', 'claude-sonnet-5'];
-export const MAX_CUE_CHARS = 90;
+export const MAX_CUE_CHARS = 110;
 
 const clip = (v, n = 300) => String(v ?? '').replace(/[\x00-\x1f]/g, ' ').slice(0, n);
 
@@ -88,6 +88,7 @@ Ground rules — never break them:
 - Never praise anything the facts do not show as clean. No generic filler ("good job", "keep going") without a concrete point.
 - The trainee may have an amputation / a prosthesis (given in the facts): respect it precisely, never ask a missing limb to do anything.
 - Address the trainee ONLY by the given name (or no name) — never any other name.
+- Correct, natural Hebrew grammar: the coach SEES the trainee ("אני רואה אותך"), speaks in masculine singular to him.
 - If the facts are unclear, garbled or missing, output exactly: SKIP
 - Never assume the device (a phone, a laptop) — say "the camera".
 - The trainee may train in a SMALL ROOM: never ask them to move the camera or themselves meters away; to be seen better, suggest tilting the camera / keeping the feet in the picture.
@@ -95,8 +96,27 @@ Ground rules — never break them:
 - No lists, no brackets, no emojis, no quotation marks — words that are SPOKEN aloud.`;
 
 /** The prompt of a live cue (pure — tested). */
+// The moment the line is for (the device decides WHAT; the AI words it)
+const MOMENTS = {
+  setup: 'NOW: the trainee is getting into position in front of the camera, maybe in a SMALL ROOM. Say the ONE positioning fix given in "what", in your own words — precise, warm, with authority — at most 12 words, one sentence. Never add another fix.',
+  start: 'NOW: the trainee is seen clearly but not yet in the start stance. Tell them, in your own words, exactly what "what" says to do to start — at most 12 words, one sentence, with drive.',
+  ready: 'NOW: you can see the trainee clearly and the exercise is about to begin. Tell them so and to start — warm, short, at most 8 words. No technique, no numbers.',
+  motivate: 'NOW: a natural moment for ONE genuine, warm encouragement (the moment and the intent are in "what"). In your own words, at most 10 words. Never praise a performance, never claim a technique fact, never a number. If the trainee is tired / frustrated: calm and supportive.',
+};
+
 export function buildCuePrompt(f) {
   const he = f.lang !== 'en';
+  const moment = MOMENTS[f.mode];
+  if (moment) {
+    const system = `${COACH_PERSONA(he)}
+${moment} ${f.name ? `You may use the name ${clip(f.name, 20)} (not every time).` : ''}
+Do not repeat or paraphrase closely any of the recent lines listed. Output ONLY the spoken sentence.`;
+    const user = JSON.stringify({
+      exercise: clip(f.exercise, 80), sport: clip(f.sport, 40), body: clip(f.body, 120),
+      what: clip(f.error?.what, 200), recentLines: (f.recent || []).slice(-4).map(x => clip(x, 90)),
+    });
+    return { system, user };
+  }
   const system = `${COACH_PERSONA(he)}
 NOW: the trainee is IN THE MIDDLE OF A SET. Give ONE immediate correction, like a shout from the sideline: warm, sharp, specific to THIS error and THIS rep — at most 9 words, one sentence. It must tell them what to do on the very next rep — exactly the instruction of "what" / "how", nothing else. ${f.name ? `You may use the name ${clip(f.name, 20)} (not every time).` : ''}
 Do not repeat or paraphrase closely any of the recent cues listed. Output ONLY the spoken sentence.`;
@@ -108,6 +128,20 @@ Do not repeat or paraphrase closely any of the recent cues listed. Output ONLY t
       measured: f.error?.measured ?? null, target: clip(f.error?.target, 80), timesThisSet: f.error?.times ?? null,
     },
     recentCues: (f.recent || []).slice(-4).map(x => clip(x, 90)),
+  });
+  return { system, user };
+}
+
+/** The prompt of the exercise briefing (pure — tested). */
+export function buildBriefingPrompt(f) {
+  const he = f.lang !== 'en';
+  const system = `${COACH_PERSONA(he)}
+NOW: the exercise is about to begin. Introduce and TEACH it to THIS trainee like the best coach + physiotherapist: what the exercise is for, then the technique — ONLY the steps and the key point given, in your own fresh words, adapted to the trainee's body (a prosthesis / crutches as given) — and end with a short cue to get ready. About 45–75 words, flowing spoken sentences. ${f.name ? `Address the trainee as ${clip(f.name, 20)} once.` : ''}
+Output ONLY the spoken text.`;
+  const user = JSON.stringify({
+    exercise: clip(f.exercise, 80), sport: clip(f.sport, 40), body: clip(f.body, 120),
+    sets: f.sets ?? null, reps: clip(f.reps, 20),
+    steps: (f.steps || []).slice(0, 8).map(x => clip(x, 200)), keyPoint: clip(f.safety, 300), setup: clip(f.setup, 200),
   });
   return { system, user };
 }
@@ -162,6 +196,24 @@ export async function generateCue(facts, { timeoutMs = 3500, askFn = ask } = {})
     const text = String(raw || '').replace(/["“”«»]/g, '').replace(/\s+/g, ' ').trim();
     if (!text || /^SKIP/i.test(text) || text.length > MAX_CUE_CHARS || !numbersGrounded(text, facts) || !directionsKept(text, facts)) return null;
     if ((facts.recent || []).some(r => r && r.trim() === text)) return null;   // never the same words twice
+    return text;
+  }
+  return null;
+}
+
+/** The spoken briefing of an exercise, or null (the device then says the written explanation). */
+export async function generateBriefing(facts, { timeoutMs = 9000, askFn = ask } = {}) {
+  const steps = facts?.steps || [];
+  if (!readable(facts?.exercise) || !steps.length || steps.some(x => !readable(x))) return null;
+  const prompt = buildBriefingPrompt(facts);
+  // the guards judge it against the given technique (its directions, its numbers)
+  const ground = { ...facts, error: { what: steps.join(' '), how: facts.safety || '' } };
+  for (const model of CUE_MODELS) {
+    let raw;
+    try { raw = await askFn(model, prompt, 800, timeoutMs, 'low'); } catch (err) { if (isModelError(err)) continue; throw err; }
+    const text = String(raw || '').replace(/["“”«»]/g, '').replace(/\s+/g, ' ').trim();
+    if (!text || /^SKIP/i.test(text) || text.length < 40 || text.length > 700) return null;
+    if (!numbersGrounded(text, facts) || !directionsKept(text, ground)) return null;
     return text;
   }
   return null;

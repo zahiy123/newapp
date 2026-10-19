@@ -36,10 +36,12 @@ import { variationProfile } from '../../engine/catalog/catalog';
 import { applySportContext } from '../../engine/sports/sportLibrary';
 import { createExecutionTracker, updateExecution, calibrateUpright, stableUpright, resetSetLog } from '../../engine/exercise/profileEvaluator';
 import { liveCue } from '../../engine/coachBrain/policy';
+import { jointAngleSide, torsoLength } from '../../engine/exercise/kinematics';
 import { cueFacts } from '../../engine/coachBrain/aiFacts';
-import { aiCue } from '../../utils/aiCoach';
+import { aiCue, aiLine } from '../../utils/aiCoach';
+import { bodyText } from '../../engine/coachBrain/aiFacts';
 import {
-  createStartGate, updateStartGate, isStartPosition, isValidRep, updateWork, withDrive, startPositionPrompt, READY_DRIVE,
+  createStartGate, updateStartGate, isStartPosition, feetStill, isValidRep, updateWork, withDrive, startPositionPrompt, READY_DRIVE,
 } from '../../engine/training/coachFlow';
 import { createClipRecorder, recordFrame } from '../../engine/validation/clipRecorder';
 import { createRepEvidence, evidenceFrame, evidenceOk, evidenceAccept, evidenceGroupFor } from '../../engine/training/repEvidence';
@@ -166,6 +168,8 @@ export function useExpertExecution({
     strikeCountRef.current = 0;
     earlyRef.current = false;
     const gate = createStartGate();
+    const feetHist = [];                       // the feet's positions (the ready stance of a kick / pass)
+    let lastStance = null;
     let startedOnce = false;                   // no rep counts before the trainee first reached the start position
     countOpenRef.current = false;
     let tiltCalibrated = false;
@@ -224,6 +228,25 @@ export function useExpertExecution({
         speakRef.current?.(text, { rate });
       });
     };
+    // positioning / start / ready lines are worded by the AI too (the device decides WHAT; the line is
+    // the AI's); the device's own line only when the AI is late — one line at a time
+    let lineInFlight = false;
+    const recentLines = [];
+    const sayLine = (mode, localText, rate, he) => {
+      if (lineInFlight) return;
+      lineInFlight = true;
+      aiLine({
+        mode, lang: he ? 'he' : 'en', name: nameRef.current, exercise: exerciseName, sport: contextsKey,
+        body: bodyText(limbProfile || {}), error: { what: localText }, recent: recentLines,
+      }).then((ai) => {
+        lineInFlight = false;
+        if (disposed) return;
+        const text = ai || localText;
+        recentLines.push(text); if (recentLines.length > 6) recentLines.shift();
+        holdSpeech(estimateSpeechMs(text, rate));
+        speakRef.current?.(text, { rate });
+      });
+    };
     setIssue(null); setAccuracy(null); setCadence(null); setUnsure(null); setSetup(null); setReadyFlash(null);
 
     const id = setInterval(() => {
@@ -236,13 +259,41 @@ export function useExpertExecution({
         if (brain) brainFrame(brain, lm, now);
         evidenceFrame(kinetic, lm, now);
 
+        // (dev only — the local harness traces why positioning / the start gate decide what they decide; stripped in production)
+        if (import.meta.env.DEV && lm) {
+          const tr0 = (window.__execTrace ||= []);
+          if (!tr0.length || now - tr0[tr0.length - 1].now > 200) {
+            const v = (i) => (lm[i] ? [Math.round(lm[i].y * 100) / 100, Math.round((lm[i].visibility ?? 0) * 100) / 100] : null);
+            tr0.push({ now: Math.round(now), inView: r.inView, setup: r.setup?.code || null, hint: r.hint?.code || null, missing: r.missing,
+              conf: r.quality?.confident, reason: r.quality?.reason || null, ankL: v(27), ankR: v(28), kneeL: v(25), kneeR: v(26), nose: v(0),
+              inStart: null, stance: lastStance, fl: feetHist.length ? [feetHist[feetHist.length-1].l && Math.round(feetHist[feetHist.length-1].l.y*100), feetHist[feetHist.length-1].r && Math.round(feetHist[feetHist.length-1].r.y*100)] : null, gate: startReadyRef.current, knee: r.metrics?.knee != null ? Math.round(r.metrics.knee) : null, kL: Math.round(jointAngleSide(lm, 'knee', 'left') ?? -1), kR: Math.round(jointAngleSide(lm, 'knee', 'right') ?? -1), lean: Math.round(tracker.leanRaw ?? -1) });
+          }
+        }
         // ---- Start gate: positioned + reliable + in the START POSITION, held ----
-        const inStart = r.inView && isStartPosition(profile, r.metrics);
+        let stance = null;
+        if (profile.kind === 'strike') {
+          const foot = (i) => (lm?.[i] && (lm[i].visibility ?? 0) >= 0.4 ? { x: lm[i].x, y: lm[i].y } : null);
+          feetHist.push({ t: now, l: foot(27), r: foot(28), torso: lm ? torsoLength(lm) : null });
+          while (feetHist.length && now - feetHist[0].t > 1500) feetHist.shift();
+          // standing: the hips above the knees on a side that is seen (never crouched / sitting)
+          const stand = lm && [[23, 25], [24, 26]].some(([h, k]) => lm[h] && lm[k] && (lm[k].visibility ?? 0) >= 0.4 && lm[h].y < lm[k].y);
+          stance = { still: feetStill(feetHist, now), standing: !!stand };
+          lastStance = stance;
+        }
+        const inStart = r.inView && isStartPosition(profile, r.metrics, stance);
         startReadyRef.current = updateStartGate(gate, { positioned: r.inView, confident: r.quality?.confident, inStart }, now);
         if (startReadyRef.current) startedOnce = true;
+        // a coach starts when you START: a real kick / pass IN PLACE (one leg, the pelvis still, with its
+        // kinetic evidence) while seen clearly opens the exercise at once — and that kick counts
+        if (!startedOnce && profile.kind === 'strike' && r.inView && !r.setup && r.quality?.confident !== false
+          && r.events.some(ev => ev.type === 'strike') && evidenceOk(kinetic, now, { strike: true, kick: true })) {
+          startedOnce = true;
+        }
         // walking in / out of the picture, adjusting the camera: nothing counts (the positioning card is up)
         countOpenRef.current = startedOnce && !r.setup && r.inView;
-        if (!countOpenRef.current) evidenceAccept(kinetic, now);    // movement before / outside never carries into a rep
+        // movement before / outside never carries into a rep — except a kick drill BEFORE its first start: the
+        // first real pass must be able to prove itself (kickInPlace still rejects walking in / adjusting)
+        if (!countOpenRef.current && (startedOnce || profile.kind !== 'strike' || r.setup || !r.inView)) evidenceAccept(kinetic, now);
         // the camera's tilt (a laptop on a desk), measured ONCE on the trainee upright and STILL in the
         // start position: the median of a stable ~1.5 s stretch (a lean / a glitch never calibrates it)
         if (!tiltCalibrated) {
@@ -297,7 +348,7 @@ export function useExpertExecution({
             spokenByCode[code] = now; spokenCode = code; spokenAt = now; lastVoice = now; hadProblemShown = true; lastSetupSpokenAt = now;
             setupRepeats += 1;                       // not fixed → the next reminder comes later (10 → 20 → 40 → 60 s)
             // the precise instruction only — said once, with authority
-            speakRef.current?.(withDrive(he ? r.setup.he : r.setup.en, driveK++, nameRef.current, he), { rate: 1.05 });
+            sayLine('setup', he ? r.setup.he : r.setup.en, 1.05, he);
           }
         } else {
           if (readySince === null) readySince = now;
@@ -312,7 +363,7 @@ export function useExpertExecution({
             spokenCode = null; lastVoice = now;
             flashUntil = now + READY_FLASH_MS;
             setReadyFlash(msg);
-            speakRef.current?.(he ? msg.he : msg.en, { rate: 1.12 });
+            sayLine('ready', he ? msg.he : msg.en, 1.12, he);
           }
         }
         if (flashUntil && now > flashUntil) { flashUntil = 0; setReadyFlash(null); }
@@ -323,7 +374,7 @@ export function useExpertExecution({
         if (!roomTipGiven && hintSince !== null && now - hintSince >= ROOM_TIP_AFTER_MS && !countingRef.current
           && !quietRef.current && now - lastVoice > 4000) {
           roomTipGiven = true; lastVoice = now;
-          speakRef.current?.(he ? ROOM_TIP.he : ROOM_TIP.en, { rate: 1.05 });
+          sayLine('setup', he ? ROOM_TIP.he : ROOM_TIP.en, 1.05, he);
         }
 
         // Positioned, but not in the start position (before the start / between reps of a hold):
@@ -334,7 +385,7 @@ export function useExpertExecution({
         if (showStart !== lastStartPrompt) { lastStartPrompt = showStart; setStartPrompt(showStart); }
         if (showStart && !quietRef.current && now - startSpokenAt >= START_PROMPT_REPEAT_MS && now - lastVoice > 2500) {
           startSpokenAt = now; lastVoice = now;
-          speakRef.current?.(startPositionPrompt(driveK++, nameRef.current, he), { rate: 1.12 });
+          sayLine('start', startPositionPrompt(driveK++, '', he, profile.kind), 1.12, he);
         }
 
         // Positioned right but the measurement is momentarily unreliable (tracking glitch)

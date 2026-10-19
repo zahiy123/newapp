@@ -3,7 +3,7 @@ import { applySideCorrection } from '../services/anatomyDiagnosis.js';
 import { generateWeek, generateTips, analyzeMovement, generateWorkoutSummary, getLocalFallbackWeek, generateRealtimeFeedback, adaptWorkout, analyzeRepFrames, analyzeAnatomy, verifyScan } from '../services/claude.js';
 import { analyzeGameFrames, analyzeVARFrame } from '../services/gameAnalysis.js';
 import { analyzeEnvironment } from '../services/environmentAnalysis.js';
-import { generateCue, generateDebrief } from '../services/liveCoach.js';
+import { generateCue, generateDebrief, generateBriefing } from '../services/liveCoach.js';
 
 const router = Router();
 
@@ -208,6 +208,15 @@ router.post('/live-cue', async (req, res) => {
   } catch (error) {
     console.error('[COACH] /live-cue ERROR:', error.message);
     res.json({ cue: null });
+  }
+});
+
+router.post('/briefing', async (req, res) => {
+  try {
+    res.json({ briefing: await generateBriefing(req.body || {}) });
+  } catch (error) {
+    console.error('[COACH] /briefing ERROR:', error.message);
+    res.json({ briefing: null });
   }
 });
 

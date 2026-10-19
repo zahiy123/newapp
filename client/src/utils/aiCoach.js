@@ -28,3 +28,17 @@ export async function aiDebrief(facts) {
   const d = j?.debrief;
   return d && typeof d.speech === 'string' && d.speech.length > 20 ? d : null;
 }
+
+export const BRIEFING_DEADLINE_MS = 9500;
+
+/** A short coach line (positioning / start / ready / motivation) worded by the AI from the facts, or null. */
+export async function aiLine(facts) {
+  return aiCue(facts);
+}
+
+/** The exercise briefing worded by the AI for this exercise and trainee, or null. */
+export async function aiBriefing(facts) {
+  const j = await post('/api/coach/briefing', facts, BRIEFING_DEADLINE_MS);
+  const b = typeof j?.briefing === 'string' ? j.briefing.trim() : '';
+  return b.length > 40 ? b : null;
+}

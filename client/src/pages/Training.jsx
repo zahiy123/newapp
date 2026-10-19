@@ -43,8 +43,8 @@ import VirtualBall from '../components/VirtualBall';
 import { useVoiceProsody } from '../hooks/useVoiceProsody';
 import { brainSummary, brainBall } from '../engine/coachBrain/brain';
 import { buildDebrief } from '../engine/coachBrain/debrief';
-import { debriefFacts, legacyCueFacts } from '../engine/coachBrain/aiFacts';
-import { aiCue, aiDebrief } from '../utils/aiCoach';
+import { debriefFacts, legacyCueFacts, bodyText } from '../engine/coachBrain/aiFacts';
+import { aiCue, aiDebrief, aiBriefing, aiLine } from '../utils/aiCoach';
 import { kickingSide } from '../engine/incomingBall';
 import { ballModeFor, virtualBallWanted, handSide, ballLook, realBallInPlay } from '../engine/virtualBall';
 import { rebuildPlanFromCatalog, planContext } from '../engine/catalog/planBuilder';
@@ -202,7 +202,7 @@ export default function Training() {
   const [equipmentLabel, setEquipmentLabel] = useState('');
   const equipCheckTimerRef = useRef(null);
   const {
-    speak, speakPriority, speakIfIdle, speakBriefing, speakEncouragement, speakCorrection,
+    speak, speakPriority, speakIfIdle, speakBriefing, speakBriefingText, speakEncouragement, speakCorrection,
     speakOptimization, speakRestTip, speakSetStart, speakCount,
     speakMidSetQuit, speakHeadUp,
     speakActiveProd,
@@ -581,6 +581,8 @@ export default function Training() {
   const [restDebrief, setRestDebrief] = useState(null);   // the rest's analysis card (debrief.js)
   const legacySetLogRef = useRef({ counts: {} });   // the older analyzers' corrections seen in this set
   const legacyCuesRef = useRef([]);                  // the AI coach's recent words (never the same twice)
+  const briefingCacheRef = useRef(new Map());         // exercise name → the AI briefing (a promise)
+  const briefingSeqRef = useRef(0);
   const debriefSeqRef = useRef(0);                   // the rest analysis in flight (a newer set wins)
   const gradeTimerRef = useRef(null);
 
@@ -1541,7 +1543,7 @@ export default function Training() {
           const now = Date.now();
           const isAnalyzing = commandPhaseRef.current === 'ANALYZING' || commandPhaseRef.current === 'SPEAKING_FEEDBACK';
           if (!isAnalyzing && now - lastEncouragementRef.current > 8000) {
-            speakPositiveReinforcement(playerName);
+            // (no generic praise line — what was good is said in the rest's analysis, from the measurement)
             lastEncouragementRef.current = now;
           }
         }
@@ -2658,13 +2660,49 @@ export default function Training() {
   }
 
   // Build briefing voice params from deterministic instruction map
+  // THE BRIEFING BY THE AI (owner, 2026-10-19: "nothing generic written in the system — the AI"): the
+  // exercise's technique (its steps + key point) is TAUGHT by the AI coach for this trainee's body; it is
+  // prepared as soon as the exercise is known, so it plays at once. The written explanation is said only
+  // when the AI could not answer in time.
+  function briefingFacts(exercise) {
+    const instr = getExerciseInstruction(exercise.name, analyzerFor(exercise, !!limbProfile?.wheelchair)?.cueKey);
+    const steps = instr ? instr.steps : [exercise.voicePrompt || exercise.description].filter(Boolean);
+    return {
+      instr, steps, safety: instr?.safety || exercise.tips || '',
+      facts: {
+        lang: isHe ? 'he' : 'en', name: playerName, exercise: instr?.name || exercise.name, sport: sportContexts.join('+'),
+        body: bodyText(limbProfile || {}), sets: exercise.sets ?? null, reps: String(exercise.reps ?? ''),
+        steps, safety: instr?.safety || exercise.tips || '', setup: exerciseNeedsSetup(exercise) ? (locationProps?.setup || '') : '',
+      },
+    };
+  }
+  function prefetchBriefing(exercise) {
+    if (!exercise?.name) return null;
+    const cache = briefingCacheRef.current;
+    if (!cache.has(exercise.name)) cache.set(exercise.name, aiBriefing(briefingFacts(exercise).facts));
+    return cache.get(exercise.name);
+  }
+  // prepare the briefing of this exercise and the next one in the background (it plays at once)
+  useEffect(() => {
+    if (!currentExercise) return;
+    prefetchBriefing(currentExercise);
+    if (exercises[currentIdx + 1]) prefetchBriefing(exercises[currentIdx + 1]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentExercise?.name, currentIdx]);
+
   function doBriefingSpeech(exercise) {
     if (!exercise) return;
-    const instr = getExerciseInstruction(exercise.name, analyzerFor(exercise, !!limbProfile?.wheelchair)?.cueKey);
-    const voiceText = instr ? instr.steps.join('. ') : (exercise.voicePrompt || exercise.description);
-    const safetyText = instr?.safety || exercise.tips;
-    // Equipment set-up only for drills that really use it (never "two chairs" for a plank)
-    speakBriefing(instr?.name || exercise.name, voiceText, safetyText, exerciseNeedsSetup(exercise) ? locationProps : null, playerName);
+    const { instr, steps, safety } = briefingFacts(exercise);
+    const written = () => speakBriefing(instr?.name || exercise.name, steps.join('. '), safety, exerciseNeedsSetup(exercise) ? locationProps : null, playerName);
+    const pending = prefetchBriefing(exercise);
+    const seq = ++briefingSeqRef.current;
+    // wait for the AI's briefing at most 4.5 s (it was prepared ahead, usually ready)
+    Promise.race([pending, new Promise(r => setTimeout(() => r(undefined), 4500))]).then((ai) => {
+      // (not after the trainee already started / the exercise moved on)
+      if (seq !== briefingSeqRef.current || [PHASE.EXERCISING, PHASE.RESTING, PHASE.EXERCISE_DONE].includes(phaseRef.current)) return;
+      if (ai) speakBriefingText(ai);
+      else written();
+    });
   }
 
   function handleStartBriefing() {
@@ -2879,7 +2917,10 @@ export default function Training() {
     const read = FEATURES.COACH_BRAIN && execution.brainRef?.current ? brainSummary(execution.brainRef.current, voiceEffortRef.current)?.state : null;
     const strained = !!read && (read.frustration >= 0.4 || read.fatigue >= 0.5);
     const line = motivationLine(motivationRef.current, { now: Date.now(), moment, name: playerName, he: isHe, strained });
-    if (line) setTimeout(() => { if (!isSpeaking()) speakIfIdle(line, { rate: 1.05 }); }, 1800);
+    if (!line) return;
+    aiLine({ mode: 'motivate', lang: isHe ? 'he' : 'en', name: playerName, exercise: currentExercise?.name || '', sport: sportContexts.join('+'),
+      body: bodyText(limbProfile || {}), error: { what: `${moment}${strained ? ' (the trainee is tired / frustrated — calm, supportive)' : ''}: ${line}` }, recent: legacyCuesRef.current })
+      .then((ai) => setTimeout(() => { if (!isSpeaking()) speakIfIdle(ai || line, { rate: 1.05 }); }, 600));
   }
 
   // The leg the trainee REALLY kicks with (detected by the ball). In a split set (a full set per leg,
