@@ -158,6 +158,7 @@ NOW: the REST between sets. You are the expert in the locker room analysing the 
 4. What was good — ONLY items listed in "measuredClean".
 5. ONE clear goal for the next set (or, if lastSet, what to take to next time).
 If nothing was measured (attempts 0 and no errors) say honestly that you could not see the movement clearly and what to do so you can.
+"visualNotes" are what a vision model saw in single frames — weaker evidence than the measurement: use a note only if it agrees with the measured errors / clean items, never to contradict them, and never invent a number from it.
 Then add the spoken extras given (the leg switch / a mental cue), if any.
 Return ONLY JSON: {"speech":"<the spoken analysis>","card":[{"kind":"fix|good|focus|note","title":"<short line>","detail":["<short line>", ...]}]} — the card is a short written version of the same analysis (max 5 items).`;
   const user = JSON.stringify({
@@ -171,6 +172,7 @@ Return ONLY JSON: {"speech":"<the spoken analysis>","card":[{"kind":"fix|good|fo
     })),
     measuredClean: (f.clean || []).slice(0, 4).map(x => clip(x, 80)),
     extras: (f.extras || []).filter(Boolean).map(x => clip(x, 160)),
+    visualNotes: (f.visual || []).filter(Boolean).slice(-4).map(x => clip(x, 160)),
   });
   return { system, user };
 }

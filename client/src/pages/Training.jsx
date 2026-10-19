@@ -328,6 +328,13 @@ export default function Training() {
       });
     }
 
+    // ONE coach (field video 2026-10-19): in an exercise the expert + AI coach runs, the vision module never
+    // speaks — what it saw in its frame becomes a VISUAL NOTE for the rest's analysis (weighed by the AI
+    // against the measurement), never a second voice during the set
+    if (expertCoachesRef.current) {
+      if (result.feedback) { const v = visionNotesRef.current; v.push(stripName(result.feedback)); if (v.length > 6) v.shift(); }
+      return;
+    }
     if (cmdPhase === 'IDLE') {
       // Hold exercises or no command coaching — short rep count + technical feedback only
       if (repConfirmed) {
@@ -582,6 +589,7 @@ export default function Training() {
   const [restDebrief, setRestDebrief] = useState(null);   // the rest's analysis card (debrief.js)
   const legacySetLogRef = useRef({ counts: {} });   // the older analyzers' corrections seen in this set
   const legacyCuesRef = useRef([]);                  // the AI coach's recent words (never the same twice)
+  const visionNotesRef = useRef([]);                 // what the vision module saw in its frames (this set) — for the rest's analysis
   const briefingCacheRef = useRef(new Map());         // exercise name → the AI briefing (a promise)
   const briefingSeqRef = useRef(0);
   const debriefSeqRef = useRef(0);                   // the rest analysis in flight (a newer set wins)
@@ -1092,7 +1100,7 @@ export default function Training() {
     e.n += 1;
     q.errors[execution.issue.id] = e;
   }, [execution.issue, phase]);
-  useEffect(() => { setQualityRef.current = { sum: 0, n: 0, errors: {} }; legacySetLogRef.current = { counts: {} }; }, [currentSet, currentIdx]);
+  useEffect(() => { setQualityRef.current = { sum: 0, n: 0, errors: {} }; legacySetLogRef.current = { counts: {} }; visionNotesRef.current = []; }, [currentSet, currentIdx]);
   const lastSetGoodRef = useRef(false);
 
   // The coach celebrates ONLY a good set (its measured accuracy), then stands ready
@@ -1507,7 +1515,7 @@ export default function Training() {
 
     // === MOVEMENT QUALITY CHECK (calibration-aware ROM) ===
     // If a rep was just counted, check if ROM was deep enough relative to calibration
-    if (newState.feedback?.type === 'count' && prevState._calibration && newState._phaseStartAngle != null) {
+    if (newState.feedback?.type === 'count' && prevState._calibration && newState._phaseStartAngle != null && !expertCoachesRef.current) {
       const joint = analyzerRef.current?.cueKey === 'squat' || analyzerRef.current?.cueKey === 'lunge' ? 'knee'
         : analyzerRef.current?.cueKey === 'shoulder' ? 'shoulder' : 'elbow';
       const currentAngle = newState.elbowAngle || newState.kneeAngle || 0;
@@ -1815,11 +1823,19 @@ export default function Training() {
   // Ball detection + AI coaching lifecycle
   useEffect(() => {
     if (phase === PHASE.EXERCISING) {
-      // Start equipment detection (unified model) or fall back to ball-only
-      if (equipReady && videoRef.current) {
-        startEquipLoop(videoRef.current);
+      // Start equipment detection (unified model) or fall back to ball-only — the heaviest background work
+      // (an object model in the browser, ~7.5 fps) competes with the skeleton on a laptop (field video
+      // 2026-10-19: a lagging live picture). Not at all when the trainee has no real ball (the virtual ball
+      // has nothing to look for); at a third of the rate in an expert + AI coached drill (it only notices a
+      // real ball coming into play)
+      const noRealBall = !!ballDrill && hasRealBall === false;
+      const every = expertCoachesRef.current ? 24 : undefined;
+      if (noRealBall) {
+        // nothing to detect
+      } else if (equipReady && videoRef.current) {
+        startEquipLoop(videoRef.current, every);
       } else if (analyzerRef.current?.ballAware && ballReady && videoRef.current) {
-        startBallLoop(videoRef.current);
+        startBallLoop(videoRef.current, every ? 30 : undefined);
       }
       // Start AI coaching
       const targetReps = parseInt(currentExercise?.reps) || 10;
@@ -2864,6 +2880,7 @@ export default function Training() {
       setNo: currentSet, lastSet, he: isHe, name: playerName, exercise: currentExercise?.name || '',
       sport: sportContexts.join('+'), lp: limbProfile || {}, legacy: legacySetLogRef.current, whyOf: techniqueWhy,
       extras: debriefExtras,
+      visual: visionNotesRef.current.slice(-4),
     });
     aiDebrief(facts).then((ai) => {
       if (seq !== debriefSeqRef.current) return;                    // a newer set / exercise took over

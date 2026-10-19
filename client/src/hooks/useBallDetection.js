@@ -135,7 +135,7 @@ export function useBallDetection(sport = 'football') {
   const preprocess = useCallback((videoEl) => {
     const canvas = canvasRef.current;
     if (!canvas) return null;
-    const ctx = canvas.getContext('2d');
+    const ctx = canvas.getContext('2d', { willReadFrequently: true });
     ctx.drawImage(videoEl, 0, 0, INPUT_SIZE, INPUT_SIZE);
     const imageData = ctx.getImageData(0, 0, INPUT_SIZE, INPUT_SIZE);
     const { data } = imageData;
@@ -297,14 +297,14 @@ export function useBallDetection(sport = 'football') {
   }, [preprocess, postprocess]);
 
   // Detection loop: runs every 10th rAF frame (~6fps at 60fps camera)
-  const startLoop = useCallback((videoEl) => {
+  const startLoop = useCallback((videoEl, every = 10) => {
     // Don't start loop if no model loaded (safe mode — pose-only)
     if (!sessionRef.current) return;
     frameCountRef.current = 0;
 
     function loop() {
       frameCountRef.current++;
-      if (frameCountRef.current % 10 === 0) {
+      if (frameCountRef.current % every === 0) {
         detect(videoEl);
       }
       animFrameRef.current = requestAnimationFrame(loop);

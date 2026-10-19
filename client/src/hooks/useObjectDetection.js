@@ -124,7 +124,7 @@ export function useObjectDetection(enabled = true) {
     const scale = Math.min(MAX_W / vw, 1);
     canvas.width = Math.round(vw * scale);
     canvas.height = Math.round(vh * scale);
-    const ctx = canvas.getContext('2d');
+    const ctx = canvas.getContext('2d', { willReadFrequently: true });
     ctx.drawImage(videoEl, 0, 0, canvas.width, canvas.height);
 
     // Validate: check if frame is not black/empty (sample 20 pixels)

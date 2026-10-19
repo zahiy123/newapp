@@ -199,7 +199,7 @@ export function useHaikuVision({ onVisionFeedback } = {}) {
 
     // === Capture "start frame" when entering down/active phase ===
     if (currentPhase === 'down' && prevPhase !== 'down') {
-      const f1 = captureFrame();
+      const f1 = null;                          // (only the peak frame is sent — no capture here)
       startFrameRef.current = f1;
       startAnglesRef.current = angles || null;
       startLandmarksRef.current = landmarks || null;

@@ -80,6 +80,7 @@ export function debriefFacts(o) {
     reps: o.reps ?? 0, accuracy: typeof o.accuracy === 'number' ? Math.round(o.accuracy) : null,
     attempts: o.log?.attempts ?? 0, partial: o.log?.partial ?? 0,
     errors, clean: goods, extras: (o.extras || []).filter(Boolean),
+    visual: (o.visual || []).filter(Boolean).slice(-4),
   };
 }
 

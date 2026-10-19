@@ -285,7 +285,7 @@ export function useEquipmentDetection(sport = 'football') {
   const preprocess = useCallback((videoEl) => {
     const canvas = canvasRef.current;
     if (!canvas || !ortModule) return null;
-    const ctx = canvas.getContext('2d');
+    const ctx = canvas.getContext('2d', { willReadFrequently: true });
     ctx.drawImage(videoEl, 0, 0, INPUT_SIZE, INPUT_SIZE);
     const imageData = ctx.getImageData(0, 0, INPUT_SIZE, INPUT_SIZE);
     const { data } = imageData;
@@ -404,14 +404,15 @@ export function useEquipmentDetection(sport = 'football') {
   }, [preprocess, postprocess]);
 
   // Detection loop: every 8th rAF frame (~7.5fps)
-  const startLoop = useCallback((videoEl) => {
+  // `every`: detect on every Nth animation frame (8 ≈ 7.5 fps; lighter where only a real ball's presence matters)
+  const startLoop = useCallback((videoEl, every = 8) => {
     if (!sessionRef.current) return;
     frameCountRef.current = 0;
     trackerRef.current.reset();
 
     function loop() {
       frameCountRef.current++;
-      if (frameCountRef.current % 8 === 0) {
+      if (frameCountRef.current % every === 0) {
         detect(videoEl);
       }
       animFrameRef.current = requestAnimationFrame(loop);
