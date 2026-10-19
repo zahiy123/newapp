@@ -303,7 +303,8 @@ export function updateExecution(tracker, landmarks, nowMs) {
   const canCoach = (id) => (tr.coached[id] || 0) < MAX_COACH_PER_RULE;
   // a repeat explanation needs a LONGER streak each time (2 → 6 → 10 reps): the coach is patient
   const need = (r, base) => (r.coachNow ? 1 : base) * (1 + 2 * (tr.coached[r.id] || 0));
-  const coachIt = (r) => { tr.coached[r.id] = (tr.coached[r.id] || 0) + 1; tr.coachedAt[r.id] = nowMs; tr.dynStreak[r.id] = 0; coaching.push(r); };
+  // (with what was MEASURED — the AI coach words the correction from it: the value, the side)
+  const coachIt = (r, measured = null, side = null) => { tr.coached[r.id] = (tr.coached[r.id] || 0) + 1; tr.coachedAt[r.id] = nowMs; tr.dynStreak[r.id] = 0; coaching.push({ ...r, measured, side }); };
   // (a peak is short: ≥ REP_ERR_FRAMES frames in this rep, not the full hold time)
   for (const r of hits) {
     tr.repErr[r.id] = (tr.repErr[r.id] || 0) + 1;
@@ -351,7 +352,7 @@ export function updateExecution(tracker, landmarks, nowMs) {
         if (r.severity !== 'error' || !judged(r)) continue;
         if ((tr.repErr[r.id] || 0) >= REP_ERR_FRAMES) {
           tr.dynStreak[r.id] = (tr.dynStreak[r.id] || 0) + 1;
-          if (tr.dynStreak[r.id] >= need(r, STATIC_COACH_AFTER) && canCoach(r.id)) coachIt(r);
+          if (tr.dynStreak[r.id] >= need(r, STATIC_COACH_AFTER) && canCoach(r.id)) coachIt(r, tr.repWorst[r.id] ?? null, ev.side || null);
         } else tr.dynStreak[r.id] = 0;
       }
       tr.repErr = {}; tr.repJudged = {}; tr.repWorst = {};
@@ -365,7 +366,7 @@ export function updateExecution(tracker, landmarks, nowMs) {
         tr.dynActive[r.id] = { rule: r, until: nowMs + DYNAMIC_SHOW_MS, value: ev[r.feature] };
         tr.dynStreak[r.id] = (tr.dynStreak[r.id] || 0) + 1;
         // a technique error of the movement itself (coachNow) is corrected RIGHT AFTER the first time
-        if (tr.dynStreak[r.id] >= need(r, COACH_AFTER) && canCoach(r.id)) coachIt(r);
+        if (tr.dynStreak[r.id] >= need(r, COACH_AFTER) && canCoach(r.id)) coachIt(r, ev[r.feature], ev.side || null);
       } else if (typeof ev[r.feature] === 'number') {
         tr.dynStreak[r.id] = 0;
       }
@@ -380,7 +381,7 @@ export function updateExecution(tracker, landmarks, nowMs) {
     for (const r of issues) {
       if (r.severity !== 'error' || !(profile.rules || []).includes(r)) continue;
       const heldMs = nowMs - (tr.ruleSince[r.id] ?? nowMs);
-      if (heldMs >= HOLD_COACH_MS && canCoach(r.id) && nowMs - (tr.coachedAt[r.id] ?? -1e9) >= HOLD_RECOACH_GAP_MS) coachIt(r);
+      if (heldMs >= HOLD_COACH_MS && canCoach(r.id) && nowMs - (tr.coachedAt[r.id] ?? -1e9) >= HOLD_RECOACH_GAP_MS) coachIt(r, metrics[r.metric] ?? null);
     }
   }
   for (const [id, d] of Object.entries(tr.dynActive)) {

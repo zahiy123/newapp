@@ -3,6 +3,7 @@ import { applySideCorrection } from '../services/anatomyDiagnosis.js';
 import { generateWeek, generateTips, analyzeMovement, generateWorkoutSummary, getLocalFallbackWeek, generateRealtimeFeedback, adaptWorkout, analyzeRepFrames, analyzeAnatomy, verifyScan } from '../services/claude.js';
 import { analyzeGameFrames, analyzeVARFrame } from '../services/gameAnalysis.js';
 import { analyzeEnvironment } from '../services/environmentAnalysis.js';
+import { generateCue, generateDebrief } from '../services/liveCoach.js';
 
 const router = Router();
 
@@ -193,6 +194,29 @@ router.post('/realtime-feedback', async (req, res) => {
     res.json({ feedback: '', isUrgent: false });
   } finally {
     realtimeInFlight.delete(key);
+  }
+});
+
+// === THE COACH'S WORDS, BY CLAUDE, FROM THE MEASURED FACTS (owner, 2026-10-19) ===
+// live-cue: one short sideline correction during the set; set-debrief: the rest's expert analysis.
+// An empty answer = the device says its own measured line (never silence on a correction).
+router.post('/live-cue', async (req, res) => {
+  const key = `cue-${String(req.body?.name || '')}`;
+  if (shouldThrottle(key, 1500)) return res.json({ cue: null });
+  try {
+    res.json({ cue: await generateCue(req.body || {}) });
+  } catch (error) {
+    console.error('[COACH] /live-cue ERROR:', error.message);
+    res.json({ cue: null });
+  }
+});
+
+router.post('/set-debrief', async (req, res) => {
+  try {
+    res.json({ debrief: await generateDebrief(req.body || {}) });
+  } catch (error) {
+    console.error('[COACH] /set-debrief ERROR:', error.message);
+    res.json({ debrief: null });
   }
 });
 

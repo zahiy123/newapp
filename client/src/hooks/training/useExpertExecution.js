@@ -36,6 +36,8 @@ import { variationProfile } from '../../engine/catalog/catalog';
 import { applySportContext } from '../../engine/sports/sportLibrary';
 import { createExecutionTracker, updateExecution, calibrateUpright, stableUpright, resetSetLog } from '../../engine/exercise/profileEvaluator';
 import { liveCue } from '../../engine/coachBrain/policy';
+import { cueFacts } from '../../engine/coachBrain/aiFacts';
+import { aiCue } from '../../utils/aiCoach';
 import {
   createStartGate, updateStartGate, isStartPosition, isValidRep, updateWork, withDrive, startPositionPrompt, READY_DRIVE,
 } from '../../engine/training/coachFlow';
@@ -199,6 +201,29 @@ export function useExpertExecution({
       setRepAccuracy(Math.round(repScores.reduce((x, y) => x + y, 0) / repScores.length));
     };
     brainRef.current = brain;
+    // THE COACH'S WORDS BY THE AI (owner, 2026-10-19): a correction is worded by the AI coach from the
+    // measured facts (the value, the side, the rep, how often); the device's own measured line only when
+    // the AI is late / unreachable. One cue at a time; never after the set ended; never the same words twice
+    let disposed = false; let cueInFlight = false;
+    const recentCues = [];
+    const sayCorrection = (rule, localText, rate, he) => {
+      const local = () => { holdSpeech(estimateSpeechMs(localText, rate)); speakRef.current?.(localText, { rate }); recentCues.push(localText); };
+      if (!rule || cueInFlight) { local(); return; }
+      cueInFlight = true;
+      const facts = cueFacts({
+        rule, profile, lp: limbProfile || {}, exercise: exerciseName, sport: contextsKey,
+        name: nameRef.current, he, rep: repCountRef.current || null, times: tracker.log?.rules?.[rule.id]?.n ?? null, recent: recentCues,
+      });
+      aiCue(facts).then((ai) => {
+        cueInFlight = false;
+        if (disposed || !countingRef.current) return;
+        const text = ai || localText;
+        recentCues.push(text);
+        if (recentCues.length > 8) recentCues.shift();
+        holdSpeech(estimateSpeechMs(text, rate));
+        speakRef.current?.(text, { rate });
+      });
+    };
     setIssue(null); setAccuracy(null); setCadence(null); setUnsure(null); setSetup(null); setReadyFlash(null);
 
     const id = setInterval(() => {
@@ -355,9 +380,9 @@ export function useExpertExecution({
               lastVoice = now;
               if (say.kind === 'correction') statsRef.current.coached.push(coach?.id || say.kind);
               // a correction is never cut in the middle (field video: the rep count cut it) — the count
-              // waits in the queue and plays right after it
-              holdSpeech(estimateSpeechMs(say.text, say.rate));
-              speakRef.current?.(say.text, { rate: say.rate });
+              // waits in the queue and plays right after it; a technique line is worded by the AI coach
+              if (say.rule && (say.kind === 'correction' || say.kind === 'forecast')) sayCorrection(say.rule, say.text, say.rate, he);
+              else { holdSpeech(estimateSpeechMs(say.text, say.rate)); speakRef.current?.(say.text, { rate: say.rate }); }
             }
           }
           const learned = brainPolicyToSave(brain);
@@ -365,8 +390,8 @@ export function useExpertExecution({
         } else if (coach && !r.danger && now - lastVoice > COACH_VOICE_GAP_MS) {
           lastVoice = now;
           statsRef.current.coached.push(coach.id);
-          // during the set: the short sideline cue (the full why / how is the rest's debrief)
-          speakRef.current?.(liveCue(coach, he), { rate: 1.1 });
+          // during the set: the short sideline cue, worded by the AI (the full why / how is the rest's debrief)
+          sayCorrection(coach, liveCue(coach, he), 1.1, he);
         }
       } catch (err) {
         console.error('[ExpertExecution] disabled after a runtime error — falling back to the previous pipeline:', err);
@@ -377,6 +402,7 @@ export function useExpertExecution({
     }, TICK_MS);
 
     return () => {
+      disposed = true;
       clearInterval(id);
       inViewRef.current = true;
       startReadyRef.current = true;

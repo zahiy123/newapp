@@ -147,7 +147,7 @@ export function brainDecide(brain, c) {
     brain.cues = (brain.cues || 0) + 1;
     // warm: the trainee's name on every third cue
     const named = c.name && brain.cues % 3 === 1 && style !== 'calm' ? `${c.name}, ` : '';
-    return { text: named + renderCorrection(rule, style, he), kind: 'correction', rate: situation === 'frustrated' ? 0.95 : 1.1, style };
+    return { text: named + renderCorrection(rule, style, he), kind: 'correction', rate: situation === 'frustrated' ? 0.95 : 1.1, style, rule };
   }
   if (brain.intentNote) {
     const n = brain.intentNote;
@@ -160,7 +160,7 @@ export function brainDecide(brain, c) {
     brain.lastForecastId = fid; brain.lastForecastAttempt = brain.attempts;
     const rule = withExternal(brain.rules[fid]);
     const cue = rule.external ? (he ? rule.external.he : rule.external.en) : (he ? rule.msg?.he : rule.msg?.en);
-    return { text: he ? `בחזרה הבאה — ${cue}` : `Next one — ${cue}`, kind: 'forecast', rate: 1.05 };
+    return { text: he ? `בחזרה הבאה — ${cue}` : `Next one — ${cue}`, kind: 'forecast', rate: 1.05, rule };
   }
   if ((state.frustration >= 0.5 || state.fatigue >= 0.5) && c.now - brain.lastMentalAt >= MENTAL_EVERY_MS) {
     const top = topError(brain);

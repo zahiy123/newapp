@@ -44,25 +44,44 @@ export const GOOD_BY_MEASURE = Object.freeze({
 const measureOf = (r) => r.metric || r.feature;
 const avg = (a) => (a.length ? a.reduce((x, y) => x + y, 0) / a.length : null);
 
+/** The target of a rule in words (degree measures only; null otherwise). */
+export function targetText(r, profile, he = true) {
+  if (!DEG.has(measureOf(r))) return null;
+  const j = profile?.joints?.[measureOf(r)];
+  if (r.when === 'peak' && j?.peak) return he ? `בין ${j.peak[0]} ל-${j.peak[1]} מעלות` : `${j.peak[0]}–${j.peak[1]}°`;
+  return r.op === '>' ? (he ? `עד ${r.value} מעלות` : `up to ${r.value}°`) : (he ? `לפחות ${r.value} מעלות` : `at least ${r.value}°`);
+}
+/** A measured value worth saying (degrees only), rounded; null otherwise. */
+export const sayableValue = (r, v) => (typeof v === 'number' && DEG.has(measureOf(r)) ? Math.round(v) : null);
+
 /** "the knee reached 128° on average; the target at the bottom: 65–105°" (degrees only; null otherwise). */
 export function measuredLine(r, values, profile, he = true) {
-  const m = measureOf(r);
   const v = avg(values);
-  if (v === null || !DEG.has(m)) return null;
+  const target = targetText(r, profile, he);
+  if (v === null || !target) return null;
   const val = Math.round(v);
-  const j = profile?.joints?.[m];
-  let target;
-  if (r.when === 'peak' && j?.peak) target = he ? `בין ${j.peak[0]} ל-${j.peak[1]} מעלות` : `${j.peak[0]}–${j.peak[1]}°`;
-  else target = r.op === '>' ? (he ? `עד ${r.value} מעלות` : `up to ${r.value}°`) : (he ? `לפחות ${r.value} מעלות` : `at least ${r.value}°`);
   return he ? `מדדתי בממוצע ${val} מעלות; היעד: ${target}` : `I measured ${val}° on average; the target: ${target}`;
+}
+
+/** The set's faults (safety first, then how often) and its measured-clean strengths. */
+export function analyzeLog(log, he = true) {
+  const entries = Object.values(log?.rules || {}).filter(e => e.judged > 0);
+  const faults = entries.filter(e => e.n > 0)
+    .sort((a, b) => ((a.rule.severity === 'danger' ? 0 : 1) - (b.rule.severity === 'danger' ? 0 : 1)) || (b.n / b.judged - a.n / a.judged) || (b.n - a.n));
+  // (never praise a measure that had an error this set — a clean "too deep" is not a full range)
+  const enough = Math.max(3, Math.ceil(0.5 * (log?.attempts || 0)));
+  const faulted = new Set(faults.map(e => measureOf(e.rule)));
+  const goods = [...new Set(entries.filter(e => e.n === 0 && e.judged >= enough && !faulted.has(measureOf(e.rule)))
+    .map(e => L(GOOD_BY_MEASURE[measureOf(e.rule)], he)).filter(Boolean))].slice(0, 2);
+  return { faults, goods };
 }
 
 const howOf = (r, he) => L(r.how, he) || L(EXTERNAL_CUES[measureOf(r)], he) || '';
 
 /**
- * The rest's analysis.
+ * The rest's analysis (the device's own — used when the AI coach cannot answer in time).
  * @param {{ log?, profile?, reps?: number, accuracy?: number|null, setNo?: number, he?: boolean, name?: string,
- *           legacy?: { counts: Object<string, number>, reps?: number }|null, whyOf?: (text) => {he,en}|null,
+ *           legacy?: { counts: Object<string, number> }|null, whyOf?: (text) => {he,en}|null,
  *           lastSet?: boolean, extra?: string[] }} o
  * @returns {{ speech: string, card: { headline: string, items: Array<{ kind: 'fix'|'note'|'good'|'focus', title: string, detail?: string[] }> } }}
  */
@@ -98,9 +117,7 @@ export function buildDebrief(o) {
   }
 
   // 2–3. The fixes, from the measured log (safety first, then how often)
-  const entries = Object.values(log?.rules || {}).filter(e => e.judged > 0);
-  const faults = entries.filter(e => e.n > 0)
-    .sort((a, b) => ((a.rule.severity === 'danger' ? 0 : 1) - (b.rule.severity === 'danger' ? 0 : 1)) || (b.n / b.judged - a.n / a.judged) || (b.n - a.n));
+  const { faults, goods } = analyzeLog(log, he);
   let focus = null;
   if (faults.length) {
     const e = faults[0], r = e.rule;
@@ -132,12 +149,7 @@ export function buildDebrief(o) {
     said.push(`${title}.`, ...detail.map(d => `${d}.`));
   }
 
-  // 4. What was good — measured clean in enough attempts (never invented)
-  const enough = Math.max(3, Math.ceil(0.5 * (log?.attempts || 0)));
-  // (never praise a measure that had an error this set — a clean "too deep" is not a full range)
-  const faulted = new Set(faults.map(e => measureOf(e.rule)));
-  const goods = [...new Set(entries.filter(e => e.n === 0 && e.judged >= enough && !faulted.has(measureOf(e.rule)))
-    .map(e => L(GOOD_BY_MEASURE[measureOf(e.rule)], he)).filter(Boolean))].slice(0, 2);
+  // 4. What was good — measured clean in enough attempts (never invented; analyzeLog)
   if (goods.length) {
     const t = (he ? 'מה היה טוב: ' : 'What was good: ') + goods.join(he ? ', ו' : ', and ');
     items.push({ kind: 'good', title: t });

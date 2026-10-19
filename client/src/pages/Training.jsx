@@ -43,6 +43,8 @@ import VirtualBall from '../components/VirtualBall';
 import { useVoiceProsody } from '../hooks/useVoiceProsody';
 import { brainSummary, brainBall } from '../engine/coachBrain/brain';
 import { buildDebrief } from '../engine/coachBrain/debrief';
+import { debriefFacts, legacyCueFacts } from '../engine/coachBrain/aiFacts';
+import { aiCue, aiDebrief } from '../utils/aiCoach';
 import { kickingSide } from '../engine/incomingBall';
 import { ballModeFor, virtualBallWanted, handSide, ballLook, realBallInPlay } from '../engine/virtualBall';
 import { rebuildPlanFromCatalog, planContext } from '../engine/catalog/planBuilder';
@@ -578,6 +580,8 @@ export default function Training() {
   const [setGrade, setSetGrade] = useState(null); // { grade: 'A+', color: '#...' }
   const [restDebrief, setRestDebrief] = useState(null);   // the rest's analysis card (debrief.js)
   const legacySetLogRef = useRef({ counts: {} });   // the older analyzers' corrections seen in this set
+  const legacyCuesRef = useRef([]);                  // the AI coach's recent words (never the same twice)
+  const debriefSeqRef = useRef(0);                   // the rest analysis in flight (a newer set wins)
   const gradeTimerRef = useRef(null);
 
   // Feedback tracking
@@ -1550,9 +1554,17 @@ export default function Training() {
           // during the set: the analyzer's own short correction (the full why / how is the rest's debrief)
           const what = isHe ? wfb.text : (wfb.textEn || wfb.text);
           legacySetLogRef.current.counts[wfb.text] = (legacySetLogRef.current.counts[wfb.text] || 0) + 1;
-          holdSpeech(Math.round(what.length / 14 * 1000) + 400);
-          speakPriority(what, { rate: 1.1 });
           setFeedback({ type: 'warning', text: what });
+          // worded by the AI coach from what the analyzer saw; its own short line only if the AI is late
+          const recent = legacyCuesRef.current;
+          aiCue(legacyCueFacts({ text: wfb.text, why: techniqueWhy(wfb.text), exercise: currentExercise?.name || '', sport: sportContexts.join('+'), lp: limbProfile || {}, name: playerName, he: isHe, recent }))
+            .then((ai) => {
+              if (phaseRef.current !== PHASE.EXERCISING) return;
+              const line = ai || what;
+              recent.push(line); if (recent.length > 8) recent.shift();
+              holdSpeech(Math.round(line.length / 14 * 1000) + 400);
+              speakPriority(line, { rate: 1.1 });
+            });
           lastWarningRef.current = null;
           setTimeout(() => {
             formStoppedRef.current = false;
@@ -2791,16 +2803,38 @@ export default function Training() {
     const lastSet = currentSet >= totalSets;
     const nextLeg = !lastSet && currentExercise?.sideSwitch && currentExercise.splitBy === 'set'
       ? legSetNextText(limbProfile, isHe, currentExercise.splitMode, currentSet + 1) : null;
+    let debriefExtras = [];
     const debrief = buildDebrief({
       log: execution.setLogRef?.current || null, profile: execution.profile, reps: displayReps, accuracy: setAcc,
       setNo: currentSet, he: isHe, name: playerName, lastSet,
       legacy: legacySetLogRef.current, whyOf: techniqueWhy,
       // the coach brain's one mental cue for the rest (fatigue / frustration) closes the analysis
-      extra: [nextLeg, lastSet ? t('training.allSetsComplete') : null, (() => { const m = FEATURES.COACH_BRAIN && execution.brainRef?.current ? brainSummary(execution.brainRef.current, voiceEffortRef.current)?.adaptation?.mental : null; return m ? (isHe ? m.he : m.en) : null; })()],
+      extra: debriefExtras = [nextLeg, lastSet ? t('training.allSetsComplete') : null, (() => { const m = FEATURES.COACH_BRAIN && execution.brainRef?.current ? brainSummary(execution.brainRef.current, voiceEffortRef.current)?.adaptation?.mental : null; return m ? (isHe ? m.he : m.en) : null; })()],
     });
-    setRestDebrief(debrief.card);
-    speakPriority(debrief.speech, { rate: 1.0 });
-    const debriefSec = Math.ceil(debrief.speech.length / 14) + 8;
+    // the AI coach analyses the set from its measured log (Opus — the expert in the locker room); the
+    // card says it is analysing; when the AI is late / unreachable the device's own analysis is said
+    const seq = ++debriefSeqRef.current;
+    const setEndedAt = Date.now();
+    setRestDebrief({ pending: true, items: [{ kind: 'note', title: isHe ? 'המאמן מנתח את הסט…' : 'The coach is analysing the set…' }] });
+    const facts = debriefFacts({
+      log: execution.setLogRef?.current || null, profile: execution.profile, reps: displayReps, accuracy: setAcc,
+      setNo: currentSet, lastSet, he: isHe, name: playerName, exercise: currentExercise?.name || '',
+      sport: sportContexts.join('+'), lp: limbProfile || {}, legacy: legacySetLogRef.current, whyOf: techniqueWhy,
+      extras: debriefExtras,
+    });
+    aiDebrief(facts).then((ai) => {
+      if (seq !== debriefSeqRef.current) return;                    // a newer set / exercise took over
+      // (the screen may still be switching to the rest when an instant answer arrives)
+      const inRest = phaseRef.current === PHASE.RESTING || phaseRef.current === PHASE.EXERCISE_DONE || Date.now() - setEndedAt < 2000;
+      if (!inRest) return;
+      const speech = ai?.speech || debrief.speech;
+      setRestDebrief(ai?.card?.length ? { items: ai.card } : debrief.card);
+      speakPriority(speech, { rate: 1.0 });
+      // the rest lasts long enough to hear the whole analysis (+ a breath)
+      const need = Math.ceil(speech.length / 14) + 6;
+      setRestTime(prev => (phaseRef.current === PHASE.RESTING ? Math.max(prev, need) : prev));
+    });
+    const debriefSec = 20;                                          // the AI's time to answer + the start of the analysis
 
     // Level-Up check for 51+ longevity athletes
     const playerAge = userProfile?.age;
