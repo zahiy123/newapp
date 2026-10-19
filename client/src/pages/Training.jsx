@@ -1485,7 +1485,9 @@ export default function Training() {
 
     // === HEAD-DOWN: Only for ball sports (football, basketball, tennis) — NOT fitness ===
     const isBallSport = analyzerRef.current?.ballAware || ['football', 'footballAmputee', 'basketball', 'tennis'].includes(userProfile?.sport);
-    if (isBallSport && firstRepStarted && newState.headDown) {
+    // (not in an exercise the expert / AI coach guides: in a pass the eyes ARE on the ball at contact —
+    // "head up, look at the field" contradicted the technique; field video 2026-10-19)
+    if (isBallSport && firstRepStarted && newState.headDown && !expertCoachesRef.current) {
       headDownCountRef.current++;
       const now = Date.now();
       if (headDownCountRef.current >= 5 && now - lastHeadUpWarningRef.current > 10000) {

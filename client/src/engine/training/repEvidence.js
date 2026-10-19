@@ -140,21 +140,32 @@ export function evidenceRange(ev, returnShare = RETURN_SHARE) {
  * A KICK / PASS stands in place: the pelvis stays put (≤ KICK_MAX_TRAVEL torsos) and ONE leg kicks —
  * the other leg's knee stays steady (≤ KICK_OTHER_KNEE_DEG). Walking moves the pelvis and both legs.
  */
-export const KICK_MAX_TRAVEL = 0.25;
-export const KICK_OTHER_KNEE_DEG = 20;
+// Field video 2026-10-19: judged over the whole evidence window (up to 8 s) with "the support knee moves
+// ≤ 20°", every pass was rejected — a foot adjusted seconds before, the support knee's natural bend and the
+// prosthetic knee's measurement noise. A coach judges THE kick: the last KICK_WINDOW_MS, robust ranges
+// (10th–90th percentile, no single-frame spike), the kicking knee clearly dominating; walking still fails
+// (the pelvis travels, both legs alternate with similar ranges).
+export const KICK_WINDOW_MS = 1200;
+export const KICK_MAX_TRAVEL = 0.35;
+export const KICK_OTHER_KNEE_DEG = 25;
+export const KICK_DOMINANCE = 0.6;          // the support knee's range ≤ this share of the kicking knee's
+const spread = (v) => { if (v.length < 2) return 0; const s2 = [...v].sort((a, b) => a - b); const q = (p) => s2[Math.round(p * (s2.length - 1))]; return q(0.9) - q(0.1); };
 export function kickInPlace(ev) {
-  const fr = ev?.frames || [];
+  const all = ev?.frames || [];
+  const tEnd = all.length ? all[all.length - 1].t : 0;
+  const fr = all.filter(f => tEnd - f.t <= KICK_WINDOW_MS);
   const hips = fr.map(f => f.hip).filter(Boolean);
   const torsos = fr.map(f => f.torso).filter(Number.isFinite);
   const torso = torsos.length ? torsos.reduce((a, b) => a + b, 0) / torsos.length : null;
   if (hips.length >= 2 && torso) {
-    const travel = Math.hypot(Math.max(...hips.map(h => h.x)) - Math.min(...hips.map(h => h.x)), Math.max(...hips.map(h => h.y)) - Math.min(...hips.map(h => h.y)));
+    const travel = Math.hypot(spread(hips.map(h => h.x)), spread(hips.map(h => h.y)));
     if (travel > KICK_MAX_TRAVEL * torso) return false;
   }
   // knees: indices 6 (left) / 7 (right) — the kicking knee is the one that moved most
-  const range = (j) => { const v = fr.map(f => f.a[j]).filter(x => typeof x === 'number'); return v.length >= 2 ? Math.max(...v) - Math.min(...v) : 0; };
+  const range = (j) => spread(fr.map(f => f.a[j]).filter(x => typeof x === 'number'));
   const l = range(6), r = range(7);
-  return Math.min(l, r) <= KICK_OTHER_KNEE_DEG;
+  const kick = Math.max(l, r), other = Math.min(l, r);
+  return other <= Math.max(KICK_OTHER_KNEE_DEG, KICK_DOMINANCE * kick);
 }
 
 /** Does the movement since the last counted rep prove a real rep (range + velocity + trajectory + flow)? */

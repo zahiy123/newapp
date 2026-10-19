@@ -35,13 +35,20 @@ describe('the contact surface of a pass / kick — told precisely', () => {
     expect(c.footOpen).toBeGreaterThan(0.45);
     expect(c.ankleDeg).toBeGreaterThan(140);
   });
-  it('foot pointing at the camera: toes level = a toe-poke; toes dropped = the laces', () => {
-    const toe = strikeContact(leg([0.55, 0.9], [0.555, 0.91]), 'right');
+  it('foot pointing at the camera: judged against the OWN standing foot of the trainee (toes level = a toe-poke; dropped = the laces)', () => {
+    const base = 0.05;                                            // this foot standing flat
+    const toe = strikeContact(leg([0.55, 0.9], [0.555, 0.91]), 'right', base);
     expect(toe.contactToe).toBe(1);
     expect(toe.contactLaces).toBe(0);
-    const laces = strikeContact(leg([0.55, 0.89], [0.556, 0.99]), 'right');
+    const laces = strikeContact(leg([0.55, 0.89], [0.556, 0.99]), 'right', base);
     expect(laces.contactLaces).toBe(1);
     expect(laces.contactToe).toBe(0);
+  });
+  it('a camera above looking down: a flat foot reads "toes low" — relative to the standing foot it is NOT the laces', () => {
+    const highCamBase = 0.2;                                      // the same flat foot, standing, from above
+    const flat = strikeContact(leg([0.55, 0.89], [0.556, 0.99]), 'right', highCamBase);
+    expect(flat.contactLaces).toBe(0);
+    expect(strikeContact(leg([0.55, 0.89], [0.556, 0.99]), 'right').contactLaces).toBeNull();   // no reference → not judged
   });
   it('the pass judges toes / laces / the ankle; the laces kick judges a toe-poke — frontal, right after the rep', () => {
     const ids = EXPERT_PROFILES.shadowPass.dynamics.map(d => d.id);

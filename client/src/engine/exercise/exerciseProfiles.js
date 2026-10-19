@@ -593,7 +593,7 @@ RAW_EXPERT.shadowPass = {
       msg: msg('פגעת עם החלק המלא של כף הרגל — השרוכים. במסירה פותחים את כף הרגל ופוגשים עם הפנים', 'You struck with the full instep — the laces. In a pass, open the foot and meet the ball with the inside'),
       why: msg('השרוכים נותנים כוח, לא כיוון — הכדור יוצא חזק אבל לא מדויק. פנים כף הרגל נותן משטח רחב וכיוון שליטה', 'The laces give power, not direction — the ball goes hard but off target. The inside of the foot gives a wide surface and control'),
       how: msg('ברך הרגל הבועטת פונה החוצה, כף הרגל בזווית ישרה לכיוון המסירה, והתנועה קצרה — כמו מטוטלת', 'The kicking knee turns out, the foot square to the pass direction, and a short swing — like a pendulum') },
-    { id: 'pass_ankle', on: 'strike', feature: 'ankleDeg', op: '>', value: 140, severity: 'error', view: 'front', coachNow: true,
+    { id: 'pass_ankle', on: 'strike', feature: 'ankleDeg', op: '>', value: 150, severity: 'error', view: 'front', coachNow: true,
       cue: msg('נעל את הקרסול — אצבעות למעלה!', 'Lock the ankle — toes up!'),
       msg: msg('הקרסול לא נעול — האצבעות צנחו למטה ברגע המגע. נעל את הקרסול, אצבעות למעלה', 'The ankle is not locked — the toes dropped at contact. Lock the ankle, toes up'),
       why: msg('קרסול רפוי בולע את המכה — הכדור יוצא חלש ובכיוון לא צפוי. קרסול נעול הופך את כף הרגל למשטח קשיח ויציב', 'A loose ankle absorbs the strike — the ball comes off weak and unpredictable. A locked ankle makes the foot a firm, stable surface'),

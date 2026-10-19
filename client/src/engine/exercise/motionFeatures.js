@@ -76,6 +76,8 @@ export function createMotionState(profile, lp = {}) {
     pendingLandings: [],
     contacts: [],
     lastStrikeAt: -Infinity,
+    footBase: { left: [], right: [] },      // the standing foot's toe drop (its own reference, per side)
+    lastAnkle: { left: null, right: null },
     lastWindowAt: 0,
   };
 }
@@ -117,7 +119,8 @@ function speedAt(hist, i, side, metric, dir) {
  * @returns {{ footOpen, ankleDeg, toeDrop, contactToe, contactLaces }} (null fields when not seen)
  */
 export const OPEN_FOOT = 0.45, CLOSED_FOOT = 0.35, LACES_DROP = 0.18, TOE_DROP = 0.1;
-export function strikeContact(landmarks, side) {
+export const LACES_DELTA = 0.12, TOE_DELTA = 0.04;   // toes pointed down vs. level, relative to the standing foot
+export function strikeContact(landmarks, side, base = null) {
   const out = { footOpen: null, ankleDeg: null, toeDrop: null, contactToe: null, contactLaces: null };
   const [hip, knee, ankle, toe] = side === 'left' ? [23, 25, 27, 31] : [24, 26, 28, 32];
   const ok = (p) => p && (p.visibility ?? 1) >= 0.6;
@@ -134,10 +137,23 @@ export function strikeContact(landmarks, side) {
   }
   if (open < CLOSED_FOOT && leg > 1e-4) {
     out.toeDrop = (T.y - A.y) / leg;
-    out.contactLaces = out.toeDrop >= LACES_DROP ? 1 : 0;
-    out.contactToe = out.toeDrop < TOE_DROP ? 1 : 0;
+    // judged RELATIVE to this trainee's own foot standing still (a camera above, looking down, shows a
+    // flat foot's toes "lower" — field video 2026-10-19); with no standing reference: not judged
+    if (typeof base === 'number') {
+      const d = out.toeDrop - base;
+      out.contactLaces = d >= LACES_DELTA ? 1 : 0;
+      out.contactToe = d < TOE_DELTA ? 1 : 0;
+    }
   }
   return out;
+}
+
+/** The standing foot's toe-drop reference (median of its still frames), or null before enough of them. */
+export function footBaseOf(ms, side) {
+  const b = ms?.footBase?.[side] || [];
+  if (b.length < 8) return null;
+  const v = [...b].sort((x, y) => x - y);
+  return v[Math.floor(v.length / 2)];
 }
 
 /**
@@ -183,6 +199,15 @@ export function updateMotion(ms, landmarks, metrics, t) {
     }
   }
   ms.hist.push(frame);
+  // the standing foot's reference: while a foot is STILL, its toe drop (median of the recent still frames)
+  for (const s of SIDES) {
+    const a = frame.ankles[s], prev = ms.lastAnkle?.[s];
+    if (a && prev && Math.hypot(a.x - prev.x, a.y - prev.y) < 0.004) {
+      const c = strikeContact(landmarks, s);
+      if (typeof c.toeDrop === 'number') { const b = ms.footBase[s]; b.push(c.toeDrop); if (b.length > 60) b.shift(); }
+    }
+    if (ms.lastAnkle) ms.lastAnkle[s] = a ? { x: a.x, y: a.y } : null;
+  }
   while (ms.hist.length && t - ms.hist[0].t > HISTORY_MS) ms.hist.shift();
 
   // ---- 1. Rep tempo + per-rep control ----
@@ -294,7 +319,7 @@ export function updateMotion(ms, landmarks, metrics, t) {
         distalSpeed: v0,
         balance: plant && c ? Math.abs(c.x - plant.x) * frameAspect() / scale : null,
         trunkLean: ms.hist[n - 2].lean,
-        ...strikeContact(landmarks, s),          // footOpen, ankleDeg, toeDrop, contactToe, contactLaces
+        ...strikeContact(landmarks, s, footBaseOf(ms, s)),   // footOpen, ankleDeg, toeDrop, contactToe, contactLaces
       });
       ms.lastStrikeAt = t;
       break;

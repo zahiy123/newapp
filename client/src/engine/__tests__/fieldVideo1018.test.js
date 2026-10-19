@@ -167,3 +167,37 @@ describe('field video 2026-10-19: a pass starts from the ready stance, not from 
     expect(startPositionPrompt(0, '', true, 'strike')).toContain('ליד הכדור');
   });
 });
+
+import { KICK_WINDOW_MS } from '../training/repEvidence';
+
+describe('field video 2026-10-19 (counter stayed 0): a real pass counts even with a bending, noisy support knee', () => {
+  const frame = (hipX, kL, kR) => {
+    const lm = body({ kneeDeg: 178 });
+    const dx = hipX - 0.5;
+    const out = lm.map(p => ({ ...p, x: p.x + dx }));
+    const bend = (i1, i2, deg) => { const t = ((180 - deg) * Math.PI) / 180; out[i2] = { ...out[i2], x: out[i1].x - 0.2 * Math.sin(t), y: out[i1].y + 0.2 * Math.cos(t) }; };
+    bend(25, 27, kL); bend(26, 28, kR);
+    return out;
+  };
+  it('the support (prosthetic) knee bends ~25° and its reading jitters ±10° — the pass is accepted', () => {
+    const ev = createRepEvidence('legs');
+    let t = 0;
+    const kick = [178, 150, 115, 85, 120, 160, 178];
+    kick.forEach((k, i) => evidenceFrame(ev, frame(0.5, 160 - (i === 3 ? 25 : 0) + (i % 2 ? 10 : -10), k), (t += 100)));
+    expect(kickInPlace(ev)).toBe(true);
+  });
+  it('a foot adjusted seconds BEFORE the pass does not cancel it (only the kick itself is judged)', () => {
+    const ev = createRepEvidence('legs');
+    let t = 0;
+    for (let i = 0; i < 10; i++) evidenceFrame(ev, frame(0.35 + i * 0.015, i % 2 ? 140 : 175, i % 2 ? 175 : 140), (t += 120));   // stepping into place
+    t += KICK_WINDOW_MS;                                                                                                   // then standing
+    for (const k of [178, 178, 150, 115, 85, 120, 160, 178]) evidenceFrame(ev, frame(0.5, 172, k), (t += 100));
+    expect(kickInPlace(ev)).toBe(true);
+  });
+  it('walking across the room is still never a pass', () => {
+    const ev = createRepEvidence('legs');
+    let t = 0;
+    for (let i = 0; i < 12; i++) evidenceFrame(ev, frame(0.3 + i * 0.03, i % 2 ? 130 : 175, i % 2 ? 175 : 130), (t += 120));
+    expect(kickInPlace(ev)).toBe(false);
+  });
+});
