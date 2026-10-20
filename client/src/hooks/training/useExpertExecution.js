@@ -38,7 +38,7 @@ import { createExecutionTracker, updateExecution, calibrateUpright, stableUprigh
 import { liveCue } from '../../engine/coachBrain/policy';
 import { jointAngleSide, torsoLength } from '../../engine/exercise/kinematics';
 import { cueFacts } from '../../engine/coachBrain/aiFacts';
-import { aiCue, aiLine, aiPassVision } from '../../utils/aiCoach';
+import { aiCue, aiLine, aiPassVision, aiBodyVision } from '../../utils/aiCoach';
 import { logRule, logJudgedCount } from '../../engine/exercise/profileEvaluator';
 
 // one kick / pass = one count: after a COUNTED kick nothing counts for COUNT_LOCK_MS (its back-swing / return);
@@ -50,6 +50,8 @@ export const REST_ONLY_IDS = new Set(['runInPlace', 'highKnees', 'buttKicks', 'a
 export const restOnlyFeedback = (profile) => !!profile && (profile.kind === 'cyclic' || REST_ONLY_IDS.has(profile.id));
 // the vision model's verdict on a pass, mapped to the pass's own rules (confident findings only)
 export const VISION_CONFIDENCE = 0.75;
+export const VISION_MINOR_CONFIDENCE = 0.6;
+export const VISION_GOOD_CONFIDENCE = 0.65;
 export function visionRuleHits(v, profile) {
   const rule = (id) => [...(profile?.rules || []), ...(profile?.dynamics || [])].find(r => r.id === id) || null;
   const out = [];
@@ -120,8 +122,10 @@ export function buildExecutionProfile(cueKey, exerciseName, limbProfile, sportCo
 export function useExpertExecution({
   enabled, counting = false, quiet = false, cueKey, exerciseName, catalogId = null, sportContexts, limbProfile, landmarksRef,
   isHe, playerName = '', speakPriority, recordClips = false, onClips,
-  brainEnabled = false, effortRef = null, onStrikeSide = null, captureFrameRef = null,
+  brainEnabled = false, effortRef = null, onStrikeSide = null, captureFrameRef = null, bodyFrameRef = null, keyPoints = null,
 }) {
+  const keyPointsRef = useRef(keyPoints);
+  keyPointsRef.current = keyPoints;
   const onStrikeSideRef = useRef(onStrikeSide);
   onStrikeSideRef.current = onStrikeSide;
   const [failed, setFailed] = useState(false);
@@ -239,6 +243,7 @@ export function useExpertExecution({
       const judged = judgedNow > judgedBefore || profile.kind !== 'strike';
       judgedBefore = judgedNow;
       if (profile.kind !== 'strike') {
+        repVerdicts.push({ judged: true, error: (res.issues || []).some(i => i.severity === 'error' || i.severity === 'danger') });
         const a = typeof res.accuracy === 'number' ? res.accuracy : null;
         if (a === null) return;
         repScores.push((res.issues || []).length ? Math.min(a, 60) : a);
@@ -252,29 +257,68 @@ export function useExpertExecution({
     let lastCountAt = -1e9; const strikeTimes = []; let floodUntil = -1e9;
     // the EYES: one frame at the contact of a counted pass → the vision model's verdict (contact surface,
     // ankle lock, …) → the set log, the accuracy and a live cue (confident findings only)
-    let visionBusy = false;
-    const lookAtPass = (repIdx, side) => {
-      if (visionBusy || restOnly || profile.id !== 'shadowPass') return;
-      const frame = captureFrameRef?.current?.();
+    // THE WHOLE-BODY EYES (owner, 2026-10-20): at each counted rep (a hold: every few seconds) the coach LOOKS —
+    // the full raw camera frame (+ a legs close-up in a kick / pass) → a vision model reports what stops a correct
+    // execution anywhere in the body (posture, arms, trunk, head, balance, legs, feet) with severity + confidence.
+    // Confident findings (≥ VISION_CONFIDENCE): a MAJOR one is said at once, every time; a minor one is forgiven once
+    // and said when it comes back; ALL go into the set log → the rest's full analysis. Rest-only drills: logged only.
+    let visionBusy = false; let lastLookAt = -1e9; const visOcc = {}; const visCoached = {};
+    let cleanStreak = 0; let lastPraiseAt = -1e9;
+    const visionRule = (f) => ({
+      id: `vis_${f.code}`, severity: 'error', major: f.severity === 'major', vision: true,
+      msg: { he: f.what, en: f.what }, why: f.why ? { he: f.why, en: f.why } : null, how: f.how ? { he: f.how, en: f.how } : null, cue: { he: f.cue, en: f.cue },
+    });
+    const lookAtRep = (repIdx, side) => {
+      const now0 = performance.now();
+      if (visionBusy || now0 - lastLookAt < 2000) return;
+      const frame = bodyFrameRef?.current?.();
       if (!frame) return;
-      visionBusy = true;
+      const isPass = profile.id === 'shadowPass';
+      const legsFrame = profile.kind === 'strike' ? captureFrameRef?.current?.() : null;
+      visionBusy = true; lastLookAt = now0;
       const he0 = isHeRef.current;
-      aiPassVision({ frame, lang: he0 ? 'he' : 'en', side, exercise: exerciseName, body: bodyText(limbProfile || {}) }).then((v) => {
+      aiBodyVision({ frame, legsFrame, isPass, lang: he0 ? 'he' : 'en', side, exercise: exerciseName, sport: contextsKey,
+        body: bodyText(limbProfile || {}), keyPoints: keyPointsRef.current || [], name: nameRef.current }).then((v) => {
         visionBusy = false;
         if (disposed || !v) return;
-        const hits = visionRuleHits(v, profile);
-        if (!hits.length) return;
+        // the pass's own rules from the contact surface / the ankle (as before)
+        const hits = isPass ? visionRuleHits(v, profile) : [];
         for (const h of hits) logRule(tracker.log, h.rule, h.violated, null);
+        // a MAJOR finding needs high confidence (said at once); a minor one 0.6 — and it is said only when it comes
+        // back (the repetition confirms it, a one-off reading never speaks)
+        const found = (v.findings || []).filter(f => f.confidence >= (f.severity === 'major' ? VISION_CONFIDENCE : VISION_MINOR_CONFIDENCE));
+        for (const f of found) logRule(tracker.log, visionRule(f), true, null);
+        const goods = (v.good || []).filter(g => g.confidence >= VISION_GOOD_CONFIDENCE);
+        const judged = hits.length > 0 || found.length > 0 || goods.length > 0;
         judgedBefore = logJudgedCount(tracker.log);
         const rec = repVerdicts[repIdx];
-        if (rec) { rec.judged = true; rec.error = rec.error || hits.some(h => h.violated); refreshAccuracy(); }
-        const bad = hits.find(h => h.violated);
-        if (bad && countingRef.current && performance.now() >= floodUntil) {
-          console.info(`[Vision] pass #${repIdx + 1}: ${bad.rule.id} (contact ${v.contact?.value}/${v.contact?.confidence}, ankle ${v.ankleLocked?.value}/${v.ankleLocked?.confidence})`);
-          sayCorrection({ ...bad.rule, side }, liveCue(bad.rule, he0), 1.1, he0);
+        const anyBad = hits.some(h => h.violated) || found.length > 0;
+        if (rec && judged) { rec.judged = true; rec.error = rec.error || anyBad; refreshAccuracy(); }
+        console.info(`[Vision] rep #${repIdx + 1}: ${found.map(f => `${f.severity}:${f.code}(${f.confidence})`).join(', ') || 'no finding'} | good: ${goods.map(g => g.text).join(' / ') || '-'}`);
+        if (restOnly || !countingRef.current || performance.now() < floodUntil) return;
+        // what to SAY now: the pass's own rule first, then the most important vision finding — the policy decides
+        const passBad = hits.find(h => h.violated);
+        if (passBad) { sayCorrection({ ...passBad.rule, side }, liveCue(passBad.rule, he0), 1.1, he0); cleanStreak = 0; return; }
+        for (const f of found) {
+          visOcc[f.code] = (visOcc[f.code] || 0) + 1;
+          if (f.severity === 'major' || visCoached[f.code] || visOcc[f.code] >= 2) {
+            visCoached[f.code] = true; cleanStreak = 0;
+            holdSpeech(estimateSpeechMs(f.cue, 1.1));
+            speakRef.current?.(f.cue, { rate: 1.1 });                 // the vision model's own short, specific words
+            return;
+          }
+        }
+        // POSITIVE FEEDBACK (owner, 2026-10-20): measured-good reps earn a genuine, specific praise — sparingly
+        if (!anyBad && judged) cleanStreak += 1; else if (anyBad) cleanStreak = 0;
+        const t = performance.now();
+        if (cleanStreak >= 3 && t - lastPraiseAt > 20000 && goods.length) {
+          lastPraiseAt = t; cleanStreak = 0;
+          sayLine('praise', goods[0].text, 1.1, he0);
         }
       });
     };
+    // a HOLD (a plank, a wall sit): the coach looks every few seconds of the hold
+    let lastHoldLook = -1e9;
     brainRef.current = brain;
     // THE COACH'S WORDS BY THE AI (owner, 2026-10-19): a correction is worded by the AI coach from the
     // measured facts (the value, the side, the rep, how often); the device's own measured line only when
@@ -394,6 +438,7 @@ export function useExpertExecution({
             if (countsReps && profile.kind === 'reps' && isValidRep(ev) && r.quality?.confident !== false && evidenceOk(kinetic, now)) {
               evidenceAccept(kinetic, now); repCountRef.current += 1; earlyRef.current = true;
               noteRepScore(r);
+              lookAtRep(repVerdicts.length ? repVerdicts.length - 1 : 0, null);
             }
             // the reason of every detected kick, in the console (the owner's videos show exactly why it did or did not count)
             if (ev.type === 'strike' && profile.kind === 'strike') {
@@ -426,10 +471,11 @@ export function useExpertExecution({
               noteRepScore(r);
               lastRepCleanRef.current = !(r.issues || []).some(i => i.severity === 'error' || i.severity === 'danger');
               if (kickSide === 'left' || kickSide === 'right') onStrikeSideRef.current?.(kickSide);   // the leg of a REAL counted kick
-              lookAtPass(repVerdicts.length - 1, kickSide);
+              lookAtRep(repVerdicts.length - 1, kickSide);
             }
           }
           if (profile.kind === 'cyclic' && workingRef.current) earlyRef.current = true;
+          if (profile.kind === 'hold' && r.inView && now - lastHoldLook > 6000) { lastHoldLook = now; repVerdicts.push({ judged: false, error: false }); lookAtRep(repVerdicts.length - 1, null); }
         } else if (profile.kind === 'strike' && r.events.some(ev => ev.type === 'strike')) {
           console.info(`[Kick] not counted: counting closed | set running=${!!countingRef.current} inView=${r.inView} started=${startedOnce} positioning=${r.setup?.code || 'ok'}`);
         }

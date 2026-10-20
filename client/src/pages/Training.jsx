@@ -430,6 +430,7 @@ export default function Training() {
   // the rep counter ON THE SCREEN, for the ball (every counted rep plays a ball)
   const displayRepsRef = useRef(0);
   const passFrameRef = useRef(null);               // () => a camera frame (base64 JPEG) for the vision model
+  const bodyFrameRef = useRef(null);               // () => the full raw camera frame (base64 JPEG) for the whole-body eyes
   displayRepsRef.current = displayReps;
   useEffect(() => { if (window.__GHOST_DEBUG) window.__trainingReps = displayReps; }, [displayReps]);
   const [feedback, setFeedback] = useState(null);
@@ -808,16 +809,22 @@ export default function Training() {
   // The count is spoken the moment a rep is done — once per number (per exercise / set)
   const spokenCountRef = useRef({ n: 0 });
   /** Say the rep number right now (cuts an explanation in progress) — each number once. */
+  // the counts are NOT said aloud (owner, 2026-10-20: never cut the coach's words) — the counter on the screen shows
+  // every rep at once; this keeps only the bookkeeping
   function speakCountNow(n) {
     if (!(n > spokenCountRef.current.n)) return;
     spokenCountRef.current.n = n;
-    speakCount(n);
   }
   const alreadySaid = (n) => n <= spokenCountRef.current.n;
   currentExerciseRef.current = currentExercise;
 
   // Stage 3.1 — Expert Execution Profile of the current exercise (isolated module, behind a flag):
   // required limbs in the frame, kinematic errors / danger, accuracy, and the Ghost of the same profile
+  const exerciseKeyPoints = useMemo(() => {
+    if (!currentExercise) return [];
+    const instr = getExerciseInstruction(currentExercise.name, analyzerFor(currentExercise, !!limbProfile?.wheelchair)?.cueKey);
+    return [...(instr?.steps || []), instr?.safety || currentExercise.tips || ''].filter(Boolean).slice(0, 6);
+  }, [currentExercise?.name, limbProfile?.wheelchair]);
   const exerciseCueKey = useMemo(
     () => (currentExercise ? analyzerFor(currentExercise, !!limbProfile?.wheelchair).cueKey : null),
     [currentExercise?.name, currentExercise?.analyzerName, limbProfile?.wheelchair],
@@ -867,6 +874,9 @@ export default function Training() {
     onStrikeSide: (side) => handleKickSideRef.current?.(side),
     // the coach's EYES: one camera frame at a pass's contact (the vision model judges the contact surface)
     captureFrameRef: passFrameRef,
+    // the WHOLE body for the eyes + the exercise's correct technique (its key points)
+    bodyFrameRef,
+    keyPoints: exerciseKeyPoints,
     effortRef: voiceEffortRef,
   });
   const executionInViewRef = execution.inViewRef;
@@ -1177,7 +1187,7 @@ export default function Training() {
       if (early > 0) {
         setDisplayReps(early);
         spokenCountRef.current.n = early;
-        speakCritical(`${early}! ${line}`, { rate: 1.2 });
+        speakCritical(line, { rate: 1.2 });
       } else {
         speakCritical(line, { rate: 1.2 });
       }
@@ -2722,6 +2732,9 @@ export default function Training() {
     if (!cache.has(exercise.name)) cache.set(exercise.name, aiBriefing(briefingFacts(exercise).facts));
     return cache.get(exercise.name);
   }
+  // keep the AI coach's server WARM (a sleeping server answers its first call seconds late): a ping at each exercise
+  useEffect(() => { if (currentExercise) fetch(apiUrl('/api/health')).catch(() => {}); }, [currentExercise?.name]);
+
   // prepare the briefing of this exercise and the next one in the background (it plays at once)
   useEffect(() => {
     if (!currentExercise) return;
@@ -3001,6 +3014,16 @@ export default function Training() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [displayReps, phase, currentSet, currentIdx]);
 
+  // the WHOLE body at a usable resolution (640 px wide, the raw camera — no overlay drawn on it)
+  bodyFrameRef.current = () => {
+    const v = videoRef.current;
+    if (!v || !v.videoWidth) return null;
+    const k = Math.min(1, 640 / v.videoWidth);
+    const c = document.createElement('canvas');
+    c.width = Math.round(v.videoWidth * k); c.height = Math.round(v.videoHeight * k);
+    c.getContext('2d').drawImage(v, 0, 0, c.width, c.height);
+    try { return c.toDataURL('image/jpeg', 0.7).split(',')[1] || null; } catch { return null; }
+  };
   // the frame for the coach's EYES: the RAW camera (no skeleton / Ghost / ball drawn on it), cropped around the
   // legs and feet at the camera's full resolution — the foot is what the vision model must see clearly
   passFrameRef.current = () => {

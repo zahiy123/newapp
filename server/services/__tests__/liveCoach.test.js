@@ -96,3 +96,18 @@ test('an Anthropic failure is classified for the log and the screen (credit / au
   assert.equal(aiErrorKind(Object.assign(new Error('Overloaded'), { status: 529 })), 'overloaded');
   assert.equal(aiErrorKind(new Error('Request timed out.')), 'timeout');
 });
+
+import { generateBodyVision } from '../liveCoach.js';
+const bigFrame = 'x'.repeat(5000);
+test('the whole-body eyes: findings parsed with guards — no numbers, readable words, at most 3; a broken reply is no finding', async () => {
+  const reply = JSON.stringify({ findings: [
+    { code: 'Arms-Locked!', severity: 'minor', confidence: 0.7, cue: 'פתח ידיים לאיזון', what: 'הידיים צמודות לגוף' },
+    { code: 'bad_num', severity: 'major', confidence: 0.9, cue: 'כופף 30 מעלות', what: 'הברך ב-30 מעלות' },
+  ], good: [{ text: 'רגל התמיכה יציבה', confidence: 0.8 }] });
+  const v = await generateBodyVision({ frame: bigFrame, lang: 'he', exercise: 'מסירה' }, { askFn: async () => reply });
+  assert.equal(v.findings.length, 1);                                  // the one with a number is dropped
+  assert.equal(v.findings[0].code, 'armslocked');
+  assert.equal(v.good[0].text, 'רגל התמיכה יציבה');
+  assert.equal(await generateBodyVision({ frame: bigFrame }, { askFn: async () => '{"findings":[{"code":"x",}]' }), null);
+  assert.equal(await generateBodyVision({ frame: 'tiny' }, { askFn: async () => reply }), null);
+});

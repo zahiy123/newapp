@@ -51,6 +51,12 @@ export async function aiDebrief(facts) {
 export const BRIEFING_DEADLINE_MS = 9500;
 export const VISION_DEADLINE_MS = 6000;
 
+/** The whole-body eyes: { findings:[{code,severity,confidence,cue,what,why,how}], good:[{text,confidence}], contact?, ankleLocked? } or null. */
+export async function aiBodyVision(facts) {
+  const j = await post('/api/coach/body-vision', facts, VISION_DEADLINE_MS + 1000);
+  return j?.vision && typeof j.vision === 'object' ? j.vision : null;
+}
+
 /** The vision model's verdict on one pass frame { contact, ankleLocked, … each { value, confidence } }, or null. */
 export async function aiPassVision(facts) {
   const j = await post('/api/coach/pass-vision', facts, VISION_DEADLINE_MS);

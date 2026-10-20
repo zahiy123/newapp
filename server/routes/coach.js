@@ -3,7 +3,7 @@ import { applySideCorrection } from '../services/anatomyDiagnosis.js';
 import { generateWeek, generateTips, analyzeMovement, generateWorkoutSummary, getLocalFallbackWeek, generateRealtimeFeedback, adaptWorkout, analyzeRepFrames, analyzeAnatomy, verifyScan } from '../services/claude.js';
 import { analyzeGameFrames, analyzeVARFrame } from '../services/gameAnalysis.js';
 import { analyzeEnvironment } from '../services/environmentAnalysis.js';
-import { generateCue, generateDebrief, generateBriefing, generatePassVision, aiErrorKind } from '../services/liveCoach.js';
+import { generateCue, generateDebrief, generateBriefing, generatePassVision, generateBodyVision, aiErrorKind } from '../services/liveCoach.js';
 
 // an Anthropic API failure is LOUD in the log and returned to the screen (never a silent fallback)
 const aiFail = (route, error) => { const kind = aiErrorKind(error); console.error(`[AI] ${route} FAILED (${kind}): ${String(error?.message || error).slice(0, 200)}`); return kind; };
@@ -229,6 +229,16 @@ router.post('/pass-vision', async (req, res) => {
     res.json({ vision: await generatePassVision(req.body || {}) });
   } catch (error) {
     res.json({ vision: null, aiError: aiFail('/pass-vision', error) });
+  }
+});
+
+router.post('/body-vision', async (req, res) => {
+  const key = `body-${String(req.body?.name || '')}`;
+  if (shouldThrottle(key, 800)) return res.json({ vision: null });
+  try {
+    res.json({ vision: await generateBodyVision(req.body || {}) });
+  } catch (error) {
+    res.json({ vision: null, aiError: aiFail('/body-vision', error) });
   }
 });
 

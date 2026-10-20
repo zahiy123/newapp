@@ -100,6 +100,7 @@ Ground rules — never break them:
 const MOMENTS = {
   setup: 'NOW: the trainee is getting into position in front of the camera, maybe in a SMALL ROOM. Say the ONE positioning fix given in "what", in your own words — precise, warm, with authority — at most 12 words, one sentence. Never add another fix.',
   start: 'NOW: the trainee is seen clearly but not yet in the start stance. Tell them, in your own words, exactly what "what" says to do to start — at most 12 words, one sentence, with drive.',
+  praise: 'NOW: the last reps were MEASURED correct. Give ONE short, genuine, specific praise for exactly the good point in "what" — 3 to 7 words, one sentence, warm. Never a generic "good job"; never a number.',
   ready: 'NOW: you can see the trainee clearly and the exercise is about to begin. Tell them so and to start — warm, short, at most 8 words. No technique, no numbers.',
   motivate: 'NOW: a natural moment for ONE genuine, warm encouragement (the moment and the intent are in "what"). In your own words, at most 10 words. Never praise a performance, never claim a technique fact, never a number. If the trainee is tired / frustrated: calm and supportive.',
 };
@@ -261,6 +262,58 @@ export async function generatePassVision(f, { timeoutMs = 5500, askFn = null } =
       const j = m ? JSON.parse(m[0]) : null;
       const item = (o, vals) => (o && vals.includes(o.value) && typeof o.confidence === 'number' ? { value: o.value, confidence: Math.max(0, Math.min(1, o.confidence)) } : null);
       return j ? { contact: item(j.contact, ['inside', 'laces', 'toe', 'unclear']), ankleLocked: item(j.ankleLocked, [true, false, null]) } : null;
+    } catch (err) {
+      if (!isModelError(err)) throw err;
+    }
+  }
+  return null;
+}
+
+// ---- THE WHOLE-BODY EYES (owner, 2026-10-20): the coach looks at EVERYTHING — posture, arms, trunk, head,
+// balance, the legs and feet, anything that stops a correct execution (hands in pockets was only an example) ----
+export function buildBodyVisionPrompt(f) {
+  const he = f.lang !== 'en';
+  const system = `You are the world's best coach and sports physiotherapist watching ONE camera frame of a trainee in the middle of THIS exercise: "${clip(f.exercise, 80)}"${f.sport ? ` (${clip(f.sport, 40)})` : ''}. ${f.body ? `Body: ${clip(f.body, 120)} — respect it precisely, never ask a missing / prosthetic limb to do anything it cannot.` : ''}
+${(f.keyPoints || []).length ? `The exercise's correct technique: ${(f.keyPoints || []).slice(0, 6).map(x => clip(x, 120)).join(' | ')}.` : ''}
+${f.legsImage ? 'A second image is a close-up of the legs and feet of the same moment.' : ''}${f.isPass ? ` It is a SHADOW inside-foot pass (no real ball); the kicking leg is the ${f.side === 'left' ? 'LEFT' : f.side === 'right' ? 'RIGHT' : 'moving'} (anatomical) leg.` : ''}
+Look at the WHOLE body: posture and trunk, head and gaze, arms and hands (e.g. hands in the pockets, arms locked, no balance arms), hips and pelvis, knees, feet and support, balance — anything that prevents a correct, safe execution of THIS exercise.
+Report ONLY what is clearly visible. Return ONLY JSON:
+{"findings":[{"code":"short_snake_case","severity":"major|minor","confidence":0.0,"cue":"<${he ? 'Hebrew' : 'English'}, 3-7 words, an instruction for the next rep>","what":"<${he ? 'Hebrew' : 'English'}, at most 10 words: what you saw>"}],
+ "good":[{"text":"<${he ? 'Hebrew' : 'English'} 3-7 words of genuine praise for something done well>","confidence":0.0}]${f.isPass ? ',\n "contact":{"value":"inside|laces|toe|unclear","confidence":0.0},"ankleLocked":{"value":true|false|null,"confidence":0.0}' : ''}}
+"major" = unsafe or a significant technique fault; "minor" = a small detail. At most 3 findings, the most important first. No numbers. Natural spoken ${he ? 'Hebrew (masculine singular)' : 'English'}. If the body is not clearly visible return {"findings":[],"good":[]}.`;
+  return { system };
+}
+export async function generateBodyVision(f, { timeoutMs = 9000, askFn = null } = {}) {
+  const frame = String(f?.frame || '');
+  if (frame.length < 1000 || frame.length > 600000) return null;
+  const legs = String(f?.legsFrame || '');
+  const { system } = buildBodyVisionPrompt({ ...f, legsImage: legs.length > 1000 });
+  const content = [{ type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: frame } }];
+  if (legs.length > 1000 && legs.length < 600000) content.push({ type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: legs } });
+  content.push({ type: 'text', text: 'Judge this moment.' });
+  for (const model of VISION_MODELS) {
+    try {
+      const raw = askFn ? await askFn(model, system, content)
+        : (await getClient().messages.create({
+          model, max_tokens: 400, system, messages: [{ role: 'user', content }],
+          ...(model.startsWith('claude-sonnet-5') ? { output_config: { effort: 'low' } } : {}),
+        }, { timeout: timeoutMs, maxRetries: 0 })).content.filter(b => b.type === 'text').map(b => b.text).join('');
+      const m = String(raw).match(/\{[\s\S]*\}/);
+      let j = null;
+      try { j = m ? JSON.parse(m[0]) : null; } catch { j = null; }
+      if (!j) return null;
+      const conf = (x) => (typeof x === 'number' ? Math.max(0, Math.min(1, x)) : 0);
+      const txt = (x, n) => clip(x, n).trim();
+      // honesty guards on every finding: readable words, no invented numbers, a short cue
+      const okText = (t) => readable(t) && !/\d/.test(t);
+      const findings = (Array.isArray(j.findings) ? j.findings : []).slice(0, 3).map(x => ({
+        code: String(x?.code || '').toLowerCase().replace(/[^a-z0-9_]/g, '').slice(0, 40),
+        severity: x?.severity === 'major' ? 'major' : 'minor', confidence: conf(x?.confidence),
+        cue: txt(x?.cue, 80), what: txt(x?.what, 200), why: txt(x?.why, 220), how: txt(x?.how, 220),
+      })).filter(x => x.code && okText(x.cue) && okText(x.what));
+      const good = (Array.isArray(j.good) ? j.good : []).slice(0, 2).map(x => ({ text: txt(x?.text, 80), confidence: conf(x?.confidence) })).filter(x => okText(x.text));
+      const item = (o, vals) => (o && vals.includes(o.value) && typeof o.confidence === 'number' ? { value: o.value, confidence: conf(o.confidence) } : null);
+      return { findings, good, contact: item(j.contact, ['inside', 'laces', 'toe', 'unclear']), ankleLocked: item(j.ankleLocked, [true, false, null]) };
     } catch (err) {
       if (!isModelError(err)) throw err;
     }
