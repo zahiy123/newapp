@@ -3,7 +3,10 @@ import { applySideCorrection } from '../services/anatomyDiagnosis.js';
 import { generateWeek, generateTips, analyzeMovement, generateWorkoutSummary, getLocalFallbackWeek, generateRealtimeFeedback, adaptWorkout, analyzeRepFrames, analyzeAnatomy, verifyScan } from '../services/claude.js';
 import { analyzeGameFrames, analyzeVARFrame } from '../services/gameAnalysis.js';
 import { analyzeEnvironment } from '../services/environmentAnalysis.js';
-import { generateCue, generateDebrief, generateBriefing } from '../services/liveCoach.js';
+import { generateCue, generateDebrief, generateBriefing, aiErrorKind } from '../services/liveCoach.js';
+
+// an Anthropic API failure is LOUD in the log and returned to the screen (never a silent fallback)
+const aiFail = (route, error) => { const kind = aiErrorKind(error); console.error(`[AI] ${route} FAILED (${kind}): ${String(error?.message || error).slice(0, 200)}`); return kind; };
 
 const router = Router();
 
@@ -207,8 +210,7 @@ router.post('/live-cue', async (req, res) => {
   try {
     res.json({ cue: await generateCue(req.body || {}) });
   } catch (error) {
-    console.error('[COACH] /live-cue ERROR:', error.message);
-    res.json({ cue: null });
+    res.json({ cue: null, aiError: aiFail('/live-cue', error) });
   }
 });
 
@@ -216,8 +218,7 @@ router.post('/briefing', async (req, res) => {
   try {
     res.json({ briefing: await generateBriefing(req.body || {}) });
   } catch (error) {
-    console.error('[COACH] /briefing ERROR:', error.message);
-    res.json({ briefing: null });
+    res.json({ briefing: null, aiError: aiFail('/briefing', error) });
   }
 });
 
@@ -225,8 +226,7 @@ router.post('/set-debrief', async (req, res) => {
   try {
     res.json({ debrief: await generateDebrief(req.body || {}) });
   } catch (error) {
-    console.error('[COACH] /set-debrief ERROR:', error.message);
-    res.json({ debrief: null });
+    res.json({ debrief: null, aiError: aiFail('/set-debrief', error) });
   }
 });
 

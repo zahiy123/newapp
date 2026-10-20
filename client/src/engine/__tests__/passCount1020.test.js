@@ -49,3 +49,27 @@ describe('the opening pass needs the trainee standing still at the ball just bef
     expect(openingKickAllowed(9000, 9000 + OPENING_STILL_WINDOW_MS + 1)).toBe(false);
   });
 });
+
+import { inPlaceCheck } from '../training/repEvidence';
+import { EXPERT_PROFILES } from '../exercise/exerciseProfiles';
+import { SPORT_LIBRARY, applySportContext } from '../sports/sportLibrary';
+
+describe('the exact reason of a rejected kick (the console line)', () => {
+  it('walking across → walk-across; toward the camera → walk-depth; a pass in place → ok', () => {
+    expect(inPlaceCheck(run([-10, -22, -12, 8, 25].map((d, i) => legBody(d, { dx: i * 0.04 }))).ev).reason).toBe('walk-across');
+    expect(inPlaceCheck(run([-10, -22, -12, 8, 25].map((d, i) => legBody(d, { scale: 1 + i * 0.08 }))).ev).reason).toBe('walk-depth');
+    const ok = inPlaceCheck(run([0, -10, -22, -12, 8, 25].map(d => legBody(d))).ev);
+    expect(ok.ok).toBe(true);
+    expect(ok.kick).toBeGreaterThan(5);
+  });
+});
+
+describe('the hip → knee whip is a POWER-KICK rule only (never a pass, in any sport)', () => {
+  it('no pass profile judges strike_chain; the kick does', () => {
+    for (const ctx of Object.keys(SPORT_LIBRARY)) {
+      const pass = applySportContext(EXPERT_PROFILES.shadowPass, [ctx], { crutches: false });
+      expect((pass.dynamics || []).some(r => r.id === 'strike_chain'), ctx).toBe(false);
+    }
+    expect(EXPERT_PROFILES.footballKick.dynamics.some(r => r.id === 'strike_chain')).toBe(true);
+  });
+});

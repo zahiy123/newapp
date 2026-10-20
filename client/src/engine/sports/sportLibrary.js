@@ -224,7 +224,9 @@ export function applySportContext(profile, contexts = ['fitness'], { crutches = 
   if (!sports.length) return profile;
   const tags = new Set(profile.tags || []);
   const byId = new Map((profile.dynamics || []).map(r => [r.id, r]));
-  for (const sp of sports) for (const r of sp.rules) if (tagsMatch(r, tags)) byId.set(r.id, saferRule(byId.get(r.id), { ...r, sport: sp.id }));
+  // (a rule the exercise's own build excluded — `only` another exercise — is never brought back by a sport)
+  const own = (r) => !r.only || r.only.includes(profile.id);
+  for (const sp of sports) for (const r of sp.rules) if (tagsMatch(r, tags) && own(r)) byId.set(r.id, saferRule(byId.get(r.id), { ...r, sport: sp.id }));
   // Tempo scaling is for strength reps / holds; a stride or a kick has its own technical rhythm
   const scalable = profile.kind === 'reps' || profile.kind === 'hold';
   const tempoScale = scalable ? Math.max(...sports.map(s => s.tempoScale || 1)) : 1;

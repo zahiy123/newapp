@@ -87,3 +87,12 @@ test('garbled facts (a broken encoding) never reach the AI; SKIP is honoured', a
   assert.equal(await generateDebrief(g2, { askFn: async () => { called = true; return '{}'; } }), null);
   assert.equal(called, false);
 });
+
+import { aiErrorKind } from '../liveCoach.js';
+test('an Anthropic failure is classified for the log and the screen (credit / auth / rate / overloaded / timeout)', () => {
+  assert.equal(aiErrorKind(new Error('400 {"error":{"message":"Your credit balance is too low to access the Anthropic API."}}')), 'credit');
+  assert.equal(aiErrorKind(Object.assign(new Error('invalid x-api-key'), { status: 401 })), 'auth');
+  assert.equal(aiErrorKind(Object.assign(new Error('rate limited'), { status: 429 })), 'rate');
+  assert.equal(aiErrorKind(Object.assign(new Error('Overloaded'), { status: 529 })), 'overloaded');
+  assert.equal(aiErrorKind(new Error('Request timed out.')), 'timeout');
+});

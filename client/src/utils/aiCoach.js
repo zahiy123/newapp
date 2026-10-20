@@ -5,13 +5,32 @@ import { apiUrl, fetchWithTimeout } from './api';
 export const CUE_DEADLINE_MS = 4000;       // a sideline cue must land right after the rep
 export const DEBRIEF_DEADLINE_MS = 27000;  // the rest's analysis (Opus: ~8–12 s measured; the card says it is analysing)
 
+// The AI coach's health, shown on the screen (owner, 2026-10-20: the credit ran out and the coach silently fell
+// back to fixed lines). 'ok' | 'credit' | 'auth' | 'rate' | 'overloaded' | 'error' | 'unreachable'
+let aiStatus = 'ok';
+let failsInRow = 0;
+const listeners = new Set();
+export const getAiStatus = () => aiStatus;
+export function onAiStatus(fn) { listeners.add(fn); return () => listeners.delete(fn); }
+function setAiStatus(s) {
+  if (s === aiStatus) return;
+  aiStatus = s;
+  if (s !== 'ok') console.error(`[AI] the AI coach is NOT available (${s}) — the device's own lines are used`);
+  else console.info('[AI] the AI coach is available again');
+  for (const fn of listeners) { try { fn(s); } catch { /* a listener's error never breaks the call */ } }
+}
+
 async function post(path, body, timeoutMs) {
   try {
     const res = await fetchWithTimeout(apiUrl(path), { method: 'POST', body: JSON.stringify(body) }, timeoutMs);
-    if (!res.ok) return null;
-    return await res.json();
+    if (!res.ok) { if (++failsInRow >= 2) setAiStatus('unreachable'); return null; }
+    const j = await res.json();
+    if (j?.aiError) setAiStatus(j.aiError);
+    else { failsInRow = 0; const got = Object.values(j || {}).some(v => v); if (got || aiStatus === 'unreachable') setAiStatus('ok'); }
+    return j;
   } catch {
-    return null;                            // timeout / offline → the device's own words
+    if (++failsInRow >= 2) setAiStatus('unreachable');      // timeout / offline → the device's own words, and SAY so
+    return null;
   }
 }
 

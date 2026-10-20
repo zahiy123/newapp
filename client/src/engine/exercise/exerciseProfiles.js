@@ -418,7 +418,9 @@ const RAW_EXPERT = {
         why: msg('נטייה אחורה מרימה את הכדור לגובה ומוציאה את המשקל מרגל התמיכה', 'Leaning back lifts the ball high and takes the weight off the support foot') },
     ],
     dynamics: [
-      { id: 'strike_chain', on: 'strike', feature: 'chainLeadMs', op: '<', value: 15, severity: 'error',
+      // a POWER kick's whip (the hip leads, the knee snaps) — never a pass (a short pendulum, the knee hardly
+      // snaps: field video 2026-10-20, "start from the hip" was the main fix of every pass set)
+      { id: 'strike_chain', on: 'strike', feature: 'chainLeadMs', op: '<', value: 15, severity: 'error', only: ['footballKick'],
         msg: msg('התחל את התנועה מהירך — ואז הברך', 'Start the swing from the hip — then the knee'),
         why: msg('הכוח עובר בשרשרת ירך → ברך → כף רגל', 'Power flows hip → knee → foot') },
       { id: 'kick_toe', on: 'strike', feature: 'contactToe', op: '>', value: 0.5, severity: 'error', view: 'front', confirm: 2, only: ['footballKick'],
@@ -696,7 +698,9 @@ const TAGS = {
   rehabElbowFlex: ['strength', 'upperBody', 'arm', 'rehab'],
   runInPlace: ['gait', 'cyclic', 'landing', 'conditioning'],
   footballKick: ['strike', 'chain', 'singleLegStance', 'ballSkill'],
-  shadowPass: ['strike', 'chain', 'singleLegStance', 'ballSkill'],
+  // (no 'chain': the hip → knee WHIP of a power kick is not a pass's technique — the sport library adds its chain
+  // rules / emphasis only to drills tagged 'chain' — owner, 2026-10-20: no rule leaks between exercises)
+  shadowPass: ['strike', 'singleLegStance', 'ballSkill'],
   singleLegSquat: ['strength', 'lowerBody', 'singleLeg'],
   singleLegLunge: ['strength', 'lowerBody', 'singleLeg'],
   gkStance: ['hold', 'isometric', 'lowerBody'],

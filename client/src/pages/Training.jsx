@@ -44,7 +44,7 @@ import { useVoiceProsody } from '../hooks/useVoiceProsody';
 import { brainSummary, brainBall } from '../engine/coachBrain/brain';
 import { buildDebrief } from '../engine/coachBrain/debrief';
 import { debriefFacts, legacyCueFacts, bodyText } from '../engine/coachBrain/aiFacts';
-import { aiCue, aiDebrief, aiBriefing, aiLine } from '../utils/aiCoach';
+import { aiCue, aiDebrief, aiBriefing, aiLine, getAiStatus, onAiStatus } from '../utils/aiCoach';
 import { kickingSide } from '../engine/incomingBall';
 import { ballModeFor, virtualBallWanted, handSide, ballLook, realBallInPlay } from '../engine/virtualBall';
 import { rebuildPlanFromCatalog, planContext } from '../engine/catalog/planBuilder';
@@ -590,6 +590,8 @@ export default function Training() {
   // Set grade display (A+/A/B) — shown briefly after set completion
   const [setGrade, setSetGrade] = useState(null); // { grade: 'A+', color: '#...' }
   const [restDebrief, setRestDebrief] = useState(null);   // the rest's analysis card (debrief.js)
+  const [aiStatus, setAiStatusState] = useState(getAiStatus());   // the AI coach's health (a visible banner when it fails)
+  useEffect(() => onAiStatus(setAiStatusState), []);
   const legacySetLogRef = useRef({ counts: {} });   // the older analyzers' corrections seen in this set
   const legacyCuesRef = useRef([]);                  // the AI coach's recent words (never the same twice)
   const visionNotesRef = useRef([]);                 // what the vision module saw in its frames (this set) — for the rest's analysis
@@ -3302,7 +3304,7 @@ export default function Training() {
             limbProfile={limbProfile}
             isHe={isHe}
             isSpeaking={isSpeaking}
-            bubble={feedback?.text || null}
+            bubble={phase === PHASE.RESTING ? null : (feedback?.text || null)}
             action={(() => {
               // what the coach is doing right now — in the coach's gender
               const f = coachChoice === 'female';
@@ -3736,6 +3738,19 @@ export default function Training() {
           </div>
         )}
 
+        {/* The AI coach is not available — said plainly, never a silent fallback to fixed lines */}
+        {aiStatus !== 'ok' && [PHASE.BRIEFING, PHASE.CHECKING_EQUIPMENT, PHASE.CALIBRATING, PHASE.EXERCISING, PHASE.RESTING, PHASE.EXERCISE_DONE].includes(phase) && (
+          <div dir={isHe ? 'rtl' : 'ltr'} role="alert" className="absolute top-12 inset-x-3 z-40 rounded-lg bg-red-600/90 text-white text-xs font-semibold px-3 py-2 text-center">
+            {isHe
+              ? (aiStatus === 'credit' ? '⚠️ המאמן החכם לא זמין — נגמר הקרדיט בחשבון Anthropic. המאמן משתמש בהנחיות בסיסיות.'
+                : aiStatus === 'auth' ? '⚠️ המאמן החכם לא זמין — מפתח ה-API לא תקין. המאמן משתמש בהנחיות בסיסיות.'
+                : aiStatus === 'rate' || aiStatus === 'overloaded' ? '⚠️ המאמן החכם עמוס כרגע — המאמן משתמש בהנחיות בסיסיות עד שיחזור.'
+                : '⚠️ המאמן החכם לא עונה — המאמן משתמש בהנחיות בסיסיות.')
+              : (aiStatus === 'credit' ? '⚠️ The AI coach is unavailable — the Anthropic credit ran out. Using basic guidance.'
+                : '⚠️ The AI coach is not responding — using basic guidance.')}
+          </div>
+        )}
+
         {/* Rest timer overlay */}
         {phase === PHASE.RESTING && (
           <div className="absolute inset-0 bg-black/70 flex items-center justify-center">
@@ -3743,6 +3758,10 @@ export default function Training() {
               <div className="text-white text-lg font-medium">{t('training.restBetweenSets')}</div>
               <div className="text-7xl font-bold text-white">{restTime}</div>
               <div className="text-white/70 text-sm">{t('training.set')} {currentSet}/{totalSets} {t('training.setComplete')}</div>
+              {/* the next set's leg — its own line under the countdown (never a bubble over it) */}
+              {typeof feedback?.text === 'string' && feedback.text.startsWith('🔄') && (
+                <div className="text-sky-300 text-sm font-semibold max-w-sm mx-auto">{feedback.text}</div>
+              )}
               {restDebrief?.items?.length > 0 && (
                 <div dir={isHe ? 'rtl' : 'ltr'} className="bg-white/10 rounded-xl px-4 py-3 text-white/90 text-sm max-w-sm mx-auto space-y-2 text-start max-h-[45vh] overflow-y-auto">
                   {restDebrief.items.map((it, i) => (

@@ -159,7 +159,14 @@ export const STRIKE_MIN_RANGE = 20;         // ° — the kicking leg's hip OR k
 export const STRIKE_MIN_VEL = 60;           // °/s
 export const STRIKE_MIN_PATH = 0.2;         // torso lengths — the moving end point's path          // the support knee's range ≤ this share of the kicking knee's
 const spread = (v) => { if (v.length < 2) return 0; const s2 = [...v].sort((a, b) => a - b); const q = (p) => s2[Math.round(p * (s2.length - 1))]; return q(0.9) - q(0.1); };
-export function kickInPlace(ev) {
+export function kickInPlace(ev) { return inPlaceCheck(ev).ok; }
+
+/**
+ * Why a kick is (not) in place: { ok, reason: 'ok'|'walk-depth'|'walk-across'|'both-legs', widthChange, travel, kick, other }
+ * (widthChange / travel as shares of their limits' basis; kick / other: the legs' swing in °)
+ */
+export function inPlaceCheck(ev) {
+  const out = { ok: false, reason: 'ok', widthChange: null, travel: null, kick: null, other: null };
   const all = ev?.frames || [];
   const tEnd = all.length ? all[all.length - 1].t : 0;
   const fr = all.filter(f => tEnd - f.t <= KICK_WINDOW_MS);
@@ -167,21 +174,25 @@ export function kickInPlace(ev) {
   const sw = fr.map(f => f.shoulderW).filter(Number.isFinite);
   if (sw.length >= 3) {
     const med = [...sw].sort((x, y) => x - y)[Math.floor(sw.length / 2)];
-    if (med > 0 && spread(sw) > KICK_MAX_WIDTH_CHANGE * med) return false;
+    if (med > 0) out.widthChange = Math.round((spread(sw) / med) * 100) / 100;
+    if (med > 0 && spread(sw) > KICK_MAX_WIDTH_CHANGE * med) return { ...out, reason: 'walk-depth' };
   }
   const hips = fr.map(f => f.hip).filter(Boolean);
   const torsos = fr.map(f => f.torso).filter(Number.isFinite);
   const torso = torsos.length ? torsos.reduce((a, b) => a + b, 0) / torsos.length : null;
   if (hips.length >= 2 && torso) {
     const travel = Math.hypot(spread(hips.map(h => h.x)), spread(hips.map(h => h.y)));
-    if (travel > KICK_MAX_TRAVEL * torso) return false;
+    out.travel = Math.round((travel / torso) * 100) / 100;
+    if (travel > KICK_MAX_TRAVEL * torso) return { ...out, reason: 'walk-across' };
   }
   // knees: indices 6 (left) / 7 (right) — the kicking knee is the one that moved most
   const range = (j) => spread(fr.map(f => f.a[j]).filter(x => typeof x === 'number'));
   // each leg's motion = its hip OR its knee (a pass swings from the hip with an almost straight knee)
   const l = Math.max(range(4), range(6)), r = Math.max(range(5), range(7));
   const kick = Math.max(l, r), other = Math.min(l, r);
-  return other <= Math.max(KICK_OTHER_KNEE_DEG, KICK_DOMINANCE * kick);
+  out.kick = Math.round(kick); out.other = Math.round(other);
+  if (other > Math.max(KICK_OTHER_KNEE_DEG, KICK_DOMINANCE * kick)) return { ...out, reason: 'both-legs' };
+  return { ...out, ok: true };
 }
 
 /**
@@ -218,7 +229,7 @@ export function strikeSwing(ev) {
 export function explainStrike(ev, t) {
   const first = ev?.frames?.[0]?.t ?? t;
   const since = ev?.lastAt == null ? t - first : t - ev.lastAt;
-  return { since: Math.round(since), inPlace: kickInPlace(ev), swing: strikeSwing(ev) };
+  return { since: Math.round(since), place: inPlaceCheck(ev), inPlace: kickInPlace(ev), swing: strikeSwing(ev) };
 }
 
 /** Does the movement since the last counted rep prove a real rep (range + velocity + trajectory + flow)? */

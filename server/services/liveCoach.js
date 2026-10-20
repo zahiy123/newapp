@@ -187,6 +187,18 @@ async function ask(model, { system, user }, maxTokens, timeoutMs, effort = null)
 }
 
 /** A live cue, or null (the device then says its own measured line). */
+/** What went wrong with the Anthropic API (for the server log and the trainee's screen). */
+export function aiErrorKind(err) {
+  const m = String(err?.message || err || '');
+  const st = err?.status;
+  if (/credit balance/i.test(m)) return 'credit';
+  if (st === 401 || /authentication|api[_ -]?key/i.test(m)) return 'auth';
+  if (st === 429 || /rate.?limit/i.test(m)) return 'rate';
+  if (st === 529 || /overloaded/i.test(m)) return 'overloaded';
+  if (/timed? ?out|timeout/i.test(m)) return 'timeout';
+  return 'error';
+}
+
 const isModelError = (err) => /model|not_found|404|not supported/i.test(String(err?.message || err));
 
 export async function generateCue(facts, { timeoutMs = 3500, askFn = ask } = {}) {

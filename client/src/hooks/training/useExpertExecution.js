@@ -44,7 +44,8 @@ import {
   createStartGate, updateStartGate, isStartPosition, feetStill, openingKickAllowed, isValidRep, updateWork, withDrive, startPositionPrompt, READY_DRIVE,
 } from '../../engine/training/coachFlow';
 import { createClipRecorder, recordFrame } from '../../engine/validation/clipRecorder';
-import { createRepEvidence, evidenceFrame, evidenceOk, evidenceAccept, evidenceGroupFor, explainStrike } from '../../engine/training/repEvidence';
+import { createRepEvidence, evidenceFrame, evidenceOk, evidenceAccept, evidenceGroupFor, explainStrike,
+  KICK_MAX_WIDTH_CHANGE, KICK_MAX_TRAVEL, STRIKE_MIN_RANGE, STRIKE_MIN_VEL, STRIKE_MIN_PATH } from '../../engine/training/repEvidence';
 import { holdSpeech } from '../useSpeech';
 import { ROOM_TIP } from '../../engine/exercise/setupCoach';
 
@@ -331,7 +332,17 @@ export function useExpertExecution({
             if (ev.type === 'strike' && profile.kind === 'strike') {
               const why = explainStrike(kinetic, now);
               const counts = countsReps && r.quality?.confident !== false && evidenceOk(kinetic, now, { strike: true, kick: true });
-              console.info(`[Kick] ${counts ? 'COUNTED' : 'rejected'} | side=${ev.side} inPlace=${why.inPlace} swing=${why.swing.ok}(range ${why.swing.range}° vel ${why.swing.peakVel}°/s path ${why.swing.path}) since=${why.since}ms confident=${r.quality?.confident !== false}`);
+              // the EXACT reason (never a guess): walking toward / away (the shoulders' width), walking across (the
+              // pelvis travel), both legs moving, a too-small swing (range / speed / path), too soon, unsure tracking
+              const P = why.place, S = why.swing;
+              const reason = counts ? 'ok'
+                : !P.ok ? (P.reason === 'walk-depth' ? `walking toward/away — shoulders width changed ${Math.round((P.widthChange || 0) * 100)}% (max ${Math.round(KICK_MAX_WIDTH_CHANGE * 100)}%)`
+                  : P.reason === 'walk-across' ? `walking across — pelvis moved ${P.travel} torso (max ${KICK_MAX_TRAVEL})`
+                  : `both legs moved — kick ${P.kick}° / other leg ${P.other}°`)
+                : !S.ok ? `swing too small — range ${S.range}° (min ${STRIKE_MIN_RANGE}), speed ${S.peakVel}°/s (min ${STRIKE_MIN_VEL}), path ${S.path} (min ${STRIKE_MIN_PATH})`
+                : why.since < 450 ? `too soon after the last count (${why.since} ms)`
+                : r.quality?.confident === false ? 'tracking unsure' : 'unknown';
+              console.info(`[Kick] ${counts ? 'COUNTED' : 'REJECTED'} | side=${ev.side} | ${reason} | swing ${S.range}° ${S.peakVel}°/s path ${S.path} | width ${P.widthChange ?? '-'} travel ${P.travel ?? '-'}`);
             }
             // a kick / pass: a real strike, IN PLACE, by ONE leg (walking is never a pass)
             if (countsReps && profile.kind === 'strike' && ev.type === 'strike' && r.quality?.confident !== false && evidenceOk(kinetic, now, { strike: true, kick: true })) {
