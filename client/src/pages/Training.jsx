@@ -275,6 +275,9 @@ export default function Training() {
 
   // Speak the initial command for a rep, then transition to WAITING_FOR_REP
   function speakCommandAndWait(repNum) {
+    // the older "command → wait → vision → next command" loop never runs where the expert + AI coach coaches
+    // (it collided in the background and stalled the flow — owner, 2026-10-20)
+    if (expertCoachesRef.current) { commandPhaseRef.current = 'IDLE'; return; }
     const cueKey = analyzerRef.current?.cueKey;
     const type = analyzerRef.current?.type;
     const text = getCommandText(repNum, cueKey, type);
@@ -426,7 +429,7 @@ export default function Training() {
   const [displayReps, setDisplayReps] = useState(0);
   // the rep counter ON THE SCREEN, for the ball (every counted rep plays a ball)
   const displayRepsRef = useRef(0);
-  if (displayReps === 0 || displayReps > displayRepsRef.current) displayRepsRef.current = displayReps;
+  displayRepsRef.current = displayReps;
   useEffect(() => { if (window.__GHOST_DEBUG) window.__trainingReps = displayReps; }, [displayReps]);
   const [feedback, setFeedback] = useState(null);
   const [aiAnalyzing, setAiAnalyzing] = useState(false);
@@ -855,8 +858,6 @@ export default function Training() {
     brainEnabled: FEATURES.COACH_BRAIN,
     // the kicking leg of a REAL counted kick (never a weight shift) — the split-set leg notice
     onStrikeSide: (side) => handleKickSideRef.current?.(side),
-    // the count AT the counted moment: the number, the ball and the voice — not on the older loop's next pass
-    onCount: (n) => onExpertCountRef.current?.(n),
     effortRef: voiceEffortRef,
   });
   const executionInViewRef = execution.inViewRef;
@@ -865,7 +866,6 @@ export default function Training() {
   const repEvidenceRef = useRef(null);             // the kinematic evidence of the current rep (anti-ghost counting)
   const motivationRef = useRef(createMotivation()); // the motivation lines' dose (engine/training/motivation)
   const handleKickSideRef = useRef(null);          // the split-set leg notice (set below, called by the expert module)
-  const onExpertCountRef = useRef(null);
   profileRepsRef.current = {
     active: execution.active && execution.profile?.precision === 'expert' && (execution.profile?.kind === 'reps' || execution.profile?.kind === 'strike'),
     countRef: execution.repCountRef,
@@ -1253,9 +1253,7 @@ export default function Training() {
         }
 
         // Honest: we start because the trainee IS in the start position (not "I got your range")
-        // (a coached drill: ONE line for the start — announceSet below — never three stacked lines)
-        if (expertCoachesRef.current) { /* announceSet says it */ }
-        else if (gated()) speakPriority(isHe ? READY_DRIVE.start.he : READY_DRIVE.start.en, { rate: 1.12 });
+        if (gated()) speakPriority(isHe ? READY_DRIVE.start.he : READY_DRIVE.start.en, { rate: 1.12 });
         else speakCalibrationDone(playerName);
         calibrationDataRef.current = null;
         setPhase(PHASE.EXERCISING);
@@ -1263,7 +1261,8 @@ export default function Training() {
         lastActivityRef.current = Date.now();
         exerciseStartTimeRef.current = Date.now();
         lastNudgeTimeRef.current = 0;
-        announceSet(currentSet, totalSets, currentSet === 1 ? 'start' : 'set');
+        speakSetStart(currentSet, totalSets);
+        motivateLater(currentSet === 1 ? 'start' : 'set');
 
         // Start command coaching for rep-based exercises — NOT in an exercise the expert + AI coach runs: its
         // "command → wait → vision → next command" loop broke the flow (field video 2026-10-19)
@@ -2949,15 +2948,6 @@ export default function Training() {
       .then((ai) => setTimeout(() => { if (!isSpeaking()) speakIfIdle(ai || line, { rate: 1.05 }); }, 600));
   }
 
-  // the expert module counted a rep / kick: the number, the ball (it reads displayRepsRef) and the spoken count
-  // at that moment; only while exercising, never a lower number
-  onExpertCountRef.current = (n) => {
-    if (phaseRef.current !== PHASE.EXERCISING || !(n > displayRepsRef.current)) return;
-    displayRepsRef.current = n;
-    setDisplayReps(n);
-    speakCountNow(n);
-  };
-
   // The leg the trainee REALLY kicks with (detected by the ball). In a split set (a full set per leg,
   // by the plan) a kick with the other leg is told precisely, once per set; otherwise the detected leg
   // simply leads — the coach never insists on a leg the trainee is not using
@@ -2981,7 +2971,7 @@ export default function Training() {
     setCurrentSet(prev => {
       const nextSet = prev + 1;
       // Speak inside updater to avoid stale closure on currentSet
-      setTimeout(() => announceSet(nextSet, totalSets, 'resume'), 100);
+      setTimeout(() => { speakSetStart(nextSet, totalSets); motivateLater('resume'); }, 100);
       return nextSet;
     });
     const prevCal = exerciseStateRef.current._calibration;
@@ -2993,28 +2983,12 @@ export default function Training() {
     setTimer(0);
     setActiveTimer(0);
 
-    // Start command coaching for rep-based exercises — never in a coached drill (field video 2026-10-19:
-    // set 2+ brought the older "command → wait → vision" loop back)
+    // Start command coaching for rep-based exercises — never in a coached drill (it came back from set 2 on)
     if (analyzerRef.current?.type !== 'hold' && !expertCoachesRef.current) {
       commandPhaseRef.current = 'COMMANDING';
       commandRepRef.current = 1;
       setTimeout(() => speakCommandAndWait(1), 1500);
     }
-  }
-
-  // The start of a set: ONE line. A coached drill: the AI words it (the set number + one warm phrase) — a
-  // light line a kick's count may cut; else the older set line + motivation
-  function announceSet(n, total, moment) {
-    if (!expertCoachesRef.current) { speakSetStart(n, total); motivateLater(moment); return; }
-    const local = isHe ? `סט ${n} מתוך ${total}.` : `Set ${n} of ${total}.`;
-    aiLine({ mode: 'setstart', lang: isHe ? 'he' : 'en', name: playerName, exercise: currentExercise?.name || '', sport: sportContexts.join('+'),
-      body: bodyText(limbProfile || {}), error: { what: isHe ? `סט ${n} מתוך ${total} מתחיל` : `set ${n} of ${total} starts` }, recent: legacyCuesRef.current })
-      .then((ai) => {
-        if (phaseRef.current !== PHASE.EXERCISING) return;
-        const line = ai || local;
-        legacyCuesRef.current.push(line); if (legacyCuesRef.current.length > 8) legacyCuesRef.current.shift();
-        speakPriority(line, { rate: 1.05, filler: true });
-      });
   }
 
   function handleSkipRest() {
@@ -3099,8 +3073,8 @@ export default function Training() {
     setPhase(PHASE.EXERCISING);
     speakPriority(isHe ? 'ממשיכים!' : "Let's go!");
 
-    // Resume command coaching for rep-based exercises
-    if (analyzerRef.current?.type !== 'hold') {
+    // Resume command coaching for rep-based exercises — never in a coached drill
+    if (analyzerRef.current?.type !== 'hold' && !expertCoachesRef.current) {
       const nextRep = (snap.displayReps || 0) + 1;
       commandPhaseRef.current = 'COMMANDING';
       commandRepRef.current = nextRep;

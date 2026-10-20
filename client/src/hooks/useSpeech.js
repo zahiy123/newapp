@@ -46,7 +46,6 @@ export function useSpeech(lang = 'he-IL', age) {
   const speaking = useRef(false);
   const queueRef = useRef([]);
   const currentSidRef = useRef(null);       // the id of the sentence playing (its chunks share it)
-  const currentFillerRef = useRef(false);
   const sidSeqRef = useRef(0);
   const currentUtteranceRef = useRef(null);
   const speechStartedAtRef = useRef(0);
@@ -168,7 +167,6 @@ export function useSpeech(lang = 'he-IL', age) {
     lastSpokenTextRef.current = text;
     lastSpokenTimeRef.current = now;
     currentSidRef.current = options?.__sid ?? null;             // which sentence is playing now
-    currentFillerRef.current = !!options?.filler;               // a light line a count may cut
     noteCoachLine(text);
 
     // Resume before every speak (Android/iOS requirement)
@@ -331,13 +329,6 @@ export function useSpeech(lang = 'he-IL', age) {
     if (speaking.current || queueRef.current.length) {
       const isCount = /^\d+!?$/.test(String(text).trim());
       if (isCount) queueRef.current = queueRef.current.filter(q => !q.count);
-      // the count AT the kick: a light line (encouragement / ready / a set start) yields to it at once
-      if (isCount && speaking.current && currentFillerRef.current) {
-        const sid = currentSidRef.current;
-        queueRef.current = [{ text: String(text), options, count: true, at: Date.now() }, ...queueRef.current.filter(q => q.options?.__sid !== sid || sid == null)];
-        try { window.speechSynthesis.cancel(); } catch { /* the onerror of the cut line plays the queue */ }
-        return;
-      }
       // AFTER the queued rest of the sentence (never between its chunks)
       const items = splitToChunks(text).map(c => ({ text: c, options, count: isCount, at: Date.now() }));
       queueRef.current = [...queueRef.current, ...items];
