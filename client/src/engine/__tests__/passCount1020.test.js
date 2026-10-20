@@ -158,3 +158,36 @@ describe('a minor error that comes back — not in a row — is said', () => {
     expect(said).toEqual([2]);
   });
 });
+
+import { isProstheticLeg } from '../exercise/profileEvaluator';
+import { footSettled, kickLockOpen, RELEASE_MS } from '../training/coachFlow';
+
+describe('the prosthetic kicking leg: no ankle / foot-surface judgement', () => {
+  it('the foot rules are marked natural-foot only; a prosthetic leg is recognised', () => {
+    for (const id of ['pass_toe', 'pass_laces', 'pass_ankle']) expect(EXPERT_PROFILES.shadowPass.dynamics.find(r => r.id === id).naturalFoot).toBe(true);
+    expect(EXPERT_PROFILES.footballKick.dynamics.find(r => r.id === 'kick_toe').naturalFoot).toBe(true);
+    expect(isProstheticLeg({ left_leg: { state: 'prosthetic', level: 'below_knee' } }, 'left')).toBe(true);
+    expect(isProstheticLeg({ left_leg: { state: 'prosthetic' } }, 'right')).toBe(false);
+  });
+  it('a prosthetic kicking leg: the evaluator never raises a foot rule on its strike', async () => {
+    const { createExecutionTracker } = await import('../exercise/profileEvaluator');
+    const tr = createExecutionTracker(EXPERT_PROFILES.shadowPass, { left_leg: { state: 'prosthetic', level: 'below_knee' } });
+    tr.activeLeg = 'left';
+    const r = EXPERT_PROFILES.shadowPass.dynamics.find(x => x.id === 'pass_ankle');
+    expect(r.naturalFoot && isProstheticLeg(tr.lp, tr.activeLeg)).toBe(true);
+  });
+});
+
+describe('one pass = ONE count: the lock opens only when the kicking foot settled (or after 1.8 s)', () => {
+  const hist = (moving) => Array.from({ length: 30 }, (_, i) => ({ t: 1000 + i * 50, r: { x: 0.5 + (moving ? (i % 2) * 0.05 : 0), y: 0.9 }, l: { x: 0.4, y: 0.9 }, torso: 0.3 }));
+  it('the foot still → settled; the foot swinging back → not', () => {
+    expect(footSettled(hist(false), 'right', 1000, 2400)).toBe(true);
+    expect(footSettled(hist(true), 'right', 1000, 2400)).toBe(false);
+  });
+  it('locked before 1 s always; between 1 and 1.8 s only if settled; open after 1.8 s', () => {
+    expect(kickLockOpen({ now: 1900, lastCountAt: 1000, settledSinceCount: true })).toBe(false);
+    expect(kickLockOpen({ now: 2200, lastCountAt: 1000, settledSinceCount: false })).toBe(false);
+    expect(kickLockOpen({ now: 2200, lastCountAt: 1000, settledSinceCount: true })).toBe(true);
+    expect(kickLockOpen({ now: 1000 + RELEASE_MS, lastCountAt: 1000, settledSinceCount: false })).toBe(true);
+  });
+});

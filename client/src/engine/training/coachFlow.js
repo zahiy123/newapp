@@ -30,6 +30,23 @@ export const READY_STILL_MS = 600;
 // the FIRST pass may open the exercise only if the trainee stood still at the ball just before it — walking
 // back to the spot never opens it with a phantom "1"; counting during the set is untouched
 export const OPENING_STILL_WINDOW_MS = 2500;
+// after a counted kick the NEXT one may count only once the kicking foot SETTLED again (still for SETTLE_MS) —
+// its back-swing / its return is never a second count; after RELEASE_MS the lock opens anyway (a lost foot)
+export const SETTLE_MS = 220, RELEASE_MS = 1800, SETTLE_TORSO = 0.08;
+export function footSettled(hist, side, sinceT, now) {
+  const key = side === 'left' ? 'l' : side === 'right' ? 'r' : null;
+  if (!key) return false;
+  const w = (hist || []).filter(h => h.t > sinceT && now - h.t <= SETTLE_MS);
+  if (w.length < 3 || now - w[0].t < SETTLE_MS * 0.7) return false;
+  const pts = w.map(h => h[key]);
+  if (pts.some(p => !p)) return false;
+  const torso = w.map(h => h.torso).filter(v => v > 0)[0];
+  if (!torso) return false;
+  const xs = pts.map(p => p.x), ys = pts.map(p => p.y);
+  return Math.hypot(Math.max(...xs) - Math.min(...xs), Math.max(...ys) - Math.min(...ys)) <= SETTLE_TORSO * torso;
+}
+export const kickLockOpen = ({ now, lastCountAt, settledSinceCount, lockMs = 1000 }) =>
+  now - lastCountAt >= lockMs && (settledSinceCount || now - lastCountAt >= RELEASE_MS);
 export const openingKickAllowed = (lastStillAt, now) => typeof lastStillAt === 'number' && now - lastStillAt <= OPENING_STILL_WINDOW_MS;
 export const READY_STILL_TORSO = 0.12;     // the feet move less than this share of the torso length
 

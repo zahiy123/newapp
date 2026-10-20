@@ -276,7 +276,8 @@ export function buildBodyVisionPrompt(f) {
   const system = `You are the world's best coach and sports physiotherapist watching ONE camera frame of a trainee in the middle of THIS exercise: "${clip(f.exercise, 80)}"${f.sport ? ` (${clip(f.sport, 40)})` : ''}. ${f.body ? `Body: ${clip(f.body, 120)} — respect it precisely, never ask a missing / prosthetic limb to do anything it cannot.` : ''}
 ${(f.keyPoints || []).length ? `The exercise's correct technique: ${(f.keyPoints || []).slice(0, 6).map(x => clip(x, 120)).join(' | ')}.` : ''}
 ${f.legsImage ? 'A second image is a close-up of the legs and feet of the same moment.' : ''}${f.isPass ? ` It is a SHADOW inside-foot pass (no real ball); the kicking leg is the ${f.side === 'left' ? 'LEFT' : f.side === 'right' ? 'RIGHT' : 'moving'} (anatomical) leg.` : ''}
-Look at the WHOLE body: posture and trunk, head and gaze, arms and hands (e.g. hands in the pockets, arms locked, no balance arms), hips and pelvis, knees, feet and support, balance — anything that prevents a correct, safe execution of THIS exercise.
+${f.kickingProsthesis ? `The KICKING leg is the trainee's PROSTHESIS (the ${f.side === 'left' ? 'LEFT' : f.side === 'right' ? 'RIGHT' : ''} leg): its ankle is fixed — NEVER judge or mention the ankle lock, the toes or which surface of the foot meets the ball. Judge the prosthesis kick by its real technique: the swing driven from the HIP (not the knee), the leg turned out from the hip, the weight anchored on the sound support leg, the chest over the ball, the arms for balance.
+` : ''}Look at the WHOLE body: posture and trunk, head and gaze, arms and hands (e.g. hands in the pockets, arms locked, no balance arms), hips and pelvis, knees, feet and support, balance — anything that prevents a correct, safe execution of THIS exercise.
 Report ONLY what is clearly visible. Return ONLY JSON:
 {"findings":[{"code":"short_snake_case","severity":"major|minor","confidence":0.0,"cue":"<${he ? 'Hebrew' : 'English'}, 3-7 words, an instruction for the next rep>","what":"<${he ? 'Hebrew' : 'English'}, at most 10 words: what you saw>"}],
  "good":[{"text":"<${he ? 'Hebrew' : 'English'} 3-7 words of genuine praise for something done well>","confidence":0.0}]${f.isPass ? ',\n "contact":{"value":"inside|laces|toe|unclear","confidence":0.0},"ankleLocked":{"value":true|false|null,"confidence":0.0}' : ''}}
@@ -287,7 +288,7 @@ export async function generateBodyVision(f, { timeoutMs = 9000, askFn = null } =
   const frame = String(f?.frame || '');
   if (frame.length < 1000 || frame.length > 600000) return null;
   const legs = String(f?.legsFrame || '');
-  const { system } = buildBodyVisionPrompt({ ...f, legsImage: legs.length > 1000 });
+  const { system } = buildBodyVisionPrompt({ ...f, isPass: f.isPass && !f.kickingProsthesis, legsImage: legs.length > 1000 });
   const content = [{ type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: frame } }];
   if (legs.length > 1000 && legs.length < 600000) content.push({ type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: legs } });
   content.push({ type: 'text', text: 'Judge this moment.' });

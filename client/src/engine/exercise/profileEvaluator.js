@@ -185,6 +185,10 @@ export const logJudgedCount = (log) => Object.values(log?.rules || {}).reduce((s
 
 /** Start a new set's log (a new set starts from zero). */
 export function resetSetLog(tr) { if (tr) { tr.log = createSetLog(tr.profile); tr.occ = {}; } return tr?.log; }
+/** Is this side's leg a prosthesis (or absent) for this trainee? */
+export const isProstheticLeg = (lp, side) => (side === 'left' || side === 'right')
+  && ['prosthetic', 'absent'].includes(lp?.[`${side}_leg`]?.state);
+
 export function logRule(log, r, violated, value) {
   const e = log.rules[r.id] || (log.rules[r.id] = { rule: r, judged: 0, n: 0, values: [] });
   e.judged += 1;
@@ -381,6 +385,9 @@ export function updateExecution(tracker, landmarks, nowMs) {
     let clean = true;
     for (const r of profile.dynamics || []) {
       if (r.on !== ev.type || !judged(r)) continue;
+      // a foot rule (the ankle lock, the contact surface) never judges a PROSTHETIC foot — its ankle is fixed
+      // (owner, 2026-10-20); the kicking leg = the leg the set is for, else the strike's side
+      if (r.naturalFoot && isProstheticLeg(tr.lp, tr.activeLeg || ev.side)) continue;
       if (dynamicViolation(r, ev)) {
         tr.dynStreak[r.id] = (tr.dynStreak[r.id] || 0) + 1;
         // a rule that needs CONFIRMATION (the foot / ankle — a fine measure) shows, counts and is coached only

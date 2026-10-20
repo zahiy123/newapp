@@ -851,6 +851,7 @@ export default function Training() {
     // the effort listening runs where both can share the mic (desktop browsers)
     enabled: FEATURES.VOICE_PROSODY && FEATURES.COACH_BRAIN && !IS_MOBILE_DEVICE && (phase === PHASE.EXERCISING || phase === PHASE.CALIBRATING),
   });
+  const activeKickLegRef = useRef(null);           // the kicking leg of this set (set below, once the split is known)
   const execution = useExpertExecution({
     // From the briefing on: the trainee may start working while the coach still explains —
     // the module counts silently and the exercise starts at once (early start, below)
@@ -877,6 +878,8 @@ export default function Training() {
     // the WHOLE body for the eyes + the exercise's correct technique (its key points)
     bodyFrameRef,
     keyPoints: exerciseKeyPoints,
+    // the leg this set is for (a split set: the kicking leg of this half) — a prosthesis → the prosthesis technique
+    activeLeg: activeKickLegRef.current,
     effortRef: voiceEffortRef,
   });
   const executionInViewRef = execution.inViewRef;
@@ -913,6 +916,8 @@ export default function Training() {
   const [splitHalf, setSplitHalf] = useState(1);
   const splitOrder = useMemo(() => splitLegOrder(limbProfile), [limbProfile]);
   const splitSupport = splitHalf === 1 ? splitOrder.first : splitOrder.second;
+  activeKickLegRef.current = execution.profile?.kind === 'strike'
+    ? kickingSide(limbProfile, currentExercise?.sideSwitch && isStrikeMode(currentExercise?.splitMode) ? splitSupport : null) : null;
   const demoGhostSpec = useMemo(() => {
     if (!demoGhostPhase) return null;
     // A catalog exercise always has its Ghost (its pattern × variation)
@@ -3014,30 +3019,55 @@ export default function Training() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [displayReps, phase, currentSet, currentIdx]);
 
-  // the WHOLE body at a usable resolution (640 px wide, the raw camera — no overlay drawn on it)
-  bodyFrameRef.current = () => {
+  // the coach's EYES — frames prepared IN THE BACKGROUND (owner, 2026-10-20: no stall in the live video): the frame is
+  // grabbed as a bitmap (async, cropped / resized by the browser) and encoded off the drawing path; the old canvas
+  // path stays as the fallback for browsers without it
+  const encodeBitmap = async (bmp) => {
+    if (typeof OffscreenCanvas === 'undefined') return null;
+    const c = new OffscreenCanvas(bmp.width, bmp.height);
+    c.getContext('2d').drawImage(bmp, 0, 0);
+    bmp.close?.();
+    const blob = await c.convertToBlob({ type: 'image/jpeg', quality: 0.72 });
+    const buf = new Uint8Array(await blob.arrayBuffer());
+    let bin = ''; for (let k = 0; k < buf.length; k += 0x8000) bin += String.fromCharCode.apply(null, buf.subarray(k, k + 0x8000));
+    return btoa(bin);
+  };
+  const grab = async (sx, sy, sw, sh, maxSide) => {
+    const v = videoRef.current;
+    if (!v || !v.videoWidth || typeof createImageBitmap !== 'function') return null;
+    const k = Math.min(1, maxSide / Math.max(sw, sh));
+    try {
+      const bmp = await createImageBitmap(v, sx, sy, sw, sh, { resizeWidth: Math.round(sw * k), resizeHeight: Math.round(sh * k), resizeQuality: 'medium' });
+      return await encodeBitmap(bmp);
+    } catch { return null; }
+  };
+  // the WHOLE body (640 px, the raw camera — no overlay drawn on it)
+  bodyFrameRef.current = async () => {
     const v = videoRef.current;
     if (!v || !v.videoWidth) return null;
+    const bg = await grab(0, 0, v.videoWidth, v.videoHeight, 640);
+    if (bg) return bg;
     const k = Math.min(1, 640 / v.videoWidth);
     const c = document.createElement('canvas');
     c.width = Math.round(v.videoWidth * k); c.height = Math.round(v.videoHeight * k);
     c.getContext('2d').drawImage(v, 0, 0, c.width, c.height);
     try { return c.toDataURL('image/jpeg', 0.7).split(',')[1] || null; } catch { return null; }
   };
-  // the frame for the coach's EYES: the RAW camera (no skeleton / Ghost / ball drawn on it), cropped around the
-  // legs and feet at the camera's full resolution — the foot is what the vision model must see clearly
-  passFrameRef.current = () => {
+  // the legs and feet close-up (the raw camera at full resolution, cropped around them)
+  passFrameRef.current = async () => {
     const v = videoRef.current, lm = poseLandmarksRef.current;
     if (!v || !v.videoWidth) return null;
     const pts = [23, 24, 25, 26, 27, 28, 29, 30, 31, 32].map(i => lm?.[i]).filter(p => p && (p.visibility ?? 0) >= 0.3);
-    if (pts.length < 4) return captureFrame(v);
+    if (pts.length < 4) return null;
     const W = v.videoWidth, H = v.videoHeight;
     let x0 = Math.min(...pts.map(p => p.x)) * W, x1 = Math.max(...pts.map(p => p.x)) * W;
     let y0 = Math.min(...pts.map(p => p.y)) * H, y1 = Math.max(...pts.map(p => p.y)) * H;
     const padX = (x1 - x0) * 0.35 + 20, padY = (y1 - y0) * 0.2 + 20;
     x0 = Math.max(0, x0 - padX); x1 = Math.min(W, x1 + padX); y0 = Math.max(0, y0 - padY); y1 = Math.min(H, y1 + padY);
     const cw = x1 - x0, ch = y1 - y0;
-    if (cw < 40 || ch < 40) return captureFrame(v);
+    if (cw < 40 || ch < 40) return null;
+    const bg = await grab(Math.round(x0), Math.round(y0), Math.round(cw), Math.round(ch), 448);
+    if (bg) return bg;
     const k = Math.min(1, 448 / Math.max(cw, ch));
     const c = document.createElement('canvas');
     c.width = Math.round(cw * k); c.height = Math.round(ch * k);
