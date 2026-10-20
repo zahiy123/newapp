@@ -13,14 +13,6 @@
 // ============================================================
 
 const XY = { minCutoff: 1.0, beta: 9, dCutoff: 1.0 };   // normalized image coords
-// the FEET (ankles, heels, toes) tremble most (small, far, often a prosthesis): smoother when still, as
-// responsive in a kick (a higher beta) — field video 2026-10-19
-const FEET = new Set([27, 28, 29, 30, 31, 32]);
-const XY_FEET = { minCutoff: 0.6, beta: 14, dCutoff: 1.0 };
-// a point seen with low confidence jumps the most: smoothed more while it stays doubtful
-const LOW_VIS = 0.6;
-// a ONE-frame jump of a single point (not the body) is a glitch: held one frame; a real move continues
-export const SPIKE = 0.12;
 const Z = { minCutoff: 0.5, beta: 4, dCutoff: 1.0 };    // depth is noisier → smoother
 const VIS_ALPHA = 0.45;                                   // visibility: simple EMA
 export const HOLD_MS = 280;                               // bridge a missed detection this long
@@ -70,17 +62,11 @@ export function filterLandmarks(f, lm, now) {
   const pts = [];
   const out = lm.map((p, i) => {
     const s = prev[i];
-    let par = FEET.has(i) ? XY_FEET : XY;
-    if ((p.visibility ?? 1) < LOW_VIS) par = { ...par, minCutoff: par.minCutoff * 0.5 };
-    // spike guard: this point alone jumped far in one frame → keep its last position once (if it is real,
-    // the next frame confirms it and it moves on)
-    let px = p.x, py = p.y;
-    if (s && Math.hypot(p.x - s.x.x, p.y - s.y.x) > SPIKE && !s.spiked) { px = s.x.x; py = s.y.x; }
-    const fx = oneEuro(s?.x, px, dt, par);
-    const fy = oneEuro(s?.y, py, dt, par);
+    const fx = oneEuro(s?.x, p.x, dt, XY);
+    const fy = oneEuro(s?.y, p.y, dt, XY);
     const fz = oneEuro(s?.z, p.z ?? 0, dt, Z);
     const vis = s ? s.v + VIS_ALPHA * ((p.visibility ?? 1) - s.v) : (p.visibility ?? 1);
-    pts[i] = { x: fx, y: fy, z: fz, v: vis, spiked: !!s && px !== p.x };
+    pts[i] = { x: fx, y: fy, z: fz, v: vis };
     return { ...p, x: fx.x, y: fy.x, z: fz.x, visibility: vis };
   });
   f.pts = pts; f.last = lm; f.lastAt = now; f.out = out;

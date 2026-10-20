@@ -1,7 +1,7 @@
 // The owner, 2026-10-19: the count AT the kick, a steady skeleton, one natural flow
 import { describe, it, expect } from 'vitest';
 import { createRepEvidence, evidenceFrame, evidenceOk } from '../training/repEvidence';
-import { createLandmarkFilter, filterLandmarks, SPIKE } from '../landmarkFilter';
+import { createLandmarkFilter, filterLandmarks } from '../landmarkFilter';
 
 function legBody(thighDeg) {
   const lm = Array.from({ length: 33 }, () => ({ x: 0.5, y: 0.5, visibility: 0.1 }));
@@ -30,29 +30,24 @@ describe('the count AT the contact of a pass', () => {
   });
 });
 
-describe('a steady skeleton', () => {
-  const frame = (ax, vis = 0.95) => Array.from({ length: 33 }, (_, i) => ({ x: i === 28 ? ax : 0.5, y: i === 28 ? 0.9 : 0.5, z: 0, visibility: i === 28 ? vis : 0.95 }));
-  it('a ONE-frame jump of the ankle (a glitch) is held back; a real move continues on the next frame', () => {
+describe('field video 2026-10-20: never block a real kick, never count walking in', () => {
+  const frame = (ax) => Array.from({ length: 33 }, (_, i) => ({ x: i === 28 ? ax : 0.5, y: i === 28 ? 0.9 : 0.5, z: 0, visibility: 0.95 }));
+  it('a laptop camera at ~12 fps: a fast kick moves the foot 0.15 per frame — the skeleton follows it (no "glitch" hold)', () => {
     const f = createLandmarkFilter();
     let t = 0;
-    for (let i = 0; i < 10; i++) filterLandmarks(f, frame(0.5), (t += 33));
-    const glitch = filterLandmarks(f, frame(0.5 + SPIKE + 0.1), (t += 33));
-    expect(Math.abs(glitch[28].x - 0.5)).toBeLessThan(0.02);              // held
-    const back = filterLandmarks(f, frame(0.5), (t += 33));
-    expect(Math.abs(back[28].x - 0.5)).toBeLessThan(0.02);                // the glitch never showed
-    const f2 = createLandmarkFilter();
-    t = 0;
-    for (let i = 0; i < 10; i++) filterLandmarks(f2, frame(0.5), (t += 33));
-    filterLandmarks(f2, frame(0.75), (t += 33));
-    const moved = filterLandmarks(f2, frame(0.75), (t += 33));
-    expect(moved[28].x).toBeGreaterThan(0.6);                              // a real move follows
+    for (let i = 0; i < 6; i++) filterLandmarks(f, frame(0.5), (t += 83));
+    const xs = [0.65, 0.8, 0.95].map(x => filterLandmarks(f, frame(x), (t += 83))[28].x);
+    expect(xs[0]).toBeGreaterThan(0.58);                                  // moving on the FIRST fast frame
+    expect(xs[2]).toBeGreaterThan(0.85);
   });
-  it('a still foot trembling ±0.6% reads steady', () => {
-    const f = createLandmarkFilter();
+  it('walking TOWARD the camera (the body grows in the picture) with a leg swinging is not a pass', () => {
+    const ev = createRepEvidence('legs');
     let t = 0;
-    const xs = [];
-    for (let i = 0; i < 60; i++) xs.push(filterLandmarks(f, frame(0.5 + (i % 2 ? 0.006 : -0.006), 0.5), (t += 33))[28].x);
-    const tail = xs.slice(30);
-    expect(Math.max(...tail) - Math.min(...tail)).toBeLessThan(0.004);
+    [0, -12, -25, -10, 15, 32].forEach((d, i) => {
+      const k = 1 + i * 0.06;                                             // the body grows 6% per frame
+      const lm = legBody(d).map(p => ({ ...p, x: 0.5 + (p.x - 0.5) * k, y: 0.5 + (p.y - 0.5) * k }));
+      evidenceFrame(ev, lm, (t += 100));
+    });
+    expect(evidenceOk(ev, t, { strike: true, kick: true })).toBe(false);
   });
 });
