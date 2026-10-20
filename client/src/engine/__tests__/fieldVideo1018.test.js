@@ -242,9 +242,9 @@ describe('field video 2026-10-19: a pendulum pass (straight knee, the hip swings
       const a = (deg * Math.PI) / 180;
       lm[26] = { x: 0.55 + 0.2 * Math.sin(a), y: 0.5 + 0.2 * Math.cos(a), visibility: 0.95 };
       lm[28] = { x: 0.55 + 0.4 * Math.sin(a), y: 0.5 + 0.4 * Math.cos(a), visibility: 0.95 };
-      // the left (prosthetic) knee reading jitters ±12°
-      const k = ((180 - (165 + (i % 2 ? 12 : -12))) * Math.PI) / 180;
-      lm[27] = { x: 0.45 - 0.2 * Math.sin(k), y: 0.7 + 0.2 * Math.cos(k), visibility: 0.95 };
+      // the left (prosthetic) KNEE point jitters (its angle reads ±12° off) — the planted foot stays put
+      lm[25] = { x: 0.45 + (i % 2 ? 0.04 : -0.04), y: 0.7, visibility: 0.95 };
+      lm[27] = { x: 0.45, y: 0.9, visibility: 0.95 };
       evidenceFrame(ev, lm, (t += 100));
     });
     expect(kickInPlace(ev)).toBe(true);

@@ -60,7 +60,7 @@ describe('the exact reason of a rejected kick (the console line)', () => {
     expect(inPlaceCheck(run([-10, -22, -12, 8, 25].map((d, i) => legBody(d, { scale: 1 + i * 0.08 }))).ev).reason).toBe('walk-depth');
     const ok = inPlaceCheck(run([0, -10, -22, -12, 8, 25].map(d => legBody(d))).ev);
     expect(ok.ok).toBe(true);
-    expect(ok.kick).toBeGreaterThan(5);
+    expect(ok.kick).toBeGreaterThan(0.3);                                   // the kicking foot's path (torso lengths)
   });
 });
 
@@ -71,5 +71,30 @@ describe('the hip → knee whip is a POWER-KICK rule only (never a pass, in any 
       expect((pass.dynamics || []).some(r => r.id === 'strike_chain'), ctx).toBe(false);
     }
     expect(EXPERT_PROFILES.footballKick.dynamics.some(r => r.id === 'strike_chain')).toBe(true);
+  });
+});
+
+describe('the support ANCHOR: the planted foot decides, not the support leg joint angles', () => {
+  it('a real pass whose support hip / knee angles change a lot (a turning pelvis, a noisy prosthesis) — the foot planted → in place', () => {
+    const frames = [0, -10, -22, -12, 8, 25].map((d, i) => {
+      const lm = legBody(d);
+      lm[25] = { x: 0.45 + (i % 2 ? 0.06 : -0.06), y: 0.7, visibility: 0.95 };   // the support knee point swings in the picture
+      return lm;
+    });
+    const c = inPlaceCheck(run(frames).ev);
+    expect(c.ok).toBe(true);
+    expect(c.anchor).toBeLessThan(0.3);
+  });
+  it('both feet travel (stepping) → not in place, with the reason', () => {
+    const frames = [0, -10, -22, -12, 8, 25].map((d, i) => { const lm = legBody(d); lm[27] = { x: 0.45 + i * 0.03, y: 0.9, visibility: 0.95 }; return lm; });
+    expect(inPlaceCheck(run(frames).ev).reason).toBe('both-legs');
+  });
+  it('crutches / a support the camera does not see as a foot → the anchor is not judged (the pelvis guard still is)', () => {
+    const frames = [0, -10, -22, -12, 8, 25].map(d => { const lm = legBody(d); lm[27] = { x: 0.5, y: 0.5, visibility: 0.1 }; return lm; });
+    expect(inPlaceCheck(run(frames).ev).ok).toBe(true);
+  });
+  it('a hip pendulum (the knee hardly moves) is a real swing — the FOOT path counts', () => {
+    const { ev } = run([0, 0, 0, -10, -18, 4, 20].map(d => legBody(d)));
+    expect(strikeSwing(ev).ok).toBe(true);
   });
 });

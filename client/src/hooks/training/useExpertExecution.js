@@ -45,7 +45,7 @@ import {
 } from '../../engine/training/coachFlow';
 import { createClipRecorder, recordFrame } from '../../engine/validation/clipRecorder';
 import { createRepEvidence, evidenceFrame, evidenceOk, evidenceAccept, evidenceGroupFor, explainStrike,
-  KICK_MAX_WIDTH_CHANGE, KICK_MAX_TRAVEL, STRIKE_MIN_RANGE, STRIKE_MIN_VEL, STRIKE_MIN_PATH } from '../../engine/training/repEvidence';
+  KICK_MAX_WIDTH_CHANGE, KICK_MAX_TRAVEL, KICK_ANCHOR_MAX, STRIKE_MIN_RANGE, STRIKE_MIN_VEL, STRIKE_MIN_PATH } from '../../engine/training/repEvidence';
 import { holdSpeech } from '../useSpeech';
 import { ROOM_TIP } from '../../engine/exercise/setupCoach';
 
@@ -338,7 +338,7 @@ export function useExpertExecution({
               const reason = counts ? 'ok'
                 : !P.ok ? (P.reason === 'walk-depth' ? `walking toward/away — shoulders width changed ${Math.round((P.widthChange || 0) * 100)}% (max ${Math.round(KICK_MAX_WIDTH_CHANGE * 100)}%)`
                   : P.reason === 'walk-across' ? `walking across — pelvis moved ${P.travel} torso (max ${KICK_MAX_TRAVEL})`
-                  : `both legs moved — kick ${P.kick}° / other leg ${P.other}°`)
+                  : `support foot not planted — moved ${P.anchor} torso (max ${KICK_ANCHOR_MAX}), kicking foot path ${P.kick}`)
                 : !S.ok ? `swing too small — range ${S.range}° (min ${STRIKE_MIN_RANGE}), speed ${S.peakVel}°/s (min ${STRIKE_MIN_VEL}), path ${S.path} (min ${STRIKE_MIN_PATH})`
                 : why.since < 450 ? `too soon after the last count (${why.since} ms)`
                 : r.quality?.confident === false ? 'tracking unsure' : 'unknown';
@@ -382,7 +382,8 @@ export function useExpertExecution({
           if (readySince === null) readySince = now;
           // "now I can see you" once; "I see you again" only after an instruction was really given, and rarely
           const sayReady = !everReady || (hadProblemShown && now - lastReadyAt >= READY_AGAIN_GAP_MS);
-          if (!announcedReady && !quietRef.current && now - readySince >= READY_SETTLE_MS && !sayReady) announcedReady = true;
+          // (never during a running set: "I can see you again" over the work is noise — the count is the coach's voice)
+          if (!announcedReady && !quietRef.current && now - readySince >= READY_SETTLE_MS && (!sayReady || countingRef.current && everReady)) announcedReady = true;
           if (!announcedReady && !quietRef.current && now - readySince >= READY_SETTLE_MS) {
             announcedReady = true;
             hadProblemShown = false; lastReadyAt = now;

@@ -118,7 +118,7 @@ Do not repeat or paraphrase closely any of the recent lines listed. Output ONLY 
     return { system, user };
   }
   const system = `${COACH_PERSONA(he)}
-NOW: the trainee is IN THE MIDDLE OF A SET. Give ONE immediate correction, like a shout from the sideline: warm, sharp, specific to THIS error and THIS rep — at most 9 words, one sentence. It must tell them what to do on the very next rep — exactly the instruction of "what" / "how", nothing else. ${f.name ? `You may use the name ${clip(f.name, 20)} (not every time).` : ''}
+NOW: the trainee is IN THE MIDDLE OF A SET. Give ONE immediate correction, like a shout from the sideline: warm, sharp, specific to THIS error and THIS rep — 4 to 7 words, one sentence (it must be SAID in under 2 seconds, the next pass is coming; the deep why / how is said in the rest). It must tell them what to do on the very next rep — exactly the instruction of "what" / "how", nothing else. ${f.name ? `You may use the name ${clip(f.name, 20)} (not every time).` : ''}
 ${f.tone === 'calm' ? 'The trainee is tired / frustrated right now: say it calmly and supportively, one simple thing.' : ''}
 Do not repeat or paraphrase closely any of the recent cues listed. Output ONLY the spoken sentence.`;
   const user = JSON.stringify({
@@ -152,7 +152,7 @@ export function buildDebriefPrompt(f) {
   const he = f.lang !== 'en';
   const system = `${COACH_PERSONA(he)}
 NOW: the REST between sets. You are the expert in the locker room analysing the set that just ended, for THIS trainee, from the measured log. Speak about 60–90 words (~25 seconds), in flowing spoken sentences:
-1. The set in numbers (reps / seconds, accuracy — if accuracy is null say nothing about it). "reps" are COUNTED reps — never call them clean, perfect or good unless "errors" is empty.
+${f.prefetch ? '1. Do NOT open with the set in numbers (the coach says them first) and give frequencies in words ("in most passes", "in a few") — never as counts.' : '1. The set in numbers (reps / seconds, accuracy — if accuracy is null say nothing about it).'} "reps" are COUNTED reps — never call them clean, perfect or good unless "errors" is empty.
 2. The most important thing to fix (safety first, then what happened most): what happened, how often, the measured value vs. the target when given, WHY it matters biomechanically / for injury, and HOW to fix it — a precise, practical instruction or feel.
 3. If there is a second error that happened often — one short sentence.
 4. What was good — ONLY items listed in "measuredClean".
@@ -207,7 +207,7 @@ export async function generateCue(facts, { timeoutMs = 3500, askFn = ask } = {})
   const prompt = buildCuePrompt(facts);
   for (const model of CUE_MODELS) {
     let raw;
-    try { raw = await askFn(model, prompt, 300, timeoutMs, 'low'); } catch (err) { if (isModelError(err)) continue; throw err; }
+    try { raw = await askFn(model, prompt, 200, timeoutMs, 'low'); } catch (err) { if (isModelError(err)) continue; throw err; }
     const text = String(raw || '').replace(/["“”«»]/g, '').replace(/\s+/g, ' ').trim();
     if (!text || /^SKIP/i.test(text) || text.length > MAX_CUE_CHARS || !numbersGrounded(text, facts) || !directionsKept(text, facts)) return null;
     if ((facts.recent || []).some(r => r && r.trim() === text)) return null;   // never the same words twice

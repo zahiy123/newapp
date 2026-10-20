@@ -598,6 +598,7 @@ export default function Training() {
   const briefingCacheRef = useRef(new Map());         // exercise name → the AI briefing (a promise)
   const briefingSeqRef = useRef(0);
   const debriefSeqRef = useRef(0);                   // the rest analysis in flight (a newer set wins)
+  const debriefPrefetchRef = useRef(null);           // { key, promise } — the analysis requested near the set's end
   const gradeTimerRef = useRef(null);
 
   // Feedback tracking
@@ -2887,7 +2888,18 @@ export default function Training() {
       extras: debriefExtras,
       visual: visionNotesRef.current.slice(-4),
     });
-    aiDebrief(facts).then((ai) => {
+    // the analysis was requested near the END of the set (prefetched) — the coach says the numbers at once and
+    // the AI's analysis follows without a wait; without a prefetch, the full request now
+    const pre = debriefPrefetchRef.current;
+    debriefPrefetchRef.current = null;
+    const usePre = pre && pre.key === `${currentIdx}-${currentSet}`;
+    if (usePre) {
+      const numbers = isHe
+        ? `${playerName ? `${playerName}, ` : ''}סט ${currentSet} מאחוריך: ${displayReps} חזרות${typeof setAcc === 'number' ? `, דיוק ${Math.round(setAcc)} אחוז` : ''}.`
+        : `Set ${currentSet} done: ${displayReps} reps${typeof setAcc === 'number' ? `, ${Math.round(setAcc)}% accuracy` : ''}.`;
+      speakPriority(nextLeg ? `${numbers} ${nextLeg}` : numbers, { rate: 1.05 });
+    }
+    (usePre ? pre.promise : aiDebrief(facts)).then((ai) => {
       if (seq !== debriefSeqRef.current) return;                    // a newer set / exercise took over
       // (the screen may still be switching to the rest when an instant answer arrives)
       const inRest = phaseRef.current === PHASE.RESTING || phaseRef.current === PHASE.EXERCISE_DONE || Date.now() - setEndedAt < 2000;
@@ -2949,6 +2961,23 @@ export default function Training() {
       body: bodyText(limbProfile || {}), error: { what: `${moment}${strained ? ' (the trainee is tired / frustrated — calm, supportive)' : ''}: ${line}` }, recent: legacyCuesRef.current })
       .then((ai) => setTimeout(() => { if (!isSpeaking()) speakIfIdle(ai || line, { rate: 1.05 }); }, 600));
   }
+
+  // PREFETCH the rest analysis 2 reps before the set's end (owner, 2026-10-20: "the coach is analysing…" waited
+  // 8–12 s): the technique analysis is ready when the set ends; the device says the final numbers itself
+  useEffect(() => {
+    if (phase !== PHASE.EXERCISING || !execution.active) return;
+    const target = parseInt(currentExercise?.reps) || 0;
+    const key = `${currentIdx}-${currentSet}`;
+    if (target < 4 || displayReps !== target - 2 || debriefPrefetchRef.current?.key === key) return;
+    const facts = debriefFacts({
+      log: execution.setLogRef?.current || null, profile: execution.profile, reps: displayReps, accuracy: execution.repAccuracy,
+      setNo: currentSet, lastSet: currentSet >= totalSets, he: isHe, name: playerName, exercise: currentExercise?.name || '',
+      sport: sportContexts.join('+'), lp: limbProfile || {}, legacy: legacySetLogRef.current, whyOf: techniqueWhy,
+      extras: [], visual: visionNotesRef.current.slice(-4),
+    });
+    debriefPrefetchRef.current = { key, promise: aiDebrief({ ...facts, prefetch: true }) };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [displayReps, phase, currentSet, currentIdx]);
 
   // The leg the trainee REALLY kicks with (detected by the ball). In a split set (a full set per leg,
   // by the plan) a kick with the other leg is told precisely, once per set; otherwise the detected leg
@@ -3415,9 +3444,9 @@ export default function Training() {
 
         {/* Set Grade Overlay (A+/A/B) */}
         {setGrade && (
-          <div className="absolute inset-0 flex items-center justify-center z-30 pointer-events-none">
+          <div className="absolute inset-x-0 top-[12%] flex justify-center z-30 pointer-events-none">
             <div
-              className="text-8xl font-black drop-shadow-lg"
+              className="text-6xl font-black drop-shadow-lg"
               style={{
                 color: setGrade.color,
                 animation: 'gradePopIn 0.4s ease-out forwards, gradePopOut 0.5s ease-in 2s forwards',

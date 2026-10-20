@@ -151,7 +151,8 @@ export const KICK_WINDOW_MS = 1200;
 export const KICK_MAX_TRAVEL = 0.35;
 export const KICK_OTHER_KNEE_DEG = 25;
 export const KICK_DOMINANCE = 0.6;
-export const KICK_MAX_WIDTH_CHANGE = 0.18;  // the shoulders' width in the picture changes ≤ this share (no walking in depth)
+export const KICK_MAX_WIDTH_CHANGE = 0.18;
+export const KICK_ANCHOR_MAX = 0.3;         // the support foot moves ≤ this many torso lengths (planted)  // the shoulders' width in the picture changes ≤ this share (no walking in depth)
 // A KICK / PASS is proven by ITS OWN swing, judged in the kick's short window AT the contact (field video
 // 2026-10-20: a controlled inside-foot pass is a pendulum from the hip with an almost straight knee — "the
 // leg came back over 8 s of history" failed on every pass, 0 counts while the passes were seen)
@@ -185,13 +186,17 @@ export function inPlaceCheck(ev) {
     out.travel = Math.round((travel / torso) * 100) / 100;
     if (travel > KICK_MAX_TRAVEL * torso) return { ...out, reason: 'walk-across' };
   }
-  // knees: indices 6 (left) / 7 (right) — the kicking knee is the one that moved most
-  const range = (j) => spread(fr.map(f => f.a[j]).filter(x => typeof x === 'number'));
-  // each leg's motion = its hip OR its knee (a pass swings from the hip with an almost straight knee)
-  const l = Math.max(range(4), range(6)), r = Math.max(range(5), range(7));
-  const kick = Math.max(l, r), other = Math.min(l, r);
-  out.kick = Math.round(kick); out.other = Math.round(other);
-  if (other > Math.max(KICK_OTHER_KNEE_DEG, KICK_DOMINANCE * kick)) return { ...out, reason: 'both-legs' };
+  // THE SUPPORT ANCHOR (owner, 2026-10-20): the support leg is judged by its FOOT staying planted on the floor —
+  // never by its joint angles (a prosthetic knee reads noisy, the hip turns in every real pass: "both legs moved"
+  // rejected real passes). The kicking foot = the one that travelled most; the other foot must stay put. A support
+  // the camera does not see as a foot (crutches, an absent limb) is not judged — the pelvis guard above still is.
+  const footPath = (j) => { let p = 0, prev = null; for (const f of fr) { const e = f.e[j]; if (e && prev) p += Math.hypot(e.x - prev.x, e.y - prev.y); if (e) prev = e; } return p; };
+  const footSpread = (j) => { const pts = fr.map(f => f.e[j]).filter(Boolean); return pts.length >= 3 ? Math.hypot(spread(pts.map(p => p.x)), spread(pts.map(p => p.y))) : null; };
+  const kickJ = footPath(6) >= footPath(7) ? 6 : 7, supportJ = kickJ === 6 ? 7 : 6;
+  const anchor = footSpread(supportJ);
+  out.kick = torso ? Math.round((footPath(kickJ) / torso) * 100) / 100 : null;
+  out.anchor = anchor !== null && torso ? Math.round((anchor / torso) * 100) / 100 : null;
+  if (anchor !== null && torso && anchor > KICK_ANCHOR_MAX * torso) return { ...out, reason: 'both-legs' };
   return { ...out, ok: true };
 }
 
@@ -217,6 +222,13 @@ export function strikeSwing(ev) {
       if (dt > 0 && dt < 0.5) peakVel = Math.max(peakVel, Math.abs(v[i] - v[i - 1]) / dt);
       const p0 = rows[i - 1].e[j], p1 = rows[i].e[j];
       if (p0 && p1) path += Math.hypot(p1.x - p0.x, p1.y - p0.y);
+    }
+    // (a hip pendulum moves the knee little but the FOOT a lot: the leg's path = the longer of the two)
+    const footJ = j === 4 ? 6 : j === 5 ? 7 : j;
+    if (footJ !== j) {
+      let fp = 0;
+      for (let i = 1; i < fr.length; i++) { const p0 = fr[i - 1].e[footJ], p1 = fr[i].e[footJ]; if (p0 && p1) fp += Math.hypot(p1.x - p0.x, p1.y - p0.y); }
+      path = Math.max(path, fp);
     }
     path = torso ? path / torso : 0;
     const ok = range >= STRIKE_MIN_RANGE && peakVel >= STRIKE_MIN_VEL && path >= STRIKE_MIN_PATH;

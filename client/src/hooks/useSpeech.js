@@ -293,7 +293,8 @@ export function useSpeech(lang = 'he-IL', age) {
     processingQueueRef.current = true;
     let next = queueRef.current.shift();
     // a rep count that waited too long is no longer true — skip it (the next one will come)
-    while (next?.count && Date.now() - (next.at || 0) > 3000) next = queueRef.current.shift();
+    // a count is LIVE: it waits at most 1.2 s (the number is already on the screen) — never said late
+    while (next?.count && Date.now() - (next.at || 0) > 1200) next = queueRef.current.shift();
     processingQueueRef.current = false;
     if (next) _utterSpeak(next.text, next.options);
   }, [_utterSpeak]);
