@@ -599,6 +599,9 @@ export default function Training() {
   const briefingCacheRef = useRef(new Map());         // exercise name → the AI briefing (a promise)
   const briefingSeqRef = useRef(0);
   const debriefSeqRef = useRef(0);                   // the rest analysis in flight (a newer set wins)
+  const debriefPendingRef = useRef(0);               // when the analysis was requested (0 = it arrived / was said)
+  const inRestNow = () => phaseRef.current === PHASE.RESTING || phaseRef.current === PHASE.EXERCISE_DONE;
+  const [restWaiting, setRestWaiting] = useState(false);   // the countdown ended, the coach is still talking
   const debriefPrefetchRef = useRef(null);           // { key, promise } — the analysis requested near the set's end
   const gradeTimerRef = useRef(null);
 
@@ -1814,7 +1817,11 @@ export default function Training() {
     } else if (phase === PHASE.RESTING) {
       timerRef.current = setInterval(() => {
         setRestTime(prev => {
-          if (prev <= 1) { clearInterval(timerRef.current); startNextSet(); return 0; }
+          // the next set NEVER starts over the coach's analysis (owner, 2026-10-20): at the end of the countdown it
+          // waits — while the analysis is still coming (≤ 30 s) or the coach is still speaking
+          const analysing = debriefPendingRef.current && Date.now() - debriefPendingRef.current < 30000;
+          if (prev <= 1 && (analysing || isSpeaking())) { setRestWaiting(true); return 1; }
+          if (prev <= 1) { setRestWaiting(false); clearInterval(timerRef.current); startNextSet(); return 0; }
           return prev - 1;
         });
       }, 1000);
@@ -2888,6 +2895,8 @@ export default function Training() {
     // the AI coach analyses the set from its measured log (Opus — the expert in the locker room); the
     // card says it is analysing; when the AI is late / unreachable the device's own analysis is said
     const seq = ++debriefSeqRef.current;
+    debriefPendingRef.current = Date.now();
+    setRestWaiting(false);
     const setEndedAt = Date.now();
     setRestDebrief({ pending: true, items: [{ kind: 'note', title: isHe ? 'המאמן מנתח את הסט…' : 'The coach is analysing the set…' }] });
     const facts = debriefFacts({
@@ -2910,9 +2919,11 @@ export default function Training() {
     }
     (usePre ? pre.promise : aiDebrief(facts)).then((ai) => {
       if (seq !== debriefSeqRef.current) return;                    // a newer set / exercise took over
+      if (!inRestNow()) { debriefPendingRef.current = 0; }
       // (the screen may still be switching to the rest when an instant answer arrives)
       const inRest = phaseRef.current === PHASE.RESTING || phaseRef.current === PHASE.EXERCISE_DONE || Date.now() - setEndedAt < 2000;
       if (!inRest) return;
+      debriefPendingRef.current = 0;
       const speech = ai?.speech || debrief.speech;
       setRestDebrief(ai?.card?.length ? { items: ai.card } : debrief.card);
       speakPriority(speech, { rate: 1.0 });
@@ -3816,6 +3827,7 @@ export default function Training() {
             <div className="text-center space-y-4">
               <div className="text-white text-lg font-medium">{t('training.restBetweenSets')}</div>
               <div className="text-7xl font-bold text-white">{restTime}</div>
+              {restWaiting && <div className="text-white/80 text-sm">{isHe ? 'המאמן מסיים את הניתוח — הסט הבא יתחיל מיד אחריו' : 'The coach is finishing the analysis — the next set starts right after'}</div>}
               <div className="text-white/70 text-sm">{t('training.set')} {currentSet}/{totalSets} {t('training.setComplete')}</div>
               {/* the next set's leg — its own line under the countdown (never a bubble over it) */}
               {typeof feedback?.text === 'string' && feedback.text.startsWith('🔄') && (

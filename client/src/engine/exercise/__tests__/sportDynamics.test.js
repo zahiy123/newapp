@@ -107,12 +107,12 @@ describe('Sport contexts', () => {
 });
 
 describe('Movement flow — tempo and control', () => {
-  it('rehab: a fitness-tempo squat is too fast — flagged, explained in rehab terms, coached once', () => {
+  it('rehab: a fitness-tempo squat is too fast — flagged, explained in rehab terms, corrected again while it repeats', () => {
     const p = applySportContext(EXPERT_PROFILES.squat, ['rehab']);
     const res = run(p, ms => frameAt(EXPERT_PROFILES.squat, ms), 6 * 3200);
     expect(res.issues.has('tempo_lowering')).toBe(true);
     const coached = res.coaching.filter(r => r.id === 'tempo_lowering');
-    expect(coached.length).toBe(1);
+    expect(coached.length).toBeGreaterThanOrEqual(2);
     expect(coached[0].why.he).toContain('בשיקום');
   });
 

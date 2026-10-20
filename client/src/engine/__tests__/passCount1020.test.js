@@ -125,3 +125,14 @@ describe('agility / endurance / speed drills: feedback in the rest; one pass = o
     expect(c.side).toBe('right');
   });
 });
+
+import { isMajor } from '../exercise/profileEvaluator';
+describe('the correction policy: major at once, minor forgiven once', () => {
+  it('knees caving in / a toe-poke / a danger are major; too shallow is minor', () => {
+    const sq = EXPERT_PROFILES.squat.rules;
+    expect(isMajor(sq.find(r => r.id === 'knee_valgus'))).toBe(true);
+    expect(isMajor(sq.find(r => r.id === 'trunk_collapse'))).toBe(true);
+    expect(isMajor(sq.find(r => r.id === 'too_shallow'))).toBe(false);
+    expect(isMajor(EXPERT_PROFILES.shadowPass.dynamics.find(r => r.id === 'pass_toe'))).toBe(true);
+  });
+});

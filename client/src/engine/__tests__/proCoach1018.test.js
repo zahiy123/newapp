@@ -77,16 +77,15 @@ describe('position errors are coached by voice (not only shown) — patiently', 
   // a squat that never reaches depth: the Ghost's peak knee at 135° (too shallow)
   const p = EXPERT_PROFILES.squat;
   const shallow = { ...p, ghost: { ...p.ghost, peak: { ...p.ghost.peak, knee: 135, hip: 120 } } };
-  it('a squat too shallow → a cue RIGHT AFTER the first shallow rep, then patiently (not every rep)', () => {
+  it('a squat too shallow (minor) → forgiven once, corrected from its 2nd time, and AGAIN while it repeats', () => {
     const tr = createExecutionTracker(p, lpOk);
     const at = [];
     for (let ms = 0; ms <= 7 * p.ghost.periodMs; ms += 50) {
       if (updateExecution(tr, frameAt(shallow, ms), ms).coaching.some(r => r.id === 'too_shallow')) at.push(ms);
     }
-    expect(STATIC_COACH_AFTER).toBe(1);
-    expect(at.length).toBeGreaterThanOrEqual(1);
-    expect(at.length).toBeLessThanOrEqual(2);
-    expect(at[0]).toBeLessThan(1.5 * p.ghost.periodMs);          // in the first rep
+    expect(at[0]).toBeGreaterThan(1.0 * p.ghost.periodMs);       // not the first shallow rep (forgiven once)
+    expect(at[0]).toBeLessThan(2.5 * p.ghost.periodMs);          // the second one
+    expect(at.length).toBeGreaterThanOrEqual(4);                 // and again at every repeat (7 shallow reps)
   });
   it('a clean squat is never coached', () => {
     const tr = createExecutionTracker(p, lpOk);

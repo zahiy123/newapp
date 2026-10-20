@@ -49,8 +49,14 @@ export const COACH_AFTER = 2;         // consecutive violations before the coach
 // (1 → 3 → 5 reps) — never nagging every rep. Every attempt is LOGGED (tr.log) for the rest's debrief.
 export const STATIC_COACH_AFTER = 1;
 export const HOLD_COACH_MS = 1500;
-export const MAX_COACH_PER_RULE = 4;
-const HOLD_RECOACH_GAP_MS = 20000;
+export const MAX_COACH_PER_RULE = 30;      // (practically no cap: a repeated error is corrected again)
+const HOLD_RECOACH_GAP_MS = 8000;
+// THE CORRECTION POLICY (owner, 2026-10-20): a CRITICAL / dangerous / significantly harmful technique error is said
+// at once, every time it happens; a minor one is forgiven ONCE (said from its 2nd time in a row); any error that
+// keeps repeating is corrected again (the coach brain's gap keeps it from being every second)
+export const MAJOR_RULES = new Set(['knee_valgus', 'knee_in', 'lean_back', 'trunk_collapse', 'over_bend', 'hip_sag',
+  'too_deep', 'kick_toe', 'pass_toe', 'pass_laces', 'strike_balance']);
+export const isMajor = (r) => r?.severity === 'danger' || r?.major === true || MAJOR_RULES.has(r?.id);
 const REP_ERR_FRAMES = 4;            // ~200 ms of a rep in the wrong position = an error of that rep
 const STRIKE_WINDOW = 5;              // accuracy of strike exercises: the last N strikes
 
@@ -314,7 +320,8 @@ export function updateExecution(tracker, landmarks, nowMs) {
   const coaching = [];
   const canCoach = (id) => (tr.coached[id] || 0) < MAX_COACH_PER_RULE;
   // a repeat explanation needs a LONGER streak each time (2 → 6 → 10 reps): the coach is patient
-  const need = (r, base) => (r.coachNow ? 1 : base) * (1 + 2 * (tr.coached[r.id] || 0));
+  // major → at once; minor → forgiven once (2 in a row), and once corrected, said again at its next repeat
+  const need = (r) => (isMajor(r) || r.coachNow || (tr.coached[r.id] || 0) > 0 ? 1 : 2);
   // (with what was MEASURED — the AI coach words the correction from it: the value, the side)
   const coachIt = (r, measured = null, side = null) => { tr.coached[r.id] = (tr.coached[r.id] || 0) + 1; tr.coachedAt[r.id] = nowMs; tr.dynStreak[r.id] = 0; coaching.push({ ...r, measured, side }); };
   // (a peak is short: ≥ REP_ERR_FRAMES frames in this rep, not the full hold time)
@@ -364,7 +371,7 @@ export function updateExecution(tracker, landmarks, nowMs) {
         if (r.severity !== 'error' || !judged(r)) continue;
         if ((tr.repErr[r.id] || 0) >= REP_ERR_FRAMES) {
           tr.dynStreak[r.id] = (tr.dynStreak[r.id] || 0) + 1;
-          if (tr.dynStreak[r.id] >= need(r, STATIC_COACH_AFTER) && canCoach(r.id)) coachIt(r, tr.repWorst[r.id] ?? null, ev.side || null);
+          if (tr.dynStreak[r.id] >= need(r) && canCoach(r.id)) coachIt(r, tr.repWorst[r.id] ?? null, ev.side || null);
         } else tr.dynStreak[r.id] = 0;
       }
       tr.repErr = {}; tr.repJudged = {}; tr.repWorst = {};
@@ -381,7 +388,7 @@ export function updateExecution(tracker, landmarks, nowMs) {
         clean = false;
         tr.dynActive[r.id] = { rule: r, until: nowMs + DYNAMIC_SHOW_MS, value: ev[r.feature] };
         // a technique error of the movement itself (coachNow) is corrected RIGHT AFTER the first time
-        if (tr.dynStreak[r.id] >= need(r, COACH_AFTER) && canCoach(r.id)) coachIt(r, ev[r.feature], ev.side || null);
+        if (tr.dynStreak[r.id] >= need(r) && canCoach(r.id)) coachIt(r, ev[r.feature], ev.side || null);
       } else if (typeof ev[r.feature] === 'number') {
         logRule(tr.log, r, false, ev[r.feature]);
         tr.dynStreak[r.id] = 0;

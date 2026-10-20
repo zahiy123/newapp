@@ -46,6 +46,7 @@ export function useSpeech(lang = 'he-IL', age) {
   const speaking = useRef(false);
   const queueRef = useRef([]);
   const currentSidRef = useRef(null);       // the id of the sentence playing (its chunks share it)
+  const currentChunkRef = useRef(null);     // { text, options } of the chunk playing
   const sidSeqRef = useRef(0);
   const currentUtteranceRef = useRef(null);
   const speechStartedAtRef = useRef(0);
@@ -156,9 +157,9 @@ export function useSpeech(lang = 'he-IL', age) {
     if (!window.speechSynthesis || !text) return;
     if (!speechOpen) { queueRef.current = []; return; }          // the setup screens are silent
 
-    // Dedup: skip if identical text was spoken within the last 10 seconds
+    // Dedup: skip if identical text was spoken within the last 10 seconds (never a line resumed after a count)
     const now = Date.now();
-    if (text === lastSpokenTextRef.current && now - lastSpokenTimeRef.current < DEDUP_WINDOW_MS) {
+    if (!options?.__resume && text === lastSpokenTextRef.current && now - lastSpokenTimeRef.current < DEDUP_WINDOW_MS) {
       console.log('[Speech] DEDUP skipped (same text within 10s):', text.substring(0, 40));
       // Still trigger queue processing so queued items aren't stuck
       if (processQueueRef.current) processQueueRef.current();
@@ -167,6 +168,7 @@ export function useSpeech(lang = 'he-IL', age) {
     lastSpokenTextRef.current = text;
     lastSpokenTimeRef.current = now;
     currentSidRef.current = options?.__sid ?? null;             // which sentence is playing now
+    currentChunkRef.current = { text, options };               // the chunk playing (a count may cut it — then it is said again)
     noteCoachLine(text);
 
     // Resume before every speak (Android/iOS requirement)
@@ -330,6 +332,15 @@ export function useSpeech(lang = 'he-IL', age) {
     if (speaking.current || queueRef.current.length) {
       const isCount = /^\d+!?$/.test(String(text).trim());
       if (isCount) queueRef.current = queueRef.current.filter(q => !q.count);
+      // THE COUNT IS INSTANT (owner, 2026-10-20): a number never waits behind a sentence — it cuts the chunk
+      // playing, is said at once (local, no server), and the cut chunk is said again right after it
+      if (isCount && speaking.current) {
+        const cur = currentChunkRef.current;
+        const again = cur && !/^\d+!?$/.test(String(cur.text).trim()) ? [{ text: cur.text, options: { ...cur.options, __resume: true } }] : [];
+        queueRef.current = [{ text: String(text), options, count: true, at: Date.now() }, ...again, ...queueRef.current];
+        try { window.speechSynthesis.cancel(); } catch { /* the cut utterance's onerror plays the queue */ }
+        return;
+      }
       // AFTER the queued rest of the sentence (never between its chunks)
       const items = splitToChunks(text).map(c => ({ text: c, options, count: isCount, at: Date.now() }));
       queueRef.current = [...queueRef.current, ...items];
@@ -1151,7 +1162,7 @@ export function useSpeech(lang = 'he-IL', age) {
     currentUtteranceRef.current = null;
   }, []);
 
-  const isSpeaking = () => speaking.current;
+  const isSpeaking = () => speaking.current || queueRef.current.length > 0;
 
   return {
     playAchievementDing,
