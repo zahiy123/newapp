@@ -98,3 +98,30 @@ describe('the support ANCHOR: the planted foot decides, not the support leg join
     expect(strikeSwing(ev).ok).toBe(true);
   });
 });
+
+import { visionRuleHits, restOnlyFeedback, COUNT_LOCK_MS, VISION_CONFIDENCE } from '../../hooks/training/useExpertExecution';
+
+describe('the coach eyes: only a CONFIDENT vision finding becomes a correction', () => {
+  const p = EXPERT_PROFILES.shadowPass;
+  it('toe / laces / a loose ankle seen confidently → the pass rule; unsure → nothing', () => {
+    expect(visionRuleHits({ contact: { value: 'toe', confidence: 0.9 } }, p).map(h => [h.rule.id, h.violated])).toEqual([['pass_toe', true]]);
+    expect(visionRuleHits({ contact: { value: 'laces', confidence: 0.8 } }, p)[0].rule.id).toBe('pass_laces');
+    expect(visionRuleHits({ ankleLocked: { value: false, confidence: 0.85 } }, p)[0]).toMatchObject({ violated: true });
+    expect(visionRuleHits({ contact: { value: 'toe', confidence: VISION_CONFIDENCE - 0.05 } }, p)).toEqual([]);
+    expect(visionRuleHits({ contact: { value: 'inside', confidence: 0.9 } }, p)[0]).toMatchObject({ violated: false });   // judged clean
+  });
+});
+
+describe('agility / endurance / speed drills: feedback in the rest; one pass = one count', () => {
+  it('running in place / high knees / shuffles are rest-only; a pass / a squat are live', () => {
+    expect(restOnlyFeedback(EXPERT_PROFILES.runInPlace)).toBe(true);
+    expect(restOnlyFeedback(EXPERT_PROFILES.highKnees)).toBe(true);
+    expect(restOnlyFeedback(EXPERT_PROFILES.shadowPass)).toBe(false);
+    expect(restOnlyFeedback(EXPERT_PROFILES.squat)).toBe(false);
+    expect(COUNT_LOCK_MS).toBe(1000);
+  });
+  it('the kicking side comes from the feet (the anchor), not a jumping label', () => {
+    const c = inPlaceCheck(run([0, -10, -22, -12, 8, 25].map(d => legBody(d))).ev);
+    expect(c.side).toBe('right');
+  });
+});

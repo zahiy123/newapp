@@ -202,7 +202,7 @@ export default function Training() {
   const [equipmentLabel, setEquipmentLabel] = useState('');
   const equipCheckTimerRef = useRef(null);
   const {
-    speak, speakPriority, speakIfIdle, speakBriefing, speakBriefingText, speakEncouragement, speakCorrection,
+    speak, speakPriority, speakIfIdle, speakBriefing, speakBriefingText, dropQueuedCounts, speakEncouragement, speakCorrection,
     speakOptimization, speakRestTip, speakSetStart, speakCount,
     speakMidSetQuit, speakHeadUp,
     speakActiveProd,
@@ -429,6 +429,7 @@ export default function Training() {
   const [displayReps, setDisplayReps] = useState(0);
   // the rep counter ON THE SCREEN, for the ball (every counted rep plays a ball)
   const displayRepsRef = useRef(0);
+  const passFrameRef = useRef(null);               // () => a camera frame (base64 JPEG) for the vision model
   displayRepsRef.current = displayReps;
   useEffect(() => { if (window.__GHOST_DEBUG) window.__trainingReps = displayReps; }, [displayReps]);
   const [feedback, setFeedback] = useState(null);
@@ -861,6 +862,8 @@ export default function Training() {
     brainEnabled: FEATURES.COACH_BRAIN,
     // the kicking leg of a REAL counted kick (never a weight shift) — the split-set leg notice
     onStrikeSide: (side) => handleKickSideRef.current?.(side),
+    // the coach's EYES: one camera frame at a pass's contact (the vision model judges the contact surface)
+    captureFrameRef: passFrameRef,
     effortRef: voiceEffortRef,
   });
   const executionInViewRef = execution.inViewRef;
@@ -979,7 +982,9 @@ export default function Training() {
   // "Ghost: big" = full size ON the body in every exercise (standing or on the floor): its size
   // follows the trainee's body / distance from the camera, its hips sit on the trainee's hips
   // shown on the body from the briefing on (no waiting for the exercise phase)
-  const demoOnBody = overlayActive && demoGhostPhase;
+  // the big Ghost ON the body only before the set (the explanation / the start); during the set it is the small
+  // panel at the side — on the body it confused the trainee ("it counts the Ghost") — owner, 2026-10-20
+  const demoOnBody = overlayActive && demoGhostPhase && phase !== PHASE.EXERCISING;
   const demoLarge = false;
   const demoLabel = demoProfile?.precision === 'expert'
     ? (isHe ? `הדגמה: ${demoProfile.name.he}` : `Demo: ${demoProfile.name.en}`)
@@ -2866,11 +2871,15 @@ export default function Training() {
     // measured value vs. the target, why it matters and how to fix it, what was good (measured), and one
     // goal for the next set — from the set's measured log (never a generic "good direction")
     const lastSet = currentSet >= totalSets;
+    // the FINAL count (the set ends on the count that completed it — the displayed state may lag one render);
+    // numbers still waiting in the speech queue are stale: dropped, the summary says the final one
+    const finalReps = Math.max(displayReps, execution.repCountRef?.current || 0, exerciseStateRef.current?.reps || 0);
+    dropQueuedCounts();
     const nextLeg = !lastSet && currentExercise?.sideSwitch && currentExercise.splitBy === 'set'
       ? legSetNextText(limbProfile, isHe, currentExercise.splitMode, currentSet + 1) : null;
     let debriefExtras = [];
     const debrief = buildDebrief({
-      log: execution.setLogRef?.current || null, profile: execution.profile, reps: displayReps, accuracy: setAcc,
+      log: execution.setLogRef?.current || null, profile: execution.profile, reps: finalReps, accuracy: setAcc,
       setNo: currentSet, he: isHe, name: playerName, lastSet,
       legacy: legacySetLogRef.current, whyOf: techniqueWhy,
       // the coach brain's one mental cue for the rest (fatigue / frustration) closes the analysis
@@ -2882,11 +2891,11 @@ export default function Training() {
     const setEndedAt = Date.now();
     setRestDebrief({ pending: true, items: [{ kind: 'note', title: isHe ? 'המאמן מנתח את הסט…' : 'The coach is analysing the set…' }] });
     const facts = debriefFacts({
-      log: execution.setLogRef?.current || null, profile: execution.profile, reps: displayReps, accuracy: setAcc,
+      log: execution.setLogRef?.current || null, profile: execution.profile, reps: finalReps, accuracy: setAcc,
       setNo: currentSet, lastSet, he: isHe, name: playerName, exercise: currentExercise?.name || '',
       sport: sportContexts.join('+'), lp: limbProfile || {}, legacy: legacySetLogRef.current, whyOf: techniqueWhy,
       extras: debriefExtras,
-      visual: visionNotesRef.current.slice(-4),
+      visual: [...visionNotesRef.current.slice(-4), ...(execution.restNotesRef?.current || [])],
     });
     // the analysis was requested near the END of the set (prefetched) — the coach says the numbers at once and
     // the AI's analysis follows without a wait; without a prefetch, the full request now
@@ -2895,8 +2904,8 @@ export default function Training() {
     const usePre = pre && pre.key === `${currentIdx}-${currentSet}`;
     if (usePre) {
       const numbers = isHe
-        ? `${playerName ? `${playerName}, ` : ''}סט ${currentSet} מאחוריך: ${displayReps} חזרות${typeof setAcc === 'number' ? `, דיוק ${Math.round(setAcc)} אחוז` : ''}.`
-        : `Set ${currentSet} done: ${displayReps} reps${typeof setAcc === 'number' ? `, ${Math.round(setAcc)}% accuracy` : ''}.`;
+        ? `${playerName ? `${playerName}, ` : ''}סט ${currentSet} מאחוריך: ${finalReps} חזרות${typeof setAcc === 'number' ? `, דיוק ${Math.round(setAcc)} אחוז` : ''}.`
+        : `Set ${currentSet} done: ${finalReps} reps${typeof setAcc === 'number' ? `, ${Math.round(setAcc)}% accuracy` : ''}.`;
       speakPriority(nextLeg ? `${numbers} ${nextLeg}` : numbers, { rate: 1.05 });
     }
     (usePre ? pre.promise : aiDebrief(facts)).then((ai) => {
@@ -2978,6 +2987,27 @@ export default function Training() {
     debriefPrefetchRef.current = { key, promise: aiDebrief({ ...facts, prefetch: true }) };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [displayReps, phase, currentSet, currentIdx]);
+
+  // the frame for the coach's EYES: the RAW camera (no skeleton / Ghost / ball drawn on it), cropped around the
+  // legs and feet at the camera's full resolution — the foot is what the vision model must see clearly
+  passFrameRef.current = () => {
+    const v = videoRef.current, lm = poseLandmarksRef.current;
+    if (!v || !v.videoWidth) return null;
+    const pts = [23, 24, 25, 26, 27, 28, 29, 30, 31, 32].map(i => lm?.[i]).filter(p => p && (p.visibility ?? 0) >= 0.3);
+    if (pts.length < 4) return captureFrame(v);
+    const W = v.videoWidth, H = v.videoHeight;
+    let x0 = Math.min(...pts.map(p => p.x)) * W, x1 = Math.max(...pts.map(p => p.x)) * W;
+    let y0 = Math.min(...pts.map(p => p.y)) * H, y1 = Math.max(...pts.map(p => p.y)) * H;
+    const padX = (x1 - x0) * 0.35 + 20, padY = (y1 - y0) * 0.2 + 20;
+    x0 = Math.max(0, x0 - padX); x1 = Math.min(W, x1 + padX); y0 = Math.max(0, y0 - padY); y1 = Math.min(H, y1 + padY);
+    const cw = x1 - x0, ch = y1 - y0;
+    if (cw < 40 || ch < 40) return captureFrame(v);
+    const k = Math.min(1, 448 / Math.max(cw, ch));
+    const c = document.createElement('canvas');
+    c.width = Math.round(cw * k); c.height = Math.round(ch * k);
+    c.getContext('2d').drawImage(v, x0, y0, cw, ch, 0, 0, c.width, c.height);
+    try { return c.toDataURL('image/jpeg', 0.72).split(',')[1] || null; } catch { return null; }
+  };
 
   // The leg the trainee REALLY kicks with (detected by the ball). In a split set (a full set per leg,
   // by the plan) a kick with the other leg is told precisely, once per set; otherwise the detected leg

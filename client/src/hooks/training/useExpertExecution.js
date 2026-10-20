@@ -38,7 +38,30 @@ import { createExecutionTracker, updateExecution, calibrateUpright, stableUprigh
 import { liveCue } from '../../engine/coachBrain/policy';
 import { jointAngleSide, torsoLength } from '../../engine/exercise/kinematics';
 import { cueFacts } from '../../engine/coachBrain/aiFacts';
-import { aiCue, aiLine } from '../../utils/aiCoach';
+import { aiCue, aiLine, aiPassVision } from '../../utils/aiCoach';
+import { logRule, logJudgedCount } from '../../engine/exercise/profileEvaluator';
+
+// one kick / pass = one count: after a COUNTED kick nothing counts for COUNT_LOCK_MS (its back-swing / return);
+// a FLOOD (FLOOD_N strikes within FLOOD_MS — wild, endless kicking) counts and answers nothing until calm
+export const COUNT_LOCK_MS = 1000;
+export const FLOOD_N = 3, FLOOD_MS = 2500, FLOOD_CALM_MS = 1500;
+// agility / endurance / speed drills: the data is collected during the set, the feedback is given in the REST
+export const REST_ONLY_IDS = new Set(['runInPlace', 'highKnees', 'buttKicks', 'aSkip', 'accelMarch', 'lateralShuffle', 'jumpSquat']);
+export const restOnlyFeedback = (profile) => !!profile && (profile.kind === 'cyclic' || REST_ONLY_IDS.has(profile.id));
+// the vision model's verdict on a pass, mapped to the pass's own rules (confident findings only)
+export const VISION_CONFIDENCE = 0.75;
+export function visionRuleHits(v, profile) {
+  const rule = (id) => [...(profile?.rules || []), ...(profile?.dynamics || [])].find(r => r.id === id) || null;
+  const out = [];
+  const ok = (f) => f && typeof f.confidence === 'number' && f.confidence >= VISION_CONFIDENCE;
+  if (ok(v?.contact)) {
+    if (v.contact.value === 'toe' && rule('pass_toe')) out.push({ rule: rule('pass_toe'), violated: true });
+    else if (v.contact.value === 'laces' && rule('pass_laces')) out.push({ rule: rule('pass_laces'), violated: true });
+    else if (v.contact.value === 'inside') { if (rule('pass_toe')) out.push({ rule: rule('pass_toe'), violated: false }); }
+  }
+  if (ok(v?.ankleLocked) && typeof v.ankleLocked.value === 'boolean' && rule('pass_ankle')) out.push({ rule: rule('pass_ankle'), violated: !v.ankleLocked.value });
+  return out;
+}
 import { bodyText } from '../../engine/coachBrain/aiFacts';
 import {
   createStartGate, updateStartGate, isStartPosition, feetStill, openingKickAllowed, isValidRep, updateWork, withDrive, startPositionPrompt, READY_DRIVE,
@@ -97,7 +120,7 @@ export function buildExecutionProfile(cueKey, exerciseName, limbProfile, sportCo
 export function useExpertExecution({
   enabled, counting = false, quiet = false, cueKey, exerciseName, catalogId = null, sportContexts, limbProfile, landmarksRef,
   isHe, playerName = '', speakPriority, recordClips = false, onClips,
-  brainEnabled = false, effortRef = null, onStrikeSide = null,
+  brainEnabled = false, effortRef = null, onStrikeSide = null, captureFrameRef = null,
 }) {
   const onStrikeSideRef = useRef(onStrikeSide);
   onStrikeSideRef.current = onStrikeSide;
@@ -124,6 +147,7 @@ export function useExpertExecution({
   nameRef.current = playerName;
   const statsRef = useRef({ dangers: 0, errors: {} });
   const setLogRef = useRef(null);            // the current set's measured log (the rest's debrief)
+  const restNotesRef = useRef([]);           // the brain's notes kept for the rest's analysis (never said in the set)
   const lastRepCleanRef = useRef(null);      // the last counted kick / pass was measured clean (the ball's "Nice!")
   const brainRef = useRef(null);             // the coach brain of this exercise (Layers 1–4)
   const brainOnRef = useRef(brainEnabled);
@@ -202,11 +226,54 @@ export function useExpertExecution({
     const kinetic = createRepEvidence(evidenceGroupFor({ profile, cueKey }));   // a kick: only the legs prove it
     // each counted rep's accuracy (the profile's measure at that rep, an error in it = lower)
     const repScores = [];
+    // HONEST accuracy (owner, 2026-10-20: "100%" on a set nothing was judged in): a rep counts toward the
+    // accuracy only if something was really JUDGED in it (a measured rule, or the vision model's verdict)
+    let judgedBefore = 0;
+    const repVerdicts = [];                     // per counted rep: { judged, error }
+    const refreshAccuracy = () => {
+      const j = repVerdicts.filter(v => v.judged);
+      setRepAccuracy(j.length ? Math.round(j.reduce((s, v) => s + (v.error ? 50 : 100), 0) / j.length) : null);
+    };
     const noteRepScore = (res) => {
-      const a = typeof res.accuracy === 'number' ? res.accuracy : null;
-      if (a === null) return;
-      repScores.push((res.issues || []).length ? Math.min(a, 60) : a);
-      setRepAccuracy(Math.round(repScores.reduce((x, y) => x + y, 0) / repScores.length));
+      const judgedNow = logJudgedCount(tracker.log);
+      const judged = judgedNow > judgedBefore || profile.kind !== 'strike';
+      judgedBefore = judgedNow;
+      if (profile.kind !== 'strike') {
+        const a = typeof res.accuracy === 'number' ? res.accuracy : null;
+        if (a === null) return;
+        repScores.push((res.issues || []).length ? Math.min(a, 60) : a);
+        setRepAccuracy(Math.round(repScores.reduce((x, y) => x + y, 0) / repScores.length));
+        return;
+      }
+      repVerdicts.push({ judged, error: judged && (res.issues || []).some(i => i.severity === 'error' || i.severity === 'danger') });
+      refreshAccuracy();
+    };
+    const restOnly = restOnlyFeedback(profile);
+    let lastCountAt = -1e9; const strikeTimes = []; let floodUntil = -1e9;
+    // the EYES: one frame at the contact of a counted pass → the vision model's verdict (contact surface,
+    // ankle lock, …) → the set log, the accuracy and a live cue (confident findings only)
+    let visionBusy = false;
+    const lookAtPass = (repIdx, side) => {
+      if (visionBusy || restOnly || profile.id !== 'shadowPass') return;
+      const frame = captureFrameRef?.current?.();
+      if (!frame) return;
+      visionBusy = true;
+      const he0 = isHeRef.current;
+      aiPassVision({ frame, lang: he0 ? 'he' : 'en', side, exercise: exerciseName, body: bodyText(limbProfile || {}) }).then((v) => {
+        visionBusy = false;
+        if (disposed || !v) return;
+        const hits = visionRuleHits(v, profile);
+        if (!hits.length) return;
+        for (const h of hits) logRule(tracker.log, h.rule, h.violated, null);
+        judgedBefore = logJudgedCount(tracker.log);
+        const rec = repVerdicts[repIdx];
+        if (rec) { rec.judged = true; rec.error = rec.error || hits.some(h => h.violated); refreshAccuracy(); }
+        const bad = hits.find(h => h.violated);
+        if (bad && countingRef.current && performance.now() >= floodUntil) {
+          console.info(`[Vision] pass #${repIdx + 1}: ${bad.rule.id} (contact ${v.contact?.value}/${v.contact?.confidence}, ankle ${v.ankleLocked?.value}/${v.ankleLocked?.confidence})`);
+          sayCorrection({ ...bad.rule, side }, liveCue(bad.rule, he0), 1.1, he0);
+        }
+      });
     };
     brainRef.current = brain;
     // THE COACH'S WORDS BY THE AI (owner, 2026-10-19): a correction is worded by the AI coach from the
@@ -315,7 +382,7 @@ export function useExpertExecution({
         workingRef.current = updateWork(work, profile, r, now);
 
         // ---- Exact rep counting (a new set starts from zero) ----
-        if (countingRef.current && !wasCounting) { setLogRef.current = resetSetLog(tracker); repCountRef.current = 0; strikeCountRef.current = 0; earlyRef.current = false; repScores.length = 0; setRepAccuracy(null); }
+        if (countingRef.current && !wasCounting) { restNotesRef.current = []; repVerdicts.length = 0; judgedBefore = 0; lastCountAt = -1e9; floodUntil = -1e9; setLogRef.current = resetSetLog(tracker); repCountRef.current = 0; strikeCountRef.current = 0; earlyRef.current = false; repScores.length = 0; setRepAccuracy(null); }
         wasCounting = countingRef.current;
         if (countingRef.current && r.inView && countOpenRef.current) {
           for (const ev of r.events) {
@@ -330,26 +397,36 @@ export function useExpertExecution({
             }
             // the reason of every detected kick, in the console (the owner's videos show exactly why it did or did not count)
             if (ev.type === 'strike' && profile.kind === 'strike') {
+              strikeTimes.push(now); while (strikeTimes.length && now - strikeTimes[0] > FLOOD_MS) strikeTimes.shift();
+              if (strikeTimes.length >= FLOOD_N) floodUntil = now + FLOOD_CALM_MS;
               const why = explainStrike(kinetic, now);
-              const counts = countsReps && r.quality?.confident !== false && evidenceOk(kinetic, now, { strike: true, kick: true });
+              const counts = countsReps && r.quality?.confident !== false && evidenceOk(kinetic, now, { strike: true, kick: true })
+                && now - lastCountAt >= COUNT_LOCK_MS && now >= floodUntil;
               // the EXACT reason (never a guess): walking toward / away (the shoulders' width), walking across (the
               // pelvis travel), both legs moving, a too-small swing (range / speed / path), too soon, unsure tracking
               const P = why.place, S = why.swing;
-              const reason = counts ? 'ok'
+              const reason = now - lastCountAt < COUNT_LOCK_MS ? `locked — ${Math.round(now - lastCountAt)} ms after the last count (one pass = one count)`
+                : now < floodUntil ? `flood — ${strikeTimes.length} kicks in ${FLOOD_MS / 1000} s: wild pace, not counted`
+                : counts ? 'ok'
                 : !P.ok ? (P.reason === 'walk-depth' ? `walking toward/away — shoulders width changed ${Math.round((P.widthChange || 0) * 100)}% (max ${Math.round(KICK_MAX_WIDTH_CHANGE * 100)}%)`
                   : P.reason === 'walk-across' ? `walking across — pelvis moved ${P.travel} torso (max ${KICK_MAX_TRAVEL})`
                   : `support foot not planted — moved ${P.anchor} torso (max ${KICK_ANCHOR_MAX}), kicking foot path ${P.kick}`)
                 : !S.ok ? `swing too small — range ${S.range}° (min ${STRIKE_MIN_RANGE}), speed ${S.peakVel}°/s (min ${STRIKE_MIN_VEL}), path ${S.path} (min ${STRIKE_MIN_PATH})`
                 : why.since < 450 ? `too soon after the last count (${why.since} ms)`
                 : r.quality?.confident === false ? 'tracking unsure' : 'unknown';
-              console.info(`[Kick] ${counts ? 'COUNTED' : 'REJECTED'} | side=${ev.side} | ${reason} | swing ${S.range}° ${S.peakVel}°/s path ${S.path} | width ${P.widthChange ?? '-'} travel ${P.travel ?? '-'}`);
+              console.info(`[Kick] ${counts ? 'COUNTED' : 'REJECTED'} | side=${P.side || ev.side} | ${reason} | swing ${S.range}° ${S.peakVel}°/s path ${S.path} | width ${P.widthChange ?? '-'} travel ${P.travel ?? '-'}`);
             }
             // a kick / pass: a real strike, IN PLACE, by ONE leg (walking is never a pass)
-            if (countsReps && profile.kind === 'strike' && ev.type === 'strike' && r.quality?.confident !== false && evidenceOk(kinetic, now, { strike: true, kick: true })) {
+            const locked = now - lastCountAt < COUNT_LOCK_MS;
+            const flooding = now < floodUntil;
+            if (countsReps && profile.kind === 'strike' && ev.type === 'strike' && !locked && !flooding && r.quality?.confident !== false && evidenceOk(kinetic, now, { strike: true, kick: true })) {
+              const kickSide = explainStrike(kinetic, now).place.side || ev.side;
               evidenceAccept(kinetic, now); repCountRef.current += 1; strikeCountRef.current += 1; earlyRef.current = true;
+              lastCountAt = now;
               noteRepScore(r);
               lastRepCleanRef.current = !(r.issues || []).some(i => i.severity === 'error' || i.severity === 'danger');
-              if (ev.side === 'left' || ev.side === 'right') onStrikeSideRef.current?.(ev.side);   // the leg of a REAL counted kick
+              if (kickSide === 'left' || kickSide === 'right') onStrikeSideRef.current?.(kickSide);   // the leg of a REAL counted kick
+              lookAtPass(repVerdicts.length - 1, kickSide);
             }
           }
           if (profile.kind === 'cyclic' && workingRef.current) earlyRef.current = true;
@@ -448,7 +525,7 @@ export function useExpertExecution({
         // works for this trainee; the brain also forecasts errors, reads intent and adapts to the state
         // corrections only for real attempts: after the start position, during a set (never while walking
         // into place / adjusting the camera)
-        const coach = countOpenRef.current && countingRef.current ? r.coaching?.[0] : null;
+        const coach = countOpenRef.current && countingRef.current && !restOnly && now >= floodUntil ? r.coaching?.[0] : null;
         if (brain) {
           if (coach && !r.danger) brainOfferCorrection(brain, coach);
           if (!quietRef.current && !r.danger) {
@@ -456,7 +533,11 @@ export function useExpertExecution({
               now, sinceVoiceMs: now - lastVoice, coachSpeaking: !!window.speechSynthesis?.speaking,
               effort: effortSrcRef.current?.current ?? null, he, name: nameRef.current,
             });
-            if (say) {
+            // the brain's fixed long lines (an intent mismatch / a mental cue) are never said over the work — the
+            // REST's analysis weaves them in; a rest-only drill gets no live correction at all
+            if (say && (say.kind === 'intent' || say.kind === 'mental' || restOnly)) {
+              if (say.kind === 'intent' || say.kind === 'mental') { const n = restNotesRef.current; n.push(say.text); if (n.length > 4) n.shift(); }
+            } else if (say) {
               lastVoice = now;
               if (say.kind === 'correction') statsRef.current.coached.push(coach?.id || say.kind);
               // a correction is never cut in the middle (field video: the rep count cut it) — the count
@@ -495,7 +576,7 @@ export function useExpertExecution({
   const ghostSpec = useMemo(() => (active && profile?.ghost ? { profile } : null), [active, profile]);
 
   return {
-    active, profile, setLogRef, lastRepCleanRef, inViewRef, startReadyRef, countOpenRef, repCountRef, workingRef, earlyRef, strikeCountRef, brainRef,
+    active, profile, setLogRef, restNotesRef, lastRepCleanRef, inViewRef, startReadyRef, countOpenRef, repCountRef, workingRef, earlyRef, strikeCountRef, brainRef,
     missingPart, setup, readyFlash, startPrompt, issue, accuracy, repAccuracy, cadence, unsure, ghostSpec, statsRef,
   };
 }

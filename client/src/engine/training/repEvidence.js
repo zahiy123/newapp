@@ -195,6 +195,7 @@ export function inPlaceCheck(ev) {
   const kickJ = footPath(6) >= footPath(7) ? 6 : 7, supportJ = kickJ === 6 ? 7 : 6;
   const anchor = footSpread(supportJ);
   out.kick = torso ? Math.round((footPath(kickJ) / torso) * 100) / 100 : null;
+  out.side = kickJ === 6 ? 'left' : 'right';             // the kicking leg = the foot that travelled (never a jumping label)
   out.anchor = anchor !== null && torso ? Math.round((anchor / torso) * 100) / 100 : null;
   if (anchor !== null && torso && anchor > KICK_ANCHOR_MAX * torso) return { ...out, reason: 'both-legs' };
   return { ...out, ok: true };

@@ -155,7 +155,7 @@ NOW: the REST between sets. You are the expert in the locker room analysing the 
 ${f.prefetch ? '1. Do NOT open with the set in numbers (the coach says them first) and give frequencies in words ("in most passes", "in a few") — never as counts.' : '1. The set in numbers (reps / seconds, accuracy — if accuracy is null say nothing about it).'} "reps" are COUNTED reps — never call them clean, perfect or good unless "errors" is empty.
 2. The most important thing to fix (safety first, then what happened most): what happened, how often, the measured value vs. the target when given, WHY it matters biomechanically / for injury, and HOW to fix it — a precise, practical instruction or feel.
 3. If there is a second error that happened often — one short sentence.
-4. What was good — ONLY items listed in "measuredClean".
+4. What was good — ONLY items listed in "measuredClean". If "judgedNothing" is true, say honestly that this set's technique could not be measured clearly from the camera (and what would help) — NEVER call the set clean or perfect.
 5. ONE clear goal for the next set (or, if lastSet, what to take to next time).
 If nothing was measured (attempts 0 and no errors) say honestly that you could not see the movement clearly and what to do so you can.
 "visualNotes" are what a vision model saw in single frames — weaker evidence than the measurement: use a note only if it agrees with the measured errors / clean items, never to contradict them, and never invent a number from it.
@@ -172,7 +172,8 @@ Return ONLY JSON: {"speech":"<the spoken analysis>","card":[{"kind":"fix|good|fo
     })),
     measuredClean: (f.clean || []).slice(0, 4).map(x => clip(x, 80)),
     extras: (f.extras || []).filter(Boolean).map(x => clip(x, 160)),
-    visualNotes: (f.visual || []).filter(Boolean).slice(-4).map(x => clip(x, 160)),
+    visualNotes: (f.visual || []).filter(Boolean).slice(-6).map(x => clip(x, 160)),
+    judgedNothing: !!f.judgedNothing,
   });
   return { system, user };
 }
@@ -230,6 +231,39 @@ export async function generateBriefing(facts, { timeoutMs = 9000, askFn = ask } 
     if (!text || /^SKIP/i.test(text) || text.length < 40 || text.length > 700) return null;
     if (!numbersGrounded(text, facts) || !directionsKept(text, ground)) return null;
     return text;
+  }
+  return null;
+}
+
+// ---- THE EYES: one frame at the contact of a SHADOW pass (a virtual ball — judge the kicking foot itself) ----
+export const VISION_MODELS = ['claude-sonnet-5', 'claude-haiku-4-5-20251001'];
+export function buildPassVisionPrompt(f) {
+  const system = `You are an expert football coach and sports physiotherapist judging ONE camera frame taken at the moment of a SHADOW inside-foot PASS (there is no real ball; judge the kicking foot and leg themselves). The kicking leg is the trainee's ${f.side === 'left' ? 'LEFT' : f.side === 'right' ? 'RIGHT' : 'moving'} leg (anatomical side; the image may be mirrored). ${f.body ? `Body: ${clip(f.body, 120)}.` : ''}
+Judge only what is clearly visible. For each item give a value and your confidence 0..1 (below 0.6 when the foot is blurred, cut off or hidden).
+- contact: which surface of the kicking foot faces the pass direction — "inside" (the foot turned out, the arch facing forward), "laces" (the instep, toes pointed down), "toe" (the foot pointing forward, the tip leading), or "unclear".
+- ankleLocked: true if the kicking foot is held firm (toes pulled up / neutral), false if the foot is floppy / toes dropped, null if unclear.
+Return ONLY JSON: {"contact":{"value":"inside|laces|toe|unclear","confidence":0.0},"ankleLocked":{"value":true|false|null,"confidence":0.0}}`;
+  return { system };
+}
+export async function generatePassVision(f, { timeoutMs = 5500, askFn = null } = {}) {
+  const frame = String(f?.frame || '');
+  if (frame.length < 1000 || frame.length > 400000) return null;
+  const { system } = buildPassVisionPrompt(f);
+  for (const model of VISION_MODELS) {
+    try {
+      const raw = askFn ? await askFn(model, system, frame)
+        : (await getClient().messages.create({
+          model, max_tokens: 300, system,
+          messages: [{ role: 'user', content: [{ type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: frame } }, { type: 'text', text: 'Judge this pass frame.' }] }],
+          ...(model.startsWith('claude-sonnet-5') ? { output_config: { effort: 'low' } } : {}),
+        }, { timeout: timeoutMs, maxRetries: 0 })).content.filter(b => b.type === 'text').map(b => b.text).join('');
+      const m = String(raw).match(/\{[\s\S]*\}/);
+      const j = m ? JSON.parse(m[0]) : null;
+      const item = (o, vals) => (o && vals.includes(o.value) && typeof o.confidence === 'number' ? { value: o.value, confidence: Math.max(0, Math.min(1, o.confidence)) } : null);
+      return j ? { contact: item(j.contact, ['inside', 'laces', 'toe', 'unclear']), ankleLocked: item(j.ankleLocked, [true, false, null]) } : null;
+    } catch (err) {
+      if (!isModelError(err)) throw err;
+    }
   }
   return null;
 }

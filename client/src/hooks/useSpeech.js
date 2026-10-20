@@ -528,6 +528,9 @@ export function useSpeech(lang = 'he-IL', age) {
     _utterSpeak(chunks[0], { __sid: sid });
   }, [_utterSpeak, splitToChunks]);
 
+  // the set ended: the numbers still waiting in the queue are stale — the final count is said by the summary
+  const dropQueuedCounts = useCallback(() => { queueRef.current = queueRef.current.filter(q => !q.count); }, []);
+
   const speakEncouragement = useCallback(() => {
     let phrases;
     if (lifeStage === 'kids') {
@@ -1159,6 +1162,7 @@ export function useSpeech(lang = 'he-IL', age) {
     speakQueued,
     speakBriefing,
     speakBriefingText,
+    dropQueuedCounts,
     speakEncouragement,
     speakCorrection,
     speakOptimization,

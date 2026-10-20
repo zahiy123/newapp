@@ -49,6 +49,13 @@ export async function aiDebrief(facts) {
 }
 
 export const BRIEFING_DEADLINE_MS = 9500;
+export const VISION_DEADLINE_MS = 6000;
+
+/** The vision model's verdict on one pass frame { contact, ankleLocked, … each { value, confidence } }, or null. */
+export async function aiPassVision(facts) {
+  const j = await post('/api/coach/pass-vision', facts, VISION_DEADLINE_MS);
+  return j?.vision && typeof j.vision === 'object' ? j.vision : null;
+}
 
 /** A short coach line (positioning / start / ready / motivation) worded by the AI from the facts, or null. */
 export async function aiLine(facts) {

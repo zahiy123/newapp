@@ -174,9 +174,12 @@ export function createExecutionTracker(profile, lp = {}) {
 export function createSetLog(profile) {
   return { attempts: 0, partial: 0, unit: profile?.kind === 'hold' || profile?.kind === 'cyclic' ? 'sec' : 'reps', rules: {} };
 }
+/** Has anything at all been JUDGED in this set (a measured rule / a vision finding)? */
+export const logJudgedCount = (log) => Object.values(log?.rules || {}).reduce((s, e) => s + (e.judged || 0), 0);
+
 /** Start a new set's log (a new set starts from zero). */
 export function resetSetLog(tr) { if (tr) tr.log = createSetLog(tr.profile); return tr?.log; }
-function logRule(log, r, violated, value) {
+export function logRule(log, r, violated, value) {
   const e = log.rules[r.id] || (log.rules[r.id] = { rule: r, judged: 0, n: 0, values: [] });
   e.judged += 1;
   if (violated) { e.n += 1; if (typeof value === 'number') e.values.push(value); }
