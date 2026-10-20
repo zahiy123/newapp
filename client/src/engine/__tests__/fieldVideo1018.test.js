@@ -78,7 +78,7 @@ describe('a kick / pass is proven ONLY by the legs — a hand swing never counts
     const any = createRepEvidence('all');
     t = 0;
     for (const e of [170, 140, 100, 70, 100, 140, 170]) evidenceFrame(any, body({ elbowDeg: e }), (t += 100));
-    expect(evidenceOk(any, t, { strike: true })).toBe(true);   // (what used to count it)
+    expect(evidenceOk(any, t, { strike: true })).toBe(false);  // a strike is proven only by a LEG swing (2026-10-20)
   });
   it('a real leg swing IS counted', () => {
     const ev = createRepEvidence('legs');

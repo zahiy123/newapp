@@ -87,7 +87,9 @@ export function evidenceFrame(ev, lm, t) {
   const avg = (ps) => ({ x: ps.reduce((s, p) => s + p.x, 0) / ps.length * k, y: ps.reduce((s, p) => s + p.y, 0) / ps.length });
   const torso = sh.length && hp.length ? Math.hypot(avg(sh).x - avg(hp).x, avg(sh).y - avg(hp).y) : null;
   const hip = hp.length ? avg(hp) : null;                       // the pelvis (does the body travel?)
-  ev.frames.push({ t, a, e, torso, hip });
+  // the shoulders' width in the picture: steady in a pass, it grows / shrinks when walking toward / away
+  const shoulderW = seen(lm[11]) && seen(lm[12]) ? Math.abs(lm[11].x - lm[12].x) * k : null;
+  ev.frames.push({ t, a, e, torso, hip, shoulderW });
   while (ev.frames.length && t - ev.frames[0].t > WINDOW_MS) ev.frames.shift();
   return ev;
 }
@@ -148,12 +150,25 @@ export function evidenceRange(ev, returnShare = RETURN_SHARE) {
 export const KICK_WINDOW_MS = 1200;
 export const KICK_MAX_TRAVEL = 0.35;
 export const KICK_OTHER_KNEE_DEG = 25;
-export const KICK_DOMINANCE = 0.6;          // the support knee's range ≤ this share of the kicking knee's
+export const KICK_DOMINANCE = 0.6;
+export const KICK_MAX_WIDTH_CHANGE = 0.18;  // the shoulders' width in the picture changes ≤ this share (no walking in depth)
+// A KICK / PASS is proven by ITS OWN swing, judged in the kick's short window AT the contact (field video
+// 2026-10-20: a controlled inside-foot pass is a pendulum from the hip with an almost straight knee — "the
+// leg came back over 8 s of history" failed on every pass, 0 counts while the passes were seen)
+export const STRIKE_MIN_RANGE = 20;         // ° — the kicking leg's hip OR knee swing
+export const STRIKE_MIN_VEL = 60;           // °/s
+export const STRIKE_MIN_PATH = 0.2;         // torso lengths — the moving end point's path          // the support knee's range ≤ this share of the kicking knee's
 const spread = (v) => { if (v.length < 2) return 0; const s2 = [...v].sort((a, b) => a - b); const q = (p) => s2[Math.round(p * (s2.length - 1))]; return q(0.9) - q(0.1); };
 export function kickInPlace(ev) {
   const all = ev?.frames || [];
   const tEnd = all.length ? all[all.length - 1].t : 0;
   const fr = all.filter(f => tEnd - f.t <= KICK_WINDOW_MS);
+  // walking toward / away from the camera: the shoulders' width changes (field video 2026-10-20)
+  const sw = fr.map(f => f.shoulderW).filter(Number.isFinite);
+  if (sw.length >= 3) {
+    const med = [...sw].sort((x, y) => x - y)[Math.floor(sw.length / 2)];
+    if (med > 0 && spread(sw) > KICK_MAX_WIDTH_CHANGE * med) return false;
+  }
   const hips = fr.map(f => f.hip).filter(Boolean);
   const torsos = fr.map(f => f.torso).filter(Number.isFinite);
   const torso = torsos.length ? torsos.reduce((a, b) => a + b, 0) / torsos.length : null;
@@ -169,12 +184,50 @@ export function kickInPlace(ev) {
   return other <= Math.max(KICK_OTHER_KNEE_DEG, KICK_DOMINANCE * kick);
 }
 
+/**
+ * The swing of a kick / pass in its own short window: the best leg joint's { range, peakVel, path }; ok when a
+ * hip or knee swung ≥ STRIKE_MIN_RANGE at ≥ STRIKE_MIN_VEL with its end point travelling ≥ STRIKE_MIN_PATH.
+ */
+export function strikeSwing(ev) {
+  const all = ev?.frames || [];
+  const tEnd = all.length ? all[all.length - 1].t : 0;
+  const fr = all.filter(f => tEnd - f.t <= KICK_WINDOW_MS);
+  const torsos = fr.map(f => f.torso).filter(Number.isFinite);
+  const torso = torsos.length ? torsos.reduce((a, b) => a + b, 0) / torsos.length : null;
+  let best = { ok: false, range: 0, peakVel: 0, path: 0 };
+  for (const j of [4, 5, 6, 7]) {
+    const rows = fr.filter(f => typeof f.a[j] === 'number');
+    if (rows.length < 3) continue;
+    const v = rows.map(f => f.a[j]);
+    const range = Math.max(...v) - Math.min(...v);
+    let peakVel = 0, path = 0;
+    for (let i = 1; i < rows.length; i++) {
+      const dt = (rows[i].t - rows[i - 1].t) / 1000;
+      if (dt > 0 && dt < 0.5) peakVel = Math.max(peakVel, Math.abs(v[i] - v[i - 1]) / dt);
+      const p0 = rows[i - 1].e[j], p1 = rows[i].e[j];
+      if (p0 && p1) path += Math.hypot(p1.x - p0.x, p1.y - p0.y);
+    }
+    path = torso ? path / torso : 0;
+    const ok = range >= STRIKE_MIN_RANGE && peakVel >= STRIKE_MIN_VEL && path >= STRIKE_MIN_PATH;
+    if (ok && !best.ok || (ok === best.ok && range > best.range)) best = { ok, range: Math.round(range), peakVel: Math.round(peakVel), path: Math.round(path * 100) / 100 };
+  }
+  return best;
+}
+
+/** Why a kick / pass is (not) proven — for the console (the owner's videos show the exact reason). */
+export function explainStrike(ev, t) {
+  const first = ev?.frames?.[0]?.t ?? t;
+  const since = ev?.lastAt == null ? t - first : t - ev.lastAt;
+  return { since: Math.round(since), inPlace: kickInPlace(ev), swing: strikeSwing(ev) };
+}
+
 /** Does the movement since the last counted rep prove a real rep (range + velocity + trajectory + flow)? */
 export function evidenceOk(ev, t, { strike = false, kick = false } = {}) {
   if (!ev) return false;
   const first = ev.frames[0]?.t ?? t;
   const since = ev.lastAt == null ? t - first : t - ev.lastAt;
   if (kick && !kickInPlace(ev)) return false;                    // walking is not a pass
+  if (strike) return since >= MIN_REP_MS && strikeSwing(ev).ok;   // a kick / pass: its own swing, at the contact
   // a strike is judged at the contact, while the leg still swings through — a partial return is enough
   return since >= MIN_REP_MS && evidenceRange(ev, strike ? STRIKE_RETURN_SHARE : RETURN_SHARE) >= MIN_RANGE_DEG;
 }

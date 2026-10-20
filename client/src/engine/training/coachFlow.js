@@ -27,6 +27,10 @@ const CYCLIC_WORK_WINDOW_MS = 1500;    // running / skipping: a stride or landin
 // the feet STILL for a moment next to the ball — measured from the feet's positions, not from knee angles
 // the camera's perspective distorts.
 export const READY_STILL_MS = 600;
+// the FIRST pass may open the exercise only if the trainee stood still at the ball just before it — walking
+// back to the spot never opens it with a phantom "1"; counting during the set is untouched
+export const OPENING_STILL_WINDOW_MS = 2500;
+export const openingKickAllowed = (lastStillAt, now) => typeof lastStillAt === 'number' && now - lastStillAt <= OPENING_STILL_WINDOW_MS;
 export const READY_STILL_TORSO = 0.12;     // the feet move less than this share of the torso length
 
 /**

@@ -41,10 +41,10 @@ import { cueFacts } from '../../engine/coachBrain/aiFacts';
 import { aiCue, aiLine } from '../../utils/aiCoach';
 import { bodyText } from '../../engine/coachBrain/aiFacts';
 import {
-  createStartGate, updateStartGate, isStartPosition, feetStill, isValidRep, updateWork, withDrive, startPositionPrompt, READY_DRIVE,
+  createStartGate, updateStartGate, isStartPosition, feetStill, openingKickAllowed, isValidRep, updateWork, withDrive, startPositionPrompt, READY_DRIVE,
 } from '../../engine/training/coachFlow';
 import { createClipRecorder, recordFrame } from '../../engine/validation/clipRecorder';
-import { createRepEvidence, evidenceFrame, evidenceOk, evidenceAccept, evidenceGroupFor } from '../../engine/training/repEvidence';
+import { createRepEvidence, evidenceFrame, evidenceOk, evidenceAccept, evidenceGroupFor, explainStrike } from '../../engine/training/repEvidence';
 import { holdSpeech } from '../useSpeech';
 import { ROOM_TIP } from '../../engine/exercise/setupCoach';
 
@@ -172,6 +172,7 @@ export function useExpertExecution({
     const gate = createStartGate();
     const feetHist = [];                       // the feet's positions (the ready stance of a kick / pass)
     let lastStance = null;
+    let lastStillAt = -1e9;                    // when the feet were last still (the opening pass needs it)
     let startedOnce = false;                   // no rep counts before the trainee first reached the start position
     countOpenRef.current = false;
     let tiltCalibrated = false;
@@ -282,6 +283,7 @@ export function useExpertExecution({
           const stand = lm && [[23, 25], [24, 26]].some(([h, k]) => lm[h] && lm[k] && (lm[k].visibility ?? 0) >= 0.4 && lm[h].y < lm[k].y);
           stance = { still: feetStill(feetHist, now), standing: !!stand };
           lastStance = stance;
+          if (stance.still) lastStillAt = now;
         }
         const inStart = r.inView && isStartPosition(profile, r.metrics, stance);
         startReadyRef.current = updateStartGate(gate, { positioned: r.inView, confident: r.quality?.confident, inStart }, now);
@@ -289,6 +291,7 @@ export function useExpertExecution({
         // a coach starts when you START: a real kick / pass IN PLACE (one leg, the pelvis still, with its
         // kinetic evidence) while seen clearly opens the exercise at once — and that kick counts
         if (!startedOnce && profile.kind === 'strike' && r.inView && !r.setup && r.quality?.confident !== false
+          && openingKickAllowed(lastStillAt, now)
           && r.events.some(ev => ev.type === 'strike') && evidenceOk(kinetic, now, { strike: true, kick: true })) {
           startedOnce = true;
         }
@@ -324,6 +327,12 @@ export function useExpertExecution({
               evidenceAccept(kinetic, now); repCountRef.current += 1; earlyRef.current = true;
               noteRepScore(r);
             }
+            // the reason of every detected kick, in the console (the owner's videos show exactly why it did or did not count)
+            if (ev.type === 'strike' && profile.kind === 'strike') {
+              const why = explainStrike(kinetic, now);
+              const counts = countsReps && r.quality?.confident !== false && evidenceOk(kinetic, now, { strike: true, kick: true });
+              console.info(`[Kick] ${counts ? 'COUNTED' : 'rejected'} | side=${ev.side} inPlace=${why.inPlace} swing=${why.swing.ok}(range ${why.swing.range}° vel ${why.swing.peakVel}°/s path ${why.swing.path}) since=${why.since}ms confident=${r.quality?.confident !== false}`);
+            }
             // a kick / pass: a real strike, IN PLACE, by ONE leg (walking is never a pass)
             if (countsReps && profile.kind === 'strike' && ev.type === 'strike' && r.quality?.confident !== false && evidenceOk(kinetic, now, { strike: true, kick: true })) {
               evidenceAccept(kinetic, now); repCountRef.current += 1; strikeCountRef.current += 1; earlyRef.current = true;
@@ -333,6 +342,8 @@ export function useExpertExecution({
             }
           }
           if (profile.kind === 'cyclic' && workingRef.current) earlyRef.current = true;
+        } else if (profile.kind === 'strike' && r.events.some(ev => ev.type === 'strike')) {
+          console.info(`[Kick] not counted: counting closed | set running=${!!countingRef.current} inView=${r.inView} started=${startedOnce} positioning=${r.setup?.code || 'ok'}`);
         }
 
         // ---- Positioning: one precise instruction at a time, then "now I can see you" ----
