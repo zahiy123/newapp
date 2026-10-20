@@ -120,18 +120,18 @@ export function jointKinetics(ev, j, returnShare = RETURN_SHARE) {
   return { range, back, peakVel, path: torso ? path / torso : 0, reversals };
 }
 
-/** Is this joint's movement a real, complete kinetic rep? (needBack: false = a strike judged at the contact) */
-export function kineticRep(k, needBack = true) {
-  return !!k && k.range >= MIN_RANGE_DEG && (k.back || !needBack) && k.peakVel >= MIN_PEAK_DEG_S
+/** Is this joint's movement a real, complete kinetic rep? */
+export function kineticRep(k) {
+  return !!k && k.range >= MIN_RANGE_DEG && k.back && k.peakVel >= MIN_PEAK_DEG_S
     && k.path >= MIN_PATH_TORSO && k.reversals <= MAX_REVERSALS;
 }
 
 /** The largest joint range that is a REAL kinetic rep since the last counted one (degrees; 0 = none). */
-export function evidenceRange(ev, returnShare = RETURN_SHARE, needBack = true) {
+export function evidenceRange(ev, returnShare = RETURN_SHARE) {
   let best = 0;
   for (const j of ev.joints || GROUPS.all) {
     const k = jointKinetics(ev, j, returnShare);
-    if (kineticRep(k, needBack)) best = Math.max(best, k.range);
+    if (kineticRep(k)) best = Math.max(best, k.range);
   }
   return best;
 }
@@ -148,8 +148,7 @@ export function evidenceRange(ev, returnShare = RETURN_SHARE, needBack = true) {
 export const KICK_WINDOW_MS = 1200;
 export const KICK_MAX_TRAVEL = 0.35;
 export const KICK_OTHER_KNEE_DEG = 25;
-export const KICK_DOMINANCE = 0.6;
-export const KICK_MAX_SCALE_CHANGE = 0.12;  // the torso's length in the picture changes ≤ this share (no walking in depth)          // the support knee's range ≤ this share of the kicking knee's
+export const KICK_DOMINANCE = 0.6;          // the support knee's range ≤ this share of the kicking knee's
 const spread = (v) => { if (v.length < 2) return 0; const s2 = [...v].sort((a, b) => a - b); const q = (p) => s2[Math.round(p * (s2.length - 1))]; return q(0.9) - q(0.1); };
 export function kickInPlace(ev) {
   const all = ev?.frames || [];
@@ -158,9 +157,6 @@ export function kickInPlace(ev) {
   const hips = fr.map(f => f.hip).filter(Boolean);
   const torsos = fr.map(f => f.torso).filter(Number.isFinite);
   const torso = torsos.length ? torsos.reduce((a, b) => a + b, 0) / torsos.length : null;
-  // walking toward / away from the camera barely moves the pelvis in the picture — the body's SIZE changes
-  // (field video 2026-10-20: walking back to the spot was counted as the first pass)
-  if (torsos.length >= 3 && torso && spread(torsos) > KICK_MAX_SCALE_CHANGE * torso) return false;
   if (hips.length >= 2 && torso) {
     const travel = Math.hypot(spread(hips.map(h => h.x)), spread(hips.map(h => h.y)));
     if (travel > KICK_MAX_TRAVEL * torso) return false;
@@ -180,10 +176,7 @@ export function evidenceOk(ev, t, { strike = false, kick = false } = {}) {
   const since = ev.lastAt == null ? t - first : t - ev.lastAt;
   if (kick && !kickInPlace(ev)) return false;                    // walking is not a pass
   // a strike is judged at the contact, while the leg still swings through — a partial return is enough
-  // a strike is counted AT the contact (field video 2026-10-19: a pendulum pass's hip is still at its far end
-  // when the foot meets the ball — "it came back" failed, the pass was missed or counted late): its swing
-  // proves it; walking is still rejected by kickInPlace
-  return since >= MIN_REP_MS && evidenceRange(ev, strike ? STRIKE_RETURN_SHARE : RETURN_SHARE, !strike) >= MIN_RANGE_DEG;
+  return since >= MIN_REP_MS && evidenceRange(ev, strike ? STRIKE_RETURN_SHARE : RETURN_SHARE) >= MIN_RANGE_DEG;
 }
 
 /** A rep was counted: the next one needs its OWN evidence. */
