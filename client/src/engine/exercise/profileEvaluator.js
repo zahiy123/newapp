@@ -184,7 +184,7 @@ export function createSetLog(profile) {
 export const logJudgedCount = (log) => Object.values(log?.rules || {}).reduce((s, e) => s + (e.judged || 0), 0);
 
 /** Start a new set's log (a new set starts from zero). */
-export function resetSetLog(tr) { if (tr) tr.log = createSetLog(tr.profile); return tr?.log; }
+export function resetSetLog(tr) { if (tr) { tr.log = createSetLog(tr.profile); tr.occ = {}; } return tr?.log; }
 export function logRule(log, r, violated, value) {
   const e = log.rules[r.id] || (log.rules[r.id] = { rule: r, judged: 0, n: 0, values: [] });
   e.judged += 1;
@@ -320,8 +320,10 @@ export function updateExecution(tracker, landmarks, nowMs) {
   const coaching = [];
   const canCoach = (id) => (tr.coached[id] || 0) < MAX_COACH_PER_RULE;
   // a repeat explanation needs a LONGER streak each time (2 → 6 → 10 reps): the coach is patient
-  // major → at once; minor → forgiven once (2 in a row), and once corrected, said again at its next repeat
-  const need = (r) => (isMajor(r) || r.coachNow || (tr.coached[r.id] || 0) > 0 ? 1 : 2);
+  // major → at once; minor → forgiven once: said when it happens AGAIN in this set (not necessarily in a row),
+  // and once corrected, said again at each repeat
+  if (!tr.occ) tr.occ = {};
+  const sayNow = (r) => { tr.occ[r.id] = (tr.occ[r.id] || 0) + 1; return isMajor(r) || r.coachNow || (tr.coached[r.id] || 0) > 0 || tr.occ[r.id] >= 2; };
   // (with what was MEASURED — the AI coach words the correction from it: the value, the side)
   const coachIt = (r, measured = null, side = null) => { tr.coached[r.id] = (tr.coached[r.id] || 0) + 1; tr.coachedAt[r.id] = nowMs; tr.dynStreak[r.id] = 0; coaching.push({ ...r, measured, side }); };
   // (a peak is short: ≥ REP_ERR_FRAMES frames in this rep, not the full hold time)
@@ -371,7 +373,7 @@ export function updateExecution(tracker, landmarks, nowMs) {
         if (r.severity !== 'error' || !judged(r)) continue;
         if ((tr.repErr[r.id] || 0) >= REP_ERR_FRAMES) {
           tr.dynStreak[r.id] = (tr.dynStreak[r.id] || 0) + 1;
-          if (tr.dynStreak[r.id] >= need(r) && canCoach(r.id)) coachIt(r, tr.repWorst[r.id] ?? null, ev.side || null);
+          if (sayNow(r) && canCoach(r.id)) coachIt(r, tr.repWorst[r.id] ?? null, ev.side || null);
         } else tr.dynStreak[r.id] = 0;
       }
       tr.repErr = {}; tr.repJudged = {}; tr.repWorst = {};
@@ -388,7 +390,7 @@ export function updateExecution(tracker, landmarks, nowMs) {
         clean = false;
         tr.dynActive[r.id] = { rule: r, until: nowMs + DYNAMIC_SHOW_MS, value: ev[r.feature] };
         // a technique error of the movement itself (coachNow) is corrected RIGHT AFTER the first time
-        if (tr.dynStreak[r.id] >= need(r) && canCoach(r.id)) coachIt(r, ev[r.feature], ev.side || null);
+        if (sayNow(r) && canCoach(r.id)) coachIt(r, ev[r.feature], ev.side || null);
       } else if (typeof ev[r.feature] === 'number') {
         logRule(tr.log, r, false, ev[r.feature]);
         tr.dynStreak[r.id] = 0;

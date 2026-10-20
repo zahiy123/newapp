@@ -987,7 +987,8 @@ export default function Training() {
   // shown on the body from the briefing on (no waiting for the exercise phase)
   // the big Ghost ON the body only before the set (the explanation / the start); during the set it is the small
   // panel at the side — on the body it confused the trainee ("it counts the Ghost") — owner, 2026-10-20
-  const demoOnBody = overlayActive && demoGhostPhase && phase !== PHASE.EXERCISING;
+  // the Ghost ON the trainee's body during the training too (owner, 2026-10-20: not locked in a side window)
+  const demoOnBody = overlayActive && demoGhostPhase;
   const demoLarge = false;
   const demoLabel = demoProfile?.precision === 'expert'
     ? (isHe ? `הדגמה: ${demoProfile.name.he}` : `Demo: ${demoProfile.name.en}`)
@@ -2964,7 +2965,8 @@ export default function Training() {
     } else {
       setPhase(PHASE.RESTING);
       // the rest is long enough to hear the whole analysis (+ a breath)
-      setRestTime(Math.max(15, restDuration + (ad?.restBonusSec || 0), debriefSec));
+      // a FULL rest: at least 30 s (and it waits at its end until the coach has said everything)
+      setRestTime(Math.max(30, restDuration + (ad?.restBonusSec || 0), debriefSec));
       if (nextLeg) setFeedback({ type: 'info', text: `🔄 ${nextLeg}` });
     }
   }

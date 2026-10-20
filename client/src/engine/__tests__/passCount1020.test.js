@@ -136,3 +136,25 @@ describe('the correction policy: major at once, minor forgiven once', () => {
     expect(isMajor(EXPERT_PROFILES.shadowPass.dynamics.find(r => r.id === 'pass_toe'))).toBe(true);
   });
 });
+
+import { createExecutionTracker } from '../exercise/profileEvaluator';
+describe('a minor error that comes back — not in a row — is said', () => {
+  it('shallow, clean, shallow → said at the 2nd shallow rep (forgiven only once)', async () => {
+    const { profileGhostPose } = await import('../exercise/profileGhost');
+    const { updateExecution } = await import('../exercise/profileEvaluator');
+    const { getLimbProfile } = await import('../limbProfile');
+    const lp = getLimbProfile({ disability: 'none', scanData: { classification: 'NATURAL' } });
+    const p = EXPERT_PROFILES.squat;
+    const shallow = { ...p, ghost: { ...p.ghost, peak: { ...p.ghost.peak, knee: 135, hip: 120 } } };
+    const fr = (q, ms) => profileGhostPose(q, (ms % q.ghost.periodMs) / q.ghost.periodMs, lp).landmarks
+      .map(z => (z.visibility ? { ...z, x: 0.5 + z.x * 0.17, y: 0.5 + z.y * 0.17, z: (z.z ?? 0) * 0.17, visibility: 0.95 } : z));
+    const tr = createExecutionTracker(p, lp);
+    const P = p.ghost.periodMs, said = [];
+    const seq = [shallow, p, shallow];
+    for (let ms = 0; ms < 3 * P; ms += 50) {
+      const g = seq[Math.floor(ms / P)];
+      if (updateExecution(tr, fr(g, ms), ms).coaching.some(r => r.id === 'too_shallow')) said.push(Math.floor(ms / P));
+    }
+    expect(said).toEqual([2]);
+  });
+});
