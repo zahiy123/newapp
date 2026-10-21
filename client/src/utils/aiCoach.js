@@ -2,7 +2,7 @@
 // when the AI is late / unreachable the caller says the device's own measured line — never silence.
 import { apiUrl, fetchWithTimeout } from './api';
 
-export const CUE_DEADLINE_MS = 4000;       // a sideline cue must land right after the rep
+export const CUE_DEADLINE_MS = 2200;       // a sideline cue must land right after the rep (Haiku ~0.7 s; the server gives up at 1.8 s)
 export const DEBRIEF_DEADLINE_MS = 27000;  // the rest's analysis (Opus: ~8–12 s measured; the card says it is analysing)
 
 // The AI coach's health, shown on the screen (owner, 2026-10-20: the credit ran out and the coach silently fell

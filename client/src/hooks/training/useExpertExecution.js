@@ -516,7 +516,6 @@ export function useExpertExecution({
     // the AI is late / unreachable. One cue at a time; never after the set ended; never the same words twice
     let disposed = false; let cueInFlight = false;
     const recentCues = [];
-    const cueCache = {}; const cueFetching = {};
     const cueFactsFor = (rule, he, tone = null) => {
       const facts = cueFacts({
         rule, profile, lp: limbProfile || {}, exercise: exerciseName, sport: contextsKey,
@@ -527,39 +526,29 @@ export function useExpertExecution({
       if (profile.kind === 'strike' && isProstheticLeg(limbProfile || {}, activeLegRef.current)) facts.kickingProsthesis = true;
       return facts;
     };
-    /** Prepare the AI's next wording of a rule in the background (one ready line per rule). */
-    const refillCue = (rule, he, tone = null) => {
-      if (!rule?.id || cueFetching[rule.id] || (cueCache[rule.id] || []).length) return;
-      cueFetching[rule.id] = true;
-      aiCue(cueFactsFor(rule, he, tone)).then((ai) => {
-        cueFetching[rule.id] = false;
-        if (ai && !disposed) (cueCache[rule.id] ||= []).push(ai);
-      });
-    };
+    // EVERY correction is worded LIVE by the AI (Haiku 4.5, ~0.7 s) from the facts of THIS pass — no prepared
+    // lines, no word bank (owner, 2026-10-21). Requests run in parallel (never one blocking the next); a line that
+    // comes after a newer pass is dropped. Only when the AI fails / is too late does the device's measured line speak.
     const sayCorrection = (rule, localText, rate, he, tone = null, repAt0 = null) => {
       if (rule?.id) noteCorrected(rule.id, rule.msg?.he || localText);
       lastCorrectionAt = performance.now(); cleanStreak = 0;
       const repAt = repAt0 ?? repCountRef.current; const at = performance.now();
       const r2 = Math.max(rate || 1, LIVE_CUE_RATE);
       const live = { rate: r2, kind: 'correction', preempt: true, validIf: () => cueStillTrue(repAt, at) };
-      // AT ONCE: the AI's line prepared ahead for this rule, else the device's own short line — never a wait
-      const ready = rule?.id ? (cueCache[rule.id] || []).shift() : null;
-      const s = liveText(ready || localText);
-      holdSpeech(estimateSpeechMs(s, r2)); speakRef.current?.(s, live);
-      recentCues.push(s); if (recentCues.length > 8) recentCues.shift();
-      console.info(`[Coach] said at once (${ready ? 'AI, prepared' : 'device'}): ${rule?.id || '-'}`);
-      if (rule) refillCue(rule, he, tone);                 // the next time: a fresh AI wording, ready
+      const say = (t, src) => {
+        const s = liveText(t);
+        holdSpeech(estimateSpeechMs(s, r2)); speakRef.current?.(s, live);
+        recentCues.push(s); if (recentCues.length > 8) recentCues.shift();
+        console.info(`[Coach] ${src} cue in ${Math.round(performance.now() - at)} ms: ${rule?.id || '-'}`);
+      };
+      if (!rule) { say(localText, 'device'); return; }
+      aiCue(cueFactsFor(rule, he, tone)).then((ai) => {
+        if (disposed || !countingRef.current) return;
+        if (!cueStillTrue(repAt, at)) { console.info(`[Coach] stale cue dropped (rep ${repAt}, now ${repCountRef.current})`); return; }
+        lastCorrectionAt = performance.now();
+        say(ai || localText, ai ? 'AI live' : 'device (AI failed)');
+      });
     };
-    // the AI's wording of this exercise's corrections is prepared at its start (staggered — the server's flood guard)
-    {
-      const he0 = isHeRef.current;
-      const pre = [
-        ...(profile.dynamics || []).filter(r => (r.severity === 'error' || r.severity === 'danger') && (!r.only || r.only.includes(profile.id))),
-        ...(profile.rules || []).filter(r => r.severity === 'error' || r.severity === 'danger'),
-        ...(profile.kind === 'strike' ? ['small', 'moved', 'support'].map(k => uncountedPassRule(k, isPassDrill)) : []),
-      ].filter((r, i, a) => r?.id && a.findIndex(x => x.id === r.id) === i).slice(0, 10);
-      pre.forEach((r, i) => setTimeout(() => { if (!disposed) refillCue(r, he0); }, 300 + i * 800));
-    }
     // positioning / start / ready lines are worded by the AI too (the device decides WHAT; the line is
     // the AI's); the device's own line only when the AI is late — one line at a time
     let lineInFlight = false;

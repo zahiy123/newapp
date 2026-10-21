@@ -26,7 +26,8 @@ const getClient = () => (client ||= new Anthropic({ apiKey: process.env.ANTHROPI
 // Measured on the real key (2026-10-19): Sonnet 5 at low effort words a cue in ~1.3–1.6 s in natural,
 // correct Hebrew; Opus 5.5 writes the deepest rest analysis in ~8 s. Haiku 4.5 was fast but its Hebrew
 // coaching had grammar / meaning errors — not good enough for a professional coach.
-export const CUE_MODELS = ['claude-sonnet-5', 'claude-opus-5-5'];
+// the LIVE words by Haiku 4.5 — measured 2026-10-21 on the real key: a cue 0.6–0.7 s (Sonnet 5: 1.1–1.4 s)
+export const CUE_MODELS = ['claude-haiku-4-5-20251001', 'claude-sonnet-5'];
 export const CUE_MODEL = CUE_MODELS[0];
 export const DEBRIEF_MODELS = ['claude-opus-5-5', 'claude-sonnet-5'];
 export const MAX_CUE_CHARS = 110;
@@ -185,7 +186,7 @@ Return ONLY JSON: {"speech":"<the spoken analysis>","card":[{"kind":"fix|good|fo
 async function ask(model, { system, user }, maxTokens, timeoutMs, effort = null) {
   const res = await getClient().messages.create({
     model, max_tokens: maxTokens, system, messages: [{ role: 'user', content: user }],
-    ...(effort ? { output_config: { effort } } : {}),
+    ...(effort && !/haiku/.test(model) ? { output_config: { effort } } : {}),     // (Haiku has no effort setting)
   }, { timeout: timeoutMs, maxRetries: 0 });
   return (res.content || []).filter(b => b.type === 'text').map(b => b.text).join('').trim();
 }
@@ -219,7 +220,7 @@ export function passWordsFix(s) {
 }
 const PASS_RULE = 'This is a PASS drill: never use the words בעט / תבעט / לבעוט / בעיטה (kick) or יפה — say מסירה / מסור and professional passing terms.';
 
-export async function generateCue(facts, { timeoutMs = 3500, askFn = ask } = {}) {
+export async function generateCue(facts, { timeoutMs = 1800, askFn = ask } = {}) {
   // garbled / empty facts → the AI would guess: never (the device says its own measured line)
   if (!readable(facts?.error?.what)) return null;
   const prompt = buildCuePrompt(facts);
@@ -254,7 +255,8 @@ export async function generateBriefing(facts, { timeoutMs = 18000, askFn = ask }
 }
 
 // ---- THE EYES: one frame at the contact of a SHADOW pass (a virtual ball — judge the kicking foot itself) ----
-export const VISION_MODELS = ['claude-sonnet-5', 'claude-haiku-4-5-20251001'];
+// the eyes by Haiku 4.5 first (owner, 2026-10-21 — measured: Haiku 3.1–3.4 s, Sonnet 5 2.6–3.5 s on one image)
+export const VISION_MODELS = ['claude-haiku-4-5-20251001', 'claude-sonnet-5'];
 export function buildPassVisionPrompt(f) {
   const system = `You are an expert football coach and sports physiotherapist judging ONE camera frame taken at the moment of a SHADOW inside-foot PASS (there is no real ball; judge the kicking foot and leg themselves). The kicking leg is the trainee's ${f.side === 'left' ? 'LEFT' : f.side === 'right' ? 'RIGHT' : 'moving'} leg (anatomical side; the image may be mirrored). ${f.body ? `Body: ${clip(f.body, 120)}.` : ''}
 Judge only what is clearly visible. For each item give a value and your confidence 0..1 (below 0.6 when the foot is blurred, cut off or hidden).
@@ -299,7 +301,7 @@ Look at the WHOLE body, never the kicking leg alone (owner, 2026-10-21): the CHE
 Report ONLY what is clearly visible. Return ONLY JSON:
 {"findings":[{"code":"short_snake_case","severity":"major|minor","confidence":0.0,"cue":"<${he ? 'Hebrew' : 'English'}, 3-6 words, an instruction for the next rep>","what":"<${he ? 'Hebrew' : 'English'}, at most 6 words: what you saw>"}],
  "good":[{"text":"<${he ? 'Hebrew' : 'English'} 3-7 words of genuine praise for something done well>","confidence":0.0}]${f.isPass ? ',\n "contact":{"value":"inside|laces|toe|unclear","confidence":0.0},"ankleLocked":{"value":true|false|null,"confidence":0.0}' : ''}}
-"major" ONLY = a real injury risk, or a fault in THIS exercise's core technique (for a pass: the contact surface, the swing, the support leg, the body over the ball); for a pass the chest over the ball, the pelvis and the support leg ARE core technique; the arms / the hands = "minor" unless it really endangers or breaks the core technique. The cue: at most 6 words. At most 2 findings, the most important first; at most 1 "good". Be brief — the answer is needed within 2 seconds. No numbers. Natural spoken ${he ? 'Hebrew (masculine singular)' : 'English'}. If the body is not clearly visible return {"findings":[],"good":[]}.`;
+"major" ONLY = a real injury risk, or a fault in THIS exercise's core technique (for a pass: the contact surface, the swing, the support leg, the body over the ball); for a pass the chest over the ball, the pelvis and the support leg ARE core technique; the arms / the hands = "minor" unless it really endangers or breaks the core technique. The cue: at most 6 words. At most 2 findings, the most important first; at most 1 "good". Be brief — the answer is needed within 2 seconds. Output compact JSON only — no code fences, no text before or after. No numbers. Natural spoken ${he ? 'Hebrew (masculine singular)' : 'English'}. If the body is not clearly visible return {"findings":[],"good":[]}.`;
   return { system };
 }
 export async function generateBodyVision(f, { timeoutMs = 9000, askFn = null } = {}) {
@@ -314,7 +316,7 @@ export async function generateBodyVision(f, { timeoutMs = 9000, askFn = null } =
     try {
       const raw = askFn ? await askFn(model, system, content)
         : (await getClient().messages.create({
-          model, max_tokens: 260, system, messages: [{ role: 'user', content }],
+          model, max_tokens: 320, system, messages: [{ role: 'user', content }],
           ...(model.startsWith('claude-sonnet-5') ? { output_config: { effort: 'low' } } : {}),
         }, { timeout: timeoutMs, maxRetries: 0 })).content.filter(b => b.type === 'text').map(b => b.text).join('');
       const m = String(raw).match(/\{[\s\S]*\}/);
