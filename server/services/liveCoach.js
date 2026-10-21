@@ -91,6 +91,7 @@ Ground rules — never break them:
 - Correct, natural Hebrew grammar: the coach SEES the trainee ("אני רואה אותך"), speaks in masculine singular to him.
 - If the facts are unclear, garbled or missing, output exactly: SKIP
 - Never assume the device (a phone, a laptop) — say "the camera".
+- If "kickingProsthesis" is true the kicking leg is a PROSTHESIS: never ask for the ankle, the toes, pointing or flexing the foot — only what a prosthesis can do (the swing from the hip, turning the leg out from the hip, the anchor on the sound leg, balance, the chest over the ball).
 - The trainee may train in a SMALL ROOM: never ask them to move the camera or themselves meters away; to be seen better, suggest tilting the camera / keeping the feet in the picture.
 - Write every number in DIGITS (e.g. 131, never as words). Mention a body SIDE only if "side" is given, and only that side.
 - No lists, no brackets, no emojis, no quotation marks — words that are SPOKEN aloud.`;
@@ -125,6 +126,7 @@ Do not repeat or paraphrase closely any of the recent cues listed. Output ONLY t
   const user = JSON.stringify({
     exercise: clip(f.exercise, 80), sport: clip(f.sport, 40), body: clip(f.body, 120),
     side: f.side === 'left' || f.side === 'right' ? f.side : null,
+    kickingProsthesis: !!f.kickingProsthesis,
     rep: f.rep ?? null, error: {
       what: clip(f.error?.what, 200), why: clip(f.error?.why, 300), how: clip(f.error?.how, 300),
       measured: f.error?.measured ?? null, target: clip(f.error?.target, 80), timesThisSet: f.error?.times ?? null,
@@ -277,7 +279,8 @@ export function buildBodyVisionPrompt(f) {
 ${(f.keyPoints || []).length ? `The exercise's correct technique: ${(f.keyPoints || []).slice(0, 6).map(x => clip(x, 120)).join(' | ')}.` : ''}
 ${f.legsImage ? 'A second image is a close-up of the legs and feet of the same moment.' : ''}${f.isPass ? ` It is a SHADOW inside-foot pass (no real ball); the kicking leg is the ${f.side === 'left' ? 'LEFT' : f.side === 'right' ? 'RIGHT' : 'moving'} (anatomical) leg.` : ''}
 ${f.kickingProsthesis ? `The KICKING leg is the trainee's PROSTHESIS (the ${f.side === 'left' ? 'LEFT' : f.side === 'right' ? 'RIGHT' : ''} leg): its ankle is fixed — NEVER judge or mention the ankle lock, the toes or which surface of the foot meets the ball. Judge the prosthesis kick by its real technique: the swing driven from the HIP (not the knee), the leg turned out from the hip, the weight anchored on the sound support leg, the chest over the ball, the arms for balance.
-` : ''}Look at the WHOLE body: posture and trunk, head and gaze, arms and hands (e.g. hands in the pockets, arms locked, no balance arms), hips and pelvis, knees, feet and support, balance — anything that prevents a correct, safe execution of THIS exercise.
+` : ''}${f.isPass || f.kickingProsthesis ? 'This is a PASS: if it was executed like a POWER KICK (a big back-swing, a knee snap, the leg swinging high / hard) report it as a MAJOR finding "pass_like_kick" — a pass is short, controlled, from the hip.\n' : ''}${f.goal ? `Today's training goal: ${clip(f.goal, 80)}.\n` : ''}Never praise what was technically wrong.
+Look at the WHOLE body: posture and trunk, head and gaze, arms and hands (e.g. hands in the pockets, arms locked, no balance arms), hips and pelvis, knees, feet and support, balance — anything that prevents a correct, safe execution of THIS exercise.
 Report ONLY what is clearly visible. Return ONLY JSON:
 {"findings":[{"code":"short_snake_case","severity":"major|minor","confidence":0.0,"cue":"<${he ? 'Hebrew' : 'English'}, 3-7 words, an instruction for the next rep>","what":"<${he ? 'Hebrew' : 'English'}, at most 10 words: what you saw>"}],
  "good":[{"text":"<${he ? 'Hebrew' : 'English'} 3-7 words of genuine praise for something done well>","confidence":0.0}]${f.isPass ? ',\n "contact":{"value":"inside|laces|toe|unclear","confidence":0.0},"ankleLocked":{"value":true|false|null,"confidence":0.0}' : ''}}

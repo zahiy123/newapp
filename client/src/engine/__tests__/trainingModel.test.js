@@ -209,7 +209,7 @@ describe('MIRROR mode: the big Ghost drawn from the trainee\'s own skeleton', ()
 });
 
 describe('The guide faces the way the trainee faces', () => {
-  it('a trainee facing the camera gets a FRONTAL kick Ghost (no sideways 3/4 turn); a turned trainee a turned one', async () => {
+  it('the kick Ghost ALWAYS faces the camera — facing or turned, never a sideways 3/4 turn (owner, 2026-10-21)', async () => {
     const { drawGhostOverlay } = await import('../warmupGhost.js');
     const spread = (facing) => {
       const xs = [];
@@ -218,7 +218,7 @@ describe('The guide faces the way the trainee faces', () => {
       drawGhostOverlay(ctx, { profile: EXPERT_PROFILES.footballKick }, lpOk, 0.64 * 2000, { x: 300, y: 300 }, 60, 0.9, 500, { facing });
       return Math.max(...xs) - Math.min(...xs);
     };
-    // frontal: the forward swing goes INTO the screen (no sideways spread); turned: it shows sideways
-    expect(spread(1)).toBeLessThan(spread(0.3) * 0.8);
+    // the forward swing goes INTO the screen in both cases (no sideways spread)
+    expect(spread(0.3)).toBeCloseTo(spread(1), 0);
   });
 });

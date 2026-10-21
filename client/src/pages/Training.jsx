@@ -851,6 +851,7 @@ export default function Training() {
     // the effort listening runs where both can share the mic (desktop browsers)
     enabled: FEATURES.VOICE_PROSODY && FEATURES.COACH_BRAIN && !IS_MOBILE_DEVICE && (phase === PHASE.EXERCISING || phase === PHASE.CALIBRATING),
   });
+  const sessionGoalRef = useRef(null);             // today's goal (set below, once known)
   const activeKickLegRef = useRef(null);           // the kicking leg of this set (set below, once the split is known)
   const execution = useExpertExecution({
     // From the briefing on: the trainee may start working while the coach still explains —
@@ -880,6 +881,8 @@ export default function Training() {
     keyPoints: exerciseKeyPoints,
     // the leg this set is for (a split set: the kicking leg of this half) — a prosthesis → the prosthesis technique
     activeLeg: activeKickLegRef.current,
+    // today's goal — the coach knows what the day is for
+    sessionGoal: sessionGoalRef.current,
     effortRef: voiceEffortRef,
   });
   const executionInViewRef = execution.inViewRef;
@@ -1057,7 +1060,8 @@ export default function Training() {
     const text = perSet
       ? legSetStartText(limbProfile, isHe, currentExercise.splitMode, currentSet)
       : splitStartText(limbProfile, isHe, currentExercise.splitMode);
-    const tm = setTimeout(() => speakPriority(text, { rate: 1.1 }), 900);
+    // a short line, said at once (never a stall at the set's start)
+    const tm = setTimeout(() => speakPriority(text, { rate: 1.15 }), 150);
     return () => clearTimeout(tm);
   }, [phase, currentSet, currentIdx]);
 
@@ -1080,6 +1084,7 @@ export default function Training() {
   const workoutVoiceRef = useRef(false);
   const [goalBanner, setGoalBanner] = useState(null);      // the big card at the start (8 s)
   const [sessionGoalLine, setSessionGoalLine] = useState(null);   // shown for the whole workout
+  sessionGoalRef.current = sessionGoalLine;
   /** Today's goal line: the catalog day's goal, else the plan day's focus. */
   function todayGoalLine() {
     const g = sessionDataRef.current.sessionGoalName;
@@ -1237,7 +1242,8 @@ export default function Training() {
     const gated = () => workingSourceRef.current?.active;     // the start gate is available
     calibrationDataRef.current.readyMs = 0;
     calibrationDataRef.current.lastTick = Date.now();
-    const CAL_MS = gated() ? 3000 : 5000;
+    // (the start position held briefly — a coached drill starts fast)
+    const CAL_MS = gated() ? (expertCoachesRef.current ? 1200 : 3000) : 5000;
     setCalibrationCountdown(Math.ceil(CAL_MS / 1000));
     if (!gated()) speakCalibrationStart(playerName);
 
@@ -1280,7 +1286,9 @@ export default function Training() {
         }
 
         // Honest: we start because the trainee IS in the start position (not "I got your range")
-        if (gated()) speakPriority(isHe ? READY_DRIVE.start.he : READY_DRIVE.start.en, { rate: 1.12 });
+        // (a coached drill starts with NO stacked lines — the set's leg line only; the counter + the coach do the rest)
+        if (expertCoachesRef.current) { /* silent start */ }
+        else if (gated()) speakPriority(isHe ? READY_DRIVE.start.he : READY_DRIVE.start.en, { rate: 1.12 });
         else speakCalibrationDone(playerName);
         calibrationDataRef.current = null;
         setPhase(PHASE.EXERCISING);
@@ -1288,8 +1296,7 @@ export default function Training() {
         lastActivityRef.current = Date.now();
         exerciseStartTimeRef.current = Date.now();
         lastNudgeTimeRef.current = 0;
-        speakSetStart(currentSet, totalSets);
-        motivateLater(currentSet === 1 ? 'start' : 'set');
+        if (!expertCoachesRef.current) { speakSetStart(currentSet, totalSets); motivateLater(currentSet === 1 ? 'start' : 'set'); }
 
         // Start command coaching for rep-based exercises — NOT in an exercise the expert + AI coach runs: its
         // "command → wait → vision → next command" loop broke the flow (field video 2026-10-19)
@@ -3088,7 +3095,7 @@ export default function Training() {
     const line = isHe
       ? `בחצי הזה בועטים ב${legLabel(splitSupport, limbProfile, true)} — זיהיתי בעיטה ב${legLabel(detected, limbProfile, true)}.`
       : `This half is for your ${legLabel(splitSupport, limbProfile, false)} — I saw a kick with your ${legLabel(detected, limbProfile, false)}.`;
-    speakIfIdle(line, { rate: 1.0 });
+    // (never spoken mid-set: a set is ONE leg by plan, and the side reading can err on a prosthesis — a short visual hint only)
     setFeedback({ type: 'info', text: `🦵 ${line}` });
     setTimeout(() => setFeedback(f => (f?.text === `🦵 ${line}` ? null : f)), 4000);
   }
@@ -3098,7 +3105,7 @@ export default function Training() {
     setCurrentSet(prev => {
       const nextSet = prev + 1;
       // Speak inside updater to avoid stale closure on currentSet
-      setTimeout(() => { speakSetStart(nextSet, totalSets); motivateLater('resume'); }, 100);
+      if (!expertCoachesRef.current) setTimeout(() => { speakSetStart(nextSet, totalSets); motivateLater('resume'); }, 100);
       return nextSet;
     });
     const prevCal = exerciseStateRef.current._calibration;
@@ -3388,6 +3395,8 @@ export default function Training() {
             strikeCountRef={execution.strikeCountRef}
             repShownRef={displayRepsRef}
             cleanRef={execution.lastRepCleanRef}
+            // (a coached drill: no instant "יפה!" — the coach praises only what was MEASURED correct)
+            praise={!execution.active}
             hidden={!!execution.setup}
             side={ballDrill.target === 'hand' || ballDrill.target === 'hands' ? handSide(limbProfile)
               : kickingSide(limbProfile, currentExercise?.sideSwitch && isStrikeMode(currentExercise?.splitMode) ? splitSupport : null)}

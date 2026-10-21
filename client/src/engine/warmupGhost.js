@@ -70,6 +70,9 @@ export function ghostPose(spec, t, lp = {}) {
   // Stage 3.1: an exercise Ghost is generated from its Expert Execution Profile
   if (spec?.profile?.ghost) {
     const pp = profileGhostPose(spec.profile, t, lp);
+    // a STANDING exercise's Ghost always faces the camera — exactly as the trainee is asked to stand (owner,
+    // 2026-10-21: never sideways); floor / seated exercises keep their own view
+    if (pp && pp.depth && spec.profile.posture === 'standing') return { ...pp, yaw: 0 };
     if (pp) return pp;
   }
   const wave = Math.sin(2 * Math.PI * t);          // -1..1
@@ -846,7 +849,8 @@ export function drawGhostOverlay(ctx, spec, lp, nowMs, origin, scale, alpha = 0.
   const raw = ghostPose(spec, t, lp);
   const lying = raw.landmarks && !raw.depth && raw.view !== 'front' && spec.profile?.posture !== 'standing';
   // seated trainee (detected, a wheelchair, or a seated exercise) → the Ghost sits too
-  const seated = !lying && (body?.seated || lp?.wheelchair || spec.profile?.posture === 'seated');
+  // (never seated by a guess: a standing exercise's Ghost stands — only a wheelchair / a seated exercise sits)
+  const seated = !lying && (lp?.wheelchair || spec.profile?.posture === 'seated' || (body?.seated && spec.profile?.posture !== 'standing'));
   // fitted to the trainee's own limb lengths (the same joint angles = the same correct movement)
   const fitted = lying ? { pose: raw, floorY: FLOOR_ANKLE_Y } : fitPoseToBody(raw, body?.limbs);
   let pose = seated ? seatPose(fitted.pose) : fitted.pose;

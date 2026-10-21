@@ -147,7 +147,8 @@ describe('Kicks / passes: a full separate set per leg', () => {
   it('odd sets = base leg, even sets = the prosthesis; the coach announces each leg clearly', () => {
     expect([1, 2, 3, 4].map(setLegHalf)).toEqual([1, 2, 1, 2]);
     expect(legSetStartText(lpBK, true, 'kick', 1)).toContain('בעיטות ברגל ימין');
-    expect(legSetStartText(lpBK, true, 'kick', 2)).toMatch(/^החלפנו רגל! סט מלא: בעיטות ברגל שמאל — הפרוטזה/);
+    expect(legSetStartText(lpBK, true, 'kick', 2)).toMatch(/^עכשיו בעיטות ברגל שמאל — הפרוטזה/);
+    expect(legSetStartText(lpBK, true, 'kick', 1)).not.toContain('מחליפים');          // never "next set we switch" in set 1
     expect(legSetNextText(lpBK, true, 'kick', 2)).toBe('בסט הבא מחליפים רגל: בעיטות ברגל שמאל — הפרוטזה.');
   });
 });

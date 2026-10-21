@@ -50,6 +50,8 @@ export const REST_ONLY_IDS = new Set(['runInPlace', 'highKnees', 'buttKicks', 'a
 export const restOnlyFeedback = (profile) => !!profile && (profile.kind === 'cyclic' || REST_ONLY_IDS.has(profile.id));
 // the vision model's verdict on a pass, mapped to the pass's own rules (confident findings only)
 export const VISION_CONFIDENCE = 0.75;
+// what a prosthetic foot cannot do — never demanded (owner, 2026-10-21)
+export const PROSTHESIS_IMPOSSIBLE = /קרסול|אצבעות|פוינט|פלקס|ankle|toe|point|flex/i;
 export const VISION_MINOR_CONFIDENCE = 0.6;
 export const VISION_GOOD_CONFIDENCE = 0.65;
 export function visionRuleHits(v, profile) {
@@ -123,8 +125,10 @@ export function useExpertExecution({
   enabled, counting = false, quiet = false, cueKey, exerciseName, catalogId = null, sportContexts, limbProfile, landmarksRef,
   isHe, playerName = '', speakPriority, recordClips = false, onClips,
   brainEnabled = false, effortRef = null, onStrikeSide = null, captureFrameRef = null, bodyFrameRef = null, keyPoints = null,
-  activeLeg = null,
+  activeLeg = null, sessionGoal = null,
 }) {
+  const sessionGoalRef = useRef(sessionGoal);
+  sessionGoalRef.current = sessionGoal;
   const activeLegRef = useRef(activeLeg);
   activeLegRef.current = activeLeg;
   const keyPointsRef = useRef(keyPoints);
@@ -322,8 +326,14 @@ export function useExpertExecution({
       const prosthetic = isProstheticLeg(limbProfile || {}, leg);
       const isPass = profile.id === 'shadowPass' && !prosthetic;          // (no foot-surface judgement on a prosthesis)
       const he0 = isHeRef.current;
-      aiBodyVision({ frame, legsFrame, isPass, kickingProsthesis: profile.kind === 'strike' && prosthetic, lang: he0 ? 'he' : 'en', side: leg,
-        exercise: exerciseName, sport: contextsKey, body: bodyText(limbProfile || {}), keyPoints: keyPointsRef.current || [], name: nameRef.current }).then((v) => {
+      const kickProsthesis = profile.kind === 'strike' && prosthetic;
+      // the technique the eyes judge: the exercise's key points (a prosthesis: never the ankle / toes / point / flex)
+      // + the SPORT's own emphasis + today's goal — the coach knows the sport and the day
+      const kp = (keyPointsRef.current || []).filter(x => !kickProsthesis || !PROSTHESIS_IMPOSSIBLE.test(x));
+      const emphasis = (profile.sportEmphasis || []).map(e => e?.he || e?.text || '').filter(Boolean).slice(0, 4);
+      aiBodyVision({ frame, legsFrame, isPass, kickingProsthesis: kickProsthesis, lang: he0 ? 'he' : 'en', side: leg,
+        exercise: exerciseName, sport: contextsKey, body: bodyText(limbProfile || {}), keyPoints: [...kp, ...emphasis], goal: sessionGoalRef.current || '',
+        name: nameRef.current }).then((v) => {
         visionBusy = false;
         if (disposed || !v) return;
         const hits = isPass ? visionRuleHits(v, profile) : [];
@@ -381,6 +391,7 @@ export function useExpertExecution({
         name: nameRef.current, he, rep: repCountRef.current || null, times: tracker.log?.rules?.[rule.id]?.n ?? null, recent: recentCues,
       });
       if (tone) facts.tone = tone;
+      if (profile.kind === 'strike' && isProstheticLeg(limbProfile || {}, activeLegRef.current)) facts.kickingProsthesis = true;
       aiCue(facts).then((ai) => {
         cueInFlight = false;
         if (disposed || !countingRef.current) return;

@@ -257,8 +257,8 @@ export function legSetStartText(lp, isHe, mode, set) {
   const leg = legLabel(half === 1 ? first : second, lp, isHe);
   if (isHe) {
     return half === 1
-      ? `סט מלא: ${action(mode, true)}${leg}. בסט הבא מחליפים רגל.`
-      : `החלפנו רגל! סט מלא: ${action(mode, true)}${leg}.`;
+      ? `${action(mode, true)}${leg}.`
+      : `עכשיו ${action(mode, true)}${leg}.`;
   }
   return half === 1
     ? `A full set: ${action(mode, false)}${leg}. Next set we switch legs.`
