@@ -11,7 +11,7 @@ const cueFacts = {
 test('the cue prompt carries the measured facts and forbids invented numbers', () => {
   const { system, user } = buildCuePrompt(cueFacts);
   assert.match(system, /ONLY the measured facts/);
-  assert.match(system, /3 to 6 words, ONE COMPLETE short sentence, NO name/);
+  assert.match(system, /3 to 5 words \(never more than 6\), ONE COMPLETE short sentence, NO name/);
   const u = JSON.parse(user);
   assert.equal(u.error.measured, 152);
   assert.equal(u.rep, 4);

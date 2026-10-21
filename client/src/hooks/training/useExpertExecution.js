@@ -49,9 +49,10 @@ export const FLOOD_N = 3, FLOOD_MS = 2500, FLOOD_CALM_MS = 1500;
 export const REST_ONLY_IDS = new Set(['runInPlace', 'highKnees', 'buttKicks', 'aSkip', 'accelMarch', 'lateralShuffle', 'jumpSquat']);
 export const restOnlyFeedback = (profile) => !!profile && (profile.kind === 'cyclic' || REST_ONLY_IDS.has(profile.id));
 // the vision model's verdict on a pass, mapped to the pass's own rules (confident findings only)
-export const VISION_CONFIDENCE = 0.75;
+export const VISION_CONFIDENCE = 0.75;          // the pass's contact surface / ankle (a fine call)
+export const VISION_BODY_CONFIDENCE = 0.65;     // a body fault the eyes saw (Sonnet's honest scale: a clear fault ≥ 0.8)
 export const VISION_SURE = 0.85;
-export const VISION_MINOR_SAY = 0.7;
+export const VISION_MINOR_SAY = 0.75;
 export const LIVE_CUE_RATE = 1.2;          // an in-set correction is spoken a little faster (short, sharp)      // a minor finding (posture, arms …) is said in the set when the eyes are this sure
 // a pass that did not count but WAS a real attempt (not a twitch): the coach reacts to it (owner, 2026-10-21)
 export const ATTEMPT_MIN_RANGE = 12;      // deg
@@ -423,7 +424,7 @@ export function useExpertExecution({
         if (disposed || !v) return;
         const hits = isPass ? visionRuleHits(v, profile) : [];
         for (const h of hits) logRule(tracker.log, h.rule, h.violated, null);
-        const found = (v.findings || []).filter(f => f.confidence >= (f.severity === 'major' ? VISION_CONFIDENCE : VISION_MINOR_CONFIDENCE));
+        const found = (v.findings || []).filter(f => f.confidence >= (f.severity === 'major' ? VISION_BODY_CONFIDENCE : VISION_MINOR_CONFIDENCE));
         for (const f of found) logRule(tracker.log, visionRule(f), true, null);
         const goods = (v.good || []).filter(g => g.confidence >= VISION_GOOD_CONFIDENCE);
         if (goods.length) lastGood = goods[0].text;
@@ -444,6 +445,14 @@ export function useExpertExecution({
         const seenAt = performance.now() - 4000;     // (the frame was taken ~at the count)
         // candidates, the most important first: the pass surface / a major finding, then a SURE minor one
         const saidDev = repSaidId.get(repNo);
+        // (the body picture for the next lines — what the eyes saw, the root first)
+        {
+          const seen = [...found].sort((a, b) => (b.severity === 'major') - (a.severity === 'major') || b.confidence - a.confidence);
+          bodyNow = { items: seen.slice(0, 3).map(f => f.what || f.cue).filter(Boolean), at: performance.now(),
+            major: seen.find(f => f.severity === 'major' && f.confidence >= VISION_BODY_CONFIDENCE) || null };
+          if (!seen.length && goods.length) bodyNow.items = [`(${goods[0].text})`];
+        }
+        if (saidDev) { console.info(`[Coach] the eyes (rep ${repNo}) → the body picture (the pass already has its line)`); return; }
         const cands = [
           ...(passBad && passBad.rule.id !== saidDev ? [{ key: passBad.rule.id, pass: passBad }] : []),
           ...found.filter(f => f.severity === 'major').sort((a, b) => b.confidence - a.confidence).map(f => ({ key: `vis_${f.code}`, f })),
@@ -498,11 +507,23 @@ export function useExpertExecution({
     const ruleById = (id, res) => (res?.issues || []).find(i => i.id === id) || tracker.dynActive?.[id]?.rule
       || [...(profile.dynamics || []), ...(profile.rules || [])].find(r => r.id === id) || null;
     const repSaidId = new Map(); const repSaidVis = new Set();
+    // the WHOLE BODY as the eyes saw it at the last look (≤ 12 s old) — every live correction links it to the leg
+    let bodyNow = { items: [], at: -1e9, major: null };
+    const bodyFresh = () => (performance.now() - bodyNow.at <= 12000 ? bodyNow : { items: [], major: null });
     const devicePolicy = (list, repNo, res) => {
-      if (!list.length || restOnly || !countingRef.current || performance.now() < floodUntil) return;
+      if (restOnly || !countingRef.current || performance.now() < floodUntil || repSaidId.has(repNo)) return;
       const rules = list.map(id => ruleById(id, res)).filter(Boolean)
         .sort((a, b) => (b.severity === 'danger') - (a.severity === 'danger') || isMajorRule(b) - isMajorRule(a));
-      if (!rules.length || repSaidId.has(repNo)) return;
+      // no leg error measured, but the eyes see a MAJOR body fault that keeps happening → the line is about it, now
+      const bm = bodyFresh().major;
+      if (!rules.length && bm) {
+        const vr = visionRule(bm);
+        repSaidId.set(repNo, vr.id);
+        console.info(`[Coach] body cue at the count (rep ${repNo}): ${bm.code}`);
+        sayCorrection(vr, bm.cue, 1.1, isHeRef.current, null, repNo);
+        return;
+      }
+      if (!rules.length) return;
       const top = rules[0];
       repSaidId.set(repNo, top.id);
       console.info(`[Coach] device cue (rep ${repNo}): ${top.id}`);
@@ -523,6 +544,7 @@ export function useExpertExecution({
         name: nameRef.current, he, rep: repCountRef.current || null, times: tracker.log?.rules?.[rule.id]?.n ?? null, recent: recentCues,
       });
       if (rule?.id && (cueHistory[rule.id] || []).length) facts.previousForThisError = cueHistory[rule.id].slice(-3);
+      const bn = bodyFresh().items; if (bn.length) facts.bodyNow = bn;
       if (tone) facts.tone = tone;
       if (isPassDrill) facts.isPass = true;
       if (profile.kind === 'strike' && isProstheticLeg(limbProfile || {}, activeLegRef.current)) facts.kickingProsthesis = true;

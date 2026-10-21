@@ -124,12 +124,14 @@ Do not repeat or paraphrase closely any of the recent lines listed. Output ONLY 
     return { system, user };
   }
   const system = `${COACH_PERSONA(he)}
-${isPassFacts(f) ? PASS_RULE + '\n' : ''}NOW: the trainee is IN THE MIDDLE OF A SET. Give ONE immediate correction, like a shout from the sideline: warm, sharp, specific to THIS error and THIS rep — 3 to 6 words, ONE COMPLETE short sentence, NO name (it must be SAID in under 2 seconds, the next pass is coming; the deep why / how is said in the rest). It must tell them what to do on the very next rep — exactly the instruction of "what" / "how", nothing else.
+${isPassFacts(f) ? PASS_RULE + '\n' : ''}NOW: the trainee is IN THE MIDDLE OF A SET. Give ONE immediate correction, like a shout from the sideline of the best professional coach: sharp, technical, specific to THIS rep — 3 to 5 words (never more than 6), ONE COMPLETE short sentence, NO name.
+WHOLE BODY, ONE CHAIN (owner, 2026-10-21): "error" is what the device MEASURED (the leg / the movement); "bodyNow" is what the coach's eyes see in the WHOLE body (chest, pelvis, posture, support leg). Treat them as ONE movement chain: when the body causes the leg error (e.g. the chest leaning back → the leg swings up; the pelvis open → the foot does not turn out), name the ROOT in the body and its effect on the leg in one instruction; otherwise give the single most important fix. Never generic, never filler, never a vague 'focus' — a concrete action a top coach would shout (it must be SAID in under 2 seconds, the next pass is coming; the deep why / how is said in the rest). It must tell them what to do on the very next rep — exactly the instruction of "what" / "how", nothing else.
 ${f.tone === 'calm' ? 'The trainee is tired / frustrated right now: say it calmly and supportively, one simple thing.' : ''}
 Do not repeat or paraphrase closely any of the recent cues listed.${(f.previousForThisError || []).length ? ' This SAME error is repeating — "previousForThisError" lists what you already told; give the same fix from a DIFFERENT angle (another body part of the chain, an external focus, a feel / image), never the same words or the same structure.' : ''} Output ONLY the spoken sentence.`;
   const user = JSON.stringify({
     exercise: clip(f.exercise, 80), sport: clip(f.sport, 40), body: clip(f.body, 120),
     previousForThisError: (f.previousForThisError || []).slice(-3).map(x => clip(x, 90)),
+    bodyNow: (f.bodyNow || []).slice(0, 3).map(x => clip(x, 80)),
     side: f.side === 'left' || f.side === 'right' ? f.side : null,
     kickingProsthesis: !!f.kickingProsthesis,
     rep: f.rep ?? null, error: {
@@ -263,7 +265,8 @@ export function hedged(fn, ms) {
     setTimeout(() => { if (!done) { started = 2; run(); } }, ms);
   });
 }
-const wordCount = (t) => String(t || '').trim().split(/\s+/).filter(Boolean).length;
+// (the Hebrew object particle "את" is not counted — it is barely heard; 6 words = the length of a short shout)
+const wordCount = (t) => String(t || '').trim().split(/\s+/).filter(w => w && w !== 'את').length;
 
 /** The spoken briefing of an exercise, or null (the device then says the written explanation). */
 export async function generateBriefing(facts, { timeoutMs = 18000, askFn = ask } = {}) {
@@ -328,8 +331,9 @@ ${f.kickingProsthesis ? `The KICKING leg is the trainee's PROSTHESIS (the ${f.si
 ` : ''}${f.isPass || f.kickingProsthesis || isPassFacts(f) ? 'The ball is VIRTUAL (drawn on the screen, not in the camera): never report a missing / unseen ball.\n' : ''}${f.isPass || f.kickingProsthesis ? 'This is a PASS: if it was executed like a POWER KICK (a big back-swing, a knee snap, the leg swinging high / hard) report it as a MAJOR finding "pass_like_kick" — a pass is short, controlled, from the hip.\n' : ''}${isPassFacts(f) ? PASS_RULE + '\n' : ''}${f.goal ? `Today's training goal: ${clip(f.goal, 80)}.\n` : ''}Never praise what was technically wrong.
 Look at the WHOLE body, never the kicking leg alone (owner, 2026-10-21): the CHEST (over the ball / leaning back / collapsed), the overall POSTURE and trunk, the PELVIS (square, rotating, dropping, shifting), the SUPPORT leg (knee soft, foot planted, weight on it), the head and gaze, the arms for balance, and the working leg and foot — anything that prevents a correct, safe execution of THIS exercise. Judge the whole chain: a fault in the chest / posture / pelvis that spoils the movement is as important as the leg. Arms simply hanging beside the body are NOT "hands in the pockets" — report that only if the hands are clearly inside the pockets.
 Report ONLY what is clearly visible. Return ONLY this COMPACT JSON (short keys — every token costs time):
-{"f":[{"c":"short_snake_case_code","s":"M|m","p":0.0,"q":"<${he ? 'Hebrew' : 'English'}, 3-6 words: the instruction for the next rep>"}],"g":"<${he ? 'Hebrew' : 'English'}, 3-5 words of genuine praise, or empty>","gp":0.0${f.isPass ? ',"ct":"inside|laces|toe|unclear","cp":0.0,"al":true|false|null,"ap":0.0' : ''}}
-("s": "M" = major, "m" = minor; "p" = your confidence 0..1; "gp" = the praise's confidence.)
+{"f":[{"c":"short_snake_case_code","s":"M|m","p":0.0,"w":"<${he ? 'Hebrew' : 'English'}, at most 6 words: what you saw>","q":"<${he ? 'Hebrew' : 'English'}, 3-6 words: ONE whole-chain instruction for the next rep — link the body to the leg when they are connected (e.g. the chest back → the leg swings up)>"}],"g":"<${he ? 'Hebrew' : 'English'}, 3-5 words of genuine praise, or empty>","gp":0.0${f.isPass ? ',"ct":"inside|laces|toe|unclear","cp":0.0,"al":true|false|null,"ap":0.0' : ''}}
+("s": "M" = major, "m" = minor; "p" = how sure you are it is REALLY visible in this frame: 0.9 = clearly seen, 0.75 = seen, 0.5 = a guess — be honest, a clear fault is 0.8+; "gp" = the praise's confidence.)
+Coach like the best professional: see the movement as ONE chain (support foot → knee → pelvis → chest → the working leg → the foot); name the ROOT cause of what went wrong, not a symptom; precise football terms, never generic filler.
 "major" ONLY = a real injury risk, or a fault in THIS exercise's core technique (for a pass: the contact surface, the swing, the support leg, the body over the ball); for a pass the chest over the ball, the pelvis and the support leg ARE core technique; the arms / the hands = "minor" unless it really endangers or breaks the core technique. The cue: at most 6 words. At most 2 findings, the most important first; at most 1 "good". Be brief — the answer is needed within 2 seconds. Output compact JSON only — no code fences, no text before or after. No numbers inside the texts. Natural spoken ${he ? 'Hebrew (masculine singular)' : 'English'}. If the body is not clearly visible return {"f":[],"g":""}.`;
   return { system };
 }
@@ -345,8 +349,8 @@ export async function generateBodyVision(f, { timeoutMs = 9000, askFn = null } =
     try {
       const raw = askFn ? await askFn(model, system, content)
         : (await getClient().messages.create({
-          model, max_tokens: 200, system: [{ type: 'text', text: system, cache_control: { type: 'ephemeral' } }], messages: [{ role: 'user', content }],
-          thinking: { type: 'disabled' },
+          model, max_tokens: 300, system: [{ type: 'text', text: system, cache_control: { type: 'ephemeral' } }], messages: [{ role: 'user', content }],
+          output_config: { effort: 'low' },
         }, { timeout: timeoutMs, maxRetries: 0 })).content.filter(b => b.type === 'text').map(b => b.text).join('');
       const m = String(raw).match(/\{[\s\S]*\}/);
       let j = null;
@@ -355,7 +359,7 @@ export async function generateBodyVision(f, { timeoutMs = 9000, askFn = null } =
       // the compact answer → the full structure the app uses (the cue doubles as "what" — the rest's log)
       if (Array.isArray(j.f) || typeof j.g === 'string') {
         j = {
-          findings: (j.f || []).map(x => ({ code: x?.c, severity: x?.s === 'M' ? 'major' : 'minor', confidence: x?.p, cue: x?.q, what: x?.q })),
+          findings: (j.f || []).map(x => ({ code: x?.c, severity: x?.s === 'M' ? 'major' : 'minor', confidence: x?.p, cue: x?.q, what: x?.w || x?.q })),
           good: j.g ? [{ text: j.g, confidence: typeof j.gp === 'number' ? j.gp : 0.7 }] : [],
           contact: j.ct ? { value: j.ct, confidence: j.cp } : null,
           ankleLocked: j.al !== undefined && j.ap !== undefined ? { value: j.al, confidence: j.ap } : null,
