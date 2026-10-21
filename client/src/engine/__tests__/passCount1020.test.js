@@ -244,3 +244,14 @@ describe('owner 2026-10-21 (c): pass words, whole short lines, a fast pass may m
     expect(inPlaceCheck(run(frames(), 100).ev).reason).toBe('walk-across');
   });
 });
+
+describe('owner 2026-10-21 (d): a repeated error — "one yes, one no"', () => {
+  it('said at the 1st rep, not the 2nd in a row, said at the 3rd; a break starts over; an owed line is said next time', async () => {
+    const { errorsDue } = await import('../../hooks/training/useExpertExecution');
+    const st = {}, owed = {};
+    const seq = [['dev:a'], ['dev:a'], ['dev:a'], ['dev:a'], [], ['dev:a']].map(p => errorsDue(st, owed, 'dev:', p));
+    expect(seq).toEqual([['dev:a'], [], ['dev:a'], [], [], ['dev:a']]);
+    owed['dev:a'] = true;                                  // the 1st sighting could not be said (the rep had a line)
+    expect(errorsDue(st, owed, 'dev:', ['dev:a'])).toEqual(['dev:a']);   // 2nd in a row, but owed → said
+  });
+});

@@ -39,7 +39,7 @@ import { liveCue } from '../../engine/coachBrain/policy';
 import { jointAngleSide, torsoLength } from '../../engine/exercise/kinematics';
 import { cueFacts } from '../../engine/coachBrain/aiFacts';
 import { aiCue, aiLine, aiPassVision, aiBodyVision } from '../../utils/aiCoach';
-import { logRule, logJudgedCount, isProstheticLeg } from '../../engine/exercise/profileEvaluator';
+import { logRule, logJudgedCount, isProstheticLeg, isMajor as isMajorRule, DYNAMIC_SHOW_MS } from '../../engine/exercise/profileEvaluator';
 
 // one kick / pass = one count: after a COUNTED kick nothing counts for COUNT_LOCK_MS (its back-swing / return);
 // a FLOOD (FLOOD_N strikes within FLOOD_MS — wild, endless kicking) counts and answers nothing until calm
@@ -51,6 +51,14 @@ export const restOnlyFeedback = (profile) => !!profile && (profile.kind === 'cyc
 // the vision model's verdict on a pass, mapped to the pass's own rules (confident findings only)
 export const VISION_CONFIDENCE = 0.75;
 export const VISION_SURE = 0.85;
+export const VISION_MINOR_SAY = 0.8;
+/** "One yes, one no": the errors of this rep that are said now — the odd places of each error's streak in a row,
+ *  or an error OWED from a rep that could not take it. Mutates the streak / owed maps. */
+export function errorsDue(errStreak, owed, prefix, present) {
+  for (const k of Object.keys(errStreak)) if (k.startsWith(prefix) && !present.includes(k)) { errStreak[k] = 0; owed[k] = false; }
+  for (const k of present) errStreak[k] = (errStreak[k] || 0) + 1;
+  return present.filter(k => errStreak[k] % 2 === 1 || owed[k]);
+}      // a minor finding is said in the set only when the eyes are this sure
 // a pass that did not count but WAS a real attempt (not a twitch): the coach reacts to it (owner, 2026-10-21)
 export const ATTEMPT_MIN_RANGE = 12;      // deg
 export const ATTEMPT_MIN_PATH = 0.1;      // torso lengths
@@ -325,7 +333,12 @@ export function useExpertExecution({
     // execution anywhere in the body (posture, arms, trunk, head, balance, legs, feet) with severity + confidence.
     // Confident findings (≥ VISION_CONFIDENCE): a MAJOR one is said at once, every time; a minor one is forgiven once
     // and said when it comes back; ALL go into the set log → the rest's full analysis. Rest-only drills: logged only.
-    let visionBusy = false; let lastLookAt = -1e9; const visOcc = {}; const visCoached = {}; const visConsec = {}; const visSeen = {};
+    // REPEATED ERRORS (owner, 2026-10-21 — "one yes, one no"): an error is said AT ONCE on its first rep; the
+    // same error again in the next rep → not said; a 3rd rep in a row → said again (the odd places of its streak).
+    // One correction per rep; a line that had to wait (the rep already got one) is OWED → said at its next sighting.
+    const errStreak = {}; const owed = {}; const repSaid = new Set();
+    const streakStep = (prefix, present) => errorsDue(errStreak, owed, prefix, present);
+    let visionInFlight = 0; let lastLookAt = -1e9; const visOcc = {}; const visCoached = {}; 
     let cleanStreak = 0; let lastPraiseAt = -1e9;
     const visionRule = (f) => ({
       id: `vis_${f.code}`, severity: 'error', major: f.severity === 'major', vision: true,
@@ -387,8 +400,9 @@ export function useExpertExecution({
     };
     const lookAtRep = async (repIdx, side) => {
       const now0 = performance.now();
-      if (visionBusy || now0 - lastLookAt < 2000) return;
-      visionBusy = true; lastLookAt = now0;
+      // the eyes look at EVERY counted rep (up to 2 looks in flight — a look takes 2–5 s, a pass ~3 s)
+      if (visionInFlight >= 2 || now0 - lastLookAt < 700) return;
+      visionInFlight += 1; lastLookAt = now0;
       // the frames are prepared IN THE BACKGROUND (an async bitmap + encode — never a stall in the live video)
       let frame = null, legsFrame = null;
       try {
@@ -397,7 +411,7 @@ export function useExpertExecution({
           profile.kind === 'strike' ? Promise.resolve(captureFrameRef?.current?.()) : Promise.resolve(null),
         ]);
       } catch { frame = null; }
-      if (!frame || disposed) { visionBusy = false; return; }
+      if (!frame || disposed) { visionInFlight = Math.max(0, visionInFlight - 1); return; }
       const leg = activeLegRef.current || side;
       const prosthetic = isProstheticLeg(limbProfile || {}, leg);
       const isPass = profile.id === 'shadowPass' && !prosthetic;          // (no foot-surface judgement on a prosthesis)
@@ -410,7 +424,7 @@ export function useExpertExecution({
       aiBodyVision({ frame, legsFrame, isPass, passDrill: isPassDrill, kickingProsthesis: kickProsthesis, lang: he0 ? 'he' : 'en', side: leg,
         exercise: exerciseName, sport: contextsKey, body: bodyText(limbProfile || {}), keyPoints: [...kp, ...emphasis], goal: sessionGoalRef.current || '',
         name: nameRef.current }).then((v) => {
-        visionBusy = false;
+        visionInFlight = Math.max(0, visionInFlight - 1);
         if (disposed || !v) return;
         const hits = isPass ? visionRuleHits(v, profile) : [];
         for (const h of hits) logRule(tracker.log, h.rule, h.violated, null);
@@ -428,33 +442,40 @@ export function useExpertExecution({
         // the eyes' verdict of this rep: clean (looked, no major / pass error), not clean, or not seen (null)
         if (rec) { rec.visClean = judged ? !anyBad : null; if (anyBad) errorSeen(found.map(f => `vis_${f.code}`).concat(hits.filter(h => h.violated).map(h => h.rule.id))); judgeClean(rec, repIdx + 1); }
         console.info(`[Vision] rep #${repIdx + 1}${prosthetic ? ' (prosthesis kicks)' : ''}: ${found.map(f => `${f.severity}:${f.code}(${f.confidence})`).join(', ') || 'no finding'} | good: ${goods.map(g => g.text).join(' / ') || '-'}`);
-        if (restOnly || !countingRef.current || performance.now() < floodUntil) return;
+        // the streaks of what the eyes saw in THIS looked rep (an unjudged look neither counts nor resets)
         const passBad = hits.find(h => h.violated);
-        if (passBad) { cleanStreak = 0; sayCorrection({ ...passBad.rule, side }, liveCue(passBad.rule, he0), 1.1, he0, null, repIdx + 1); noteCorrected(passBad.rule.id, passBad.rule.msg?.he); return; }
-        // consecutive appearances (a finding absent from a judged rep starts over)
-        // the evidence of a finding: seen in 2 of the last 3 looked reps (one miss between does not erase it)
-        for (const f of found) (visSeen[f.code] ||= []).push(repIdx);
-        for (const code of Object.keys(visSeen)) visSeen[code] = visSeen[code].filter(i => repIdx - i <= 2);
-        for (const code of Object.keys(visSeen)) visConsec[code] = visSeen[code].length;
-        for (const f of found) {
-          visOcc[f.code] = (visOcc[f.code] || 0) + 1;
-          // in the SET only a MAJOR finding confirmed in 2 reps in a row; everything else → the rest's analysis
-          if (f.severity !== 'major' || (visConsec[f.code] < 2 && f.confidence < VISION_SURE)) continue;
-          // a correction already said is said AGAIN only every 3rd time it comes back (never every rep)
-          const again = visCoached[f.code] && (visOcc[f.code] - visCoached[f.code]) >= 3;
-          if (!visCoached[f.code] || again) {
-            // a cue about a rep that is no longer the last one is dropped (never said late)
-            const seenAt = performance.now() - 4000;     // (the frame was taken ~at the count)
-            if (!cueStillTrue(repIdx + 1, seenAt)) { console.info(`[Coach] stale vision cue dropped (rep ${repIdx + 1}, now ${repCountRef.current})`); return; }
-            visCoached[f.code] = visOcc[f.code]; cleanStreak = 0;
-            noteCorrected(`vis_${f.code}`, f.cue);
-            const cue6 = liveText(f.cue);                                     // at most 6 words, no name
-            lastCorrectionAt = performance.now();
-            holdSpeech(estimateSpeechMs(cue6, 1.1));
-            const repAt = repIdx + 1;
-            speakRef.current?.(cue6, { rate: 1.1, kind: 'correction', preempt: true, validIf: () => cueStillTrue(repAt, seenAt) });
-            return;
-          }
+        const visKeys = [...found.map(f => `vis:${f.code}`), ...(passBad ? [`vis:${passBad.rule.id}`] : [])];
+        const due = judged ? streakStep('vis:', visKeys) : [];
+        if (restOnly || !countingRef.current || performance.now() < floodUntil) return;
+        const repNo = repIdx + 1;
+        const seenAt = performance.now() - 4000;     // (the frame was taken ~at the count)
+        // candidates, the most important first: the pass surface / a major finding, then a SURE minor one
+        const cands = [
+          ...(passBad && due.includes(`vis:${passBad.rule.id}`) ? [{ key: `vis:${passBad.rule.id}`, pass: passBad }] : []),
+          ...found.filter(f => f.severity === 'major' && due.includes(`vis:${f.code}`)).sort((a, b) => b.confidence - a.confidence).map(f => ({ key: `vis:${f.code}`, f })),
+          ...found.filter(f => f.severity !== 'major' && f.confidence >= VISION_MINOR_SAY && due.includes(`vis:${f.code}`)).map(f => ({ key: `vis:${f.code}`, f })),
+        ];
+        if (!cands.length) return;
+        const top = cands[0];
+        if (repSaid.has(repNo) || cueInFlight || !cueStillTrue(repNo, seenAt)) {
+          for (const c of cands) owed[c.key] = true;
+          console.info(`[Coach] vision cue owed (rep ${repNo}: ${cands.map(c => c.key).join(', ')})`);
+          return;
+        }
+        repSaid.add(repNo);
+        for (const c of cands) owed[c.key] = c !== top;
+        cleanStreak = 0;
+        if (top.pass) { sayCorrection({ ...top.pass.rule, side }, liveCue(top.pass.rule, he0), 1.1, he0, null, repNo); noteCorrected(top.pass.rule.id, top.pass.rule.msg?.he); return; }
+        {
+          const f = top.f;
+          visOcc[f.code] = (visOcc[f.code] || 0) + 1; visCoached[f.code] = visOcc[f.code];
+          noteCorrected(`vis_${f.code}`, f.cue);
+          const cue = liveText(f.cue);
+          lastCorrectionAt = performance.now();
+          holdSpeech(estimateSpeechMs(cue, 1.1));
+          speakRef.current?.(cue, { rate: 1.1, kind: 'correction', preempt: true, validIf: () => cueStillTrue(repNo, seenAt) });
+          console.info(`[Coach] vision cue (rep ${repNo}, streak ${errStreak[top.key]}): ${f.code}`);
+          return;
         }
       });
     };
@@ -466,13 +487,31 @@ export function useExpertExecution({
       const errs = new Set((res.issues || []).filter(i => i.severity === 'error' || i.severity === 'danger').map(i => i.id));
       setTimeout(() => {
         if (disposed) return;
-        for (const [id, d] of Object.entries(tracker.dynActive || {})) if (d.rule?.severity === 'error' || d.rule?.severity === 'danger') errs.add(id);
+        // (a rule shown since THIS pass — never one still on screen from the previous pass)
+        for (const [id, d] of Object.entries(tracker.dynActive || {})) if ((d.rule?.severity === 'error' || d.rule?.severity === 'danger') && d.until - DYNAMIC_SHOW_MS >= at - 1500) errs.add(id);
         for (const [id, t] of Object.entries(tracker.suspect || {})) if (t >= at - 1500) errs.add(id);
         const list = [...errs];
         const rec = repVerdicts[repAt - 1];
         if (list.length) { errorSeen(list); if (rec) { rec.judged = true; rec.error = true; refreshAccuracy(); } }
         if (rec) { rec.devErr = list; rec.devDone = true; judgeClean(rec, repAt); }
+        devicePolicy(list, repAt, res);
       }, 900);
+    };
+    // the device's errors of a counted rep → said by the "one yes, one no" policy (one correction per rep)
+    const ruleById = (id, res) => (res?.issues || []).find(i => i.id === id) || tracker.dynActive?.[id]?.rule
+      || [...(profile.dynamics || []), ...(profile.rules || [])].find(r => r.id === id) || null;
+    const devicePolicy = (list, repNo, res) => {
+      const due = streakStep('dev:', list.map(id => `dev:${id}`)).map(k => k.slice(4));
+      if (!due.length || restOnly || !countingRef.current || performance.now() < floodUntil) return;
+      const rules = due.map(id => ruleById(id, res)).filter(Boolean)
+        .sort((a, b) => (b.severity === 'danger') - (a.severity === 'danger') || isMajorRule(b) - isMajorRule(a));
+      if (!rules.length) return;
+      if (repSaid.has(repNo) || cueInFlight) { for (const r of rules) owed[`dev:${r.id}`] = true; return; }
+      const top = rules[0];
+      repSaid.add(repNo);
+      for (const r of rules) owed[`dev:${r.id}`] = r !== top;
+      console.info(`[Coach] device cue (rep ${repNo}, streak ${errStreak[`dev:${top.id}`]}): ${top.id}`);
+      sayCorrection(top, liveCue(top, isHeRef.current), 1.1, isHeRef.current, null, repNo);
     };
     // a HOLD (a plank, a wall sit): the coach looks every few seconds of the hold
     let lastHoldLook = -1e9;
@@ -771,7 +810,7 @@ export function useExpertExecution({
             // REST's analysis weaves them in; a rest-only drill gets no live correction at all
             if (say && (say.kind === 'intent' || say.kind === 'mental' || restOnly)) {
               if (say.kind === 'intent' || say.kind === 'mental') { const n = restNotesRef.current; n.push(say.text); if (n.length > 4) n.shift(); }
-            } else if (say && countingRef.current && !(say.rule && (say.kind === 'correction' || say.kind === 'forecast'))) {
+            } else if (say && countingRef.current && (profile.kind === 'strike' || profile.kind === 'reps' || !(say.rule && (say.kind === 'correction' || say.kind === 'forecast')))) {
               // (a running set: the coach is QUIET — only a sharp correction tied to the pass; the rest's analysis says the rest)
             } else if (say) {
               lastVoice = now;
