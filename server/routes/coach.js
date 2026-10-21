@@ -214,6 +214,9 @@ router.post('/live-cue', async (req, res) => {
   }
 });
 
+// a warm-up ping (the app calls it on load): wakes the server before the first coach line
+router.get('/warm', (req, res) => res.json({ ok: true }));
+
 router.post('/briefing', async (req, res) => {
   try {
     res.json({ briefing: await generateBriefing(req.body || {}) });

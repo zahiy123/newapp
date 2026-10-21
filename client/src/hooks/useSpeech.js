@@ -414,15 +414,9 @@ export function useSpeech(lang = 'he-IL', age) {
     unstickSpeaking();
     const chunks = splitToChunks(text);
     if (chunks.length === 0) return;
-    // a CORRECTION cuts a praise (playing or waiting): the technique comes first
-    if (options.preempt) {
-      queueRef.current = queueRef.current.filter(q => q.options?.kind !== 'praise');
-      if (speaking.current && currentChunkRef.current?.options?.kind === 'praise') {
-        queueRef.current = [...chunks.map(c => ({ text: c, options })), ...queueRef.current];
-        try { window.speechSynthesis.cancel(); } catch { /* onerror plays the queue */ }
-        return;
-      }
-    }
+    // a CORRECTION drops a WAITING praise (the technique comes first) — a praise already playing ends first:
+    // two lines never cut / run over each other (owner, 2026-10-21)
+    if (options.preempt) queueRef.current = queueRef.current.filter(q => q.options?.kind !== 'praise');
     if (!speaking.current && queueRef.current.length && queueRef.current[0].options?.__sid != null && queueRef.current[0].options.__sid === currentSidRef.current) {
       // between the chunks of a sentence (the briefing!): its rest is NEVER cleared — wait after it
       const sid = currentSidRef.current;

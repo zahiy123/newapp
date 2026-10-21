@@ -50,7 +50,56 @@ export const REST_ONLY_IDS = new Set(['runInPlace', 'highKnees', 'buttKicks', 'a
 export const restOnlyFeedback = (profile) => !!profile && (profile.kind === 'cyclic' || REST_ONLY_IDS.has(profile.id));
 // the vision model's verdict on a pass, mapped to the pass's own rules (confident findings only)
 export const VISION_CONFIDENCE = 0.75;
-export const VISION_SURE = 0.85;          // a major finding this sure is said at its first sighting
+export const VISION_SURE = 0.85;
+// a pass that did not count but WAS a real attempt (not a twitch): the coach reacts to it (owner, 2026-10-21)
+export const ATTEMPT_MIN_RANGE = 12;      // deg
+export const ATTEMPT_MIN_PATH = 0.1;      // torso lengths
+export const ATTEMPT_CUE_GAP_MS = 6000;
+/** The rule told for an uncounted pass: too small / the body moved / the support foot moved. */
+export function uncountedPassRule(kind, pass = true) {
+  const what = pass ? 'מסירה' : 'בעיטה', whatEn = pass ? 'pass' : 'kick';
+  const R = {
+    small: { id: 'attempt_small', msg: { he: `ה${what} הייתה קטנה מדי ולא נספרה`, en: `The ${whatEn} was too small and did not count` },
+      how: { he: 'תנופה מלאה מהירך, והרגל ממשיכה דרך הכדור', en: 'A full swing from the hip, the leg follows through the ball' },
+      cue: { he: 'תנופה מלאה מהירך, דרך הכדור', en: 'Full swing from the hip, through the ball' } },
+    moved: { id: 'attempt_moved', msg: { he: `הגוף זז הצידה ב${what} והיא לא נספרה`, en: `The body moved sideways in the ${whatEn}; it did not count` },
+      how: { he: 'עמוד במקום מול הכדור, רק הרגל זזה', en: 'Stand still at the ball, only the leg moves' },
+      cue: { he: 'עמוד במקום, רק הרגל זזה', en: 'Stay put, only the leg moves' } },
+    support: { id: 'attempt_support', msg: { he: `רגל העמידה זזה ב${what} והיא לא נספרה`, en: `The support foot moved in the ${whatEn}; it did not count` },
+      how: { he: 'נעץ את רגל העמידה ליד הכדור לאורך כל התנועה', en: 'Plant the support foot beside the ball for the whole motion' },
+      cue: { he: 'רגל העמידה נעוצה ליד הכדור', en: 'Support foot planted by the ball' } },
+  };
+  return { severity: 'error', ...R[kind] };
+}
+const PASS_RE = /pass|מסיר/i;
+/** A pass drill (its words are pass words — never "kick" / "יפה"). */
+export function isPassExercise(profile, name) {
+  return profile?.id === 'shadowPass' || PASS_RE.test(String(profile?.id || '')) || PASS_RE.test(String(name || ''));
+}
+/** A pass is never a "kick" and a correction never "יפה" (owner, 2026-10-21): the words are replaced, not cut. */
+export function passWords(s) {
+  return String(s || '')
+    .replace(/(^|[\s,.!—-])ב?לבעוט(?=$|[\s,.!—-])/g, '$1למסור')
+    .replace(/(^|[\s,.!—-])תבעט(?=$|[\s,.!—-])/g, '$1תמסור')
+    .replace(/(^|[\s,.!—-])בעט(?=$|[\s,.!—-])/g, '$1מסור')
+    .replace(/(^|[\s,.!—-])(ה|ב|ל)?בעיטה(?=$|[\s,.!—-])/g, (m, a, p) => `${a}${p || ''}מסירה`)
+    .replace(/(^|[\s,.!—-])(ה|ב|ל)?בעיטות(?=$|[\s,.!—-])/g, (m, a, p) => `${a}${p || ''}מסירות`)
+    .replace(/(^|\s)יפה(?=$|[\s,.!—-])/g, '$1')
+    .replace(/\s{2,}/g, ' ').replace(/^[\s,—-]+/, '').trim();
+}
+/** A short line kept WHOLE: up to 7 words; longer → its first whole clauses (never a cut mid-clause). */
+export function shortWhole(s, max = 7) {
+  const t = String(s || '').trim();
+  if (t.split(/\s+/).length <= max) return t;
+  const parts = t.split(/(?<=[,.!?;—–])\s+/);
+  let out = '';
+  for (const p of parts) {
+    const next = out ? `${out} ${p}` : p;
+    if (out && next.split(/\s+/).length > max) break;
+    out = next;
+  }
+  return out.replace(/[,—–;]\s*$/, '').trim();
+}          // a major finding this sure is said at its first sighting
 // what a prosthetic foot cannot do — never demanded (owner, 2026-10-21)
 export const PROSTHESIS_IMPOSSIBLE = /קרסול|אצבעות|פוינט|פלקס|ankle|toe|point|flex/i;
 export const VISION_MINOR_CONFIDENCE = 0.6;
@@ -267,6 +316,7 @@ export function useExpertExecution({
     // the device's own verdict of a counted rep → the fix-praise / clean-praise flow (vision verdicts add theirs)
     let deviceRepVerdict = () => {};
     let lastCountAt = -1e9; const strikeTimes = []; let floodUntil = -1e9;
+    let uncountedAttempts = 0; let lastAttemptCueAt = -1e9;
     let lastCountSide = null; let settledSinceCount = true;
     // the EYES: one frame at the contact of a counted pass → the vision model's verdict (contact surface,
     // ankle lock, …) → the set log, the accuracy and a live cue (confident findings only)
@@ -285,13 +335,16 @@ export function useExpertExecution({
     // a correction that was SAID and then fixed → an immediate "that was better than before!" (the strongest drive);
     // and every 2 clean reps (a minor finding never resets it, a real error does) a genuine praise, ≥ 15 s apart
     // IN THE SET every line is short and live (owner, 2026-10-21): a correction without the name, at most 6 words
+    // (free wording by the AI, but SHORT and WHOLE: a long line keeps its first whole clauses — never a cut word)
     const liveText = (t, { keepName = false } = {}) => {
       let s = String(t || '').trim();
       const nm = String(nameRef.current || '').trim();
       if (!keepName && nm && s.startsWith(nm)) s = s.slice(nm.length).replace(/^[\s,،:—-]+/, '');
-      return s.split(/\s+/).slice(0, 6).join(' ');
+      if (isPassDrill) s = passWords(s);
+      return shortWhole(s);
     };
     let lastCorrectionAt = -1e9;                    // no praise within 10 s of a correction
+    const isPassDrill = isPassExercise(profile, exerciseName);
     // a correction is an instruction FOR THE NEXT PASS: still true while at most ONE newer pass was done and
     // ≤ 8 s passed; older than that it is about the past → dropped (field video 2026-10-21 b: the eyes' cue
     // always arrives during the next pass — dropping it at once left the set with no correction at all)
@@ -304,27 +357,33 @@ export function useExpertExecution({
     const praiseNow = (what, kind) => {
       const t = performance.now();
       if (t - lastPraiseAt < (kind === 'fix' ? 6000 : 15000) || !countingRef.current) return false;
-      if (t - lastCorrectionAt < PRAISE_AFTER_CORRECTION_MS) return false;
+      if (t - lastCorrectionAt < PRAISE_AFTER_CORRECTION_MS || cueInFlight) return false;
       lastPraiseAt = t; cleanStreak = 0;
       sayLine('praise', what, 1.1, isHeRef.current);
       return true;
     };
-    // a counted rep's verdict: errorIds = the errors in it (device rules / vision codes); judged = it was looked at
-    const afterRep = (errorIds, { judged = true, majorOrDevice = false } = {}) => {
-      if (!judged || restOnly) return;
+    // THE PRAISE NEEDS BOTH VERDICTS (owner, 2026-10-21): a rep is CLEAN only when the device found no error in it
+    // AND the eyes looked at it and found no major one. An error from either resets; a rep the eyes did not see
+    // neither counts nor resets. A praise is said only about the last pass or the one before it.
+    const errorSeen = (ids) => {
+      cleanStreak = 0;
+      for (const id of ids) if (pendingFix[id]) pendingFix[id].clean = 0;
+    };
+    const judgeClean = (rec, repNo) => {
+      if (!rec || rec.decided || !rec.devDone || rec.visClean === undefined || restOnly) return;
+      rec.decided = true;
+      if (!(rec.visClean === true && !(rec.devErr || []).length)) return;
+      cleanStreak += 1;
+      const fresh = repCountRef.current - repNo <= 1;
       for (const [id, f] of Object.entries(pendingFix)) {
-        if (id.startsWith('vis_')) continue;          // a vision correction is judged fixed only by the eyes
-        if (errorIds.includes(id)) { f.clean = 0; continue; }
         f.clean += 1;
         if (f.clean >= 2) {
           delete pendingFix[id];
           const he0 = isHeRef.current;
-          if (praiseNow(he0 ? `תיקן: ${f.label} — זה היה טוב יותר מקודם` : `Fixed: ${f.label} — better than before`, 'fix')) return;
+          if (fresh && praiseNow(he0 ? `תיקן: ${f.label} — זה היה טוב יותר מקודם` : `Fixed: ${f.label} — better than before`, 'fix')) return;
         }
       }
-      if (majorOrDevice) { cleanStreak = 0; return; }
-      if (errorIds.length === 0) cleanStreak += 1;
-      if (cleanStreak >= 2) praiseNow(lastGood || (isHeRef.current ? 'הביצוע נקי ומדויק — ככה ממשיכים' : 'Clean and precise — keep it up'), 'clean');
+      if (cleanStreak >= 2 && fresh) praiseNow(lastGood || (isHeRef.current ? 'הביצוע נקי ומדויק — ככה ממשיכים' : 'Clean and precise — keep it up'), 'clean');
     };
     const lookAtRep = async (repIdx, side) => {
       const now0 = performance.now();
@@ -348,7 +407,7 @@ export function useExpertExecution({
       // + the SPORT's own emphasis + today's goal — the coach knows the sport and the day
       const kp = (keyPointsRef.current || []).filter(x => !kickProsthesis || !PROSTHESIS_IMPOSSIBLE.test(x));
       const emphasis = (profile.sportEmphasis || []).map(e => e?.he || e?.text || '').filter(Boolean).slice(0, 4);
-      aiBodyVision({ frame, legsFrame, isPass, kickingProsthesis: kickProsthesis, lang: he0 ? 'he' : 'en', side: leg,
+      aiBodyVision({ frame, legsFrame, isPass, passDrill: isPassDrill, kickingProsthesis: kickProsthesis, lang: he0 ? 'he' : 'en', side: leg,
         exercise: exerciseName, sport: contextsKey, body: bodyText(limbProfile || {}), keyPoints: [...kp, ...emphasis], goal: sessionGoalRef.current || '',
         name: nameRef.current }).then((v) => {
         visionBusy = false;
@@ -366,24 +425,12 @@ export function useExpertExecution({
         const anyBad = hits.some(h => h.violated) || majors.length > 0;
         // (the accuracy: a major / a pass-rule error lowers it; a minor finding goes to the rest's list only)
         if (rec && judged) { rec.judged = true; rec.error = rec.error || anyBad; refreshAccuracy(); }
+        // the eyes' verdict of this rep: clean (looked, no major / pass error), not clean, or not seen (null)
+        if (rec) { rec.visClean = judged ? !anyBad : null; if (anyBad) errorSeen(found.map(f => `vis_${f.code}`).concat(hits.filter(h => h.violated).map(h => h.rule.id))); judgeClean(rec, repIdx + 1); }
         console.info(`[Vision] rep #${repIdx + 1}${prosthetic ? ' (prosthesis kicks)' : ''}: ${found.map(f => `${f.severity}:${f.code}(${f.confidence})`).join(', ') || 'no finding'} | good: ${goods.map(g => g.text).join(' / ') || '-'}`);
         if (restOnly || !countingRef.current || performance.now() < floodUntil) return;
         const passBad = hits.find(h => h.violated);
         if (passBad) { cleanStreak = 0; sayCorrection({ ...passBad.rule, side }, liveCue(passBad.rule, he0), 1.1, he0, null, repIdx + 1); noteCorrected(passBad.rule.id, passBad.rule.msg?.he); return; }
-        // the eyes only ADD errors to the rep (the device already gave its one verdict — no 2nd clean count);
-        // a vision correction is praised as fixed only after the eyes saw 2 reps without it
-        const visErr = found.map(f => `vis_${f.code}`);
-        if (visErr.length) cleanStreak = 0;
-        if (judged) for (const [id, f] of Object.entries(pendingFix)) {
-          if (!id.startsWith('vis_')) continue;
-          if (visErr.includes(id)) { f.clean = 0; continue; }
-          f.clean += 1;
-          if (f.clean >= 2 && repCountRef.current === repIdx + 1) {
-            delete pendingFix[id];
-            praiseNow(he0 ? 'תיקנת — זה טוב יותר מקודם' : 'Fixed — better than before', 'fix');
-            break;
-          }
-        }
         // consecutive appearances (a finding absent from a judged rep starts over)
         // the evidence of a finding: seen in 2 of the last 3 looked reps (one miss between does not erase it)
         for (const f of found) (visSeen[f.code] ||= []).push(repIdx);
@@ -422,10 +469,9 @@ export function useExpertExecution({
         for (const [id, d] of Object.entries(tracker.dynActive || {})) if (d.rule?.severity === 'error' || d.rule?.severity === 'danger') errs.add(id);
         for (const [id, t] of Object.entries(tracker.suspect || {})) if (t >= at - 1500) errs.add(id);
         const list = [...errs];
-        if (list.length) { const rec = repVerdicts[repAt - 1]; if (rec) { rec.judged = true; rec.error = true; refreshAccuracy(); } }
-        // a newer rep already came: its own verdict decides the praise (this one only keeps the bookkeeping)
-        if (repCountRef.current !== repAt) { if (list.length) cleanStreak = 0; return; }
-        afterRep(list, { judged: true, majorOrDevice: list.length > 0 });
+        const rec = repVerdicts[repAt - 1];
+        if (list.length) { errorSeen(list); if (rec) { rec.judged = true; rec.error = true; refreshAccuracy(); } }
+        if (rec) { rec.devErr = list; rec.devDone = true; judgeClean(rec, repAt); }
       }, 900);
     };
     // a HOLD (a plank, a wall sit): the coach looks every few seconds of the hold
@@ -450,6 +496,7 @@ export function useExpertExecution({
         name: nameRef.current, he, rep: repCountRef.current || null, times: tracker.log?.rules?.[rule.id]?.n ?? null, recent: recentCues,
       });
       if (tone) facts.tone = tone;
+      if (isPassDrill) facts.isPass = true;
       if (profile.kind === 'strike' && isProstheticLeg(limbProfile || {}, activeLegRef.current)) facts.kickingProsthesis = true;
       aiCue(facts).then((ai) => {
         cueInFlight = false;
@@ -467,16 +514,19 @@ export function useExpertExecution({
     const sayLine = (mode, localText, rate, he) => {
       if (lineInFlight) return;
       lineInFlight = true;
-      const askedAt = performance.now(); const repAt0 = repCountRef.current;
+      const askedAt = performance.now(); const repAt0 = repCountRef.current; const askedInSet = !!countingRef.current;
       aiLine({
         mode, lang: he ? 'he' : 'en', name: nameRef.current, exercise: exerciseName, sport: contextsKey,
-        body: bodyText(limbProfile || {}), error: { what: localText }, recent: recentLines,
+        body: bodyText(limbProfile || {}), error: { what: localText }, recent: recentLines, isPass: isPassDrill,
       }).then((ai) => {
         lineInFlight = false;
         if (disposed) return;
         // a PRAISE is live: at most 6 words, dropped if a new rep came or a correction was said since it was asked for
         const isPraise = mode === 'praise';
         if (isPraise && (repCountRef.current !== repAt0 || lastCorrectionAt > askedAt)) { console.info('[Coach] stale praise dropped'); return; }
+        // a setup / ready / start / motivation line that arrives after the set began or after a pass: never said
+        // over the work (field video 2026-10-21 c: "I see you, let's start" + "step back" said at pass 2)
+        if (!isPraise && ((countingRef.current && !askedInSet) || repCountRef.current !== repAt0)) { console.info(`[Coach] stale ${mode} line dropped`); return; }
         const text = isPraise ? liveText(ai || localText, { keepName: true }) : (ai || localText);
         recentLines.push(text); if (recentLines.length > 6) recentLines.shift();
         holdSpeech(estimateSpeechMs(text, rate));
@@ -576,12 +626,27 @@ export function useExpertExecution({
                 : now < floodUntil ? `flood — ${strikeTimes.length} kicks in ${FLOOD_MS / 1000} s: wild pace, not counted`
                 : counts ? 'ok'
                 : !P.ok ? (P.reason === 'walk-depth' ? `walking toward/away — shoulders width changed ${Math.round((P.widthChange || 0) * 100)}% (max ${Math.round(KICK_MAX_WIDTH_CHANGE * 100)}%)`
-                  : P.reason === 'walk-across' ? `walking across — pelvis moved ${P.travel} torso (max ${KICK_MAX_TRAVEL})`
+                  : P.reason === 'walk-across' ? `walking across — pelvis moved ${P.travel} torso (max ${P.travelMax ?? KICK_MAX_TRAVEL})`
                   : `support foot not planted — moved ${P.anchor} torso (max ${P.anchorMax ?? KICK_ANCHOR_MAX}), kicking foot path ${P.kick}`)
                 : !S.ok ? `swing too small — range ${S.range}° (min ${STRIKE_MIN_RANGE}), speed ${S.peakVel}°/s (min ${STRIKE_MIN_VEL}), path ${S.path} (min ${STRIKE_MIN_PATH})`
                 : why.since < 450 ? `too soon after the last count (${why.since} ms)`
                 : r.quality?.confident === false ? 'tracking unsure' : 'unknown';
               console.info(`[Kick] ${counts ? 'COUNTED' : 'REJECTED'} | side=${P.side || ev.side} | ${reason} | swing ${S.range}° ${S.peakVel}°/s path ${S.path} | width ${P.widthChange ?? '-'} travel ${P.travel ?? '-'}`);
+              // a REAL attempt that did not count (not the same pass again, not a twitch) — the coach reacts to it
+              const sameOrWild = reason.startsWith('locked') || reason.startsWith('flood') || reason.startsWith('too soon');
+              if (!counts && !sameOrWild && countsReps && !restOnly && r.quality?.confident !== false
+                && S.range >= ATTEMPT_MIN_RANGE && S.path >= ATTEMPT_MIN_PATH) {
+                const devRule = (r.issues || []).find(i => i.severity === 'error' || i.severity === 'danger');
+                const rule = devRule || uncountedPassRule(!S.ok ? 'small' : P.reason === 'walk-across' ? 'moved' : 'support', isPassDrill);
+                uncountedAttempts += 1;
+                if (now - lastAttemptCueAt >= ATTEMPT_CUE_GAP_MS && performance.now() - lastCorrectionAt >= 4000 && !cueInFlight) {
+                  lastAttemptCueAt = now;
+                  console.info(`[Coach] uncounted pass → ${rule.id}`);
+                  sayCorrection({ ...rule, side: P.side || ev.side || null }, liveCue(rule, isHeRef.current), 1.1, isHeRef.current);
+                }
+                const note = isHeRef.current ? `${uncountedAttempts} מסירות לא נספרו (${rule.msg?.he || ''})` : `${uncountedAttempts} passes did not count (${rule.msg?.en || ''})`;
+                const n = restNotesRef.current; const k = n.findIndex(x => /לא נספרו|did not count/.test(x)); if (k >= 0) n[k] = note; else n.push(note);
+              }
             }
             // a kick / pass: a real strike, IN PLACE, by ONE leg (walking is never a pass)
             if (lastCountAt > 0 && !settledSinceCount && footSettled(feetHist, lastCountSide, lastCountAt, now)) settledSinceCount = true;
@@ -706,6 +771,8 @@ export function useExpertExecution({
             // REST's analysis weaves them in; a rest-only drill gets no live correction at all
             if (say && (say.kind === 'intent' || say.kind === 'mental' || restOnly)) {
               if (say.kind === 'intent' || say.kind === 'mental') { const n = restNotesRef.current; n.push(say.text); if (n.length > 4) n.shift(); }
+            } else if (say && countingRef.current && !(say.rule && (say.kind === 'correction' || say.kind === 'forecast'))) {
+              // (a running set: the coach is QUIET — only a sharp correction tied to the pass; the rest's analysis says the rest)
             } else if (say) {
               lastVoice = now;
               if (say.kind === 'correction') statsRef.current.coached.push(coach?.id || say.kind);

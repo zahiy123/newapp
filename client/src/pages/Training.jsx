@@ -1052,8 +1052,23 @@ export default function Training() {
 
   // Split balance sets: each set starts on the base leg; at half of the set's work the coach calls
   // the switch (clear voice), the Ghost changes legs and the chip shows the second half
+  // THE SET STARTS (owner, 2026-10-21): every explanation still playing / waiting is cut, and the coach says ONE
+  // short opening line (the set's leg + "בוא נתחיל") — then quiet, only sharp corrections tied to the passes
   useEffect(() => {
-    if (phase !== PHASE.EXERCISING || !currentExercise?.sideSwitch) return undefined;
+    if (phase !== PHASE.EXERCISING || !expertCoachesRef.current) return undefined;
+    stopSpeech();
+    const perSet = currentExercise?.sideSwitch && currentExercise.splitBy === 'set';
+    const leg = currentExercise?.sideSwitch
+      ? String(perSet ? legSetStartText(limbProfile, isHe, currentExercise.splitMode, currentSet) : splitStartText(limbProfile, isHe, currentExercise.splitMode)).replace(/[.!]\s*$/, '')
+      : '';
+    const text = isHe ? (leg ? `${leg} — בוא נתחיל.` : 'בוא נתחיל.') : (leg ? `${leg} — let's start.` : "Let's start.");
+    if (perSet) setSplitHalf(setLegHalf(currentSet));
+    const tm = setTimeout(() => speakPriority(text, { rate: 1.15 }), 200);
+    return () => clearTimeout(tm);
+  }, [phase, currentSet, currentIdx]);
+
+  useEffect(() => {
+    if (phase !== PHASE.EXERCISING || !currentExercise?.sideSwitch || expertCoachesRef.current) return undefined;
     // Kicks / passes: a full set per leg — odd sets the base leg, even sets the other leg
     const perSet = currentExercise.splitBy === 'set';
     setSplitHalf(perSet ? setLegHalf(currentSet) : 1);
@@ -1193,7 +1208,8 @@ export default function Training() {
       lastActivityRef.current = Date.now();
       exerciseStartTimeRef.current = Date.now();
       lastNudgeTimeRef.current = 0;
-      const line = isHe ? 'יפה, התחלת! אני סופר איתך.' : "Nice, you've started! I'm counting with you.";
+      const line = isHe ? 'התחלת! אני סופר איתך.' : "You've started! I'm counting with you.";
+      if (expertCoachesRef.current) { if (early > 0) { setDisplayReps(early); spokenCountRef.current.n = early; } return; }   // (the set-start line says it)
       if (early > 0) {
         setDisplayReps(early);
         spokenCountRef.current.n = early;
@@ -2745,6 +2761,7 @@ export default function Training() {
     return cache.get(exercise.name);
   }
   // keep the AI coach's server WARM (a sleeping server answers its first call seconds late): a ping at each exercise
+  useEffect(() => { fetch(apiUrl('/api/health')).catch(() => {}); fetch(apiUrl('/api/coach/warm')).catch(() => {}); }, []);
   useEffect(() => { if (currentExercise) fetch(apiUrl('/api/health')).catch(() => {}); }, [currentExercise?.name]);
 
   // prepare the briefing of this exercise and the next one in the background (it plays at once)

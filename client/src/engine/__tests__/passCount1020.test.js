@@ -223,3 +223,24 @@ describe('field video 2026-10-21 (b): a strong pass + the set leg', () => {
     expect(inPlaceCheck(r2.ev).side).toBe('right');
   });
 });
+
+describe('owner 2026-10-21 (c): pass words, whole short lines, a fast pass may move the pelvis more', () => {
+  it('a pass is never a "kick" / "יפה"; a long line keeps whole clauses', async () => {
+    const { passWords, shortWhole, isPassExercise, uncountedPassRule } = await import('../../hooks/training/useExpertExecution');
+    expect(passWords('בעט בתנועה קצרה וקטנה יותר')).toBe('מסור בתנועה קצרה וקטנה יותר');
+    expect(passWords('פתח יפה את כף הרגל ופגע')).toBe('פתח את כף הרגל ופגע');
+    expect(passWords('הבעיטה הייתה חזקה')).toBe('המסירה הייתה חזקה');
+    expect(shortWhole('סובב כף רגל ימין החוצה, מגע עם פנים כף הרגל במרכז הכדור')).toBe('סובב כף רגל ימין החוצה');
+    expect(shortWhole('תנופה מלאה מהירך, דרך הכדור')).toBe('תנופה מלאה מהירך, דרך הכדור');
+    expect(isPassExercise({ id: 'shadowPass' }, '')).toBe(true);
+    expect(isPassExercise({ id: 'squat' }, 'סקוואט')).toBe(false);
+    expect(uncountedPassRule('small').cue.he).toBe('תנופה מלאה מהירך, דרך הכדור');
+  });
+  it('a FAST pass may move the pelvis up to 0.45 torso', () => {
+    const frames = () => [-10, -22, -12, 8, 25].map((d, i) => legBody(d, { dx: i * 0.022 }));
+    const fast = inPlaceCheck(run(frames(), 30).ev);
+    expect(fast.travelMax).toBe(0.45);
+    expect(fast.reason).not.toBe('walk-across');
+    expect(inPlaceCheck(run(frames(), 100).ev).reason).toBe('walk-across');
+  });
+});

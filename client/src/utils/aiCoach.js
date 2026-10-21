@@ -20,11 +20,13 @@ function setAiStatus(s) {
   for (const fn of listeners) { try { fn(s); } catch { /* a listener's error never breaks the call */ } }
 }
 
-async function post(path, body, timeoutMs) {
+async function post(path, body, timeoutMs, { background = false } = {}) {
   try {
     const res = await fetchWithTimeout(apiUrl(path), { method: 'POST', body: JSON.stringify(body) }, timeoutMs);
     if (!res.ok) { if (++failsInRow >= 2) setAiStatus('unreachable'); return null; }
     const j = await res.json();
+    // a SLOW background call (the briefing, prepared ahead) is not an outage: only a real failure shows the banner
+    if (j?.aiError && background && (j.aiError === 'timeout' || j.aiError === 'overloaded')) { console.warn(`[AI] ${path}: ${j.aiError} (background — the written text is used)`); return j; }
     if (j?.aiError) setAiStatus(j.aiError);
     else { failsInRow = 0; const got = Object.values(j || {}).some(v => v); if (got || aiStatus === 'unreachable') setAiStatus('ok'); }
     return j;
@@ -48,7 +50,7 @@ export async function aiDebrief(facts) {
   return d && typeof d.speech === 'string' && d.speech.length > 20 ? d : null;
 }
 
-export const BRIEFING_DEADLINE_MS = 9500;
+export const BRIEFING_DEADLINE_MS = 20000;   // prepared ahead in the background (the speech waits at most 4.5 s)
 export const VISION_DEADLINE_MS = 6000;
 
 /** The whole-body eyes: { findings:[{code,severity,confidence,cue,what,why,how}], good:[{text,confidence}], contact?, ankleLocked? } or null. */
@@ -70,7 +72,7 @@ export async function aiLine(facts) {
 
 /** The exercise briefing worded by the AI for this exercise and trainee, or null. */
 export async function aiBriefing(facts) {
-  const j = await post('/api/coach/briefing', facts, BRIEFING_DEADLINE_MS);
+  const j = await post('/api/coach/briefing', facts, BRIEFING_DEADLINE_MS, { background: true });
   const b = typeof j?.briefing === 'string' ? j.briefing.trim() : '';
   return b.length > 40 ? b : null;
 }

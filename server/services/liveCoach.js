@@ -111,7 +111,7 @@ export function buildCuePrompt(f) {
   const moment = MOMENTS[f.mode];
   if (moment) {
     const system = `${COACH_PERSONA(he)}
-${moment} ${f.name ? `You may use the name ${clip(f.name, 20)} (not every time).` : ''}
+${isPassFacts(f) ? PASS_RULE + '\n' : ''}${moment} ${f.name ? `You may use the name ${clip(f.name, 20)} (not every time).` : ''}
 Do not repeat or paraphrase closely any of the recent lines listed. Output ONLY the spoken sentence.`;
     const user = JSON.stringify({
       exercise: clip(f.exercise, 80), sport: clip(f.sport, 40), body: clip(f.body, 120),
@@ -120,7 +120,7 @@ Do not repeat or paraphrase closely any of the recent lines listed. Output ONLY 
     return { system, user };
   }
   const system = `${COACH_PERSONA(he)}
-NOW: the trainee is IN THE MIDDLE OF A SET. Give ONE immediate correction, like a shout from the sideline: warm, sharp, specific to THIS error and THIS rep — 3 to 6 words, one sentence, NO name (it must be SAID in under 2 seconds, the next pass is coming; the deep why / how is said in the rest). It must tell them what to do on the very next rep — exactly the instruction of "what" / "how", nothing else.
+${isPassFacts(f) ? PASS_RULE + '\n' : ''}NOW: the trainee is IN THE MIDDLE OF A SET. Give ONE immediate correction, like a shout from the sideline: warm, sharp, specific to THIS error and THIS rep — 3 to 6 words, ONE COMPLETE short sentence, NO name (it must be SAID in under 2 seconds, the next pass is coming; the deep why / how is said in the rest). It must tell them what to do on the very next rep — exactly the instruction of "what" / "how", nothing else.
 ${f.tone === 'calm' ? 'The trainee is tired / frustrated right now: say it calmly and supportively, one simple thing.' : ''}
 Do not repeat or paraphrase closely any of the recent cues listed. Output ONLY the spoken sentence.`;
   const user = JSON.stringify({
@@ -205,6 +205,20 @@ export function aiErrorKind(err) {
 
 const isModelError = (err) => /model|not_found|404|not supported/i.test(String(err?.message || err));
 
+// A PASS is never a "kick", and a correction never "יפה" (owner, 2026-10-21)
+const PASS_RE = /pass|מסיר/i;
+export const isPassFacts = (f) => !!f?.isPass || !!f?.passDrill || PASS_RE.test(String(f?.exercise || ''));
+const BANNED_PASS = /(^|[\s,.!—-])(ב?לבעוט|תבעט|בעט|בועט|(ה|ב|ל)?בעיט(ה|ות)|יפה|kick(s|ing)?)(?=$|[\s,.!—-])/i;
+export const passWordsOk = (text, f) => !isPassFacts(f) || !BANNED_PASS.test(String(text || ''));
+export function passWordsFix(s) {
+  return String(s || '')
+    .replace(/(^|[\s,.!—-])ב?לבעוט(?=$|[\s,.!—-])/g, '$1למסור').replace(/(^|[\s,.!—-])תבעט(?=$|[\s,.!—-])/g, '$1תמסור')
+    .replace(/(^|[\s,.!—-])בעט(?=$|[\s,.!—-])/g, '$1מסור').replace(/(^|[\s,.!—-])(ה|ב|ל)?בעיטה(?=$|[\s,.!—-])/g, (m, a, p) => `${a}${p || ''}מסירה`)
+    .replace(/(^|[\s,.!—-])(ה|ב|ל)?בעיטות(?=$|[\s,.!—-])/g, (m, a, p) => `${a}${p || ''}מסירות`)
+    .replace(/(^|\s)יפה(?=$|[\s,.!—-])/g, '$1').replace(/\s{2,}/g, ' ').trim();
+}
+const PASS_RULE = 'This is a PASS drill: never use the words בעט / תבעט / לבעוט / בעיטה (kick) or יפה — say מסירה / מסור and professional passing terms.';
+
 export async function generateCue(facts, { timeoutMs = 3500, askFn = ask } = {}) {
   // garbled / empty facts → the AI would guess: never (the device says its own measured line)
   if (!readable(facts?.error?.what)) return null;
@@ -214,6 +228,7 @@ export async function generateCue(facts, { timeoutMs = 3500, askFn = ask } = {})
     try { raw = await askFn(model, prompt, 200, timeoutMs, 'low'); } catch (err) { if (isModelError(err)) continue; throw err; }
     const text = String(raw || '').replace(/["“”«»]/g, '').replace(/\s+/g, ' ').trim();
     if (!text || /^SKIP/i.test(text) || text.length > MAX_CUE_CHARS || !numbersGrounded(text, facts) || !directionsKept(text, facts)) return null;
+    if (!passWordsOk(text, facts)) return null;                                  // a pass is never a "kick" / "יפה"
     if ((facts.recent || []).some(r => r && r.trim() === text)) return null;   // never the same words twice
     return text;
   }
@@ -221,7 +236,7 @@ export async function generateCue(facts, { timeoutMs = 3500, askFn = ask } = {})
 }
 
 /** The spoken briefing of an exercise, or null (the device then says the written explanation). */
-export async function generateBriefing(facts, { timeoutMs = 9000, askFn = ask } = {}) {
+export async function generateBriefing(facts, { timeoutMs = 18000, askFn = ask } = {}) {
   const steps = facts?.steps || [];
   if (!readable(facts?.exercise) || !steps.length || steps.some(x => !readable(x))) return null;
   const prompt = buildBriefingPrompt(facts);
@@ -279,7 +294,7 @@ export function buildBodyVisionPrompt(f) {
 ${(f.keyPoints || []).length ? `The exercise's correct technique: ${(f.keyPoints || []).slice(0, 6).map(x => clip(x, 120)).join(' | ')}.` : ''}
 ${f.legsImage ? 'A second image is a close-up of the legs and feet of the same moment.' : ''}${f.isPass ? ` It is a SHADOW inside-foot pass (no real ball); the kicking leg is the ${f.side === 'left' ? 'LEFT' : f.side === 'right' ? 'RIGHT' : 'moving'} (anatomical) leg.` : ''}
 ${f.kickingProsthesis ? `The KICKING leg is the trainee's PROSTHESIS (the ${f.side === 'left' ? 'LEFT' : f.side === 'right' ? 'RIGHT' : ''} leg): its ankle is fixed — NEVER judge or mention the ankle lock, the toes or which surface of the foot meets the ball. Judge the prosthesis kick by its real technique: the swing driven from the HIP (not the knee), the leg turned out from the hip, the weight anchored on the sound support leg, the chest over the ball, the arms for balance.
-` : ''}${f.isPass || f.kickingProsthesis ? 'This is a PASS: if it was executed like a POWER KICK (a big back-swing, a knee snap, the leg swinging high / hard) report it as a MAJOR finding "pass_like_kick" — a pass is short, controlled, from the hip.\n' : ''}${f.goal ? `Today's training goal: ${clip(f.goal, 80)}.\n` : ''}Never praise what was technically wrong.
+` : ''}${f.isPass || f.kickingProsthesis ? 'This is a PASS: if it was executed like a POWER KICK (a big back-swing, a knee snap, the leg swinging high / hard) report it as a MAJOR finding "pass_like_kick" — a pass is short, controlled, from the hip.\n' : ''}${isPassFacts(f) ? PASS_RULE + '\n' : ''}${f.goal ? `Today's training goal: ${clip(f.goal, 80)}.\n` : ''}Never praise what was technically wrong.
 Look at the WHOLE body: posture and trunk, head and gaze, arms and hands (e.g. hands in the pockets, arms locked, no balance arms), hips and pelvis, knees, feet and support, balance — anything that prevents a correct, safe execution of THIS exercise.
 Report ONLY what is clearly visible. Return ONLY JSON:
 {"findings":[{"code":"short_snake_case","severity":"major|minor","confidence":0.0,"cue":"<${he ? 'Hebrew' : 'English'}, 3-6 words, an instruction for the next rep>","what":"<${he ? 'Hebrew' : 'English'}, at most 10 words: what you saw>"}],
@@ -314,8 +329,10 @@ export async function generateBodyVision(f, { timeoutMs = 9000, askFn = null } =
         code: String(x?.code || '').toLowerCase().replace(/[^a-z0-9_]/g, '').slice(0, 40),
         severity: x?.severity === 'major' ? 'major' : 'minor', confidence: conf(x?.confidence),
         cue: txt(x?.cue, 80), what: txt(x?.what, 200), why: txt(x?.why, 220), how: txt(x?.how, 220),
-      })).filter(x => x.code && okText(x.cue) && okText(x.what));
-      const good = (Array.isArray(j.good) ? j.good : []).slice(0, 2).map(x => ({ text: txt(x?.text, 80), confidence: conf(x?.confidence) })).filter(x => okText(x.text));
+      })).filter(x => x.code && okText(x.cue) && okText(x.what))
+        .map(x => (isPassFacts(f) ? { ...x, cue: passWordsFix(x.cue), what: passWordsFix(x.what), how: passWordsFix(x.how) } : x));
+      const good = (Array.isArray(j.good) ? j.good : []).slice(0, 2).map(x => ({ text: txt(x?.text, 80), confidence: conf(x?.confidence) }))
+        .map(x => (isPassFacts(f) ? { ...x, text: passWordsFix(x.text) } : x)).filter(x => okText(x.text));
       const item = (o, vals) => (o && vals.includes(o.value) && typeof o.confidence === 'number' ? { value: o.value, confidence: conf(o.confidence) } : null);
       return { findings, good, contact: item(j.contact, ['inside', 'laces', 'toe', 'unclear']), ankleLocked: item(j.ankleLocked, [true, false, null]) };
     } catch (err) {
