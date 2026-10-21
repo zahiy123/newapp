@@ -156,7 +156,15 @@ export const KICK_MAX_WIDTH_CHANGE = 0.18;
 export const KICK_ANCHOR_MAX = 0.3;
 // a FAST, strong pass (>= 350 deg/s) moves the whole body a little - the support foot may shift up to this (owner, 2026-10-21)
 export const KICK_ANCHOR_MAX_FAST = 0.5;
-export const KICK_FAST_SWING_DEG_S = 350;         // the support foot moves ≤ this many torso lengths (planted)  // the shoulders' width in the picture changes ≤ this share (no walking in depth)
+export const KICK_FAST_SWING_DEG_S = 350;
+export const KICK_MID_SWING_DEG_S = 250;
+export const KICK_ANCHOR_MAX_MID = 0.45;
+// a SLOW move (< 150 °/s) of the leg that is NOT the set's leg is a step / a stance adjustment — never a pass
+export const SLOW_OTHER_LEG_DEG_S = 150;
+export function slowOtherLeg(why, setLeg) {
+  const side = why?.place?.side;
+  return !!setLeg && !!side && side !== setLeg && (why?.swing?.peakVel || 0) < SLOW_OTHER_LEG_DEG_S;
+}         // the support foot moves ≤ this many torso lengths (planted)  // the shoulders' width in the picture changes ≤ this share (no walking in depth)
 // A KICK / PASS is proven by ITS OWN swing, judged in the kick's short window AT the contact (field video
 // 2026-10-20: a controlled inside-foot pass is a pendulum from the hip with an almost straight knee — "the
 // leg came back over 8 s of history" failed on every pass, 0 counts while the passes were seen)
@@ -210,8 +218,9 @@ export function inPlaceCheck(ev) {
   out.kick = torso ? Math.round((footPath(kickJ) / torso) * 100) / 100 : null;
   out.side = kickJ === 6 ? 'left' : 'right';             // the kicking leg = the foot that travelled (never a jumping label)
   out.anchor = anchor !== null && torso ? Math.round((anchor / torso) * 100) / 100 : null;
-  const fast = strikeSwing(ev).peakVel >= KICK_FAST_SWING_DEG_S;
-  out.anchorMax = fast ? KICK_ANCHOR_MAX_FAST : KICK_ANCHOR_MAX;
+  // the support foot may shift more in a faster pass: < 250 °/s 0.3 · 250–350 °/s 0.45 · ≥ 350 °/s 0.5 (owner, 2026-10-21)
+  const pv = strikeSwing(ev).peakVel;
+  out.anchorMax = pv >= KICK_FAST_SWING_DEG_S ? KICK_ANCHOR_MAX_FAST : pv >= KICK_MID_SWING_DEG_S ? KICK_ANCHOR_MAX_MID : KICK_ANCHOR_MAX;
   if (anchor !== null && torso && anchor > out.anchorMax * torso) return { ...out, reason: 'both-legs' };
   return { ...out, ok: true };
 }

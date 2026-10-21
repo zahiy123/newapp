@@ -417,6 +417,12 @@ export function useSpeech(lang = 'he-IL', age) {
     // a CORRECTION drops a WAITING praise (the technique comes first) — a praise already playing ends first:
     // two lines never cut / run over each other (owner, 2026-10-21)
     if (options.preempt) queueRef.current = queueRef.current.filter(q => q.options?.kind !== 'praise');
+    // only the LATEST correction waits (owner, 2026-10-21): an older correction still waiting is dropped — never a pile
+    if (options.kind === 'correction') {
+      const before = queueRef.current.length;
+      queueRef.current = queueRef.current.filter(q => q.options?.kind !== 'correction' || (q.options?.__sid != null && q.options.__sid === currentSidRef.current));
+      if (queueRef.current.length < before) console.log('[Speech] older waiting correction dropped (a newer one came)');
+    }
     if (!speaking.current && queueRef.current.length && queueRef.current[0].options?.__sid != null && queueRef.current[0].options.__sid === currentSidRef.current) {
       // between the chunks of a sentence (the briefing!): its rest is NEVER cleared — wait after it
       const sid = currentSidRef.current;

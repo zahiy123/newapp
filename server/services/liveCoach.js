@@ -123,9 +123,10 @@ Do not repeat or paraphrase closely any of the recent lines listed. Output ONLY 
   const system = `${COACH_PERSONA(he)}
 ${isPassFacts(f) ? PASS_RULE + '\n' : ''}NOW: the trainee is IN THE MIDDLE OF A SET. Give ONE immediate correction, like a shout from the sideline: warm, sharp, specific to THIS error and THIS rep — 3 to 6 words, ONE COMPLETE short sentence, NO name (it must be SAID in under 2 seconds, the next pass is coming; the deep why / how is said in the rest). It must tell them what to do on the very next rep — exactly the instruction of "what" / "how", nothing else.
 ${f.tone === 'calm' ? 'The trainee is tired / frustrated right now: say it calmly and supportively, one simple thing.' : ''}
-Do not repeat or paraphrase closely any of the recent cues listed. Output ONLY the spoken sentence.`;
+Do not repeat or paraphrase closely any of the recent cues listed.${(f.previousForThisError || []).length ? ' This SAME error is repeating — "previousForThisError" lists what you already told; give the same fix from a DIFFERENT angle (another body part of the chain, an external focus, a feel / image), never the same words or the same structure.' : ''} Output ONLY the spoken sentence.`;
   const user = JSON.stringify({
     exercise: clip(f.exercise, 80), sport: clip(f.sport, 40), body: clip(f.body, 120),
+    previousForThisError: (f.previousForThisError || []).slice(-3).map(x => clip(x, 90)),
     side: f.side === 'left' || f.side === 'right' ? f.side : null,
     kickingProsthesis: !!f.kickingProsthesis,
     rep: f.rep ?? null, error: {
@@ -231,10 +232,22 @@ export async function generateCue(facts, { timeoutMs = 1800, askFn = ask } = {})
     if (!text || /^SKIP/i.test(text) || text.length > MAX_CUE_CHARS || !numbersGrounded(text, facts) || !directionsKept(text, facts)) return null;
     if (!passWordsOk(text, facts)) return null;                                  // a pass is never a "kick" / "יפה"
     if ((facts.recent || []).some(r => r && r.trim() === text)) return null;   // never the same words twice
-    return text;
+    if (wordCount(text) <= MAX_CUE_WORDS || facts.mode) return text;
+    // too long (owner, 2026-10-21): the SAME instruction asked again, at most 6 words, whole (never a cut sentence)
+    let short = null;
+    try {
+      const again = { system: `${prompt.system}\nYour answer "${clip(text, 120)}" was too long. Say the SAME instruction in at most ${MAX_CUE_WORDS} words — one complete sentence. Output ONLY it.`, user: prompt.user };
+      short = String(await askFn(model, again, 60, 1200, 'low') || '').replace(/["“”«»]/g, '').replace(/\s+/g, ' ').trim();
+    } catch { short = null; }
+    if (short && wordCount(short) <= MAX_CUE_WORDS && !/^SKIP/i.test(short) && numbersGrounded(short, facts) && directionsKept(short, facts) && passWordsOk(short, facts)) return short;
+    // (still long: its first whole clause when that alone is a full short instruction; else the device's line)
+    const first = text.split(/[,—–;.!]/)[0].trim();
+    return wordCount(first) >= 3 && wordCount(first) <= MAX_CUE_WORDS ? first : null;
   }
   return null;
 }
+export const MAX_CUE_WORDS = 6;
+const wordCount = (t) => String(t || '').trim().split(/\s+/).filter(Boolean).length;
 
 /** The spoken briefing of an exercise, or null (the device then says the written explanation). */
 export async function generateBriefing(facts, { timeoutMs = 18000, askFn = ask } = {}) {
@@ -256,7 +269,7 @@ export async function generateBriefing(facts, { timeoutMs = 18000, askFn = ask }
 
 // ---- THE EYES: one frame at the contact of a SHADOW pass (a virtual ball — judge the kicking foot itself) ----
 // the eyes by Haiku 4.5 first (owner, 2026-10-21 — measured: Haiku 3.1–3.4 s, Sonnet 5 2.6–3.5 s on one image)
-export const VISION_MODELS = ['claude-haiku-4-5-20251001', 'claude-sonnet-5'];
+export const VISION_MODELS = ['claude-sonnet-5', 'claude-haiku-4-5-20251001'];   // (owner, 2026-10-21: Sonnet for the eyes — Haiku's Hebrew / findings erred)
 export function buildPassVisionPrompt(f) {
   const system = `You are an expert football coach and sports physiotherapist judging ONE camera frame taken at the moment of a SHADOW inside-foot PASS (there is no real ball; judge the kicking foot and leg themselves). The kicking leg is the trainee's ${f.side === 'left' ? 'LEFT' : f.side === 'right' ? 'RIGHT' : 'moving'} leg (anatomical side; the image may be mirrored). ${f.body ? `Body: ${clip(f.body, 120)}.` : ''}
 Judge only what is clearly visible. For each item give a value and your confidence 0..1 (below 0.6 when the foot is blurred, cut off or hidden).
@@ -296,7 +309,7 @@ export function buildBodyVisionPrompt(f) {
 ${(f.keyPoints || []).length ? `The exercise's correct technique: ${(f.keyPoints || []).slice(0, 6).map(x => clip(x, 120)).join(' | ')}.` : ''}
 ${f.legsImage ? 'A second image is a close-up of the legs and feet of the same moment.' : ''}${f.composite ? 'The image has TWO panels of the same moment: LEFT = the whole body, RIGHT = a close-up of the legs and feet.' : ''}${f.isPass ? ` It is a SHADOW inside-foot pass (no real ball); the kicking leg is the ${f.side === 'left' ? 'LEFT' : f.side === 'right' ? 'RIGHT' : 'moving'} (anatomical) leg.` : ''}
 ${f.kickingProsthesis ? `The KICKING leg is the trainee's PROSTHESIS (the ${f.side === 'left' ? 'LEFT' : f.side === 'right' ? 'RIGHT' : ''} leg): its ankle is fixed — NEVER judge or mention the ankle lock, the toes or which surface of the foot meets the ball. Judge the prosthesis kick by its real technique: the swing driven from the HIP (not the knee), the leg turned out from the hip, the weight anchored on the sound support leg, the chest over the ball, the arms for balance.
-` : ''}${f.isPass || f.kickingProsthesis ? 'This is a PASS: if it was executed like a POWER KICK (a big back-swing, a knee snap, the leg swinging high / hard) report it as a MAJOR finding "pass_like_kick" — a pass is short, controlled, from the hip.\n' : ''}${isPassFacts(f) ? PASS_RULE + '\n' : ''}${f.goal ? `Today's training goal: ${clip(f.goal, 80)}.\n` : ''}Never praise what was technically wrong.
+` : ''}${f.isPass || f.kickingProsthesis || isPassFacts(f) ? 'The ball is VIRTUAL (drawn on the screen, not in the camera): never report a missing / unseen ball.\n' : ''}${f.isPass || f.kickingProsthesis ? 'This is a PASS: if it was executed like a POWER KICK (a big back-swing, a knee snap, the leg swinging high / hard) report it as a MAJOR finding "pass_like_kick" — a pass is short, controlled, from the hip.\n' : ''}${isPassFacts(f) ? PASS_RULE + '\n' : ''}${f.goal ? `Today's training goal: ${clip(f.goal, 80)}.\n` : ''}Never praise what was technically wrong.
 Look at the WHOLE body, never the kicking leg alone (owner, 2026-10-21): the CHEST (over the ball / leaning back / collapsed), the overall POSTURE and trunk, the PELVIS (square, rotating, dropping, shifting), the SUPPORT leg (knee soft, foot planted, weight on it), the head and gaze, the arms for balance, and the working leg and foot — anything that prevents a correct, safe execution of THIS exercise. Judge the whole chain: a fault in the chest / posture / pelvis that spoils the movement is as important as the leg. Arms simply hanging beside the body are NOT "hands in the pockets" — report that only if the hands are clearly inside the pockets.
 Report ONLY what is clearly visible. Return ONLY JSON:
 {"findings":[{"code":"short_snake_case","severity":"major|minor","confidence":0.0,"cue":"<${he ? 'Hebrew' : 'English'}, 3-6 words, an instruction for the next rep>","what":"<${he ? 'Hebrew' : 'English'}, at most 6 words: what you saw>"}],
@@ -332,6 +345,7 @@ export async function generateBodyVision(f, { timeoutMs = 9000, askFn = null } =
         severity: x?.severity === 'major' ? 'major' : 'minor', confidence: conf(x?.confidence),
         cue: txt(x?.cue, 80), what: txt(x?.what, 200), why: txt(x?.why, 220), how: txt(x?.how, 220),
       })).filter(x => x.code && okText(x.cue) && okText(x.what))
+        .filter(x => !(isPassFacts(f) && /ball/.test(x.code) && /visib|missing|no_ball|not_seen|absent/.test(x.code)))   // (a virtual ball)
         .map(x => (isPassFacts(f) ? { ...x, cue: passWordsFix(x.cue), what: passWordsFix(x.what), how: passWordsFix(x.how) } : x));
       const good = (Array.isArray(j.good) ? j.good : []).slice(0, 2).map(x => ({ text: txt(x?.text, 80), confidence: conf(x?.confidence) }))
         .map(x => (isPassFacts(f) ? { ...x, text: passWordsFix(x.text) } : x)).filter(x => okText(x.text));

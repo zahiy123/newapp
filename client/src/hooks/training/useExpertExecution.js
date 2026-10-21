@@ -124,7 +124,7 @@ import {
 } from '../../engine/training/coachFlow';
 import { createClipRecorder, recordFrame } from '../../engine/validation/clipRecorder';
 import { createRepEvidence, evidenceFrame, evidenceOk, evidenceAccept, evidenceGroupFor, explainStrike,
-  KICK_MAX_WIDTH_CHANGE, KICK_MAX_TRAVEL, KICK_ANCHOR_MAX, STRIKE_MIN_RANGE, STRIKE_MIN_VEL, STRIKE_MIN_PATH } from '../../engine/training/repEvidence';
+  KICK_MAX_WIDTH_CHANGE, KICK_MAX_TRAVEL, KICK_ANCHOR_MAX, STRIKE_MIN_RANGE, STRIKE_MIN_VEL, STRIKE_MIN_PATH, slowOtherLeg, SLOW_OTHER_LEG_DEG_S } from '../../engine/training/repEvidence';
 import { holdSpeech } from '../useSpeech';
 import { ROOM_TIP } from '../../engine/exercise/setupCoach';
 
@@ -516,11 +516,13 @@ export function useExpertExecution({
     // the AI is late / unreachable. One cue at a time; never after the set ended; never the same words twice
     let disposed = false; let cueInFlight = false;
     const recentCues = [];
+    const cueHistory = {};                          // rule id → what was already said about it (this set)
     const cueFactsFor = (rule, he, tone = null) => {
       const facts = cueFacts({
         rule, profile, lp: limbProfile || {}, exercise: exerciseName, sport: contextsKey,
         name: nameRef.current, he, rep: repCountRef.current || null, times: tracker.log?.rules?.[rule.id]?.n ?? null, recent: recentCues,
       });
+      if (rule?.id && (cueHistory[rule.id] || []).length) facts.previousForThisError = cueHistory[rule.id].slice(-3);
       if (tone) facts.tone = tone;
       if (isPassDrill) facts.isPass = true;
       if (profile.kind === 'strike' && isProstheticLeg(limbProfile || {}, activeLegRef.current)) facts.kickingProsthesis = true;
@@ -537,6 +539,7 @@ export function useExpertExecution({
       const live = { rate: r2, kind: 'correction', preempt: true, validIf: () => cueStillTrue(repAt, at) };
       const say = (t, src) => {
         const s = liveText(t);
+        if (rule?.id) { (cueHistory[rule.id] ||= []).push(s); if (cueHistory[rule.id].length > 4) cueHistory[rule.id].shift(); }
         holdSpeech(estimateSpeechMs(s, r2)); speakRef.current?.(s, live);
         recentCues.push(s); if (recentCues.length > 8) recentCues.shift();
         console.info(`[Coach] ${src} cue in ${Math.round(performance.now() - at)} ms: ${rule?.id || '-'}`);
@@ -659,13 +662,15 @@ export function useExpertExecution({
               strikeTimes.push(now); while (strikeTimes.length && now - strikeTimes[0] > FLOOD_MS) strikeTimes.shift();
               if (strikeTimes.length >= FLOOD_N) floodUntil = now + FLOOD_CALM_MS;
               const why = explainStrike(kinetic, now);
-              const counts = countsReps && r.quality?.confident !== false && evidenceOk(kinetic, now, { strike: true, kick: true })
+              const stepNotPass = slowOtherLeg(why, activeLegRef.current);
+              const counts = countsReps && !stepNotPass && r.quality?.confident !== false && evidenceOk(kinetic, now, { strike: true, kick: true })
                 && kickLockOpen({ now, lastCountAt, settledSinceCount, lockMs: COUNT_LOCK_MS, swingVel: explainStrike(kinetic, now).swing.peakVel || 0 }) && now >= floodUntil;
               // the EXACT reason (never a guess): walking toward / away (the shoulders' width), walking across (the
               // pelvis travel), both legs moving, a too-small swing (range / speed / path), too soon, unsure tracking
               const P = why.place, S = why.swing;
               const reason = !kickLockOpen({ now, lastCountAt, settledSinceCount, lockMs: COUNT_LOCK_MS, swingVel: explainStrike(kinetic, now).swing.peakVel || 0 }) ? `locked — ${Math.round(now - lastCountAt)} ms after the last count, the kicking foot not settled yet (one pass = one count)`
                 : now < floodUntil ? `flood — ${strikeTimes.length} kicks in ${FLOOD_MS / 1000} s: wild pace, not counted`
+                : stepNotPass ? `a step, not a pass — the ${why.place.side} leg (not the set's leg) moved slowly ${why.swing.peakVel}°/s (< ${SLOW_OTHER_LEG_DEG_S})`
                 : counts ? 'ok'
                 : !P.ok ? (P.reason === 'walk-depth' ? `walking toward/away — shoulders width changed ${Math.round((P.widthChange || 0) * 100)}% (max ${Math.round(KICK_MAX_WIDTH_CHANGE * 100)}%)`
                   : P.reason === 'walk-across' ? `walking across — pelvis moved ${P.travel} torso (max ${P.travelMax ?? KICK_MAX_TRAVEL})`
@@ -675,7 +680,7 @@ export function useExpertExecution({
                 : r.quality?.confident === false ? 'tracking unsure' : 'unknown';
               console.info(`[Kick] ${counts ? 'COUNTED' : 'REJECTED'} | side=${P.side || ev.side} | ${reason} | swing ${S.range}° ${S.peakVel}°/s path ${S.path} | width ${P.widthChange ?? '-'} travel ${P.travel ?? '-'}`);
               // a REAL attempt that did not count (not the same pass again, not a twitch) — the coach reacts to it
-              const sameOrWild = reason.startsWith('locked') || reason.startsWith('flood') || reason.startsWith('too soon');
+              const sameOrWild = reason.startsWith('locked') || reason.startsWith('flood') || reason.startsWith('too soon') || stepNotPass;
               if (!counts && !sameOrWild && countsReps && !restOnly && r.quality?.confident !== false
                 && S.range >= ATTEMPT_MIN_RANGE && S.path >= ATTEMPT_MIN_PATH) {
                 const devRule = (r.issues || []).find(i => i.severity === 'error' || i.severity === 'danger');
@@ -694,7 +699,7 @@ export function useExpertExecution({
             if (lastCountAt > 0 && !settledSinceCount && footSettled(feetHist, lastCountSide, lastCountAt, now)) settledSinceCount = true;
             const locked = !kickLockOpen({ now, lastCountAt, settledSinceCount, lockMs: COUNT_LOCK_MS, swingVel: explainStrike(kinetic, now).swing.peakVel || 0 });
             const flooding = now < floodUntil;
-            if (countsReps && profile.kind === 'strike' && ev.type === 'strike' && !locked && !flooding && r.quality?.confident !== false && evidenceOk(kinetic, now, { strike: true, kick: true })) {
+            if (countsReps && profile.kind === 'strike' && ev.type === 'strike' && !locked && !flooding && !slowOtherLeg(explainStrike(kinetic, now), activeLegRef.current) && r.quality?.confident !== false && evidenceOk(kinetic, now, { strike: true, kick: true })) {
               const kickSide = explainStrike(kinetic, now).place.side || ev.side;
               evidenceAccept(kinetic, now); repCountRef.current += 1; strikeCountRef.current += 1; earlyRef.current = true;
               lastCountAt = now; lastCountSide = kickSide; settledSinceCount = false;

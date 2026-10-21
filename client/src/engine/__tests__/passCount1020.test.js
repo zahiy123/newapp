@@ -244,3 +244,18 @@ describe('owner 2026-10-21 (c): pass words, whole short lines, a fast pass may m
     expect(inPlaceCheck(run(frames(), 100).ev).reason).toBe('walk-across');
   });
 });
+
+describe('owner 2026-10-21 (e): a step is not a pass; the support foot by the pass speed', () => {
+  it('a slow move (< 150 deg/s) of the leg that is not the set leg is a step', async () => {
+    const { slowOtherLeg } = await import('../training/repEvidence');
+    expect(slowOtherLeg({ place: { side: 'left' }, swing: { peakVel: 121 } }, 'right')).toBe(true);
+    expect(slowOtherLeg({ place: { side: 'left' }, swing: { peakVel: 400 } }, 'right')).toBe(false);
+    expect(slowOtherLeg({ place: { side: 'right' }, swing: { peakVel: 100 } }, 'right')).toBe(false);
+    expect(slowOtherLeg({ place: { side: 'left' }, swing: { peakVel: 100 } }, null)).toBe(false);
+  });
+  it('a mid-speed pass (250–350 deg/s) allows the support foot 0.45', () => {
+    const frames = [0, -10, -22, -12, 8, 25].map((d, i) => { const lm = legBody(d); lm[27] = { x: 0.45 + i * 0.02, y: 0.9, visibility: 0.95 }; return lm; });
+    const c = inPlaceCheck(run(frames, 60).ev);
+    expect([0.45, 0.5]).toContain(c.anchorMax);
+  });
+});

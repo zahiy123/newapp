@@ -26,7 +26,12 @@ test('numbers: only measured ones (and small counting words) pass', () => {
 
 test('a generated cue is used; an invented number / too long / a repeat → null (the device speaks its own)', async () => {
   const say = (t) => async () => t;
-  assert.equal(await generateCue(cueFacts, { askFn: say('זהי, נעל את הקרסול חזק ברגע המגע!') }), 'זהי, נעל את הקרסול חזק ברגע המגע!');
+  assert.equal(await generateCue(cueFacts, { askFn: say('זהי, נעל את הקרסול ברגע המגע!') }), 'זהי, נעל את הקרסול ברגע המגע!');
+  // longer than 6 words → asked again once for the same instruction, short and whole (owner, 2026-10-21)
+  let n = 0;
+  const twice = async () => (++n === 1 ? 'זהי, נעל את הקרסול חזק מאוד ברגע המגע בכדור!' : 'נעל את הקרסול ברגע המגע!');
+  assert.equal(await generateCue(cueFacts, { askFn: twice }), 'נעל את הקרסול ברגע המגע!');
+  assert.equal(n, 2);
   assert.equal(await generateCue(cueFacts, { askFn: say('הקרסול ב-170 מעלות — נעל אותו') }), null);
   assert.equal(await generateCue(cueFacts, { askFn: say('א'.repeat(120)) }), null);
   assert.equal(await generateCue(cueFacts, { askFn: say('נעל את הקרסול — אצבעות למעלה!') }), null);
