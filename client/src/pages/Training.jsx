@@ -430,6 +430,7 @@ export default function Training() {
   // the rep counter ON THE SCREEN, for the ball (every counted rep plays a ball)
   const displayRepsRef = useRef(0);
   const passFrameRef = useRef(null);               // () => a camera frame (base64 JPEG) for the vision model
+  const compositeFrameRef = useRef(null);          // (withLegs) => ONE image: the whole body | the legs close-up
   const bodyFrameRef = useRef(null);               // () => the full raw camera frame (base64 JPEG) for the whole-body eyes
   displayRepsRef.current = displayReps;
   useEffect(() => { if (window.__GHOST_DEBUG) window.__trainingReps = displayReps; }, [displayReps]);
@@ -878,6 +879,7 @@ export default function Training() {
     captureFrameRef: passFrameRef,
     // the WHOLE body for the eyes + the exercise's correct technique (its key points)
     bodyFrameRef,
+    compositeFrameRef,
     keyPoints: exerciseKeyPoints,
     // the leg this set is for (a split set: the kicking leg of this half) — a prosthesis → the prosthesis technique
     activeLeg: activeKickLegRef.current,
@@ -3076,6 +3078,40 @@ export default function Training() {
     c.width = Math.round(v.videoWidth * k); c.height = Math.round(v.videoHeight * k);
     c.getContext('2d').drawImage(v, 0, 0, c.width, c.height);
     try { return c.toDataURL('image/jpeg', 0.7).split(',')[1] || null; } catch { return null; }
+  };
+  // THE EYES' ONE IMAGE (field video 2026-10-21: two images answered in 4–6 s): the whole body on the left and the
+  // legs close-up (full camera resolution) on the right, drawn in the background into one JPEG
+  compositeFrameRef.current = async (withLegs = true) => {
+    const v = videoRef.current, lm = poseLandmarksRef.current;
+    if (!v || !v.videoWidth) return null;
+    try {
+      const W = v.videoWidth, H = v.videoHeight;
+      const k = Math.min(1, 640 / W); const bw = Math.round(W * k), bh = Math.round(H * k);
+      let box = null;
+      const pts = withLegs ? [23, 24, 25, 26, 27, 28, 29, 30, 31, 32].map(i => lm?.[i]).filter(p => p && (p.visibility ?? 0) >= 0.3) : [];
+      if (pts.length >= 4) {
+        let x0 = Math.min(...pts.map(p => p.x)) * W, x1 = Math.max(...pts.map(p => p.x)) * W;
+        let y0 = Math.min(...pts.map(p => p.y)) * H, y1 = Math.max(...pts.map(p => p.y)) * H;
+        const padX = (x1 - x0) * 0.35 + 20, padY = (y1 - y0) * 0.2 + 20;
+        x0 = Math.max(0, x0 - padX); x1 = Math.min(W, x1 + padX); y0 = Math.max(0, y0 - padY); y1 = Math.min(H, y1 + padY);
+        if (x1 - x0 >= 40 && y1 - y0 >= 40) box = { x0, y0, cw: x1 - x0, ch: y1 - y0 };
+      }
+      const lw = box ? Math.min(480, Math.round(box.cw * bh / box.ch)) : 0;
+      const off = typeof OffscreenCanvas !== 'undefined';
+      const c = off ? new OffscreenCanvas(bw + lw, bh) : Object.assign(document.createElement('canvas'), { width: bw + lw, height: bh });
+      const ctx = c.getContext('2d');
+      const src = typeof createImageBitmap === 'function' ? await createImageBitmap(v) : v;
+      ctx.drawImage(src, 0, 0, bw, bh);
+      if (box) ctx.drawImage(src, box.x0, box.y0, box.cw, box.ch, bw, 0, lw, bh);
+      src.close?.();
+      if (off) {
+        const blob = await c.convertToBlob({ type: 'image/jpeg', quality: 0.7 });
+        const buf = new Uint8Array(await blob.arrayBuffer());
+        let bin = ''; for (let i = 0; i < buf.length; i += 0x8000) bin += String.fromCharCode.apply(null, buf.subarray(i, i + 0x8000));
+        return btoa(bin);
+      }
+      return c.toDataURL('image/jpeg', 0.7).split(',')[1] || null;
+    } catch { return null; }
   };
   // the legs and feet close-up (the raw camera at full resolution, cropped around them)
   passFrameRef.current = async () => {

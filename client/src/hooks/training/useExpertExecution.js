@@ -51,7 +51,8 @@ export const restOnlyFeedback = (profile) => !!profile && (profile.kind === 'cyc
 // the vision model's verdict on a pass, mapped to the pass's own rules (confident findings only)
 export const VISION_CONFIDENCE = 0.75;
 export const VISION_SURE = 0.85;
-export const VISION_MINOR_SAY = 0.7;      // a minor finding (posture, arms …) is said in the set when the eyes are this sure
+export const VISION_MINOR_SAY = 0.7;
+export const LIVE_CUE_RATE = 1.2;          // an in-set correction is spoken a little faster (short, sharp)      // a minor finding (posture, arms …) is said in the set when the eyes are this sure
 // a pass that did not count but WAS a real attempt (not a twitch): the coach reacts to it (owner, 2026-10-21)
 export const ATTEMPT_MIN_RANGE = 12;      // deg
 export const ATTEMPT_MIN_PATH = 0.1;      // torso lengths
@@ -175,7 +176,7 @@ export function buildExecutionProfile(cueKey, exerciseName, limbProfile, sportCo
 export function useExpertExecution({
   enabled, counting = false, quiet = false, cueKey, exerciseName, catalogId = null, sportContexts, limbProfile, landmarksRef,
   isHe, playerName = '', speakPriority, recordClips = false, onClips,
-  brainEnabled = false, effortRef = null, onStrikeSide = null, captureFrameRef = null, bodyFrameRef = null, keyPoints = null,
+  brainEnabled = false, effortRef = null, onStrikeSide = null, captureFrameRef = null, bodyFrameRef = null, compositeFrameRef = null, keyPoints = null,
   activeLeg = null, sessionGoal = null,
 }) {
   const sessionGoalRef = useRef(sessionGoal);
@@ -396,9 +397,11 @@ export function useExpertExecution({
       if (visionInFlight >= 2 || now0 - lastLookAt < 700) return;
       visionInFlight += 1; lastLookAt = now0;
       // the frames are prepared IN THE BACKGROUND (an async bitmap + encode — never a stall in the live video)
-      let frame = null, legsFrame = null;
+      let frame = null, legsFrame = null, composite = false;
       try {
-        [frame, legsFrame] = await Promise.all([
+        const comp = compositeFrameRef?.current ? await Promise.resolve(compositeFrameRef.current(profile.kind === 'strike')) : null;
+        if (comp) { frame = comp; legsFrame = null; composite = true; }
+        else [frame, legsFrame] = await Promise.all([
           Promise.resolve(bodyFrameRef?.current?.()),
           profile.kind === 'strike' ? Promise.resolve(captureFrameRef?.current?.()) : Promise.resolve(null),
         ]);
@@ -413,7 +416,7 @@ export function useExpertExecution({
       // + the SPORT's own emphasis + today's goal — the coach knows the sport and the day
       const kp = (keyPointsRef.current || []).filter(x => !kickProsthesis || !PROSTHESIS_IMPOSSIBLE.test(x));
       const emphasis = (profile.sportEmphasis || []).map(e => e?.he || e?.text || '').filter(Boolean).slice(0, 4);
-      aiBodyVision({ frame, legsFrame, isPass, passDrill: isPassDrill, kickingProsthesis: kickProsthesis, lang: he0 ? 'he' : 'en', side: leg,
+      aiBodyVision({ frame, legsFrame, composite, isPass, passDrill: isPassDrill, kickingProsthesis: kickProsthesis, lang: he0 ? 'he' : 'en', side: leg,
         exercise: exerciseName, sport: contextsKey, body: bodyText(limbProfile || {}), keyPoints: [...kp, ...emphasis], goal: sessionGoalRef.current || '',
         name: nameRef.current }).then((v) => {
         visionInFlight = Math.max(0, visionInFlight - 1);
@@ -471,6 +474,13 @@ export function useExpertExecution({
     deviceRepVerdict = (res) => {
       const at = performance.now(); const repAt = repCountRef.current;
       const errs = new Set((res.issues || []).filter(i => i.severity === 'error' || i.severity === 'danger').map(i => i.id));
+      // the correction is said NOW, at the count: the errors of this pass (a first unconfirmed reading included)
+      {
+        const now0 = new Set(errs);
+        for (const [id, d] of Object.entries(tracker.dynActive || {})) if ((d.rule?.severity === 'error' || d.rule?.severity === 'danger') && d.until - DYNAMIC_SHOW_MS >= at - 1500) now0.add(id);
+        for (const [id, t] of Object.entries(tracker.suspect || {})) if (t >= at - 1500) now0.add(id);
+        devicePolicy([...now0], repAt, res);
+      }
       setTimeout(() => {
         if (disposed) return;
         // (a rule shown since THIS pass — never one still on screen from the previous pass)
@@ -480,6 +490,7 @@ export function useExpertExecution({
         const rec = repVerdicts[repAt - 1];
         if (list.length) { errorSeen(list); if (rec) { rec.judged = true; rec.error = true; refreshAccuracy(); } }
         if (rec) { rec.devErr = list; rec.devDone = true; judgeClean(rec, repAt); }
+        // (an error CONFIRMED only by the pass's 2nd reading, after the count: said now if the rep had no line yet)
         devicePolicy(list, repAt, res);
       }, 900);
     };
@@ -505,15 +516,8 @@ export function useExpertExecution({
     // the AI is late / unreachable. One cue at a time; never after the set ended; never the same words twice
     let disposed = false; let cueInFlight = false;
     const recentCues = [];
-    const sayCorrection = (rule, localText, rate, he, tone = null, repAt0 = null) => {
-      if (rule?.id) noteCorrected(rule.id, rule.msg?.he || localText);
-      lastCorrectionAt = performance.now(); cleanStreak = 0;
-      const repAt = repAt0 ?? repCountRef.current; const at = performance.now();
-      const live = { rate, kind: 'correction', preempt: true, validIf: () => cueStillTrue(repAt, at) };
-      const say = (t) => { const s = liveText(t); holdSpeech(estimateSpeechMs(s, rate)); speakRef.current?.(s, live); recentCues.push(s); if (recentCues.length > 8) recentCues.shift(); };
-      const local = () => say(localText);
-      if (!rule || cueInFlight) { local(); return; }
-      cueInFlight = true;
+    const cueCache = {}; const cueFetching = {};
+    const cueFactsFor = (rule, he, tone = null) => {
       const facts = cueFacts({
         rule, profile, lp: limbProfile || {}, exercise: exerciseName, sport: contextsKey,
         name: nameRef.current, he, rep: repCountRef.current || null, times: tracker.log?.rules?.[rule.id]?.n ?? null, recent: recentCues,
@@ -521,15 +525,41 @@ export function useExpertExecution({
       if (tone) facts.tone = tone;
       if (isPassDrill) facts.isPass = true;
       if (profile.kind === 'strike' && isProstheticLeg(limbProfile || {}, activeLegRef.current)) facts.kickingProsthesis = true;
-      aiCue(facts).then((ai) => {
-        cueInFlight = false;
-        if (disposed || !countingRef.current) return;
-        // the AI answered after a NEW rep — the line is about the past: dropped (never said late)
-        if (!cueStillTrue(repAt, at)) { console.info(`[Coach] stale cue dropped (rep ${repAt}, now ${repCountRef.current})`); return; }
-        lastCorrectionAt = performance.now();
-        say(ai || localText);
+      return facts;
+    };
+    /** Prepare the AI's next wording of a rule in the background (one ready line per rule). */
+    const refillCue = (rule, he, tone = null) => {
+      if (!rule?.id || cueFetching[rule.id] || (cueCache[rule.id] || []).length) return;
+      cueFetching[rule.id] = true;
+      aiCue(cueFactsFor(rule, he, tone)).then((ai) => {
+        cueFetching[rule.id] = false;
+        if (ai && !disposed) (cueCache[rule.id] ||= []).push(ai);
       });
     };
+    const sayCorrection = (rule, localText, rate, he, tone = null, repAt0 = null) => {
+      if (rule?.id) noteCorrected(rule.id, rule.msg?.he || localText);
+      lastCorrectionAt = performance.now(); cleanStreak = 0;
+      const repAt = repAt0 ?? repCountRef.current; const at = performance.now();
+      const r2 = Math.max(rate || 1, LIVE_CUE_RATE);
+      const live = { rate: r2, kind: 'correction', preempt: true, validIf: () => cueStillTrue(repAt, at) };
+      // AT ONCE: the AI's line prepared ahead for this rule, else the device's own short line — never a wait
+      const ready = rule?.id ? (cueCache[rule.id] || []).shift() : null;
+      const s = liveText(ready || localText);
+      holdSpeech(estimateSpeechMs(s, r2)); speakRef.current?.(s, live);
+      recentCues.push(s); if (recentCues.length > 8) recentCues.shift();
+      console.info(`[Coach] said at once (${ready ? 'AI, prepared' : 'device'}): ${rule?.id || '-'}`);
+      if (rule) refillCue(rule, he, tone);                 // the next time: a fresh AI wording, ready
+    };
+    // the AI's wording of this exercise's corrections is prepared at its start (staggered — the server's flood guard)
+    {
+      const he0 = isHeRef.current;
+      const pre = [
+        ...(profile.dynamics || []).filter(r => (r.severity === 'error' || r.severity === 'danger') && (!r.only || r.only.includes(profile.id))),
+        ...(profile.rules || []).filter(r => r.severity === 'error' || r.severity === 'danger'),
+        ...(profile.kind === 'strike' ? ['small', 'moved', 'support'].map(k => uncountedPassRule(k, isPassDrill)) : []),
+      ].filter((r, i, a) => r?.id && a.findIndex(x => x.id === r.id) === i).slice(0, 10);
+      pre.forEach((r, i) => setTimeout(() => { if (!disposed) refillCue(r, he0); }, 300 + i * 800));
+    }
     // positioning / start / ready lines are worded by the AI too (the device decides WHAT; the line is
     // the AI's); the device's own line only when the AI is late — one line at a time
     let lineInFlight = false;
