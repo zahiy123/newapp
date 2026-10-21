@@ -156,6 +156,12 @@ export function useSpeech(lang = 'he-IL', age) {
   const _utterSpeak = useCallback((text, options = {}) => {
     if (!window.speechSynthesis || !text) return;
     if (!speechOpen) { queueRef.current = []; return; }          // the setup screens are silent
+    // a LIVE line that is no longer true (a new rep was done since it was asked for) is dropped, never said late
+    if (typeof options?.validIf === 'function' && !options.validIf()) {
+      console.log('[Speech] STALE dropped:', String(text).substring(0, 40));
+      if (processQueueRef.current) setTimeout(() => processQueueRef.current?.(), 0);
+      return;
+    }
 
     // Dedup: skip if identical text was spoken within the last 10 seconds (never a line resumed after a count)
     const now = Date.now();
@@ -408,6 +414,15 @@ export function useSpeech(lang = 'he-IL', age) {
     unstickSpeaking();
     const chunks = splitToChunks(text);
     if (chunks.length === 0) return;
+    // a CORRECTION cuts a praise (playing or waiting): the technique comes first
+    if (options.preempt) {
+      queueRef.current = queueRef.current.filter(q => q.options?.kind !== 'praise');
+      if (speaking.current && currentChunkRef.current?.options?.kind === 'praise') {
+        queueRef.current = [...chunks.map(c => ({ text: c, options })), ...queueRef.current];
+        try { window.speechSynthesis.cancel(); } catch { /* onerror plays the queue */ }
+        return;
+      }
+    }
     if (!speaking.current && queueRef.current.length && queueRef.current[0].options?.__sid != null && queueRef.current[0].options.__sid === currentSidRef.current) {
       // between the chunks of a sentence (the briefing!): its rest is NEVER cleared — wait after it
       const sid = currentSidRef.current;

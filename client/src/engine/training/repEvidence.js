@@ -152,7 +152,10 @@ export const KICK_MAX_TRAVEL = 0.35;
 export const KICK_OTHER_KNEE_DEG = 25;
 export const KICK_DOMINANCE = 0.6;
 export const KICK_MAX_WIDTH_CHANGE = 0.18;
-export const KICK_ANCHOR_MAX = 0.3;         // the support foot moves ≤ this many torso lengths (planted)  // the shoulders' width in the picture changes ≤ this share (no walking in depth)
+export const KICK_ANCHOR_MAX = 0.3;
+// a FAST, strong pass (>= 350 deg/s) moves the whole body a little - the support foot may shift up to this (owner, 2026-10-21)
+export const KICK_ANCHOR_MAX_FAST = 0.5;
+export const KICK_FAST_SWING_DEG_S = 350;         // the support foot moves ≤ this many torso lengths (planted)  // the shoulders' width in the picture changes ≤ this share (no walking in depth)
 // A KICK / PASS is proven by ITS OWN swing, judged in the kick's short window AT the contact (field video
 // 2026-10-20: a controlled inside-foot pass is a pendulum from the hip with an almost straight knee — "the
 // leg came back over 8 s of history" failed on every pass, 0 counts while the passes were seen)
@@ -193,12 +196,21 @@ export function inPlaceCheck(ev) {
   // the camera does not see as a foot (crutches, an absent limb) is not judged — the pelvis guard above still is.
   const footPath = (j) => { let p = 0, prev = null; for (const f of fr) { const e = f.e[j]; if (e && prev) p += Math.hypot(e.x - prev.x, e.y - prev.y); if (e) prev = e; } return p; };
   const footSpread = (j) => { const pts = fr.map(f => f.e[j]).filter(Boolean); return pts.length >= 3 ? Math.hypot(spread(pts.map(p => p.x)), spread(pts.map(p => p.y))) : null; };
-  const kickJ = footPath(6) >= footPath(7) ? 6 : 7, supportJ = kickJ === 6 ? 7 : 6;
+  // the kicking leg: the SET's leg (ev.activeLeg - a whole set per leg by plan) unless the other foot clearly
+  // travelled more (>= 1.6x: really the other leg kicked); else the foot that travelled most (field video
+  // 2026-10-21: a right-leg pass logged "left" - the support foot shifted, then the kicking foot was judged as the anchor)
+  const pathL = footPath(6), pathR = footPath(7);
+  const setJ = ev?.activeLeg === 'left' ? 6 : ev?.activeLeg === 'right' ? 7 : null;
+  const kickJ = setJ !== null ? ((setJ === 6 ? pathR : pathL) >= 1.6 * (setJ === 6 ? pathL : pathR) ? (setJ === 6 ? 7 : 6) : setJ)
+    : (pathL >= pathR ? 6 : 7);
+  const supportJ = kickJ === 6 ? 7 : 6;
   const anchor = footSpread(supportJ);
   out.kick = torso ? Math.round((footPath(kickJ) / torso) * 100) / 100 : null;
   out.side = kickJ === 6 ? 'left' : 'right';             // the kicking leg = the foot that travelled (never a jumping label)
   out.anchor = anchor !== null && torso ? Math.round((anchor / torso) * 100) / 100 : null;
-  if (anchor !== null && torso && anchor > KICK_ANCHOR_MAX * torso) return { ...out, reason: 'both-legs' };
+  const fast = strikeSwing(ev).peakVel >= KICK_FAST_SWING_DEG_S;
+  out.anchorMax = fast ? KICK_ANCHOR_MAX_FAST : KICK_ANCHOR_MAX;
+  if (anchor !== null && torso && anchor > out.anchorMax * torso) return { ...out, reason: 'both-legs' };
   return { ...out, ok: true };
 }
 

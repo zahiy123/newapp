@@ -203,3 +203,23 @@ describe('field video 2026-10-21: a fast real pass after the 1 s lock counts at 
     expect(FAST_SWING_DEG_S).toBe(350);
   });
 });
+
+describe('field video 2026-10-21 (b): a strong pass + the set leg', () => {
+  const shifting = (i) => ({ x: 0.45 + i * 0.02, y: 0.9, visibility: 0.95 });   // the support foot shifts ~0.36 torso
+  const frames = () => [0, -10, -22, -12, 8, 25].map((d, i) => { const lm = legBody(d); lm[27] = shifting(i); return lm; });
+  it('a FAST pass (>= 350 deg/s) may move the support foot up to 0.5 torso; a slow one may not', () => {
+    const fast = inPlaceCheck(run(frames(), 30).ev);
+    expect(fast.ok).toBe(true);
+    expect(fast.anchorMax).toBe(0.5);
+    const slow = inPlaceCheck(run(frames(), 100).ev);
+    expect(slow.reason).toBe('both-legs');
+  });
+  it('the kicking leg is the SET\'s leg unless the other foot clearly travelled more', () => {
+    const r1 = run([0, -10, -22, -12, 8, 25].map(d => legBody(d)));
+    r1.ev.activeLeg = 'right';
+    expect(inPlaceCheck(r1.ev).side).toBe('right');
+    const r2 = run([0, -10, -22, -12, 8, 25].map(d => legBody(d)));
+    r2.ev.activeLeg = 'left';                       // the right foot clearly kicked → still logged as right
+    expect(inPlaceCheck(r2.ev).side).toBe('right');
+  });
+});

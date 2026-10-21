@@ -283,12 +283,22 @@ export function useExpertExecution({
     // ---- POSITIVE FEEDBACK (owner, 2026-10-20) ----
     // a correction that was SAID and then fixed → an immediate "that was better than before!" (the strongest drive);
     // and every 2 clean reps (a minor finding never resets it, a real error does) a genuine praise, ≥ 15 s apart
+    // IN THE SET every line is short and live (owner, 2026-10-21): a correction without the name, at most 6 words
+    const liveText = (t, { keepName = false } = {}) => {
+      let s = String(t || '').trim();
+      const nm = String(nameRef.current || '').trim();
+      if (!keepName && nm && s.startsWith(nm)) s = s.slice(nm.length).replace(/^[\s,،:—-]+/, '');
+      return s.split(/\s+/).slice(0, 6).join(' ');
+    };
+    let lastCorrectionAt = -1e9;                    // no praise within 10 s of a correction
+    const PRAISE_AFTER_CORRECTION_MS = 10000;
     const pendingFix = {};                          // rule id / vision code → { label, clean }
     const noteCorrected = (id, label) => { if (id) pendingFix[id] = { label: String(label || ''), clean: 0 }; };
     let lastGood = '';
     const praiseNow = (what, kind) => {
       const t = performance.now();
       if (t - lastPraiseAt < (kind === 'fix' ? 6000 : 15000) || !countingRef.current) return false;
+      if (t - lastCorrectionAt < PRAISE_AFTER_CORRECTION_MS) return false;
       lastPraiseAt = t; cleanStreak = 0;
       sayLine('praise', what, 1.1, isHeRef.current);
       return true;
@@ -297,6 +307,7 @@ export function useExpertExecution({
     const afterRep = (errorIds, { judged = true, majorOrDevice = false } = {}) => {
       if (!judged || restOnly) return;
       for (const [id, f] of Object.entries(pendingFix)) {
+        if (id.startsWith('vis_')) continue;          // a vision correction is judged fixed only by the eyes
         if (errorIds.includes(id)) { f.clean = 0; continue; }
         f.clean += 1;
         if (f.clean >= 2) {
@@ -352,9 +363,21 @@ export function useExpertExecution({
         console.info(`[Vision] rep #${repIdx + 1}${prosthetic ? ' (prosthesis kicks)' : ''}: ${found.map(f => `${f.severity}:${f.code}(${f.confidence})`).join(', ') || 'no finding'} | good: ${goods.map(g => g.text).join(' / ') || '-'}`);
         if (restOnly || !countingRef.current || performance.now() < floodUntil) return;
         const passBad = hits.find(h => h.violated);
-        if (passBad) { sayCorrection({ ...passBad.rule, side }, liveCue(passBad.rule, he0), 1.1, he0); noteCorrected(passBad.rule.id, passBad.rule.msg?.he); cleanStreak = 0; return; }
-        // a fix of a vision correction / the praise flow
-        afterRep(found.map(f => `vis_${f.code}`).concat(hits.filter(h => h.violated).map(h => h.rule.id)), { judged, majorOrDevice: majors.length > 0 });
+        if (passBad) { cleanStreak = 0; sayCorrection({ ...passBad.rule, side }, liveCue(passBad.rule, he0), 1.1, he0, null, repIdx + 1); noteCorrected(passBad.rule.id, passBad.rule.msg?.he); return; }
+        // the eyes only ADD errors to the rep (the device already gave its one verdict — no 2nd clean count);
+        // a vision correction is praised as fixed only after the eyes saw 2 reps without it
+        const visErr = found.map(f => `vis_${f.code}`);
+        if (visErr.length) cleanStreak = 0;
+        if (judged) for (const [id, f] of Object.entries(pendingFix)) {
+          if (!id.startsWith('vis_')) continue;
+          if (visErr.includes(id)) { f.clean = 0; continue; }
+          f.clean += 1;
+          if (f.clean >= 2 && repCountRef.current === repIdx + 1) {
+            delete pendingFix[id];
+            praiseNow(he0 ? 'תיקנת — זה טוב יותר מקודם' : 'Fixed — better than before', 'fix');
+            break;
+          }
+        }
         // consecutive appearances (a finding absent from a judged rep starts over)
         if (judged) for (const code of Object.keys(visConsec)) if (!found.some(f => f.code === code)) visConsec[code] = 0;
         for (const f of found) visConsec[f.code] = (visConsec[f.code] || 0) + 1;
@@ -365,19 +388,36 @@ export function useExpertExecution({
           // a correction already said is said AGAIN only every 3rd time it comes back (never every rep)
           const again = visCoached[f.code] && (visOcc[f.code] - visCoached[f.code]) >= 3;
           if (!visCoached[f.code] || again) {
+            // a cue about a rep that is no longer the last one is dropped (never said late)
+            if (repCountRef.current !== repIdx + 1) { console.info(`[Coach] stale vision cue dropped (rep ${repIdx + 1}, now ${repCountRef.current})`); return; }
             visCoached[f.code] = visOcc[f.code]; cleanStreak = 0;
             noteCorrected(`vis_${f.code}`, f.cue);
-            holdSpeech(estimateSpeechMs(f.cue, 1.1));
-            const cue6 = String(f.cue).split(/\s+/).slice(0, 6).join(' ');      // at most 6 words
-            speakRef.current?.(cue6, { rate: 1.1 });
+            const cue6 = liveText(f.cue);                                     // at most 6 words, no name
+            lastCorrectionAt = performance.now();
+            holdSpeech(estimateSpeechMs(cue6, 1.1));
+            const repAt = repIdx + 1;
+            speakRef.current?.(cue6, { rate: 1.1, kind: 'correction', preempt: true, validIf: () => repCountRef.current === repAt && !!countingRef.current });
             return;
           }
         }
       });
     };
+    // ONE verdict per rep, ~0.9 s after the count (the same pass is often detected twice — its 2nd reading may
+    // confirm an error): any error seen in the pass — confirmed OR a first unconfirmed reading — means NOT clean
+    // (field video 2026-10-21: a toe pass praised "איזו מסירה נקייה" while the screen said "מסרת עם האצבעות")
     deviceRepVerdict = (res) => {
-      const errs = (res.issues || []).filter(i => i.severity === 'error' || i.severity === 'danger').map(i => i.id);
-      afterRep(errs, { judged: true, majorOrDevice: errs.length > 0 });
+      const at = performance.now(); const repAt = repCountRef.current;
+      const errs = new Set((res.issues || []).filter(i => i.severity === 'error' || i.severity === 'danger').map(i => i.id));
+      setTimeout(() => {
+        if (disposed) return;
+        for (const [id, d] of Object.entries(tracker.dynActive || {})) if (d.rule?.severity === 'error' || d.rule?.severity === 'danger') errs.add(id);
+        for (const [id, t] of Object.entries(tracker.suspect || {})) if (t >= at - 1500) errs.add(id);
+        const list = [...errs];
+        if (list.length) { const rec = repVerdicts[repAt - 1]; if (rec) { rec.judged = true; rec.error = true; refreshAccuracy(); } }
+        // a newer rep already came: its own verdict decides the praise (this one only keeps the bookkeeping)
+        if (repCountRef.current !== repAt) { if (list.length) cleanStreak = 0; return; }
+        afterRep(list, { judged: true, majorOrDevice: list.length > 0 });
+      }, 900);
     };
     // a HOLD (a plank, a wall sit): the coach looks every few seconds of the hold
     let lastHoldLook = -1e9;
@@ -387,9 +427,13 @@ export function useExpertExecution({
     // the AI is late / unreachable. One cue at a time; never after the set ended; never the same words twice
     let disposed = false; let cueInFlight = false;
     const recentCues = [];
-    const sayCorrection = (rule, localText, rate, he, tone = null) => {
+    const sayCorrection = (rule, localText, rate, he, tone = null, repAt0 = null) => {
       if (rule?.id) noteCorrected(rule.id, rule.msg?.he || localText);
-      const local = () => { holdSpeech(estimateSpeechMs(localText, rate)); speakRef.current?.(localText, { rate }); recentCues.push(localText); };
+      lastCorrectionAt = performance.now(); cleanStreak = 0;
+      const repAt = repAt0 ?? repCountRef.current;
+      const live = { rate, kind: 'correction', preempt: true, validIf: () => repCountRef.current === repAt && !!countingRef.current };
+      const say = (t) => { const s = liveText(t); holdSpeech(estimateSpeechMs(s, rate)); speakRef.current?.(s, live); recentCues.push(s); if (recentCues.length > 8) recentCues.shift(); };
+      const local = () => say(localText);
       if (!rule || cueInFlight) { local(); return; }
       cueInFlight = true;
       const facts = cueFacts({
@@ -401,11 +445,10 @@ export function useExpertExecution({
       aiCue(facts).then((ai) => {
         cueInFlight = false;
         if (disposed || !countingRef.current) return;
-        const text = ai || localText;
-        recentCues.push(text);
-        if (recentCues.length > 8) recentCues.shift();
-        holdSpeech(estimateSpeechMs(text, rate));
-        speakRef.current?.(text, { rate });
+        // the AI answered after a NEW rep — the line is about the past: dropped (never said late)
+        if (repCountRef.current !== repAt) { console.info(`[Coach] stale cue dropped (rep ${repAt}, now ${repCountRef.current})`); return; }
+        lastCorrectionAt = performance.now();
+        say(ai || localText);
       });
     };
     // positioning / start / ready lines are worded by the AI too (the device decides WHAT; the line is
@@ -415,16 +458,20 @@ export function useExpertExecution({
     const sayLine = (mode, localText, rate, he) => {
       if (lineInFlight) return;
       lineInFlight = true;
+      const askedAt = performance.now(); const repAt0 = repCountRef.current;
       aiLine({
         mode, lang: he ? 'he' : 'en', name: nameRef.current, exercise: exerciseName, sport: contextsKey,
         body: bodyText(limbProfile || {}), error: { what: localText }, recent: recentLines,
       }).then((ai) => {
         lineInFlight = false;
         if (disposed) return;
-        const text = ai || localText;
+        // a PRAISE is live: at most 6 words, dropped if a new rep came or a correction was said since it was asked for
+        const isPraise = mode === 'praise';
+        if (isPraise && (repCountRef.current !== repAt0 || lastCorrectionAt > askedAt)) { console.info('[Coach] stale praise dropped'); return; }
+        const text = isPraise ? liveText(ai || localText, { keepName: true }) : (ai || localText);
         recentLines.push(text); if (recentLines.length > 6) recentLines.shift();
         holdSpeech(estimateSpeechMs(text, rate));
-        speakRef.current?.(text, { rate });
+        speakRef.current?.(text, isPraise ? { rate, kind: 'praise', validIf: () => repCountRef.current === repAt0 && lastCorrectionAt <= askedAt && !!countingRef.current } : { rate });
       });
     };
     setIssue(null); setAccuracy(null); setCadence(null); setUnsure(null); setSetup(null); setReadyFlash(null);
@@ -438,6 +485,7 @@ export function useExpertExecution({
         inViewRef.current = r.inView;
         if (recorder) recordFrame(recorder, lm, r, now);
         if (brain) brainFrame(brain, lm, now);
+        kinetic.activeLeg = activeLegRef.current || null;
         evidenceFrame(kinetic, lm, now);
 
         // (dev only — the local harness traces why positioning / the start gate decide what they decide; stripped in production)
@@ -520,7 +568,7 @@ export function useExpertExecution({
                 : counts ? 'ok'
                 : !P.ok ? (P.reason === 'walk-depth' ? `walking toward/away — shoulders width changed ${Math.round((P.widthChange || 0) * 100)}% (max ${Math.round(KICK_MAX_WIDTH_CHANGE * 100)}%)`
                   : P.reason === 'walk-across' ? `walking across — pelvis moved ${P.travel} torso (max ${KICK_MAX_TRAVEL})`
-                  : `support foot not planted — moved ${P.anchor} torso (max ${KICK_ANCHOR_MAX}), kicking foot path ${P.kick}`)
+                  : `support foot not planted — moved ${P.anchor} torso (max ${P.anchorMax ?? KICK_ANCHOR_MAX}), kicking foot path ${P.kick}`)
                 : !S.ok ? `swing too small — range ${S.range}° (min ${STRIKE_MIN_RANGE}), speed ${S.peakVel}°/s (min ${STRIKE_MIN_VEL}), path ${S.path} (min ${STRIKE_MIN_PATH})`
                 : why.since < 450 ? `too soon after the last count (${why.since} ms)`
                 : r.quality?.confident === false ? 'tracking unsure' : 'unknown';

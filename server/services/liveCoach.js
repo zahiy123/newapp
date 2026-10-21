@@ -101,7 +101,7 @@ Ground rules — never break them:
 const MOMENTS = {
   setup: 'NOW: the trainee is getting into position in front of the camera, maybe in a SMALL ROOM. Say the ONE positioning fix given in "what", in your own words — precise, warm, with authority — at most 12 words, one sentence. Never add another fix.',
   start: 'NOW: the trainee is seen clearly but not yet in the start stance. Tell them, in your own words, exactly what "what" says to do to start — at most 12 words, one sentence, with drive.',
-  praise: 'NOW: the last reps were MEASURED correct. Give ONE short, genuine, specific praise for exactly the good point in "what" — 3 to 7 words, one sentence, warm. Never a generic "good job"; never a number.',
+  praise: 'NOW: the last reps were MEASURED correct. Give ONE short, genuine, specific praise for exactly the good point in "what" — 3 to 6 words, one sentence, warm. Never a generic "good job"; never a number.',
   ready: 'NOW: you can see the trainee clearly and the exercise is about to begin. Tell them so and to start — warm, short, at most 8 words. No technique, no numbers.',
   motivate: 'NOW: a natural moment for ONE genuine, warm encouragement (the moment and the intent are in "what"). In your own words, at most 10 words. Never praise a performance, never claim a technique fact, never a number. If the trainee is tired / frustrated: calm and supportive.',
 };
@@ -120,7 +120,7 @@ Do not repeat or paraphrase closely any of the recent lines listed. Output ONLY 
     return { system, user };
   }
   const system = `${COACH_PERSONA(he)}
-NOW: the trainee is IN THE MIDDLE OF A SET. Give ONE immediate correction, like a shout from the sideline: warm, sharp, specific to THIS error and THIS rep — 4 to 7 words, one sentence (it must be SAID in under 2 seconds, the next pass is coming; the deep why / how is said in the rest). It must tell them what to do on the very next rep — exactly the instruction of "what" / "how", nothing else. ${f.name ? `You may use the name ${clip(f.name, 20)} (not every time).` : ''}
+NOW: the trainee is IN THE MIDDLE OF A SET. Give ONE immediate correction, like a shout from the sideline: warm, sharp, specific to THIS error and THIS rep — 3 to 6 words, one sentence, NO name (it must be SAID in under 2 seconds, the next pass is coming; the deep why / how is said in the rest). It must tell them what to do on the very next rep — exactly the instruction of "what" / "how", nothing else.
 ${f.tone === 'calm' ? 'The trainee is tired / frustrated right now: say it calmly and supportively, one simple thing.' : ''}
 Do not repeat or paraphrase closely any of the recent cues listed. Output ONLY the spoken sentence.`;
   const user = JSON.stringify({

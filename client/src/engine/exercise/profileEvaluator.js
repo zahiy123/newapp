@@ -40,7 +40,8 @@ const VISIBLE_OFF_SAMPLES = 20;    // ~1 s out of view → not visible (a flicke
 export const RULE_HOLD_MS = 400;   // a rule must hold this long before it is reported
 const WINDOW_MS = 8000;            // accuracy window (a few reps) — at least 2 Ghost cycles at slow tempos
 const MIN_ACCURACY_SAMPLES = 20;   // ~1 s of in-view frames before a % is shown
-export const DYNAMIC_SHOW_MS = 2500;  // a violated dynamic rule stays on screen this long
+export const DYNAMIC_SHOW_MS = 2500;
+export const SAME_PASS_MS = 900;       // two strike events this close = one pass (a re-detection)  // a violated dynamic rule stays on screen this long
 export const COACH_AFTER = 2;         // consecutive violations before the coach cues a TEMPO / flow rule
 // A position error (a static rule: depth, knee line, body line, elbow, trunk) is a technique error of
 // the movement itself (owner, 2026-10-18: "a short, immediate cue during the set — the full analysis in
@@ -161,6 +162,8 @@ export function createExecutionTracker(profile, lp = {}) {
     motion: createMotionState(profile, lp),
     dynActive: {},          // rule id → { rule, until, value }
     dynStreak: {},          // rule id → consecutive violating events
+    suspect: {},            // rule id → when it was seen but not yet confirmed (never a clean rep for praise)
+    lastStrikeAt: -1e9,     // the last strike event (the same pass detected twice never confirms a rule)
     coached: {},            // rule id → how many times it was explained
     coachedAt: {},          // rule id → when it was last explained
     repErr: {},             // static error rule id → frames it was violated since the last rep / strike
@@ -383,13 +386,18 @@ export function updateExecution(tracker, landmarks, nowMs) {
       tr.repErr = {}; tr.repJudged = {}; tr.repWorst = {};
     }
     let clean = true;
+    const samePass = ev.type === 'strike' && nowMs - (tr.lastStrikeAt ?? -1e9) < SAME_PASS_MS;
+    if (ev.type === 'strike') tr.lastStrikeAt = nowMs;
     for (const r of profile.dynamics || []) {
       if (r.on !== ev.type || !judged(r)) continue;
       // a foot rule (the ankle lock, the contact surface) never judges a PROSTHETIC foot — its ankle is fixed
       // (owner, 2026-10-20); the kicking leg = the leg the set is for, else the strike's side
       if (r.naturalFoot && isProstheticLeg(tr.lp, tr.activeLeg || ev.side)) continue;
       if (dynamicViolation(r, ev)) {
+        // (the same pass seen again: a suspect of THIS pass — never a 2nd attempt toward the confirmation)
+        if (samePass && r.confirm && (tr.dynStreak[r.id] || 0) < r.confirm) { (tr.suspect ||= {})[r.id] = nowMs; continue; }
         tr.dynStreak[r.id] = (tr.dynStreak[r.id] || 0) + 1;
+        if (r.confirm && tr.dynStreak[r.id] < r.confirm) (tr.suspect ||= {})[r.id] = nowMs;
         // a rule that needs CONFIRMATION (the foot / ankle — a fine measure) shows, counts and is coached only
         // when seen in `confirm` attempts in a row: one doubtful reading never raises an alarm
         if (r.confirm && tr.dynStreak[r.id] < r.confirm) continue;
@@ -398,7 +406,7 @@ export function updateExecution(tracker, landmarks, nowMs) {
         tr.dynActive[r.id] = { rule: r, until: nowMs + DYNAMIC_SHOW_MS, value: ev[r.feature] };
         // a technique error of the movement itself (coachNow) is corrected RIGHT AFTER the first time
         if (sayNow(r) && canCoach(r.id)) coachIt(r, ev[r.feature], ev.side || null);
-      } else if (typeof ev[r.feature] === 'number') {
+      } else if (typeof ev[r.feature] === 'number' && !samePass) {
         logRule(tr.log, r, false, ev[r.feature]);
         tr.dynStreak[r.id] = 0;
       }
