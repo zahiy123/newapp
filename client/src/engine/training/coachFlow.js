@@ -45,8 +45,10 @@ export function footSettled(hist, side, sinceT, now) {
   const xs = pts.map(p => p.x), ys = pts.map(p => p.y);
   return Math.hypot(Math.max(...xs) - Math.min(...xs), Math.max(...ys) - Math.min(...ys)) <= SETTLE_TORSO * torso;
 }
-export const kickLockOpen = ({ now, lastCountAt, settledSinceCount, lockMs = 1000 }) =>
-  now - lastCountAt >= lockMs && (settledSinceCount || now - lastCountAt >= RELEASE_MS);
+// a FAST swing (≥ FAST_SWING_DEG_S) after the 1 s lock is a new pass — a return of the leg is slow (120–300 °/s)
+export const FAST_SWING_DEG_S = 350;
+export const kickLockOpen = ({ now, lastCountAt, settledSinceCount, lockMs = 1000, swingVel = 0 }) =>
+  now - lastCountAt >= lockMs && (settledSinceCount || swingVel >= FAST_SWING_DEG_S || now - lastCountAt >= RELEASE_MS);
 export const openingKickAllowed = (lastStillAt, now) => typeof lastStillAt === 'number' && now - lastStillAt <= OPENING_STILL_WINDOW_MS;
 export const READY_STILL_TORSO = 0.12;     // the feet move less than this share of the torso length
 

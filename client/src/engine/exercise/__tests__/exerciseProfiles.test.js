@@ -144,9 +144,10 @@ describe('Ghost ⇄ profile sync — the Ghost demonstrates exactly the profile'
 
   it('warmupGhost.ghostPose draws the profile Ghost for an exercise spec', () => {
     const p = EXPERT_PROFILES.squat;
-    // (a standing exercise's Ghost always faces the camera: yaw 0)
+    // (a standing exercise's Ghost: on the body a fixed 20° turn; in the side panel its own 3/4 view)
     const pp = profileGhostPose(p, 0.5, lpOk);
-    expect(ghostPose({ profile: p }, 0.5, lpOk)).toEqual(pp.depth ? { ...pp, yaw: 0 } : pp);
+    expect(ghostPose({ profile: p }, 0.5, lpOk)).toEqual(pp.depth ? { ...pp, yaw: 20, fixedYaw: true } : pp);
+    expect(ghostPose({ profile: p }, 0.5, lpOk, 'panel')).toEqual(pp);
   });
 
   it('a personalized (limited shoulder) Ghost stays inside the personalized ranges', () => {

@@ -274,7 +274,7 @@ export function useExpertExecution({
     // execution anywhere in the body (posture, arms, trunk, head, balance, legs, feet) with severity + confidence.
     // Confident findings (≥ VISION_CONFIDENCE): a MAJOR one is said at once, every time; a minor one is forgiven once
     // and said when it comes back; ALL go into the set log → the rest's full analysis. Rest-only drills: logged only.
-    let visionBusy = false; let lastLookAt = -1e9; const visOcc = {}; const visCoached = {};
+    let visionBusy = false; let lastLookAt = -1e9; const visOcc = {}; const visCoached = {}; const visConsec = {};
     let cleanStreak = 0; let lastPraiseAt = -1e9;
     const visionRule = (f) => ({
       id: `vis_${f.code}`, severity: 'error', major: f.severity === 'major', vision: true,
@@ -355,15 +355,21 @@ export function useExpertExecution({
         if (passBad) { sayCorrection({ ...passBad.rule, side }, liveCue(passBad.rule, he0), 1.1, he0); noteCorrected(passBad.rule.id, passBad.rule.msg?.he); cleanStreak = 0; return; }
         // a fix of a vision correction / the praise flow
         afterRep(found.map(f => `vis_${f.code}`).concat(hits.filter(h => h.violated).map(h => h.rule.id)), { judged, majorOrDevice: majors.length > 0 });
+        // consecutive appearances (a finding absent from a judged rep starts over)
+        if (judged) for (const code of Object.keys(visConsec)) if (!found.some(f => f.code === code)) visConsec[code] = 0;
+        for (const f of found) visConsec[f.code] = (visConsec[f.code] || 0) + 1;
         for (const f of found) {
           visOcc[f.code] = (visOcc[f.code] || 0) + 1;
+          // in the SET only a MAJOR finding confirmed in 2 reps in a row; everything else → the rest's analysis
+          if (f.severity !== 'major' || visConsec[f.code] < 2) continue;
           // a correction already said is said AGAIN only every 3rd time it comes back (never every rep)
           const again = visCoached[f.code] && (visOcc[f.code] - visCoached[f.code]) >= 3;
-          if (f.severity === 'major' || (!visCoached[f.code] && visOcc[f.code] >= 2) || again) {
+          if (!visCoached[f.code] || again) {
             visCoached[f.code] = visOcc[f.code]; cleanStreak = 0;
             noteCorrected(`vis_${f.code}`, f.cue);
             holdSpeech(estimateSpeechMs(f.cue, 1.1));
-            speakRef.current?.(f.cue, { rate: 1.1 });
+            const cue6 = String(f.cue).split(/\s+/).slice(0, 6).join(' ');      // at most 6 words
+            speakRef.current?.(cue6, { rate: 1.1 });
             return;
           }
         }
@@ -505,11 +511,11 @@ export function useExpertExecution({
               if (strikeTimes.length >= FLOOD_N) floodUntil = now + FLOOD_CALM_MS;
               const why = explainStrike(kinetic, now);
               const counts = countsReps && r.quality?.confident !== false && evidenceOk(kinetic, now, { strike: true, kick: true })
-                && kickLockOpen({ now, lastCountAt, settledSinceCount, lockMs: COUNT_LOCK_MS }) && now >= floodUntil;
+                && kickLockOpen({ now, lastCountAt, settledSinceCount, lockMs: COUNT_LOCK_MS, swingVel: explainStrike(kinetic, now).swing.peakVel || 0 }) && now >= floodUntil;
               // the EXACT reason (never a guess): walking toward / away (the shoulders' width), walking across (the
               // pelvis travel), both legs moving, a too-small swing (range / speed / path), too soon, unsure tracking
               const P = why.place, S = why.swing;
-              const reason = !kickLockOpen({ now, lastCountAt, settledSinceCount, lockMs: COUNT_LOCK_MS }) ? `locked — ${Math.round(now - lastCountAt)} ms after the last count, the kicking foot not settled yet (one pass = one count)`
+              const reason = !kickLockOpen({ now, lastCountAt, settledSinceCount, lockMs: COUNT_LOCK_MS, swingVel: explainStrike(kinetic, now).swing.peakVel || 0 }) ? `locked — ${Math.round(now - lastCountAt)} ms after the last count, the kicking foot not settled yet (one pass = one count)`
                 : now < floodUntil ? `flood — ${strikeTimes.length} kicks in ${FLOOD_MS / 1000} s: wild pace, not counted`
                 : counts ? 'ok'
                 : !P.ok ? (P.reason === 'walk-depth' ? `walking toward/away — shoulders width changed ${Math.round((P.widthChange || 0) * 100)}% (max ${Math.round(KICK_MAX_WIDTH_CHANGE * 100)}%)`
@@ -522,7 +528,7 @@ export function useExpertExecution({
             }
             // a kick / pass: a real strike, IN PLACE, by ONE leg (walking is never a pass)
             if (lastCountAt > 0 && !settledSinceCount && footSettled(feetHist, lastCountSide, lastCountAt, now)) settledSinceCount = true;
-            const locked = !kickLockOpen({ now, lastCountAt, settledSinceCount, lockMs: COUNT_LOCK_MS });
+            const locked = !kickLockOpen({ now, lastCountAt, settledSinceCount, lockMs: COUNT_LOCK_MS, swingVel: explainStrike(kinetic, now).swing.peakVel || 0 });
             const flooding = now < floodUntil;
             if (countsReps && profile.kind === 'strike' && ev.type === 'strike' && !locked && !flooding && r.quality?.confident !== false && evidenceOk(kinetic, now, { strike: true, kick: true })) {
               const kickSide = explainStrike(kinetic, now).place.side || ev.side;

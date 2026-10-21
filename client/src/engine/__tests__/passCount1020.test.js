@@ -55,9 +55,11 @@ import { EXPERT_PROFILES } from '../exercise/exerciseProfiles';
 import { SPORT_LIBRARY, applySportContext } from '../sports/sportLibrary';
 
 describe('the exact reason of a rejected kick (the console line)', () => {
-  it('walking across → walk-across; toward the camera → walk-depth; a pass in place → ok', () => {
+  it('walking across → walk-across; toward the camera → not in place (the anchor) — never by the shoulders width; a pass in place → ok', () => {
     expect(inPlaceCheck(run([-10, -22, -12, 8, 25].map((d, i) => legBody(d, { dx: i * 0.04 }))).ev).reason).toBe('walk-across');
-    expect(inPlaceCheck(run([-10, -22, -12, 8, 25].map((d, i) => legBody(d, { scale: 1 + i * 0.08 }))).ev).reason).toBe('walk-depth');
+    const toward = inPlaceCheck(run([-10, -22, -12, 8, 25].map((d, i) => legBody(d, { scale: 1 + i * 0.08 }))).ev);
+    expect(toward.reason).not.toBe('walk-depth');                         // (the shoulders-width rule is gone)
+    expect(toward.ok).toBe(false);                                         // walking is still rejected — by the anchor / the pelvis
     const ok = inPlaceCheck(run([0, -10, -22, -12, 8, 25].map(d => legBody(d))).ev);
     expect(ok.ok).toBe(true);
     expect(ok.kick).toBeGreaterThan(0.3);                                   // the kicking foot's path (torso lengths)
@@ -189,5 +191,15 @@ describe('one pass = ONE count: the lock opens only when the kicking foot settle
     expect(kickLockOpen({ now: 2200, lastCountAt: 1000, settledSinceCount: false })).toBe(false);
     expect(kickLockOpen({ now: 2200, lastCountAt: 1000, settledSinceCount: true })).toBe(true);
     expect(kickLockOpen({ now: 1000 + RELEASE_MS, lastCountAt: 1000, settledSinceCount: false })).toBe(true);
+  });
+});
+
+describe('field video 2026-10-21: a fast real pass after the 1 s lock counts at once', () => {
+  it('a fast swing (≥ 350 °/s) opens the lock after 1 s; a slow return does not', async () => {
+    const { FAST_SWING_DEG_S } = await import('../training/coachFlow');
+    expect(kickLockOpen({ now: 2160, lastCountAt: 1000, settledSinceCount: false, swingVel: 364 })).toBe(true);
+    expect(kickLockOpen({ now: 2160, lastCountAt: 1000, settledSinceCount: false, swingVel: 200 })).toBe(false);
+    expect(kickLockOpen({ now: 1700, lastCountAt: 1000, settledSinceCount: false, swingVel: 900 })).toBe(false);   // never inside 1 s
+    expect(FAST_SWING_DEG_S).toBe(350);
   });
 });

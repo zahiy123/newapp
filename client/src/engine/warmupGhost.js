@@ -66,13 +66,16 @@ const STUMP = 0.38;                                // a below-knee residual shan
  * @param {Object} lp - limbProfile (getLimbProfile)
  * @returns {{ segments: Array<{ from, to, dashed?: boolean, limb: string }>, head: { x, y, r } }}
  */
-export function ghostPose(spec, t, lp = {}) {
+export const BODY_GHOST_YAW = 20;
+export function ghostPose(spec, t, lp = {}, where = 'body') {
   // Stage 3.1: an exercise Ghost is generated from its Expert Execution Profile
   if (spec?.profile?.ghost) {
     const pp = profileGhostPose(spec.profile, t, lp);
     // a STANDING exercise's Ghost always faces the camera — exactly as the trainee is asked to stand (owner,
     // 2026-10-21: never sideways); floor / seated exercises keep their own view
-    if (pp && pp.depth && spec.profile.posture === 'standing') return { ...pp, yaw: 0 };
+    // a STANDING exercise's Ghost: on the body a 20° turn (nearly frontal, the leg's motion visible — owner,
+    // 2026-10-21); in the side panel its own 3/4 view (the pass seen clearly)
+    if (pp && pp.depth && spec.profile.posture === 'standing') return where === 'panel' ? pp : { ...pp, yaw: BODY_GHOST_YAW, fixedYaw: true };
     if (pp) return pp;
   }
   const wave = Math.sin(2 * Math.PI * t);          // -1..1
@@ -680,9 +683,10 @@ function drawMotionTrail(ctx, spec, lp, nowMs, P, scale) {
  * @param {{ fill?: boolean }} [opts] - fill: the panel fills the whole canvas (dedicated ghost canvas)
  */
 export function drawWarmupGhost(ctx, spec, lp, nowMs, w, h, opts = {}) {
+  const PANEL = 'panel';
   if (!spec) return;
   const t = phaseOf(nowMs, periodOf(spec));
-  const pose = ghostPose(spec, t, lp);
+  const pose = ghostPose(spec, t, lp, PANEL);
 
   const panelH = opts.fill ? h : h * 0.42;
   const panelW = opts.fill ? w : panelH * 0.72;
@@ -856,7 +860,7 @@ export function drawGhostOverlay(ctx, spec, lp, nowMs, origin, scale, alpha = 0.
   let pose = seated ? seatPose(fitted.pose) : fitted.pose;
   // the guide turns the way the TRAINEE turns: facing the camera → nearly frontal (a 3/4 Ghost on a
   // frontal trainee clashed with the body — parts of it hid / stuck out); side-on → its own 3/4 view
-  if (pose.depth && typeof body?.facing === 'number') {
+  if (pose.depth && typeof body?.facing === 'number' && !pose.fixedYaw) {
     // facing the camera (the shoulders wide) → FULLY frontal, exactly like the trainee; turned → the
     // trainee's own turn (never more than the demonstration's 3/4)
     const trainee = body.facing >= FRONTAL_FACING ? 0 : (Math.acos(Math.max(0, Math.min(1, body.facing))) * 180) / Math.PI;

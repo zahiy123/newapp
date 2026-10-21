@@ -2939,8 +2939,8 @@ export default function Training() {
     const usePre = pre && pre.key === `${currentIdx}-${currentSet}`;
     if (usePre) {
       const numbers = isHe
-        ? `${playerName ? `${playerName}, ` : ''}סט ${currentSet} מאחוריך: ${finalReps} חזרות${typeof setAcc === 'number' ? `, דיוק ${Math.round(setAcc)} אחוז` : ''}.`
-        : `Set ${currentSet} done: ${finalReps} reps${typeof setAcc === 'number' ? `, ${Math.round(setAcc)}% accuracy` : ''}.`;
+        ? `סט ${currentSet}, ${finalReps} חזרות${typeof setAcc === 'number' ? `, ${Math.round(setAcc)} אחוז דיוק` : ''}.`
+        : `Set ${currentSet}, ${finalReps} reps${typeof setAcc === 'number' ? `, ${Math.round(setAcc)}% accuracy` : ''}.`;
       speakPriority(nextLeg ? `${numbers} ${nextLeg}` : numbers, { rate: 1.05 });
     }
     (usePre ? pre.promise : aiDebrief(facts)).then((ai) => {

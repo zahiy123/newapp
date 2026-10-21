@@ -176,7 +176,8 @@ export function inPlaceCheck(ev) {
   if (sw.length >= 3) {
     const med = [...sw].sort((x, y) => x - y)[Math.floor(sw.length / 2)];
     if (med > 0) out.widthChange = Math.round((spread(sw) / med) * 100) / 100;
-    if (med > 0 && spread(sw) > KICK_MAX_WIDTH_CHANGE * med) return { ...out, reason: 'walk-depth' };
+    // (measured for the log only — NOT a rejection: a pass rotates the body and the shoulders' width changes
+    // with it; field video 2026-10-21: real passes rejected for 14 s. Walking is caught by the anchor + the pelvis)
   }
   const hips = fr.map(f => f.hip).filter(Boolean);
   const torsos = fr.map(f => f.torso).filter(Number.isFinite);
