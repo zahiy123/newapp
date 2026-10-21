@@ -1709,7 +1709,7 @@ export default function Training() {
     }
 
     // Mind-muscle cue: every 20s during good-form movement (was 15s, increased to reduce noise)
-    if (firstRepStarted && isMoving && newState.feedback?.type !== 'warning') {
+    if (firstRepStarted && isMoving && newState.feedback?.type !== 'warning' && !expertCoachesRef.current) {
       const now = Date.now();
       if (now - lastMindMuscleCueRef.current > 20000) {
         lastMindMuscleCueRef.current = now;

@@ -50,6 +50,7 @@ export const REST_ONLY_IDS = new Set(['runInPlace', 'highKnees', 'buttKicks', 'a
 export const restOnlyFeedback = (profile) => !!profile && (profile.kind === 'cyclic' || REST_ONLY_IDS.has(profile.id));
 // the vision model's verdict on a pass, mapped to the pass's own rules (confident findings only)
 export const VISION_CONFIDENCE = 0.75;
+export const VISION_SURE = 0.85;          // a major finding this sure is said at its first sighting
 // what a prosthetic foot cannot do — never demanded (owner, 2026-10-21)
 export const PROSTHESIS_IMPOSSIBLE = /קרסול|אצבעות|פוינט|פלקס|ankle|toe|point|flex/i;
 export const VISION_MINOR_CONFIDENCE = 0.6;
@@ -274,7 +275,7 @@ export function useExpertExecution({
     // execution anywhere in the body (posture, arms, trunk, head, balance, legs, feet) with severity + confidence.
     // Confident findings (≥ VISION_CONFIDENCE): a MAJOR one is said at once, every time; a minor one is forgiven once
     // and said when it comes back; ALL go into the set log → the rest's full analysis. Rest-only drills: logged only.
-    let visionBusy = false; let lastLookAt = -1e9; const visOcc = {}; const visCoached = {}; const visConsec = {};
+    let visionBusy = false; let lastLookAt = -1e9; const visOcc = {}; const visCoached = {}; const visConsec = {}; const visSeen = {};
     let cleanStreak = 0; let lastPraiseAt = -1e9;
     const visionRule = (f) => ({
       id: `vis_${f.code}`, severity: 'error', major: f.severity === 'major', vision: true,
@@ -291,6 +292,11 @@ export function useExpertExecution({
       return s.split(/\s+/).slice(0, 6).join(' ');
     };
     let lastCorrectionAt = -1e9;                    // no praise within 10 s of a correction
+    // a correction is an instruction FOR THE NEXT PASS: still true while at most ONE newer pass was done and
+    // ≤ 8 s passed; older than that it is about the past → dropped (field video 2026-10-21 b: the eyes' cue
+    // always arrives during the next pass — dropping it at once left the set with no correction at all)
+    const CUE_MAX_REPS_LATE = 1, CUE_MAX_AGE_MS = 8000;
+    const cueStillTrue = (repAt, at) => repCountRef.current - repAt <= CUE_MAX_REPS_LATE && performance.now() - at <= CUE_MAX_AGE_MS && !!countingRef.current;
     const PRAISE_AFTER_CORRECTION_MS = 10000;
     const pendingFix = {};                          // rule id / vision code → { label, clean }
     const noteCorrected = (id, label) => { if (id) pendingFix[id] = { label: String(label || ''), clean: 0 }; };
@@ -379,24 +385,27 @@ export function useExpertExecution({
           }
         }
         // consecutive appearances (a finding absent from a judged rep starts over)
-        if (judged) for (const code of Object.keys(visConsec)) if (!found.some(f => f.code === code)) visConsec[code] = 0;
-        for (const f of found) visConsec[f.code] = (visConsec[f.code] || 0) + 1;
+        // the evidence of a finding: seen in 2 of the last 3 looked reps (one miss between does not erase it)
+        for (const f of found) (visSeen[f.code] ||= []).push(repIdx);
+        for (const code of Object.keys(visSeen)) visSeen[code] = visSeen[code].filter(i => repIdx - i <= 2);
+        for (const code of Object.keys(visSeen)) visConsec[code] = visSeen[code].length;
         for (const f of found) {
           visOcc[f.code] = (visOcc[f.code] || 0) + 1;
           // in the SET only a MAJOR finding confirmed in 2 reps in a row; everything else → the rest's analysis
-          if (f.severity !== 'major' || visConsec[f.code] < 2) continue;
+          if (f.severity !== 'major' || (visConsec[f.code] < 2 && f.confidence < VISION_SURE)) continue;
           // a correction already said is said AGAIN only every 3rd time it comes back (never every rep)
           const again = visCoached[f.code] && (visOcc[f.code] - visCoached[f.code]) >= 3;
           if (!visCoached[f.code] || again) {
             // a cue about a rep that is no longer the last one is dropped (never said late)
-            if (repCountRef.current !== repIdx + 1) { console.info(`[Coach] stale vision cue dropped (rep ${repIdx + 1}, now ${repCountRef.current})`); return; }
+            const seenAt = performance.now() - 4000;     // (the frame was taken ~at the count)
+            if (!cueStillTrue(repIdx + 1, seenAt)) { console.info(`[Coach] stale vision cue dropped (rep ${repIdx + 1}, now ${repCountRef.current})`); return; }
             visCoached[f.code] = visOcc[f.code]; cleanStreak = 0;
             noteCorrected(`vis_${f.code}`, f.cue);
             const cue6 = liveText(f.cue);                                     // at most 6 words, no name
             lastCorrectionAt = performance.now();
             holdSpeech(estimateSpeechMs(cue6, 1.1));
             const repAt = repIdx + 1;
-            speakRef.current?.(cue6, { rate: 1.1, kind: 'correction', preempt: true, validIf: () => repCountRef.current === repAt && !!countingRef.current });
+            speakRef.current?.(cue6, { rate: 1.1, kind: 'correction', preempt: true, validIf: () => cueStillTrue(repAt, seenAt) });
             return;
           }
         }
@@ -430,8 +439,8 @@ export function useExpertExecution({
     const sayCorrection = (rule, localText, rate, he, tone = null, repAt0 = null) => {
       if (rule?.id) noteCorrected(rule.id, rule.msg?.he || localText);
       lastCorrectionAt = performance.now(); cleanStreak = 0;
-      const repAt = repAt0 ?? repCountRef.current;
-      const live = { rate, kind: 'correction', preempt: true, validIf: () => repCountRef.current === repAt && !!countingRef.current };
+      const repAt = repAt0 ?? repCountRef.current; const at = performance.now();
+      const live = { rate, kind: 'correction', preempt: true, validIf: () => cueStillTrue(repAt, at) };
       const say = (t) => { const s = liveText(t); holdSpeech(estimateSpeechMs(s, rate)); speakRef.current?.(s, live); recentCues.push(s); if (recentCues.length > 8) recentCues.shift(); };
       const local = () => say(localText);
       if (!rule || cueInFlight) { local(); return; }
@@ -446,7 +455,7 @@ export function useExpertExecution({
         cueInFlight = false;
         if (disposed || !countingRef.current) return;
         // the AI answered after a NEW rep — the line is about the past: dropped (never said late)
-        if (repCountRef.current !== repAt) { console.info(`[Coach] stale cue dropped (rep ${repAt}, now ${repCountRef.current})`); return; }
+        if (!cueStillTrue(repAt, at)) { console.info(`[Coach] stale cue dropped (rep ${repAt}, now ${repCountRef.current})`); return; }
         lastCorrectionAt = performance.now();
         say(ai || localText);
       });
