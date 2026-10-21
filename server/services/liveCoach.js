@@ -26,8 +26,11 @@ const getClient = () => (client ||= new Anthropic({ apiKey: process.env.ANTHROPI
 // Measured on the real key (2026-10-19): Sonnet 5 at low effort words a cue in ~1.3–1.6 s in natural,
 // correct Hebrew; Opus 5.5 writes the deepest rest analysis in ~8 s. Haiku 4.5 was fast but its Hebrew
 // coaching had grammar / meaning errors — not good enough for a professional coach.
-// the LIVE words by Haiku 4.5 — measured 2026-10-21 on the real key: a cue 0.6–0.7 s (Sonnet 5: 1.1–1.4 s)
-export const CUE_MODELS = ['claude-haiku-4-5-20251001', 'claude-sonnet-5'];
+// the LIVE words by Sonnet 5 ONLY (owner, 2026-10-21: no Haiku). Speed without a weaker model (measured on the
+// real key): thinking OFF for a live line (0.8–1.0 s vs 1.1–1.5 s at effort low), a short output, a cached system
+// prompt where it is long enough, and a HEDGE — a 2nd identical request only when the 1st is slow (> 1.3 s)
+export const CUE_MODELS = ['claude-sonnet-5'];
+export const CUE_HEDGE_MS = 1300;
 export const CUE_MODEL = CUE_MODELS[0];
 export const DEBRIEF_MODELS = ['claude-opus-5-5', 'claude-sonnet-5'];
 export const MAX_CUE_CHARS = 110;
@@ -186,8 +189,12 @@ Return ONLY JSON: {"speech":"<the spoken analysis>","card":[{"kind":"fix|good|fo
 // (the Claude 5 models think adaptively: `effort` sets how much — low for a sideline cue; no temperature)
 async function ask(model, { system, user }, maxTokens, timeoutMs, effort = null) {
   const res = await getClient().messages.create({
-    model, max_tokens: maxTokens, system, messages: [{ role: 'user', content: user }],
-    ...(effort && !/haiku/.test(model) ? { output_config: { effort } } : {}),     // (Haiku has no effort setting)
+    model, max_tokens: maxTokens,
+    // (the system prompt is cached — cheaper and faster when it passes the model's cache minimum)
+    system: [{ type: 'text', text: system, cache_control: { type: 'ephemeral' } }],
+    messages: [{ role: 'user', content: user }],
+    // 'off' = a live line with NO thinking (the fastest Sonnet answer); otherwise the adaptive effort
+    ...(effort === 'off' ? { thinking: { type: 'disabled' } } : effort ? { output_config: { effort } } : {}),
   }, { timeout: timeoutMs, maxRetries: 0 });
   return (res.content || []).filter(b => b.type === 'text').map(b => b.text).join('').trim();
 }
@@ -221,13 +228,13 @@ export function passWordsFix(s) {
 }
 const PASS_RULE = 'This is a PASS drill: never use the words בעט / תבעט / לבעוט / בעיטה (kick) or יפה — say מסירה / מסור and professional passing terms.';
 
-export async function generateCue(facts, { timeoutMs = 1800, askFn = ask } = {}) {
+export async function generateCue(facts, { timeoutMs = 2500, askFn = ask } = {}) {
   // garbled / empty facts → the AI would guess: never (the device says its own measured line)
   if (!readable(facts?.error?.what)) return null;
   const prompt = buildCuePrompt(facts);
   for (const model of CUE_MODELS) {
     let raw;
-    try { raw = await askFn(model, prompt, 200, timeoutMs, 'low'); } catch (err) { if (isModelError(err)) continue; throw err; }
+    try { raw = await hedged(() => askFn(model, prompt, 80, timeoutMs, 'off'), CUE_HEDGE_MS); } catch (err) { if (isModelError(err)) continue; throw err; }
     const text = String(raw || '').replace(/["“”«»]/g, '').replace(/\s+/g, ' ').trim();
     if (!text || /^SKIP/i.test(text) || text.length > MAX_CUE_CHARS || !numbersGrounded(text, facts) || !directionsKept(text, facts)) return null;
     if (!passWordsOk(text, facts)) return null;                                  // a pass is never a "kick" / "יפה"
@@ -237,7 +244,7 @@ export async function generateCue(facts, { timeoutMs = 1800, askFn = ask } = {})
     let short = null;
     try {
       const again = { system: `${prompt.system}\nYour answer "${clip(text, 120)}" was too long. Say the SAME instruction in at most ${MAX_CUE_WORDS} words — one complete sentence. Output ONLY it.`, user: prompt.user };
-      short = String(await askFn(model, again, 60, 1200, 'low') || '').replace(/["“”«»]/g, '').replace(/\s+/g, ' ').trim();
+      short = String(await askFn(model, again, 60, 1200, 'off') || '').replace(/["“”«»]/g, '').replace(/\s+/g, ' ').trim();
     } catch { short = null; }
     if (short && wordCount(short) <= MAX_CUE_WORDS && !/^SKIP/i.test(short) && numbersGrounded(short, facts) && directionsKept(short, facts) && passWordsOk(short, facts)) return short;
     // (still long: its first whole clause when that alone is a full short instruction; else the device's line)
@@ -247,6 +254,15 @@ export async function generateCue(facts, { timeoutMs = 1800, askFn = ask } = {})
   return null;
 }
 export const MAX_CUE_WORDS = 6;
+/** The first answer of `fn`, with a 2nd identical call started only if the 1st has not answered after `ms`. */
+export function hedged(fn, ms) {
+  return new Promise((resolve, reject) => {
+    let done = false, fails = 0, started = 1;
+    const run = () => fn().then((v) => { if (!done) { done = true; resolve(v); } }, (e) => { if (++fails >= started && !done) { done = true; reject(e); } });
+    run();
+    setTimeout(() => { if (!done) { started = 2; run(); } }, ms);
+  });
+}
 const wordCount = (t) => String(t || '').trim().split(/\s+/).filter(Boolean).length;
 
 /** The spoken briefing of an exercise, or null (the device then says the written explanation). */
@@ -269,7 +285,7 @@ export async function generateBriefing(facts, { timeoutMs = 18000, askFn = ask }
 
 // ---- THE EYES: one frame at the contact of a SHADOW pass (a virtual ball — judge the kicking foot itself) ----
 // the eyes by Haiku 4.5 first (owner, 2026-10-21 — measured: Haiku 3.1–3.4 s, Sonnet 5 2.6–3.5 s on one image)
-export const VISION_MODELS = ['claude-sonnet-5', 'claude-haiku-4-5-20251001'];   // (owner, 2026-10-21: Sonnet for the eyes — Haiku's Hebrew / findings erred)
+export const VISION_MODELS = ['claude-sonnet-5'];   // (owner, 2026-10-21: Sonnet 5 only)
 export function buildPassVisionPrompt(f) {
   const system = `You are an expert football coach and sports physiotherapist judging ONE camera frame taken at the moment of a SHADOW inside-foot PASS (there is no real ball; judge the kicking foot and leg themselves). The kicking leg is the trainee's ${f.side === 'left' ? 'LEFT' : f.side === 'right' ? 'RIGHT' : 'moving'} leg (anatomical side; the image may be mirrored). ${f.body ? `Body: ${clip(f.body, 120)}.` : ''}
 Judge only what is clearly visible. For each item give a value and your confidence 0..1 (below 0.6 when the foot is blurred, cut off or hidden).
@@ -311,10 +327,10 @@ ${f.legsImage ? 'A second image is a close-up of the legs and feet of the same m
 ${f.kickingProsthesis ? `The KICKING leg is the trainee's PROSTHESIS (the ${f.side === 'left' ? 'LEFT' : f.side === 'right' ? 'RIGHT' : ''} leg): its ankle is fixed — NEVER judge or mention the ankle lock, the toes or which surface of the foot meets the ball. Judge the prosthesis kick by its real technique: the swing driven from the HIP (not the knee), the leg turned out from the hip, the weight anchored on the sound support leg, the chest over the ball, the arms for balance.
 ` : ''}${f.isPass || f.kickingProsthesis || isPassFacts(f) ? 'The ball is VIRTUAL (drawn on the screen, not in the camera): never report a missing / unseen ball.\n' : ''}${f.isPass || f.kickingProsthesis ? 'This is a PASS: if it was executed like a POWER KICK (a big back-swing, a knee snap, the leg swinging high / hard) report it as a MAJOR finding "pass_like_kick" — a pass is short, controlled, from the hip.\n' : ''}${isPassFacts(f) ? PASS_RULE + '\n' : ''}${f.goal ? `Today's training goal: ${clip(f.goal, 80)}.\n` : ''}Never praise what was technically wrong.
 Look at the WHOLE body, never the kicking leg alone (owner, 2026-10-21): the CHEST (over the ball / leaning back / collapsed), the overall POSTURE and trunk, the PELVIS (square, rotating, dropping, shifting), the SUPPORT leg (knee soft, foot planted, weight on it), the head and gaze, the arms for balance, and the working leg and foot — anything that prevents a correct, safe execution of THIS exercise. Judge the whole chain: a fault in the chest / posture / pelvis that spoils the movement is as important as the leg. Arms simply hanging beside the body are NOT "hands in the pockets" — report that only if the hands are clearly inside the pockets.
-Report ONLY what is clearly visible. Return ONLY JSON:
-{"findings":[{"code":"short_snake_case","severity":"major|minor","confidence":0.0,"cue":"<${he ? 'Hebrew' : 'English'}, 3-6 words, an instruction for the next rep>","what":"<${he ? 'Hebrew' : 'English'}, at most 6 words: what you saw>"}],
- "good":[{"text":"<${he ? 'Hebrew' : 'English'} 3-7 words of genuine praise for something done well>","confidence":0.0}]${f.isPass ? ',\n "contact":{"value":"inside|laces|toe|unclear","confidence":0.0},"ankleLocked":{"value":true|false|null,"confidence":0.0}' : ''}}
-"major" ONLY = a real injury risk, or a fault in THIS exercise's core technique (for a pass: the contact surface, the swing, the support leg, the body over the ball); for a pass the chest over the ball, the pelvis and the support leg ARE core technique; the arms / the hands = "minor" unless it really endangers or breaks the core technique. The cue: at most 6 words. At most 2 findings, the most important first; at most 1 "good". Be brief — the answer is needed within 2 seconds. Output compact JSON only — no code fences, no text before or after. No numbers. Natural spoken ${he ? 'Hebrew (masculine singular)' : 'English'}. If the body is not clearly visible return {"findings":[],"good":[]}.`;
+Report ONLY what is clearly visible. Return ONLY this COMPACT JSON (short keys — every token costs time):
+{"f":[{"c":"short_snake_case_code","s":"M|m","p":0.0,"q":"<${he ? 'Hebrew' : 'English'}, 3-6 words: the instruction for the next rep>"}],"g":"<${he ? 'Hebrew' : 'English'}, 3-5 words of genuine praise, or empty>","gp":0.0${f.isPass ? ',"ct":"inside|laces|toe|unclear","cp":0.0,"al":true|false|null,"ap":0.0' : ''}}
+("s": "M" = major, "m" = minor; "p" = your confidence 0..1; "gp" = the praise's confidence.)
+"major" ONLY = a real injury risk, or a fault in THIS exercise's core technique (for a pass: the contact surface, the swing, the support leg, the body over the ball); for a pass the chest over the ball, the pelvis and the support leg ARE core technique; the arms / the hands = "minor" unless it really endangers or breaks the core technique. The cue: at most 6 words. At most 2 findings, the most important first; at most 1 "good". Be brief — the answer is needed within 2 seconds. Output compact JSON only — no code fences, no text before or after. No numbers inside the texts. Natural spoken ${he ? 'Hebrew (masculine singular)' : 'English'}. If the body is not clearly visible return {"f":[],"g":""}.`;
   return { system };
 }
 export async function generateBodyVision(f, { timeoutMs = 9000, askFn = null } = {}) {
@@ -329,13 +345,22 @@ export async function generateBodyVision(f, { timeoutMs = 9000, askFn = null } =
     try {
       const raw = askFn ? await askFn(model, system, content)
         : (await getClient().messages.create({
-          model, max_tokens: 320, system, messages: [{ role: 'user', content }],
-          ...(model.startsWith('claude-sonnet-5') ? { output_config: { effort: 'low' } } : {}),
+          model, max_tokens: 200, system: [{ type: 'text', text: system, cache_control: { type: 'ephemeral' } }], messages: [{ role: 'user', content }],
+          thinking: { type: 'disabled' },
         }, { timeout: timeoutMs, maxRetries: 0 })).content.filter(b => b.type === 'text').map(b => b.text).join('');
       const m = String(raw).match(/\{[\s\S]*\}/);
       let j = null;
       try { j = m ? JSON.parse(m[0]) : null; } catch { j = null; }
       if (!j) return null;
+      // the compact answer → the full structure the app uses (the cue doubles as "what" — the rest's log)
+      if (Array.isArray(j.f) || typeof j.g === 'string') {
+        j = {
+          findings: (j.f || []).map(x => ({ code: x?.c, severity: x?.s === 'M' ? 'major' : 'minor', confidence: x?.p, cue: x?.q, what: x?.q })),
+          good: j.g ? [{ text: j.g, confidence: typeof j.gp === 'number' ? j.gp : 0.7 }] : [],
+          contact: j.ct ? { value: j.ct, confidence: j.cp } : null,
+          ankleLocked: j.al !== undefined && j.ap !== undefined ? { value: j.al, confidence: j.ap } : null,
+        };
+      }
       const conf = (x) => (typeof x === 'number' ? Math.max(0, Math.min(1, x)) : 0);
       const txt = (x, n) => clip(x, n).trim();
       // honesty guards on every finding: readable words, no invented numbers, a short cue
