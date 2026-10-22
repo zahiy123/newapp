@@ -52,6 +52,7 @@ export const restOnlyFeedback = (profile) => !!profile && (profile.kind === 'cyc
 export const VISION_CONFIDENCE = 0.75;          // the pass's contact surface / ankle (a fine call)
 export const VISION_BODY_CONFIDENCE = 0.65;     // a body fault the eyes saw (Sonnet's honest scale: a clear fault ≥ 0.8)
 export const VISION_SURE = 0.85;
+export const OPENING_STILL_MIN_MS = 1000;   // the exercise opens on a pass only after standing still ≥ 1 s (never walking in)
 export const VISION_MINOR_SAY = 0.75;
 export const LIVE_CUE_RATE = 1.2;          // an in-set correction is spoken a little faster (short, sharp)      // a minor finding (posture, arms …) is said in the set when the eyes are this sure
 // a pass that did not count but WAS a real attempt (not a twitch): the coach reacts to it (owner, 2026-10-21)
@@ -121,8 +122,7 @@ export function visionRuleHits(v, profile) {
 }
 import { bodyText } from '../../engine/coachBrain/aiFacts';
 import {
-  createStartGate, updateStartGate, isStartPosition, feetStill, openingKickAllowed, footSettled, kickLockOpen, isValidRep, updateWork, withDrive, startPositionPrompt, READY_DRIVE,
-} from '../../engine/training/coachFlow';
+  createStartGate, updateStartGate, isStartPosition, feetStill, openingKickAllowed, footSettled, kickLockOpen, isValidRep, updateWork, withDrive, startPositionPrompt, READY_DRIVE, READY_STILL_MS } from '../../engine/training/coachFlow';
 import { createClipRecorder, recordFrame } from '../../engine/validation/clipRecorder';
 import { createRepEvidence, evidenceFrame, evidenceOk, evidenceAccept, evidenceGroupFor, explainStrike,
   KICK_MAX_WIDTH_CHANGE, KICK_MAX_TRAVEL, KICK_ANCHOR_MAX, STRIKE_MIN_RANGE, STRIKE_MIN_VEL, STRIKE_MIN_PATH, slowOtherLeg, SLOW_OTHER_LEG_DEG_S } from '../../engine/training/repEvidence';
@@ -262,6 +262,7 @@ export function useExpertExecution({
     const feetHist = [];                       // the feet's positions (the ready stance of a kick / pass)
     let lastStance = null;
     let lastStillAt = -1e9;                    // when the feet were last still (the opening pass needs it)
+    let stillSince = null; let lastStillStretch = 0;   // the opening pass: after standing still at the ball ≥ 1 s
     let startedOnce = false;                   // no rep counts before the trainee first reached the start position
     countOpenRef.current = false;
     let tiltCalibrated = false;
@@ -452,6 +453,7 @@ export function useExpertExecution({
             major: seen.find(f => f.severity === 'major' && f.confidence >= VISION_BODY_CONFIDENCE) || null };
           if (!seen.length && goods.length) bodyNow.items = [`(${goods[0].text})`];
         }
+        noteRepErrs(repNo, 'vis', found.filter(f => f.severity === 'major').map(f => f.code));
         if (saidDev) { console.info(`[Coach] the eyes (rep ${repNo}) → the body picture (the pass already has its line)`); return; }
         const cands = [
           ...(passBad && passBad.rule.id !== saidDev ? [{ key: passBad.rule.id, pass: passBad }] : []),
@@ -510,8 +512,22 @@ export function useExpertExecution({
     // the WHOLE BODY as the eyes saw it at the last look (≤ 12 s old) — every live correction links it to the leg
     let bodyNow = { items: [], at: -1e9, major: null };
     const bodyFresh = () => (performance.now() - bodyNow.at <= 12000 ? bodyNow : { items: [], major: null });
+    // the errors of every pass (the device's at the count + the eyes' majors later) → the progress between passes
+    const repErrs = new Map();                   // repNo → { dev: [...ids], vis: [...major codes] }
+    const noteRepErrs = (repNo, part, ids) => { const e = repErrs.get(repNo) || { dev: [], vis: [] }; e[part] = ids; repErrs.set(repNo, e); };
+    /** 'better' when the pass before had MORE / a bigger error that is gone now; 'good' when it had small things only. */
+    const progressOf = (repNo, curIds) => {
+      const prev = repErrs.get(repNo - 1);
+      if (!prev) return null;
+      const prevAll = [...prev.dev, ...prev.vis.map(c => `vis_${c}`)];
+      if (prevAll.length > curIds.length || prevAll.some(id => !curIds.includes(id) && (isMajorRule(ruleById(id)) || id.startsWith('vis_')))) return 'better';
+      if (!prevAll.length) return 'good';
+      return null;
+    };
     const devicePolicy = (list, repNo, res) => {
+      noteRepErrs(repNo, 'dev', list);
       if (restOnly || !countingRef.current || performance.now() < floodUntil || repSaidId.has(repNo)) return;
+      const prog = progressOf(repNo, list);
       const rules = list.map(id => ruleById(id, res)).filter(Boolean)
         .sort((a, b) => (b.severity === 'danger') - (a.severity === 'danger') || isMajorRule(b) - isMajorRule(a));
       // no leg error measured, but the eyes see a MAJOR body fault that keeps happening → the line is about it, now
@@ -520,6 +536,7 @@ export function useExpertExecution({
         const vr = visionRule(bm);
         repSaidId.set(repNo, vr.id);
         console.info(`[Coach] body cue at the count (rep ${repNo}): ${bm.code}`);
+        progressNow = prog;
         sayCorrection(vr, bm.cue, 1.1, isHeRef.current, null, repNo);
         return;
       }
@@ -527,6 +544,7 @@ export function useExpertExecution({
       const top = rules[0];
       repSaidId.set(repNo, top.id);
       console.info(`[Coach] device cue (rep ${repNo}): ${top.id}`);
+      progressNow = prog;
       sayCorrection(top, liveCue(top, isHeRef.current), 1.1, isHeRef.current, null, repNo);
     };
     // a HOLD (a plank, a wall sit): the coach looks every few seconds of the hold
@@ -538,6 +556,7 @@ export function useExpertExecution({
     let disposed = false; let cueInFlight = false;
     const recentCues = [];
     const cueHistory = {};                          // rule id → what was already said about it (this set)
+    let progressNow = null;                          // this pass vs the one before: 'better' / 'good' (for the next cue)
     const cueFactsFor = (rule, he, tone = null) => {
       const facts = cueFacts({
         rule, profile, lp: limbProfile || {}, exercise: exerciseName, sport: contextsKey,
@@ -545,6 +564,7 @@ export function useExpertExecution({
       });
       if (rule?.id && (cueHistory[rule.id] || []).length) facts.previousForThisError = cueHistory[rule.id].slice(-3);
       const bn = bodyFresh().items; if (bn.length) facts.bodyNow = bn;
+      if (progressNow) { facts.progress = progressNow; progressNow = null; }
       if (tone) facts.tone = tone;
       if (isPassDrill) facts.isPass = true;
       if (profile.kind === 'strike' && isProstheticLeg(limbProfile || {}, activeLegRef.current)) facts.kickingProsthesis = true;
@@ -634,7 +654,8 @@ export function useExpertExecution({
           const stand = lm && [[23, 25], [24, 26]].some(([h, k]) => lm[h] && lm[k] && (lm[k].visibility ?? 0) >= 0.4 && lm[h].y < lm[k].y);
           stance = { still: feetStill(feetHist, now), standing: !!stand };
           lastStance = stance;
-          if (stance.still) lastStillAt = now;
+          if (stance.still) { if (stillSince === null) stillSince = now; lastStillAt = now; lastStillStretch = now - stillSince + READY_STILL_MS; }
+          else stillSince = null;
         }
         const inStart = r.inView && isStartPosition(profile, r.metrics, stance);
         startReadyRef.current = updateStartGate(gate, { positioned: r.inView, confident: r.quality?.confident, inStart }, now);
@@ -642,7 +663,7 @@ export function useExpertExecution({
         // a coach starts when you START: a real kick / pass IN PLACE (one leg, the pelvis still, with its
         // kinetic evidence) while seen clearly opens the exercise at once — and that kick counts
         if (!startedOnce && profile.kind === 'strike' && r.inView && !r.setup && r.quality?.confident !== false
-          && openingKickAllowed(lastStillAt, now)
+          && openingKickAllowed(lastStillAt, now) && lastStillStretch >= OPENING_STILL_MIN_MS
           && r.events.some(ev => ev.type === 'strike') && evidenceOk(kinetic, now, { strike: true, kick: true })) {
           startedOnce = true;
         }
@@ -694,7 +715,7 @@ export function useExpertExecution({
                 : now < floodUntil ? `flood — ${strikeTimes.length} kicks in ${FLOOD_MS / 1000} s: wild pace, not counted`
                 : stepNotPass ? `a step, not a pass — the ${why.place.side} leg (not the set's leg) moved slowly ${why.swing.peakVel}°/s (< ${SLOW_OTHER_LEG_DEG_S})`
                 : counts ? 'ok'
-                : !P.ok ? (P.reason === 'walk-depth' ? `walking toward/away — shoulders width changed ${Math.round((P.widthChange || 0) * 100)}% (max ${Math.round(KICK_MAX_WIDTH_CHANGE * 100)}%)`
+                : !P.ok ? (P.reason === 'walk-depth' ? `walking toward/away — the torso's length changed ${Math.round((P.torsoChange || 0) * 100)}% (max 18%)`
                   : P.reason === 'walk-across' ? `walking across — pelvis moved ${P.travel} torso (max ${P.travelMax ?? KICK_MAX_TRAVEL})`
                   : `support foot not planted — moved ${P.anchor} torso (max ${P.anchorMax ?? KICK_ANCHOR_MAX}), kicking foot path ${P.kick}`)
                 : !S.ok ? `swing too small — range ${S.range}° (min ${STRIKE_MIN_RANGE}), speed ${S.peakVel}°/s (min ${STRIKE_MIN_VEL}), path ${S.path} (min ${STRIKE_MIN_PATH})`

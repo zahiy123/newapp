@@ -58,7 +58,7 @@ describe('the exact reason of a rejected kick (the console line)', () => {
   it('walking across → walk-across; toward the camera → not in place (the anchor) — never by the shoulders width; a pass in place → ok', () => {
     expect(inPlaceCheck(run([-10, -22, -12, 8, 25].map((d, i) => legBody(d, { dx: i * 0.04 }))).ev).reason).toBe('walk-across');
     const toward = inPlaceCheck(run([-10, -22, -12, 8, 25].map((d, i) => legBody(d, { scale: 1 + i * 0.08 }))).ev);
-    expect(toward.reason).not.toBe('walk-depth');                         // (the shoulders-width rule is gone)
+    expect(toward.reason).toBe('walk-depth');                             // (owner 2026-10-22: by the TORSO's length, not the shoulders' width)
     expect(toward.ok).toBe(false);                                         // walking is still rejected — by the anchor / the pelvis
     const ok = inPlaceCheck(run([0, -10, -22, -12, 8, 25].map(d => legBody(d))).ev);
     expect(ok.ok).toBe(true);
@@ -257,5 +257,20 @@ describe('owner 2026-10-21 (e): a step is not a pass; the support foot by the pa
     const frames = [0, -10, -22, -12, 8, 25].map((d, i) => { const lm = legBody(d); lm[27] = { x: 0.45 + i * 0.02, y: 0.9, visibility: 0.95 }; return lm; });
     const c = inPlaceCheck(run(frames, 60).ev);
     expect([0.45, 0.5]).toContain(c.anchorMax);
+  });
+});
+
+describe('owner 2026-10-22: walking toward the camera is not a pass; the other leg only when fast', () => {
+  it('the torso grows in the picture (walking in) → walk-depth; a pass in place keeps it', () => {
+    const toward = inPlaceCheck(run([-10, -22, -12, 8, 25].map((d, i) => legBody(d, { scale: 1 + i * 0.08 }))).ev);
+    expect(toward.ok).toBe(false);
+    const inPlace = inPlaceCheck(run([0, -10, -22, -12, 8, 25].map(d => legBody(d))).ev);
+    expect(inPlace.ok).toBe(true);
+    expect(inPlace.torsoChange).toBeLessThan(0.18);
+  });
+  it('the leg that is not the set leg counts only at >= 350 deg/s', async () => {
+    const { slowOtherLeg } = await import('../training/repEvidence');
+    expect(slowOtherLeg({ place: { side: 'left' }, swing: { peakVel: 283 } }, 'right')).toBe(true);
+    expect(slowOtherLeg({ place: { side: 'left' }, swing: { peakVel: 420 } }, 'right')).toBe(false);
   });
 });

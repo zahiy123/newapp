@@ -153,6 +153,7 @@ export const KICK_MAX_TRAVEL_FAST = 0.45;     // a FAST strong pass (>= 350 deg/
 export const KICK_OTHER_KNEE_DEG = 25;
 export const KICK_DOMINANCE = 0.6;
 export const KICK_MAX_WIDTH_CHANGE = 0.18;
+export const KICK_MAX_TORSO_CHANGE = 0.18;   // the shoulder→hip length changes more → walking toward / away
 export const KICK_ANCHOR_MAX = 0.3;
 // a FAST, strong pass (>= 350 deg/s) moves the whole body a little - the support foot may shift up to this (owner, 2026-10-21)
 export const KICK_ANCHOR_MAX_FAST = 0.5;
@@ -160,7 +161,7 @@ export const KICK_FAST_SWING_DEG_S = 350;
 export const KICK_MID_SWING_DEG_S = 250;
 export const KICK_ANCHOR_MAX_MID = 0.45;
 // a SLOW move (< 150 °/s) of the leg that is NOT the set's leg is a step / a stance adjustment — never a pass
-export const SLOW_OTHER_LEG_DEG_S = 150;
+export const SLOW_OTHER_LEG_DEG_S = 350;     // (owner, 2026-10-22: was 150 — a 283 °/s prosthesis move counted in a right-leg set)
 export function slowOtherLeg(why, setLeg) {
   const side = why?.place?.side;
   return !!setLeg && !!side && side !== setLeg && (why?.swing?.peakVel || 0) < SLOW_OTHER_LEG_DEG_S;
@@ -194,6 +195,11 @@ export function inPlaceCheck(ev) {
   const hips = fr.map(f => f.hip).filter(Boolean);
   const torsos = fr.map(f => f.torso).filter(Number.isFinite);
   const torso = torsos.length ? torsos.reduce((a, b) => a + b, 0) / torsos.length : null;
+  if (torsos.length >= 3) {
+    const tmed = [...torsos].sort((x, y) => x - y)[Math.floor(torsos.length / 2)];
+    if (tmed > 0) out.torsoChange = Math.round((spread(torsos) / tmed) * 100) / 100;
+    if (out.torsoChange > KICK_MAX_TORSO_CHANGE) return { ...out, reason: 'walk-depth' };
+  }
   if (hips.length >= 2 && torso) {
     const travel = Math.hypot(spread(hips.map(h => h.x)), spread(hips.map(h => h.y)));
     out.travel = Math.round((travel / torso) * 100) / 100;
