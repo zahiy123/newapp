@@ -126,7 +126,7 @@ Do not repeat or paraphrase closely any of the recent lines listed. Output ONLY 
   const system = `${COACH_PERSONA(he)}
 ${isPassFacts(f) ? PASS_RULE + '\n' : ''}NOW: the trainee is IN THE MIDDLE OF A SET. Give ONE immediate correction, like a shout from the sideline of the best professional coach: sharp, technical, specific to THIS rep — 3 to 5 words (never more than 6), ONE COMPLETE short sentence, NO name.
 WHOLE BODY, ONE CHAIN (owner, 2026-10-21): "error" is what the device MEASURED (the leg / the movement); "bodyNow" is what the coach's eyes see in the WHOLE body (chest, pelvis, posture, support leg). Treat them as ONE movement chain: when the body causes the leg error (e.g. the chest leaning back → the leg swings up; the pelvis open → the foot does not turn out), name the ROOT in the body and its effect on the leg in one instruction; otherwise give the single most important fix. Never generic, never filler, never a vague 'focus' — a concrete action a top coach would shout.
-"progress" (owner, 2026-10-22): 'better' = this pass improved on the one before; 'good' = the pass before was clean / had small things only → OPEN with a short, genuine acknowledgement (1–2 words, e.g. 'יותר טוב!', 'עבודה טובה!') and then the ONE remaining fix — still at most 6 words in all. Without "progress": no praise words.
+"progress" (owner, 2026-10-22): 'better' = this pass improved on the one before; 'good' = the pass before was clean / had small things only → OPEN with a short, genuine acknowledgement (1–2 words, e.g. 'יותר טוב!', 'עבודה טובה!') and then the ONE remaining fix — the fix itself at most 6 words. Without "progress": no praise words.
 TWO LEGS: when an instruction touches both legs, NAME each leg explicitly — 'רגל עמידה' (the support leg) / 'רגל בועטת' (the kicking leg) — never one vague 'the knee' / 'the foot' that could be either.
 TERMS: only real football coaching terms — תנופה (the swing), מגע (the contact), פנים כף הרגל (the inside of the foot), גב כף הרגל (the laces), קרסול נעול, רגל עמידה, רגל בועטת, חזה מעל הכדור, המשך תנועה (the follow-through); never invented / odd words (e.g. never 'נדנוד') (it must be SAID in under 2 seconds, the next pass is coming; the deep why / how is said in the rest). It must tell them what to do on the very next rep — exactly the instruction of "what" / "how", nothing else.
 ${f.tone === 'calm' ? 'The trainee is tired / frustrated right now: say it calmly and supportively, one simple thing.' : ''}
@@ -245,14 +245,16 @@ export async function generateCue(facts, { timeoutMs = 2500, askFn = ask } = {})
     if (!text || /^SKIP/i.test(text) || text.length > MAX_CUE_CHARS || !numbersGrounded(text, facts) || !directionsKept(text, facts)) return null;
     if (!passWordsOk(text, facts)) return null;                                  // a pass is never a "kick" / "יפה"
     if ((facts.recent || []).some(r => r && r.trim() === text)) return null;   // never the same words twice
-    if (wordCount(text) <= MAX_CUE_WORDS || facts.mode) return text;
+    // (a short praise opener on progress — 'יותר טוב!' — is not counted in the fix's 6 words)
+    const maxWords = MAX_CUE_WORDS + (facts.progress === 'better' || facts.progress === 'good' ? 2 : 0);
+    if (wordCount(text) <= maxWords || facts.mode) return text;
     // too long (owner, 2026-10-21): the SAME instruction asked again, at most 6 words, whole (never a cut sentence)
     let short = null;
     try {
       const again = { system: `${prompt.system}\nYour answer "${clip(text, 120)}" was too long. Say the SAME instruction in at most ${MAX_CUE_WORDS} words — one complete sentence. Output ONLY it.`, user: prompt.user };
       short = String(await askFn(model, again, 60, 1200, 'off') || '').replace(/["“”«»]/g, '').replace(/\s+/g, ' ').trim();
     } catch { short = null; }
-    if (short && wordCount(short) <= MAX_CUE_WORDS && !/^SKIP/i.test(short) && numbersGrounded(short, facts) && directionsKept(short, facts) && passWordsOk(short, facts)) return short;
+    if (short && wordCount(short) <= maxWords && !/^SKIP/i.test(short) && numbersGrounded(short, facts) && directionsKept(short, facts) && passWordsOk(short, facts)) return short;
     // (still long: its first whole clause when that alone is a full short instruction; else the device's line)
     const first = text.split(/[,—–;.!]/)[0].trim();
     return wordCount(first) >= 3 && wordCount(first) <= MAX_CUE_WORDS ? first : null;
