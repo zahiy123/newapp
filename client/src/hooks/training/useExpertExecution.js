@@ -58,7 +58,7 @@ export const LIVE_CUE_RATE = 1.2;          // an in-set correction is spoken a l
 // a pass that did not count but WAS a real attempt (not a twitch): the coach reacts to it (owner, 2026-10-21)
 export const ATTEMPT_MIN_RANGE = 12;      // deg
 export const ATTEMPT_MIN_PATH = 0.1;      // torso lengths
-export const ATTEMPT_CUE_GAP_MS = 4000;
+export const ATTEMPT_CUE_GAP_MS = 8000;      // an uncounted pass is answered at most every 8 s (owner, 2026-10-22)
 /** The rule told for an uncounted pass: too small / the body moved / the support foot moved. */
 export function uncountedPassRule(kind, pass = true) {
   const what = pass ? 'מסירה' : 'בעיטה', whatEn = pass ? 'pass' : 'kick';
@@ -420,7 +420,7 @@ export function useExpertExecution({
       const emphasis = (profile.sportEmphasis || []).map(e => e?.he || e?.text || '').filter(Boolean).slice(0, 4);
       aiBodyVision({ frame, legsFrame, composite, isPass, passDrill: isPassDrill, kickingProsthesis: kickProsthesis, lang: he0 ? 'he' : 'en', side: leg,
         exercise: exerciseName, sport: contextsKey, body: bodyText(limbProfile || {}), keyPoints: [...kp, ...emphasis], goal: sessionGoalRef.current || '',
-        name: nameRef.current }).then((v) => {
+        name: nameRef.current, recent: recentCues.slice(-4) }).then((v) => {
         visionInFlight = Math.max(0, visionInFlight - 1);
         if (disposed || !v) return;
         const hits = isPass ? visionRuleHits(v, profile) : [];
@@ -453,7 +453,6 @@ export function useExpertExecution({
             major: seen.find(f => f.severity === 'major' && f.confidence >= VISION_BODY_CONFIDENCE) || null };
           if (!seen.length && goods.length) bodyNow.items = [`(${goods[0].text})`];
         }
-        noteRepErrs(repNo, 'vis', found.filter(f => f.severity === 'major').map(f => f.code));
         if (saidDev) { console.info(`[Coach] the eyes (rep ${repNo}) → the body picture (the pass already has its line)`); return; }
         const cands = [
           ...(passBad && passBad.rule.id !== saidDev ? [{ key: passBad.rule.id, pass: passBad }] : []),
@@ -512,22 +511,8 @@ export function useExpertExecution({
     // the WHOLE BODY as the eyes saw it at the last look (≤ 12 s old) — every live correction links it to the leg
     let bodyNow = { items: [], at: -1e9, major: null };
     const bodyFresh = () => (performance.now() - bodyNow.at <= 12000 ? bodyNow : { items: [], major: null });
-    // the errors of every pass (the device's at the count + the eyes' majors later) → the progress between passes
-    const repErrs = new Map();                   // repNo → { dev: [...ids], vis: [...major codes] }
-    const noteRepErrs = (repNo, part, ids) => { const e = repErrs.get(repNo) || { dev: [], vis: [] }; e[part] = ids; repErrs.set(repNo, e); };
-    /** 'better' when the pass before had MORE / a bigger error that is gone now; 'good' when it had small things only. */
-    const progressOf = (repNo, curIds) => {
-      const prev = repErrs.get(repNo - 1);
-      if (!prev) return null;
-      const prevAll = [...prev.dev, ...prev.vis.map(c => `vis_${c}`)];
-      if (prevAll.length > curIds.length || prevAll.some(id => !curIds.includes(id) && (isMajorRule(ruleById(id)) || id.startsWith('vis_')))) return 'better';
-      if (!prevAll.length) return 'good';
-      return null;
-    };
     const devicePolicy = (list, repNo, res) => {
-      noteRepErrs(repNo, 'dev', list);
       if (restOnly || !countingRef.current || performance.now() < floodUntil || repSaidId.has(repNo)) return;
-      const prog = progressOf(repNo, list);
       const rules = list.map(id => ruleById(id, res)).filter(Boolean)
         .sort((a, b) => (b.severity === 'danger') - (a.severity === 'danger') || isMajorRule(b) - isMajorRule(a));
       // no leg error measured, but the eyes see a MAJOR body fault that keeps happening → the line is about it, now
@@ -536,7 +521,6 @@ export function useExpertExecution({
         const vr = visionRule(bm);
         repSaidId.set(repNo, vr.id);
         console.info(`[Coach] body cue at the count (rep ${repNo}): ${bm.code}`);
-        progressNow = prog;
         sayCorrection(vr, bm.cue, 1.1, isHeRef.current, null, repNo);
         return;
       }
@@ -544,7 +528,6 @@ export function useExpertExecution({
       const top = rules[0];
       repSaidId.set(repNo, top.id);
       console.info(`[Coach] device cue (rep ${repNo}): ${top.id}`);
-      progressNow = prog;
       sayCorrection(top, liveCue(top, isHeRef.current), 1.1, isHeRef.current, null, repNo);
     };
     // a HOLD (a plank, a wall sit): the coach looks every few seconds of the hold
@@ -556,7 +539,6 @@ export function useExpertExecution({
     let disposed = false; let cueInFlight = false;
     const recentCues = [];
     const cueHistory = {};                          // rule id → what was already said about it (this set)
-    let progressNow = null;                          // this pass vs the one before: 'better' / 'good' (for the next cue)
     const cueFactsFor = (rule, he, tone = null) => {
       const facts = cueFacts({
         rule, profile, lp: limbProfile || {}, exercise: exerciseName, sport: contextsKey,
@@ -564,7 +546,7 @@ export function useExpertExecution({
       });
       if (rule?.id && (cueHistory[rule.id] || []).length) facts.previousForThisError = cueHistory[rule.id].slice(-3);
       const bn = bodyFresh().items; if (bn.length) facts.bodyNow = bn;
-      if (progressNow) { facts.progress = progressNow; progressNow = null; }
+
       if (tone) facts.tone = tone;
       if (isPassDrill) facts.isPass = true;
       if (profile.kind === 'strike' && isProstheticLeg(limbProfile || {}, activeLegRef.current)) facts.kickingProsthesis = true;
@@ -590,8 +572,9 @@ export function useExpertExecution({
       aiCue(cueFactsFor(rule, he, tone)).then((ai) => {
         if (disposed || !countingRef.current) return;
         if (!cueStillTrue(repAt, at)) { console.info(`[Coach] stale cue dropped (rep ${repAt}, now ${repCountRef.current})`); return; }
+        if (!ai) { console.info(`[Coach] the AI did not answer in time — no line for this pass (never a fixed sentence): ${rule?.id || '-'}`); return; }
         lastCorrectionAt = performance.now();
-        say(ai || localText, ai ? 'AI live' : 'device (AI failed)');
+        say(ai, 'AI live');
       });
     };
     // positioning / start / ready lines are worded by the AI too (the device decides WHAT; the line is

@@ -125,16 +125,12 @@ Do not repeat or paraphrase closely any of the recent lines listed. Output ONLY 
   }
   const system = `${COACH_PERSONA(he)}
 ${isPassFacts(f) ? PASS_RULE + '\n' : ''}NOW: the trainee is IN THE MIDDLE OF A SET. Give ONE immediate correction, like a shout from the sideline of the best professional coach: sharp, technical, specific to THIS rep — 3 to 5 words (never more than 6), ONE COMPLETE short sentence, NO name.
-WHOLE BODY, ONE CHAIN (owner, 2026-10-21): "error" is what the device MEASURED (the leg / the movement); "bodyNow" is what the coach's eyes see in the WHOLE body (chest, pelvis, posture, support leg). Treat them as ONE movement chain: when the body causes the leg error (e.g. the chest leaning back → the leg swings up; the pelvis open → the foot does not turn out), name the ROOT in the body and its effect on the leg in one instruction; otherwise give the single most important fix. Never generic, never filler, never a vague 'focus' — a concrete action a top coach would shout.
-"progress" (owner, 2026-10-22): 'better' = this pass improved on the one before; 'good' = the pass before was clean / had small things only → OPEN with a short, genuine acknowledgement (1–2 words, e.g. 'יותר טוב!', 'עבודה טובה!') and then the ONE remaining fix — the fix itself at most 6 words. Without "progress": no praise words.
-TWO LEGS: when an instruction touches both legs, NAME each leg explicitly — 'רגל עמידה' (the support leg) / 'רגל בועטת' (the kicking leg) — never one vague 'the knee' / 'the foot' that could be either.
-TERMS: only real football coaching terms — תנופה (the swing), מגע (the contact), פנים כף הרגל (the inside of the foot), גב כף הרגל (the laces), קרסול נעול, רגל עמידה, רגל בועטת, חזה מעל הכדור, המשך תנועה (the follow-through); never invented / odd words (e.g. never 'נדנוד') (it must be SAID in under 2 seconds, the next pass is coming; the deep why / how is said in the rest). It must tell them what to do on the very next rep — exactly the instruction of "what" / "how", nothing else.
+WHOLE BODY, ONE CHAIN (owner, 2026-10-21): "error" is what the device MEASURED (the leg / the movement); "bodyNow" is what the coach's eyes see in the WHOLE body (chest, pelvis, posture, support leg). Treat them as ONE movement chain: when the body causes the leg error (e.g. the chest leaning back → the leg swings up; the pelvis open → the foot does not turn out), name the ROOT in the body and its effect on the leg in one instruction; otherwise give the single most important fix. Never generic, never filler, never a vague 'focus' — a concrete action a top coach would shout (it must be SAID in under 2 seconds, the next pass is coming; the deep why / how is said in the rest). It must tell them what to do on the very next rep — exactly the instruction of "what" / "how", nothing else.
 ${f.tone === 'calm' ? 'The trainee is tired / frustrated right now: say it calmly and supportively, one simple thing.' : ''}
 Do not repeat or paraphrase closely any of the recent cues listed.${(f.previousForThisError || []).length ? ' This SAME error is repeating — "previousForThisError" lists what you already told; give the same fix from a DIFFERENT angle (another body part of the chain, an external focus, a feel / image), never the same words or the same structure.' : ''} Output ONLY the spoken sentence.`;
   const user = JSON.stringify({
     exercise: clip(f.exercise, 80), sport: clip(f.sport, 40), body: clip(f.body, 120),
     previousForThisError: (f.previousForThisError || []).slice(-3).map(x => clip(x, 90)),
-    progress: f.progress === 'better' || f.progress === 'good' ? f.progress : null,
     bodyNow: (f.bodyNow || []).slice(0, 3).map(x => clip(x, 80)),
     side: f.side === 'left' || f.side === 'right' ? f.side : null,
     kickingProsthesis: !!f.kickingProsthesis,
@@ -234,7 +230,7 @@ export function passWordsFix(s) {
 }
 const PASS_RULE = 'This is a PASS drill: never use the words בעט / תבעט / לבעוט / בעיטה (kick) or יפה — say מסירה / מסור and professional passing terms.';
 
-export async function generateCue(facts, { timeoutMs = 2500, askFn = ask } = {}) {
+export async function generateCue(facts, { timeoutMs = 3000, askFn = ask } = {}) {
   // garbled / empty facts → the AI would guess: never (the device says its own measured line)
   if (!readable(facts?.error?.what)) return null;
   const prompt = buildCuePrompt(facts);
@@ -245,16 +241,14 @@ export async function generateCue(facts, { timeoutMs = 2500, askFn = ask } = {})
     if (!text || /^SKIP/i.test(text) || text.length > MAX_CUE_CHARS || !numbersGrounded(text, facts) || !directionsKept(text, facts)) return null;
     if (!passWordsOk(text, facts)) return null;                                  // a pass is never a "kick" / "יפה"
     if ((facts.recent || []).some(r => r && r.trim() === text)) return null;   // never the same words twice
-    // (a short praise opener on progress — 'יותר טוב!' — is not counted in the fix's 6 words)
-    const maxWords = MAX_CUE_WORDS + (facts.progress === 'better' || facts.progress === 'good' ? 2 : 0);
-    if (wordCount(text) <= maxWords || facts.mode) return text;
+    if (wordCount(text) <= MAX_CUE_WORDS || facts.mode) return text;
     // too long (owner, 2026-10-21): the SAME instruction asked again, at most 6 words, whole (never a cut sentence)
     let short = null;
     try {
       const again = { system: `${prompt.system}\nYour answer "${clip(text, 120)}" was too long. Say the SAME instruction in at most ${MAX_CUE_WORDS} words — one complete sentence. Output ONLY it.`, user: prompt.user };
       short = String(await askFn(model, again, 60, 1200, 'off') || '').replace(/["“”«»]/g, '').replace(/\s+/g, ' ').trim();
     } catch { short = null; }
-    if (short && wordCount(short) <= maxWords && !/^SKIP/i.test(short) && numbersGrounded(short, facts) && directionsKept(short, facts) && passWordsOk(short, facts)) return short;
+    if (short && wordCount(short) <= MAX_CUE_WORDS && !/^SKIP/i.test(short) && numbersGrounded(short, facts) && directionsKept(short, facts) && passWordsOk(short, facts)) return short;
     // (still long: its first whole clause when that alone is a full short instruction; else the device's line)
     const first = text.split(/[,—–;.!]/)[0].trim();
     return wordCount(first) >= 3 && wordCount(first) <= MAX_CUE_WORDS ? first : null;
@@ -339,7 +333,6 @@ Look at the WHOLE body, never the kicking leg alone (owner, 2026-10-21): the CHE
 Report ONLY what is clearly visible. Return ONLY this COMPACT JSON (short keys — every token costs time):
 {"f":[{"c":"short_snake_case_code","s":"M|m","p":0.0,"w":"<${he ? 'Hebrew' : 'English'}, at most 6 words: what you saw>","q":"<${he ? 'Hebrew' : 'English'}, 3-6 words: ONE whole-chain instruction for the next rep — link the body to the leg when they are connected (e.g. the chest back → the leg swings up)>"}],"g":"<${he ? 'Hebrew' : 'English'}, 3-5 words of genuine praise, or empty>","gp":0.0${f.isPass ? ',"ct":"inside|laces|toe|unclear","cp":0.0,"al":true|false|null,"ap":0.0' : ''}}
 ("s": "M" = major, "m" = minor; "p" = how sure you are it is REALLY visible in this frame: 0.9 = clearly seen, 0.75 = seen, 0.5 = a guess — be honest, a clear fault is 0.8+; "gp" = the praise's confidence.)
-In "q" name each leg explicitly when it matters ('רגל עמידה' / 'רגל בועטת'), and use only real football terms (תנופה, מגע, פנים כף הרגל, רגל עמידה, רגל בועטת, חזה מעל הכדור, המשך תנועה) — never odd words.
 Coach like the best professional: see the movement as ONE chain (support foot → knee → pelvis → chest → the working leg → the foot); name the ROOT cause of what went wrong, not a symptom; precise football terms, never generic filler.
 "major" ONLY = a real injury risk, or a fault in THIS exercise's core technique (for a pass: the contact surface, the swing, the support leg, the body over the ball); for a pass the chest over the ball, the pelvis and the support leg ARE core technique; the arms / the hands = "minor" unless it really endangers or breaks the core technique. The cue: at most 6 words. At most 2 findings, the most important first; at most 1 "good". Be brief — the answer is needed within 2 seconds. Output compact JSON only — no code fences, no text before or after. No numbers inside the texts. Natural spoken ${he ? 'Hebrew (masculine singular)' : 'English'}. If the body is not clearly visible return {"f":[],"g":""}.`;
   return { system };
@@ -351,7 +344,8 @@ export async function generateBodyVision(f, { timeoutMs = 9000, askFn = null } =
   const { system } = buildBodyVisionPrompt({ ...f, isPass: f.isPass && !f.kickingProsthesis, legsImage: legs.length > 1000 });
   const content = [{ type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: frame } }];
   if (legs.length > 1000 && legs.length < 600000) content.push({ type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: legs } });
-  content.push({ type: 'text', text: 'Judge this moment.' });
+  const said = (Array.isArray(f.recent) ? f.recent : []).slice(-4).map(x => clip(x, 80)).filter(Boolean);
+  content.push({ type: 'text', text: said.length ? `Judge this moment. Already told this set (if the same fault repeats, give the fix from a DIFFERENT angle — never these words): ${said.join(' | ')}` : 'Judge this moment.' });
   for (const model of VISION_MODELS) {
     try {
       const raw = askFn ? await askFn(model, system, content)
