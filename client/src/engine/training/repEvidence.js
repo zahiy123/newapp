@@ -74,8 +74,9 @@ export function createRepEvidence(group = 'all') {
 }
 
 /** One frame: per joint — its angle and its end point (real proportions), when really seen; the torso. */
-export function evidenceFrame(ev, lm, t) {
-  if (!ev || !lm) return ev;
+export function evidenceFrame(ev, lm0, t) {
+  if (!ev || !lm0) return ev;
+  const { lm, swapped } = repairLegLabels(ev, lm0);
   const k = frameAspect();
   const a = [], e = [];
   for (const [x, y, z] of JOINTS) {
@@ -89,7 +90,7 @@ export function evidenceFrame(ev, lm, t) {
   const hip = hp.length ? avg(hp) : null;                       // the pelvis (does the body travel?)
   // the shoulders' width in the picture: steady in a pass, it grows / shrinks when walking toward / away
   const shoulderW = seen(lm[11]) && seen(lm[12]) ? Math.abs(lm[11].x - lm[12].x) * k : null;
-  ev.frames.push({ t, a, e, torso, hip, shoulderW });
+  ev.frames.push({ t, a, e, torso, hip, shoulderW, swapped });
   while (ev.frames.length && t - ev.frames[0].t > WINDOW_MS) ev.frames.shift();
   return ev;
 }
@@ -212,19 +213,19 @@ export function inPlaceCheck(ev) {
   // never by its joint angles (a prosthetic knee reads noisy, the hip turns in every real pass: "both legs moved"
   // rejected real passes). The kicking foot = the one that travelled most; the other foot must stay put. A support
   // the camera does not see as a foot (crutches, an absent limb) is not judged — the pelvis guard above still is.
-  const footPath = (j) => { let p = 0, prev = null; for (const f of fr) { const e = f.e[j]; if (e && prev) p += Math.hypot(e.x - prev.x, e.y - prev.y); if (e) prev = e; } return p; };
-  const footSpread = (j) => { const pts = fr.map(f => f.e[j]).filter(Boolean); return pts.length >= 3 ? Math.hypot(spread(pts.map(p => p.x)), spread(pts.map(p => p.y))) : null; };
-  // the kicking leg: the SET's leg (ev.activeLeg - a whole set per leg by plan) unless the other foot clearly
-  // travelled more (>= 1.6x: really the other leg kicked); else the foot that travelled most (field video
-  // 2026-10-21: a right-leg pass logged "left" - the support foot shifted, then the kicking foot was judged as the anchor)
-  const pathL = footPath(6), pathR = footPath(7);
+  // the kicking leg: the SET's leg unless the other foot clearly travelled more (≥ 1.6×); the labels were repaired
+  // per frame (`repairLegLabels` — owner, 2026-10-25: the pose model swapped the legs in a pass)
+  const pathOf = (j) => pathLen(fr.map(f => f.e[j]));
+  const pathL = pathOf(6), pathR = pathOf(7);
   const setJ = ev?.activeLeg === 'left' ? 6 : ev?.activeLeg === 'right' ? 7 : null;
   const kickJ = setJ !== null ? ((setJ === 6 ? pathR : pathL) >= 1.6 * (setJ === 6 ? pathL : pathR) ? (setJ === 6 ? 7 : 6) : setJ)
     : (pathL >= pathR ? 6 : 7);
-  const supportJ = kickJ === 6 ? 7 : 6;
-  const anchor = footSpread(supportJ);
-  out.kick = torso ? Math.round((footPath(kickJ) / torso) * 100) / 100 : null;
-  out.side = kickJ === 6 ? 'left' : 'right';             // the kicking leg = the foot that travelled (never a jumping label)
+  const kickPts = fr.map(f => f.e[kickJ]), supportPts = fr.map(f => f.e[kickJ === 6 ? 7 : 6]);
+  out.swapped = fr.some(f => f.swapped);
+  const sp = supportPts.filter(Boolean);
+  const anchor = sp.length >= 3 ? Math.hypot(spread(sp.map(p => p.x)), spread(sp.map(p => p.y))) : null;
+  out.kick = torso ? Math.round((pathLen(kickPts) / torso) * 100) / 100 : null;
+  out.side = kickJ === 6 ? 'left' : 'right';
   out.anchor = anchor !== null && torso ? Math.round((anchor / torso) * 100) / 100 : null;
   // the support foot may shift more in a faster pass: < 250 °/s 0.3 · 250–350 °/s 0.45 · ≥ 350 °/s 0.5 (owner, 2026-10-21)
   const pv = strikeSwing(ev).peakVel;
@@ -268,6 +269,30 @@ export function strikeSwing(ev) {
     if (ok && !best.ok || (ok === best.ok && range > best.range)) best = { ok, range: Math.round(range), peakVel: Math.round(peakVel), path: Math.round(path * 100) / 100 };
   }
   return best;
+}
+
+const pathLen = (pts) => { let p = 0, prev = null; for (const e of pts) { if (e && prev) p += Math.hypot(e.x - prev.x, e.y - prev.y); if (e) prev = e; } return p; };
+/**
+ * Repair a left / right swap of the legs in one pose frame (owner, 2026-10-25: a real right pass read as the left
+ * leg). Anatomy, not continuity: (1) the hips never cross — their left / right order is the one seen first; when it
+ * flips, the whole legs' labels are swapped back; (2) an ankle belongs to the knee it hangs from — when each ankle is
+ * clearly nearer the OTHER knee, the ankles' labels are swapped back. Returns a repaired copy (or the same lm).
+ */
+export function repairLegLabels(ev, lm) {
+  const ok = (p) => p && (p.visibility ?? 1) >= 0.3;
+  let out = lm, swapped = false;
+  const swap = (pairs) => { if (out === lm) out = lm.slice(); for (const [i, j] of pairs) [out[i], out[j]] = [out[j], out[i]]; swapped = true; };
+  if (ok(lm[23]) && ok(lm[24])) {
+    const sign = Math.sign(lm[24].x - lm[23].x);
+    if (sign && ev.hipSign == null) ev.hipSign = sign;
+    else if (sign && sign !== ev.hipSign && Math.abs(lm[24].x - lm[23].x) > 0.02) swap([[23, 24], [25, 26], [27, 28], [29, 30], [31, 32]]);
+  }
+  const kL = out[25], kR = out[26], aL = out[27], aR = out[28];
+  if (ok(kL) && ok(kR) && ok(aL) && ok(aR)) {
+    const d = (p, q) => Math.hypot(p.x - q.x, p.y - q.y);
+    if (d(aL, kR) + d(aR, kL) < 0.85 * (d(aL, kL) + d(aR, kR))) swap([[27, 28], [29, 30], [31, 32]]);
+  }
+  return { lm: out, swapped };
 }
 
 /** The moment of the strike's PEAK (the kicking foot at its fastest ≈ the contact), in the frames' time base. */

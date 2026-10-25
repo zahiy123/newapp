@@ -255,7 +255,7 @@ export async function generateCue(facts, { timeoutMs = 3000, askFn = ask } = {})
   const prompt = buildCuePrompt(facts);
   for (const model of CUE_MODELS) {
     let raw;
-    try { raw = await hedged(() => askFn(model, prompt, facts.mode === 'stop' ? 220 : 80, facts.mode === 'stop' ? Math.max(timeoutMs, 4500) : timeoutMs, 'off'), facts.mode === 'stop' ? 2500 : CUE_HEDGE_MS); } catch (err) { if (isModelError(err)) continue; throw err; }
+    try { raw = await hedged(() => askFn(model, prompt, facts.mode === 'stop' ? 220 : 80, facts.mode === 'stop' ? Math.max(timeoutMs, 8000) : timeoutMs, 'off'), facts.mode === 'stop' ? 4500 : CUE_HEDGE_MS); } catch (err) { if (isModelError(err)) continue; throw err; }
     const text = String(raw || '').replace(/["“”«»]/g, '').replace(/\s+/g, ' ').trim();
     if (!text || /^SKIP/i.test(text) || text.length > (facts.mode === 'stop' ? MAX_STOP_CHARS : MAX_CUE_CHARS) || !numbersGrounded(text, facts) || !directionsKept(text, facts)) return null;
     if (!passWordsOk(text, facts)) return null;                                  // a pass is never a "kick" / "יפה"

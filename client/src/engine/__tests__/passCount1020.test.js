@@ -302,3 +302,35 @@ describe('owner 2026-10-25 (b): one contact error, flow drills never stop, a gra
     expect(inPlaceCheck(run(fr(), 200).ev).travelMax).toBe(0.38);
   });
 });
+
+describe('owner 2026-10-25 (c): the legs followed by continuity — a pose label swap is undone', () => {
+  it('a right pass whose left / right labels swap mid-swing is still the right leg', () => {
+    const frames = [0, -10, -22, -12, 8, 25].map((d, i) => {
+      const lm = legBody(d);
+      if (i >= 3) { const L = [lm[23], lm[25], lm[27]], R = [lm[24], lm[26], lm[28]]; [lm[23], lm[25], lm[27], lm[24], lm[26], lm[28]] = [...R, ...L]; }
+      return lm;
+    });
+    const r = run(frames);
+    const c = inPlaceCheck(r.ev);
+    expect(c.swapped).toBe(true);
+    expect(c.side).toBe('right');
+    expect(c.ok).toBe(true);
+  });
+  it('no swap on a normal pass', () => {
+    const r = run([0, -10, -22, -12, 8, 25].map(d => legBody(d)));
+    expect(inPlaceCheck(r.ev).swapped).toBe(false);
+  });
+});
+
+describe('owner 2026-10-25 (c2): only the ankles swapped by the pose model — repaired by the knees', () => {
+  it('an ankle-only label swap mid-pass is still the right leg', () => {
+    const frames = [0, -10, -22, -12, 8, 25].map((d, i) => {
+      const lm = legBody(d);
+      if (i === 3 || i === 4) [lm[27], lm[28]] = [lm[28], lm[27]];
+      return lm;
+    });
+    const c = inPlaceCheck(run(frames).ev);
+    expect(c.side).toBe('right');
+    expect(c.ok).toBe(true);
+  });
+});
