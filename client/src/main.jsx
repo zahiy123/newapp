@@ -45,3 +45,12 @@ createRoot(document.getElementById('root')).render(
 // Load the MediaPipe runtime + pose model into the browser cache while the app is idle,
 // so the training screen starts instantly (local, immutable-cached assets)
 prewarmMediapipe()
+
+// WAKE THE AI COACH'S SERVER at once (owner, 2026-10-25: a sleeping server took 33 s — the first briefing fell back);
+// while the app is open it is pinged every 10 min so it never falls asleep mid-session
+{
+  const base = import.meta.env.VITE_API_URL || 'https://newapp-nujg.onrender.com';
+  const ping = () => { try { fetch(`${base}/api/health`).catch(() => {}); fetch(`${base}/api/coach/warm`).catch(() => {}); } catch { /* offline */ } };
+  ping();
+  setInterval(ping, 10 * 60 * 1000);
+}

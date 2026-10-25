@@ -249,7 +249,7 @@ describe('owner 2026-10-21 (e): a step is not a pass; the support foot by the pa
   it('a slow move (< 150 deg/s) of the leg that is not the set leg is a step', async () => {
     const { slowOtherLeg } = await import('../training/repEvidence');
     expect(slowOtherLeg({ place: { side: 'left' }, swing: { peakVel: 121 } }, 'right')).toBe(true);
-    expect(slowOtherLeg({ place: { side: 'left' }, swing: { peakVel: 400 } }, 'right')).toBe(false);
+    expect(slowOtherLeg({ place: { side: 'left' }, swing: { peakVel: 400 } }, 'right')).toBe(true);
     expect(slowOtherLeg({ place: { side: 'right' }, swing: { peakVel: 100 } }, 'right')).toBe(false);
     expect(slowOtherLeg({ place: { side: 'left' }, swing: { peakVel: 100 } }, null)).toBe(false);
   });
@@ -271,6 +271,16 @@ describe('owner 2026-10-22: walking toward the camera is not a pass; the other l
   it('the leg that is not the set leg counts only at >= 350 deg/s', async () => {
     const { slowOtherLeg } = await import('../training/repEvidence');
     expect(slowOtherLeg({ place: { side: 'left' }, swing: { peakVel: 283 } }, 'right')).toBe(true);
-    expect(slowOtherLeg({ place: { side: 'left' }, swing: { peakVel: 420 } }, 'right')).toBe(false);
+    expect(slowOtherLeg({ place: { side: 'left' }, swing: { peakVel: 420 } }, 'right')).toBe(true);   // (owner 2026-10-25: the other leg never counts in a per-leg set)
+  });
+});
+
+describe('owner 2026-10-25: the eyes get the PEAK frame', () => {
+  it('strikePeakTime = the moment the kicking foot moved fastest', async () => {
+    const { strikePeakTime } = await import('../training/repEvidence');
+    const { ev } = run([0, -5, -22, 15, 30, 32].map(d => legBody(d)), 100);
+    const t = strikePeakTime(ev);
+    expect(t).toBeGreaterThan(250);
+    expect(t).toBeLessThan(450);          // between the frames of the biggest jump (-22 → 15)
   });
 });

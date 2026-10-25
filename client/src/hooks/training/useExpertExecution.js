@@ -130,7 +130,7 @@ import {
   createStartGate, updateStartGate, isStartPosition, feetStill, openingKickAllowed, footSettled, kickLockOpen, isValidRep, updateWork, withDrive, startPositionPrompt, READY_DRIVE, READY_STILL_MS } from '../../engine/training/coachFlow';
 import { createClipRecorder, recordFrame } from '../../engine/validation/clipRecorder';
 import { createRepEvidence, evidenceFrame, evidenceOk, evidenceAccept, evidenceGroupFor, explainStrike,
-  KICK_MAX_WIDTH_CHANGE, KICK_MAX_TRAVEL, KICK_ANCHOR_MAX, STRIKE_MIN_RANGE, STRIKE_MIN_VEL, STRIKE_MIN_PATH, slowOtherLeg, SLOW_OTHER_LEG_DEG_S } from '../../engine/training/repEvidence';
+  KICK_MAX_WIDTH_CHANGE, KICK_MAX_TRAVEL, KICK_ANCHOR_MAX, STRIKE_MIN_RANGE, STRIKE_MIN_VEL, STRIKE_MIN_PATH, slowOtherLeg, SLOW_OTHER_LEG_DEG_S, strikePeakTime } from '../../engine/training/repEvidence';
 import { holdSpeech } from '../useSpeech';
 import { ROOM_TIP } from '../../engine/exercise/setupCoach';
 
@@ -400,7 +400,7 @@ export function useExpertExecution({
       }
       if (cleanStreak >= 2 && fresh) praiseNow(lastGood || (isHeRef.current ? 'הביצוע נקי ומדויק — ככה ממשיכים' : 'Clean and precise — keep it up'), 'clean');
     };
-    const lookAtRep = async (repIdx, side) => {
+    const lookAtRep = async (repIdx, side, atT = null) => {
       const now0 = performance.now();
       // the eyes look at EVERY counted rep (up to 2 looks in flight — a look takes 2–5 s, a pass ~3 s)
       if (visionInFlight >= 2 || now0 - lastLookAt < 700) return;
@@ -408,7 +408,7 @@ export function useExpertExecution({
       // the frames are prepared IN THE BACKGROUND (an async bitmap + encode — never a stall in the live video)
       let frame = null, legsFrame = null, composite = false;
       try {
-        const comp = compositeFrameRef?.current ? await Promise.resolve(compositeFrameRef.current(profile.kind === 'strike')) : null;
+        const comp = compositeFrameRef?.current ? await Promise.resolve(compositeFrameRef.current(profile.kind === 'strike', atT)) : null;
         if (comp) { frame = comp; legsFrame = null; composite = true; }
         else [frame, legsFrame] = await Promise.all([
           Promise.resolve(bodyFrameRef?.current?.()),
@@ -425,7 +425,7 @@ export function useExpertExecution({
       // + the SPORT's own emphasis + today's goal — the coach knows the sport and the day
       const kp = (keyPointsRef.current || []).filter(x => !kickProsthesis || !PROSTHESIS_IMPOSSIBLE.test(x));
       const emphasis = (profile.sportEmphasis || []).map(e => e?.he || e?.text || '').filter(Boolean).slice(0, 4);
-      aiBodyVision({ frame, legsFrame, composite, isPass, passDrill: isPassDrill, kickingProsthesis: kickProsthesis, lang: he0 ? 'he' : 'en', side: leg,
+      aiBodyVision({ frame, legsFrame, composite, atPeak: atT != null, isPass, passDrill: isPassDrill, kickingProsthesis: kickProsthesis, lang: he0 ? 'he' : 'en', side: leg,
         exercise: exerciseName, sport: contextsKey, body: bodyText(limbProfile || {}), keyPoints: [...kp, ...emphasis], goal: sessionGoalRef.current || '',
         name: nameRef.current, recent: recentCues.slice(-4) }).then((v) => {
         visionInFlight = Math.max(0, visionInFlight - 1);
@@ -522,6 +522,9 @@ export function useExpertExecution({
       const he0 = isHeRef.current;
       const facts = cueFactsFor(rule, he0);
       facts.timesInBlock = times;
+      // the whole body of THIS rep (the eyes' other clear findings) — the stop may name a 2nd problem, organised
+      const rr = blockRecs.get(repNo);
+      if (rr) { const extra = [...rr.vis.values()].map(f => f.what || f.cue).filter(Boolean); if (extra.length) facts.bodyNow = [...new Set([...extra, ...(facts.bodyNow || [])])].slice(0, 3); }
       aiStop(facts).then((t) => {
         if (disposed || !stopActive) return;
         if (!t) { releaseStop('the AI did not answer — no fixed sentence'); return; }
@@ -779,12 +782,13 @@ export function useExpertExecution({
             const flooding = now < floodUntil;
             if (countsReps && profile.kind === 'strike' && ev.type === 'strike' && !locked && !flooding && !slowOtherLeg(explainStrike(kinetic, now), activeLegRef.current) && r.quality?.confident !== false && evidenceOk(kinetic, now, { strike: true, kick: true })) {
               const kickSide = explainStrike(kinetic, now).place.side || ev.side;
+              const peakT = strikePeakTime(kinetic);            // (before the evidence is cleared) — the eyes' frame
               evidenceAccept(kinetic, now); repCountRef.current += 1; strikeCountRef.current += 1; earlyRef.current = true;
               lastCountAt = now; lastCountSide = kickSide; settledSinceCount = false;
               noteRepScore(r);
               lastRepCleanRef.current = !(r.issues || []).some(i => i.severity === 'error' || i.severity === 'danger');
               if (kickSide === 'left' || kickSide === 'right') onStrikeSideRef.current?.(kickSide);   // the leg of a REAL counted kick
-              lookAtRep(repVerdicts.length - 1, kickSide);
+              lookAtRep(repVerdicts.length - 1, kickSide, peakT);
             }
           }
           if (profile.kind === 'cyclic' && workingRef.current) earlyRef.current = true;

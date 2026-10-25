@@ -430,7 +430,8 @@ export default function Training() {
   // the rep counter ON THE SCREEN, for the ball (every counted rep plays a ball)
   const displayRepsRef = useRef(0);
   const passFrameRef = useRef(null);               // () => a camera frame (base64 JPEG) for the vision model
-  const compositeFrameRef = useRef(null);          // (withLegs) => ONE image: the whole body | the legs close-up
+  const compositeFrameRef = useRef(null);
+  const frameRingRef = useRef([]);                 // the last 1.5 s of camera frames { t, bmp, lm } (the eyes' peak frame)          // (withLegs) => ONE image: the whole body | the legs close-up
   const bodyFrameRef = useRef(null);               // () => the full raw camera frame (base64 JPEG) for the whole-body eyes
   displayRepsRef.current = displayReps;
   useEffect(() => { if (window.__GHOST_DEBUG) window.__trainingReps = displayReps; }, [displayReps]);
@@ -1846,6 +1847,28 @@ export default function Training() {
     return () => clearInterval(inactivityCheck);
   }, [phase, currentExercise, isHe, playerName, locationProps, speakActiveProd, speakQuickReExplain]);
 
+  // THE FRAME RING (owner, 2026-10-25): during the exercise the last 1.5 s of the camera is kept (960 px, ~12 / s,
+  // created in the background) — the eyes get the frame of the strike's PEAK, never a still frame after it
+  useEffect(() => {
+    if (phase !== PHASE.EXERCISING || typeof createImageBitmap !== 'function') return undefined;
+    let busy = false, alive = true;
+    const id = setInterval(async () => {
+      const v = videoRef.current;
+      if (busy || !v || !v.videoWidth) return;
+      busy = true;
+      try {
+        const k = Math.min(1, 960 / v.videoWidth);
+        const t = performance.now(); const lm = poseLandmarksRef.current;
+        const bmp = await createImageBitmap(v, { resizeWidth: Math.round(v.videoWidth * k), resizeHeight: Math.round(v.videoHeight * k), resizeQuality: 'medium' });
+        if (!alive) { bmp.close?.(); return; }
+        const ring = frameRingRef.current;
+        ring.push({ t, bmp, lm });
+        while (ring.length && t - ring[0].t > 1500) ring.shift().bmp.close?.();
+      } catch { /* a frame skipped */ } finally { busy = false; }
+    }, 80);
+    return () => { alive = false; clearInterval(id); for (const f of frameRingRef.current) f.bmp.close?.(); frameRingRef.current = []; };
+  }, [phase]);
+
   // Exercise timer + active timer (movement-locked)
   useEffect(() => {
     if (phase === PHASE.EXERCISING) {
@@ -3085,11 +3108,16 @@ export default function Training() {
   };
   // THE EYES' ONE IMAGE (field video 2026-10-21: two images answered in 4–6 s): the whole body on the left and the
   // legs close-up (full camera resolution) on the right, drawn in the background into one JPEG
-  compositeFrameRef.current = async (withLegs = true) => {
-    const v = videoRef.current, lm = poseLandmarksRef.current;
-    if (!v || !v.videoWidth) return null;
+  compositeFrameRef.current = async (withLegs = true, atT = null) => {
+    // the PEAK frame from the ring (owner, 2026-10-25) — else the live video now
+    const ring = frameRingRef.current;
+    let pick = null;
+    if (atT != null && ring.length) { pick = ring.reduce((b, f) => (Math.abs(f.t - atT) < Math.abs(b.t - atT) ? f : b), ring[0]); if (Math.abs(pick.t - atT) > 250) pick = null; }
+    const v = pick ? pick.bmp : videoRef.current, lm = pick ? pick.lm : poseLandmarksRef.current;
+    if (!v || !(pick ? v.width : v.videoWidth)) return null;
+    if (pick) console.info(`[Vision] the peak frame (${Math.round(pick.t - atT)} ms from the contact)`);
     try {
-      const W = v.videoWidth, H = v.videoHeight;
+      const W = pick ? v.width : v.videoWidth, H = pick ? v.height : v.videoHeight;
       const k = Math.min(1, 640 / W); const bw = Math.round(W * k), bh = Math.round(H * k);
       let box = null;
       const pts = withLegs ? [23, 24, 25, 26, 27, 28, 29, 30, 31, 32].map(i => lm?.[i]).filter(p => p && (p.visibility ?? 0) >= 0.3) : [];
@@ -3104,10 +3132,10 @@ export default function Training() {
       const off = typeof OffscreenCanvas !== 'undefined';
       const c = off ? new OffscreenCanvas(bw + lw, bh) : Object.assign(document.createElement('canvas'), { width: bw + lw, height: bh });
       const ctx = c.getContext('2d');
-      const src = typeof createImageBitmap === 'function' ? await createImageBitmap(v) : v;
+      const src = pick ? v : (typeof createImageBitmap === 'function' ? await createImageBitmap(v) : v);
       ctx.drawImage(src, 0, 0, bw, bh);
       if (box) ctx.drawImage(src, box.x0, box.y0, box.cw, box.ch, bw, 0, lw, bh);
-      src.close?.();
+      if (!pick) src.close?.();
       if (off) {
         const blob = await c.convertToBlob({ type: 'image/jpeg', quality: 0.7 });
         const buf = new Uint8Array(await blob.arrayBuffer());

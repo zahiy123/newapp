@@ -161,7 +161,7 @@ export const KICK_FAST_SWING_DEG_S = 350;
 export const KICK_MID_SWING_DEG_S = 250;
 export const KICK_ANCHOR_MAX_MID = 0.45;
 // a SLOW move (< 150 °/s) of the leg that is NOT the set's leg is a step / a stance adjustment — never a pass
-export const SLOW_OTHER_LEG_DEG_S = 350;     // (owner, 2026-10-22: was 150 — a 283 °/s prosthesis move counted in a right-leg set)
+export const SLOW_OTHER_LEG_DEG_S = Infinity;   // (owner, 2026-10-25: blocked — fast steps of the other leg counted at 375–479 °/s)     // (owner, 2026-10-22: was 150 — a 283 °/s prosthesis move counted in a right-leg set)
 export function slowOtherLeg(why, setLeg) {
   const side = why?.place?.side;
   return !!setLeg && !!side && side !== setLeg && (why?.swing?.peakVel || 0) < SLOW_OTHER_LEG_DEG_S;
@@ -264,6 +264,24 @@ export function strikeSwing(ev) {
     path = torso ? path / torso : 0;
     const ok = range >= STRIKE_MIN_RANGE && peakVel >= STRIKE_MIN_VEL && path >= STRIKE_MIN_PATH;
     if (ok && !best.ok || (ok === best.ok && range > best.range)) best = { ok, range: Math.round(range), peakVel: Math.round(peakVel), path: Math.round(path * 100) / 100 };
+  }
+  return best;
+}
+
+/** The moment of the strike's PEAK (the kicking foot at its fastest ≈ the contact), in the frames' time base. */
+export function strikePeakTime(ev) {
+  const all = ev?.frames || [];
+  if (all.length < 3) return null;
+  const tEnd = all[all.length - 1].t;
+  const fr = all.filter(f => tEnd - f.t <= KICK_WINDOW_MS);
+  const side = inPlaceCheck(ev).side;
+  const order = side === 'left' ? [6] : side === 'right' ? [7] : [6, 7];
+  let best = null, bestV = 0;
+  for (const j of order) for (let i = 1; i < fr.length; i++) {
+    const p0 = fr[i - 1].e[j], p1 = fr[i].e[j], dt = fr[i].t - fr[i - 1].t;
+    if (!p0 || !p1 || dt <= 0) continue;
+    const v = Math.hypot(p1.x - p0.x, p1.y - p0.y) / dt;
+    if (v > bestV) { bestV = v; best = (fr[i].t + fr[i - 1].t) / 2; }
   }
   return best;
 }

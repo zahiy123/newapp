@@ -34,7 +34,7 @@ export const CUE_HEDGE_MS = 1300;
 export const CUE_MODEL = CUE_MODELS[0];
 export const DEBRIEF_MODELS = ['claude-opus-5-5', 'claude-sonnet-5'];
 export const MAX_CUE_CHARS = 110;
-export const MAX_STOP_CHARS = 260;      // the smart stop's short explanation (18–30 words)
+export const MAX_STOP_CHARS = 170;      // the smart stop's short explanation (10–15 words)
 
 const clip = (v, n = 300) => String(v ?? '').replace(/[\x00-\x1f]/g, ' ').slice(0, n);
 
@@ -107,7 +107,7 @@ const MOMENTS = {
   setup: 'NOW: the trainee is getting into position in front of the camera, maybe in a SMALL ROOM. Say the ONE positioning fix given in "what", in your own words — precise, warm, with authority — at most 12 words, one sentence. Never add another fix.',
   start: 'NOW: the trainee is seen clearly but not yet in the start stance. Tell them, in your own words, exactly what "what" says to do to start — at most 12 words, one sentence, with drive.',
   // THE SMART STOP (owner, 2026-10-25): the same critical error 2–3 times in a block of 3 reps → a short human stop
-  stop: 'NOW: you STOP the set for a moment — the SAME critical error keeps repeating ("what"; "why" / "how" = the expert knowledge; "timesInBlock" = how many of the last reps; "bodyNow" = what you see in the whole body). In your own words, as the best professional coach: open with a short natural stop (like "wait, let\'s stop for a second"), then ONE focused professional explanation — why it matters and EXACTLY how to do it on the next rep (the body and the leg as one chain when they are connected; name the support leg / the kicking leg explicitly) — then release them to continue. 18 to 30 words, 2–3 short spoken sentences. Real football terms only — in a PASS drill describe a too-strong pass as "תנופה חזקה מדי" / "מסירה חזקה מדי", never with the word בעיטה / בעט.',
+  stop: 'NOW: you STOP the set for a moment — the SAME critical error keeps repeating ("what"; "why" / "how" = the expert knowledge; "timesInBlock" = how many of the last reps; "bodyNow" = what you see in the whole body). In your own words, as the best professional coach: open with a short natural stop (like "wait, let\'s stop for a second"), then a SHARP, organised fix — EXACTLY what to do on the next rep. If "bodyNow" shows a second clear problem at the same time (e.g. the hands in the pockets AND the toes), name both in ONE ordered sentence (first this, then that) — never a mix; the support leg / the kicking leg named explicitly. 10 to 15 words in all (~5–6 seconds), 1–2 short sentences. Real football terms only — in a PASS drill describe a too-strong pass as "תנופה חזקה מדי" / "מסירה חזקה מדי", never with the word בעיטה / בעט.',
   praise: 'NOW: the last reps were MEASURED correct. Give ONE short, genuine, specific praise for exactly the good point in "what" — 3 to 6 words, one sentence, warm. Never a generic "good job"; never a number.',
   ready: 'NOW: you can see the trainee clearly and the exercise is about to begin. Tell them so and to start — warm, short, at most 8 words. No technique, no numbers.',
   motivate: 'NOW: a natural moment for ONE genuine, warm encouragement (the moment and the intent are in "what"). In your own words, at most 10 words. Never praise a performance, never claim a technique fact, never a number. If the trainee is tired / frustrated: calm and supportive.',
@@ -246,7 +246,7 @@ export async function generateCue(facts, { timeoutMs = 3000, askFn = ask } = {})
   const prompt = buildCuePrompt(facts);
   for (const model of CUE_MODELS) {
     let raw;
-    try { raw = await hedged(() => askFn(model, prompt, facts.mode === 'stop' ? 260 : 80, facts.mode === 'stop' ? Math.max(timeoutMs, 4500) : timeoutMs, 'off'), facts.mode === 'stop' ? 2500 : CUE_HEDGE_MS); } catch (err) { if (isModelError(err)) continue; throw err; }
+    try { raw = await hedged(() => askFn(model, prompt, facts.mode === 'stop' ? 140 : 80, facts.mode === 'stop' ? Math.max(timeoutMs, 4500) : timeoutMs, 'off'), facts.mode === 'stop' ? 2500 : CUE_HEDGE_MS); } catch (err) { if (isModelError(err)) continue; throw err; }
     const text = String(raw || '').replace(/["“”«»]/g, '').replace(/\s+/g, ' ').trim();
     if (!text || /^SKIP/i.test(text) || text.length > (facts.mode === 'stop' ? MAX_STOP_CHARS : MAX_CUE_CHARS) || !numbersGrounded(text, facts) || !directionsKept(text, facts)) return null;
     if (!passWordsOk(text, facts)) return null;                                  // a pass is never a "kick" / "יפה"
@@ -298,7 +298,22 @@ export async function generateBriefing(facts, { timeoutMs = 18000, askFn = ask }
 
 // ---- THE EYES: one frame at the contact of a SHADOW pass (a virtual ball — judge the kicking foot itself) ----
 // the eyes by Haiku 4.5 first (owner, 2026-10-21 — measured: Haiku 3.1–3.4 s, Sonnet 5 2.6–3.5 s on one image)
-export const VISION_MODELS = ['claude-sonnet-5'];   // (owner, 2026-10-21: Sonnet 5 only)
+export const VISION_MODELS = ['claude-sonnet-5'];
+// the eyes' FIXED categories (owner, 2026-10-25): one name per body part — the same fault is recognised as the same
+export const VISION_CATEGORIES = ['support_leg', 'chest', 'pelvis', 'swing', 'contact', 'arms_hands', 'head_shoulders', 'balance'];
+export function visionCategory(code) {
+  const c = String(code || '').toLowerCase();
+  if (VISION_CATEGORIES.includes(c)) return c;
+  if (/support|stance|plant|knee_lock|knee_stiff/.test(c)) return 'support_leg';
+  if (/chest|lean|torso|trunk|posture/.test(c)) return 'chest';
+  if (/pelvis|hip/.test(c)) return 'pelvis';
+  if (/swing|kick|back_?swing|follow/.test(c)) return 'swing';
+  if (/contact|toe|ankle|foot|laces|inside/.test(c)) return 'contact';
+  if (/hand|arm|pocket/.test(c)) return 'arms_hands';
+  if (/head|gaze|shoulder|neck/.test(c)) return 'head_shoulders';
+  if (/balance|stab/.test(c)) return 'balance';
+  return c.replace(/[^a-z0-9_]/g, '').slice(0, 40);
+}   // (owner, 2026-10-21: Sonnet 5 only)
 export function buildPassVisionPrompt(f) {
   const system = `You are an expert football coach and sports physiotherapist judging ONE camera frame taken at the moment of a SHADOW inside-foot PASS (there is no real ball; judge the kicking foot and leg themselves). The kicking leg is the trainee's ${f.side === 'left' ? 'LEFT' : f.side === 'right' ? 'RIGHT' : 'moving'} leg (anatomical side; the image may be mirrored). ${f.body ? `Body: ${clip(f.body, 120)}.` : ''}
 Judge only what is clearly visible. For each item give a value and your confidence 0..1 (below 0.6 when the foot is blurred, cut off or hidden).
@@ -340,6 +355,8 @@ ${f.legsImage ? 'A second image is a close-up of the legs and feet of the same m
 ${f.kickingProsthesis ? `The KICKING leg is the trainee's PROSTHESIS (the ${f.side === 'left' ? 'LEFT' : f.side === 'right' ? 'RIGHT' : ''} leg): its ankle is fixed — NEVER judge or mention the ankle lock, the toes or which surface of the foot meets the ball. Judge the prosthesis kick by its real technique: the swing driven from the HIP (not the knee), the leg turned out from the hip, the weight anchored on the sound support leg, the chest over the ball, the arms for balance.
 ` : ''}${f.isPass || f.kickingProsthesis || isPassFacts(f) ? 'The ball is VIRTUAL (drawn on the screen, not in the camera): never report a missing / unseen ball.\n' : ''}${f.isPass || f.kickingProsthesis ? 'This is a PASS: if it was executed like a POWER KICK (a big back-swing, a knee snap, the leg swinging high / hard) report it as a MAJOR finding "pass_like_kick" — a pass is short, controlled, from the hip.\n' : ''}${isPassFacts(f) ? PASS_RULE + '\n' : ''}${f.goal ? `Today's training goal: ${clip(f.goal, 80)}.\n` : ''}Never praise what was technically wrong.
 Look at the WHOLE body, never the kicking leg alone (owner, 2026-10-21): the CHEST (over the ball / leaning back / collapsed), the overall POSTURE and trunk, the PELVIS (square, rotating, dropping, shifting), the SUPPORT leg (knee soft, foot planted, weight on it), the head and gaze, the arms for balance, and the working leg and foot — anything that prevents a correct, safe execution of THIS exercise. Judge the whole chain: a fault in the chest / posture / pelvis that spoils the movement is as important as the leg. Arms simply hanging beside the body are NOT "hands in the pockets" — report that only if the hands are clearly inside the pockets.
+${f.atPeak ? 'This frame is the PEAK of the rep (the moment of contact / the end of the swing) — judge the movement at its decisive moment; never report "no movement" / "static" / "not executing".\n' : ''}Scan EVERY part, top to bottom: head and gaze, shoulders, arms and hands (are the hands in the pockets? arms out for balance?), chest, pelvis, the support leg, the working leg, the contact.
+"c" MUST be ONE of these fixed categories (never another code): ${VISION_CATEGORIES.join(' | ')}.
 Report ONLY what is clearly visible. Return ONLY this COMPACT JSON (short keys — every token costs time):
 {"f":[{"c":"short_snake_case_code","s":"M|m","p":0.0,"w":"<${he ? 'Hebrew' : 'English'}, at most 6 words: what you saw>","q":"<${he ? 'Hebrew' : 'English'}, 3-6 words: ONE whole-chain instruction for the next rep — link the body to the leg when they are connected (e.g. the chest back → the leg swings up)>"}],"g":"<${he ? 'Hebrew' : 'English'}, 3-5 words of genuine praise, or empty>","gp":0.0${f.isPass ? ',"ct":"inside|laces|toe|unclear","cp":0.0,"al":true|false|null,"ap":0.0' : ''}}
 ("s": "M" = major, "m" = minor; "p" = how sure you are it is REALLY visible in this frame: 0.9 = clearly seen, 0.75 = seen, 0.5 = a guess — be honest, a clear fault is 0.8+; "gp" = the praise's confidence.)
@@ -370,7 +387,7 @@ export async function generateBodyVision(f, { timeoutMs = 9000, askFn = null } =
       // the compact answer → the full structure the app uses (the cue doubles as "what" — the rest's log)
       if (Array.isArray(j.f) || typeof j.g === 'string') {
         j = {
-          findings: (j.f || []).map(x => ({ code: x?.c, severity: x?.s === 'M' ? 'major' : 'minor', confidence: x?.p, cue: x?.q, what: x?.w || x?.q })),
+          findings: (j.f || []).map(x => ({ code: visionCategory(x?.c), severity: x?.s === 'M' ? 'major' : 'minor', confidence: x?.p, cue: x?.q, what: x?.w || x?.q })),
           good: j.g ? [{ text: j.g, confidence: typeof j.gp === 'number' ? j.gp : 0.7 }] : [],
           contact: j.ct ? { value: j.ct, confidence: j.cp } : null,
           ankleLocked: j.al !== undefined && j.ap !== undefined ? { value: j.al, confidence: j.ap } : null,
