@@ -84,6 +84,7 @@ export function debriefFacts(o) {
     oneOffs: (o.oneOffs || []).slice(0, 4),
     setProblems: (o.problems?.problems || []).slice(0, 6),
     fixedAfterStop: (o.problems?.fixed || []).slice(0, 4),
+    previousSet: o.previousSet || null,
     judgedNothing: !errors.length && !goods.length,
   };
 }

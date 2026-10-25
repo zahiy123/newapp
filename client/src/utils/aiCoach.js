@@ -69,7 +69,7 @@ export async function aiPassVision(facts) {
 export async function aiStop(facts) {
   const j = await post('/api/coach/live-cue', { ...facts, mode: 'stop' }, 5000);
   const t = typeof j?.cue === 'string' ? j.cue.trim() : '';
-  return t && t.length <= 170 ? t : null;
+  return t && t.length <= 240 ? t : null;
 }
 
 /** A short coach line (positioning / start / ready / motivation) worded by the AI from the facts, or null. */

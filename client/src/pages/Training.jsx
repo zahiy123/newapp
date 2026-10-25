@@ -71,6 +71,9 @@ import { incrementWeeklySession } from '../utils/weeklyGoals';
 import { getExerciseInstruction, getWarmUpInstruction } from '../utils/exerciseInstructions';
 import { drawFormCorrection } from '../utils/canvasDrawing';
 
+// the rest between sets is fixed at its start, at least this long (owner, 2026-10-25 — no jumps in the countdown)
+const REST_MIN_SEC = 60;
+
 const PHASE = {
   IDLE: 'idle',
   ENVIRONMENT_SCAN: 'environment_scan',
@@ -611,7 +614,9 @@ export default function Training() {
   // Feedback tracking
   const lastSpokenRef = useRef('');
   const timerRef = useRef(null);
-  const coachStopRef = useRef(false);                // the coach's smart stop is on (the timer freezes)
+  const coachStopRef = useRef(false);
+  const prevSetRef = useRef(null);                   // the previous set's problems { idx, setNo, problems, fixed }
+  const prevSetOf = (idx) => (prevSetRef.current && prevSetRef.current.idx === idx ? prevSetRef.current : null);                // the coach's smart stop is on (the timer freezes)
   const analyzerRef = useRef(null);
   const badFormCountRef = useRef(0);
   const goodFormCountRef = useRef(0);
@@ -2970,6 +2975,7 @@ export default function Training() {
     setRestWaiting(false);
     const setEndedAt = Date.now();
     setRestDebrief({ pending: true, items: [{ kind: 'note', title: isHe ? 'המאמן מנתח את הסט…' : 'The coach is analysing the set…' }] });
+    const setProblemsNow = execution.setProblemsRef?.current?.() || null;
     const facts = debriefFacts({
       log: execution.setLogRef?.current || null, profile: execution.profile, reps: finalReps, accuracy: setAcc,
       setNo: currentSet, lastSet, he: isHe, name: playerName, exercise: currentExercise?.name || '',
@@ -2977,8 +2983,11 @@ export default function Training() {
       extras: debriefExtras,
       visual: [...visionNotesRef.current.slice(-4), ...(execution.restNotesRef?.current || [])],
       oneOffs: execution.oneOffsRef?.current || [],
-      problems: execution.setProblemsRef?.current?.() || null,
+      problems: setProblemsNow,
+      previousSet: prevSetOf(currentIdx),
     });
+    // the memory of this set — the next set's rest compares with it
+    if (setProblemsNow) prevSetRef.current = { idx: currentIdx, setNo: currentSet, ...setProblemsNow };
     // the analysis was requested near the END of the set (prefetched) — the coach says the numbers at once and
     // the AI's analysis follows without a wait; without a prefetch, the full request now
     const pre = debriefPrefetchRef.current;
@@ -3000,9 +3009,7 @@ export default function Training() {
       const speech = ai?.speech || debrief.speech;
       setRestDebrief(ai?.card?.length ? { items: ai.card } : debrief.card);
       speakPriority(speech, { rate: 1.0 });
-      // the rest lasts long enough to hear the whole analysis (+ a breath)
-      const need = Math.ceil(speech.length / 14) + 6;
-      setRestTime(prev => (phaseRef.current === PHASE.RESTING ? Math.max(prev, need) : prev));
+      // (the rest's length is fixed at its start — never jumps up; its end waits for the coach to finish)
     });
     const debriefSec = 20;                                          // the AI's time to answer + the start of the analysis
 
@@ -3038,7 +3045,8 @@ export default function Training() {
       setPhase(PHASE.RESTING);
       // the rest is long enough to hear the whole analysis (+ a breath)
       // a FULL rest: at least 30 s (and it waits at its end until the coach has said everything)
-      setRestTime(Math.max(30, restDuration + (ad?.restBonusSec || 0), debriefSec));
+      // a FIXED rest (owner, 2026-10-25): ≥ 60 s, set once — the countdown never jumps; at 0 it waits for the coach
+      setRestTime(Math.max(REST_MIN_SEC, restDuration + (ad?.restBonusSec || 0), debriefSec));
       if (nextLeg) setFeedback({ type: 'info', text: `🔄 ${nextLeg}` });
     }
   }
@@ -3069,6 +3077,7 @@ export default function Training() {
       sport: sportContexts.join('+'), lp: limbProfile || {}, legacy: legacySetLogRef.current, whyOf: techniqueWhy,
       extras: [], visual: visionNotesRef.current.slice(-4),
       oneOffs: execution.oneOffsRef?.current || [], problems: execution.setProblemsRef?.current?.() || null,
+      previousSet: prevSetOf(currentIdx),
     });
     debriefPrefetchRef.current = { key, promise: aiDebrief({ ...facts, prefetch: true }) };
     // eslint-disable-next-line react-hooks/exhaustive-deps

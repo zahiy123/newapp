@@ -547,6 +547,7 @@ export function useExpertExecution({
         recentCues.push(s); if (recentCues.length > 8) recentCues.shift();
         lastCorrectionAt = performance.now(); cleanStreak = 0;
         noteCorrected(rule.id, rule.msg?.he || s);
+        if (rule?.id) (cueHistory[rule.id] ||= []).push(s);
         const until = estimateSpeechMs(s, 1.1) + STOP_AFTER_SPEECH_MS;
         stopUntil = performance.now() + until + 2000;
         setTimeout(() => releaseStop('explained'), until);
@@ -603,10 +604,12 @@ export function useExpertExecution({
         if (what && !oneOffsRef.current.some(o => o.what === what)) { oneOffsRef.current.push({ rep: c.reps[0], what }); if (oneOffsRef.current.length > 6) oneOffsRef.current.shift(); }
       }
       if (restOnly || !countingRef.current || stopActive || stopsSince(from)) return;
-      const rep = [...counts.entries()].filter(([k, c]) => c.n >= 2 && !stoppedKeys.has(k)).sort((a, b) => b[1].n - a[1].n)[0];
+      const back = (k, c) => stoppedKeys.has(k) && c.reps.every(n => n > (stopRepOf.get(k) ?? Infinity));
+      const rep = [...counts.entries()].filter(([k, c]) => c.n >= 2 && (!stoppedKeys.has(k) || back(k, c)))
+        .sort((a, b) => (back(b[0], b[1]) - back(a[0], a[1])) || (b[1].n - a[1].n))[0];
       if (rep) {
         const rule = keyRule(rep[0], rep[1].rec);
-        console.info(`[Coach] block ${from}–${to}: ${rep[0]} ×${rep[1].n} → one short line`);
+        console.info(`[Coach] block ${from}–${to}: ${rep[0]} ×${rep[1].n}${back(rep[0], rep[1]) ? ' (back after its stop)' : ''} → one short line`);
         sayCorrection(rule, liveCue(rule, isHeRef.current), 1.1, isHeRef.current, null, repCountRef.current);
       }
     };
@@ -800,10 +803,11 @@ export function useExpertExecution({
             }
             // the reason of every detected kick, in the console (the owner's videos show exactly why it did or did not count)
             if (ev.type === 'strike' && profile.kind === 'strike') {
-              strikeTimes.push(now); while (strikeTimes.length && now - strikeTimes[0] > FLOOD_MS) strikeTimes.shift();
-              if (strikeTimes.length >= FLOOD_N) floodUntil = now + FLOOD_CALM_MS;
               const why = explainStrike(kinetic, now);
               const stepNotPass = slowOtherLeg(why, activeLegRef.current);
+              // (only the SET's leg feeds the wild-pace guard — the other leg's steps never block a real pass)
+              if (!stepNotPass) { strikeTimes.push(now); while (strikeTimes.length && now - strikeTimes[0] > FLOOD_MS) strikeTimes.shift(); }
+              if (!stepNotPass && strikeTimes.length >= FLOOD_N) floodUntil = now + FLOOD_CALM_MS;
               const counts = countsReps && !stepNotPass && r.quality?.confident !== false && evidenceOk(kinetic, now, { strike: true, kick: true })
                 && kickLockOpen({ now, lastCountAt, settledSinceCount, lockMs: COUNT_LOCK_MS, swingVel: explainStrike(kinetic, now).swing.peakVel || 0 }) && now >= floodUntil;
               // the EXACT reason (never a guess): walking toward / away (the shoulders' width), walking across (the

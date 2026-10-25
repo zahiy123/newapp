@@ -34,7 +34,7 @@ export const CUE_HEDGE_MS = 1300;
 export const CUE_MODEL = CUE_MODELS[0];
 export const DEBRIEF_MODELS = ['claude-opus-5-5', 'claude-sonnet-5'];
 export const MAX_CUE_CHARS = 110;
-export const MAX_STOP_CHARS = 170;      // the smart stop's short explanation (10–15 words)
+export const MAX_STOP_CHARS = 240;      // the smart stop's explanation (15–25 words)
 
 const clip = (v, n = 300) => String(v ?? '').replace(/[\x00-\x1f]/g, ' ').slice(0, n);
 
@@ -107,7 +107,7 @@ const MOMENTS = {
   setup: 'NOW: the trainee is getting into position in front of the camera, maybe in a SMALL ROOM. Say the ONE positioning fix given in "what", in your own words — precise, warm, with authority — at most 12 words, one sentence. Never add another fix.',
   start: 'NOW: the trainee is seen clearly but not yet in the start stance. Tell them, in your own words, exactly what "what" says to do to start — at most 12 words, one sentence, with drive.',
   // THE SMART STOP (owner, 2026-10-25): the same critical error 2–3 times in a block of 3 reps → a short human stop
-  stop: 'NOW: you STOP the set for a moment — the SAME critical error keeps repeating ("what"; "why" / "how" = the expert knowledge; "timesInBlock" = how many of the last reps; "bodyNow" = what you see in the whole body). In your own words, as the best professional coach: open with a short natural stop (like "wait, let\'s stop for a second"), then a SHARP, organised fix — EXACTLY what to do on the next rep. If "bodyNow" shows a second clear problem at the same time (e.g. the hands in the pockets AND the toes), name both in ONE ordered sentence (first this, then that) — never a mix; the support leg / the kicking leg named explicitly. 10 to 15 words in all (~5–6 seconds), 1–2 short sentences. Real football terms only — in a PASS drill describe a too-strong pass as "תנופה חזקה מדי" / "מסירה חזקה מדי", never with the word בעיטה / בעט.',
+  stop: 'NOW: you STOP the set for a moment — the SAME critical error keeps repeating ("what"; "why" / "how" = the expert knowledge; "timesInBlock" = how many of the last reps; "bodyNow" = what you see in the whole body). In your own words, as the best professional coach: open with a short natural stop (like "wait, let\'s stop for a second"), then a SHARP, organised fix — EXACTLY what to do on the next rep. If "bodyNow" shows a second clear problem at the same time (e.g. the hands in the pockets AND the toes), name both in ONE ordered sentence (first this, then that) — never a mix; the support leg / the kicking leg named explicitly. A CLEAR, COMPLETE professional explanation the trainee fully understands — what is wrong, why, and exactly how to do it: 15 to 25 words, 2 short sentences. Real football terms only — in a PASS drill describe a too-strong pass as "תנופה חזקה מדי" / "מסירה חזקה מדי", never with the word בעיטה / בעט.',
   praise: 'NOW: the last reps were MEASURED correct. Give ONE short, genuine, specific praise for exactly the good point in "what" — 3 to 6 words, one sentence, warm. Never a generic "good job"; never a number.',
   ready: 'NOW: you can see the trainee clearly and the exercise is about to begin. Tell them so and to start — warm, short, at most 8 words. No technique, no numbers.',
   motivate: 'NOW: a natural moment for ONE genuine, warm encouragement (the moment and the intent are in "what"). In your own words, at most 10 words. Never praise a performance, never claim a technique fact, never a number. If the trainee is tired / frustrated: calm and supportive.',
@@ -173,6 +173,8 @@ NOW: the REST between sets. You are the expert in the locker room analysing the 
 ${f.prefetch ? '1. Do NOT open with the set in numbers (the coach says them first) and give frequencies in words ("in most passes", "in a few") — never as counts.' : '1. The set in numbers (reps / seconds, accuracy — if accuracy is null say nothing about it).'} "reps" are COUNTED reps — never call them clean, perfect or good unless "errors" is empty.
 2. The most important thing to fix (safety first, then what happened most): what happened, how often, the measured value vs. the target when given, WHY it matters biomechanically / for injury, and HOW to fix it — a precise, practical instruction or feel.
 3. COVER EVERY main problem of the set (owner, 2026-10-25): every item of "setProblems" (the device's + the coach's eyes', with the reps it happened in) gets its own short sentence — what and how to fix — most important first. Items in "fixedAfterStop" were stopped for during the set and did NOT come back: say they are fixed (genuine praise), never as a problem.
+CONSISTENCY: "setProblems" is the truth of what was seen — never say a part was "not visible / unclear" when setProblems names a finding about it (e.g. the toes at the contact); drop any visual note that contradicts it. The card says exactly the same as the speech.
+"previousSet" (when given) = the problems of the PREVIOUS set of this exercise: compare explicitly — what IMPROVED (a problem gone, or fewer times) gets a genuine, specific praise for the progress; what persists is named as the focus; then where we are heading in the next set.
 4. What was good — ONLY items listed in "measuredClean". If "judgedNothing" is true, say honestly that this set's technique could not be measured clearly from the camera (and what would help) — NEVER call the set clean or perfect.
 5. ONE clear goal for the next set (or, if lastSet, what to take to next time).
 If nothing was measured (attempts 0 and no errors) say honestly that you could not see the movement clearly and what to do so you can.
@@ -195,6 +197,11 @@ Return ONLY JSON: {"speech":"<the spoken analysis>","card":[{"kind":"fix|good|fo
     oneOffs: (f.oneOffs || []).slice(0, 4).map(o => ({ rep: o?.rep ?? null, what: clip(o?.what, 100) })).filter(o => o.what),
     setProblems: (f.setProblems || []).slice(0, 6).map(p => ({ what: clip(p?.what, 100), times: p?.times ?? null, reps: (p?.reps || []).slice(0, 6), critical: !!p?.critical })).filter(p => p.what),
     fixedAfterStop: (f.fixedAfterStop || []).slice(0, 4).map(x => clip(x, 100)),
+    previousSet: f.previousSet ? {
+      setNo: f.previousSet.setNo ?? null,
+      problems: (f.previousSet.problems || []).slice(0, 6).map(p => ({ what: clip(p?.what, 100), times: p?.times ?? null })).filter(p => p.what),
+      fixedAfterStop: (f.previousSet.fixed || []).slice(0, 4).map(x => clip(x, 100)),
+    } : null,
     judgedNothing: !!f.judgedNothing,
   });
   return { system, user };
@@ -248,7 +255,7 @@ export async function generateCue(facts, { timeoutMs = 3000, askFn = ask } = {})
   const prompt = buildCuePrompt(facts);
   for (const model of CUE_MODELS) {
     let raw;
-    try { raw = await hedged(() => askFn(model, prompt, facts.mode === 'stop' ? 140 : 80, facts.mode === 'stop' ? Math.max(timeoutMs, 4500) : timeoutMs, 'off'), facts.mode === 'stop' ? 2500 : CUE_HEDGE_MS); } catch (err) { if (isModelError(err)) continue; throw err; }
+    try { raw = await hedged(() => askFn(model, prompt, facts.mode === 'stop' ? 220 : 80, facts.mode === 'stop' ? Math.max(timeoutMs, 4500) : timeoutMs, 'off'), facts.mode === 'stop' ? 2500 : CUE_HEDGE_MS); } catch (err) { if (isModelError(err)) continue; throw err; }
     const text = String(raw || '').replace(/["“”«»]/g, '').replace(/\s+/g, ' ').trim();
     if (!text || /^SKIP/i.test(text) || text.length > (facts.mode === 'stop' ? MAX_STOP_CHARS : MAX_CUE_CHARS) || !numbersGrounded(text, facts) || !directionsKept(text, facts)) return null;
     if (!passWordsOk(text, facts)) return null;                                  // a pass is never a "kick" / "יפה"
