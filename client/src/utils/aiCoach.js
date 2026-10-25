@@ -65,6 +65,13 @@ export async function aiPassVision(facts) {
   return j?.vision && typeof j.vision === 'object' ? j.vision : null;
 }
 
+/** The smart stop's short explanation (18–30 words) worded live by the AI, or null. */
+export async function aiStop(facts) {
+  const j = await post('/api/coach/live-cue', { ...facts, mode: 'stop' }, 5000);
+  const t = typeof j?.cue === 'string' ? j.cue.trim() : '';
+  return t && t.length <= 260 ? t : null;
+}
+
 /** A short coach line (positioning / start / ready / motivation) worded by the AI from the facts, or null. */
 export async function aiLine(facts) {
   return aiCue(facts);

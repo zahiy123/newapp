@@ -38,7 +38,7 @@ import { createExecutionTracker, updateExecution, calibrateUpright, stableUprigh
 import { liveCue } from '../../engine/coachBrain/policy';
 import { jointAngleSide, torsoLength } from '../../engine/exercise/kinematics';
 import { cueFacts } from '../../engine/coachBrain/aiFacts';
-import { aiCue, aiLine, aiPassVision, aiBodyVision } from '../../utils/aiCoach';
+import { aiCue, aiLine, aiPassVision, aiBodyVision, aiStop } from '../../utils/aiCoach';
 import { logRule, logJudgedCount, isProstheticLeg, isMajor as isMajorRule, DYNAMIC_SHOW_MS } from '../../engine/exercise/profileEvaluator';
 
 // one kick / pass = one count: after a COUNTED kick nothing counts for COUNT_LOCK_MS (its back-swing / return);
@@ -58,7 +58,12 @@ export const LIVE_CUE_RATE = 1.2;          // an in-set correction is spoken a l
 // a pass that did not count but WAS a real attempt (not a twitch): the coach reacts to it (owner, 2026-10-21)
 export const ATTEMPT_MIN_RANGE = 12;      // deg
 export const ATTEMPT_MIN_PATH = 0.1;      // torso lengths
-export const ATTEMPT_CUE_GAP_MS = 8000;      // an uncounted pass is answered at most every 8 s (owner, 2026-10-22)
+// the blocks (owner, 2026-10-25)
+export const BLOCK_REPS = 3;
+export const BLOCK_EYES_WAIT_MS = 3500;     // a block closes once the eyes answered about its last rep
+export const MAX_STOPS_PER_SET = 2;         // a smart stop is rare — the same error stops the set once
+export const STOP_MAX_MS = 15000;           // a stop never lasts longer (the AI late / silent → released)
+export const STOP_AFTER_SPEECH_MS = 600;      // an uncounted pass is answered at most every 8 s (owner, 2026-10-22)
 /** The rule told for an uncounted pass: too small / the body moved / the support foot moved. */
 export function uncountedPassRule(kind, pass = true) {
   const what = pass ? 'מסירה' : 'בעיטה', whatEn = pass ? 'pass' : 'kick';
@@ -211,6 +216,8 @@ export function useExpertExecution({
   nameRef.current = playerName;
   const statsRef = useRef({ dangers: 0, errors: {} });
   const setLogRef = useRef(null);            // the current set's measured log (the rest's debrief)
+  const oneOffsRef = useRef([]);            // single slips of the set (rep + what) — the rest says the main one
+  const [coachStop, setCoachStop] = useState(null);   // the smart stop: { text } while the coach explains
   const restNotesRef = useRef([]);           // the brain's notes kept for the rest's analysis (never said in the set)
   const lastRepCleanRef = useRef(null);      // the last counted kick / pass was measured clean (the ball's "Nice!")
   const brainRef = useRef(null);             // the coach brain of this exercise (Layers 1–4)
@@ -320,7 +327,7 @@ export function useExpertExecution({
     // the device's own verdict of a counted rep → the fix-praise / clean-praise flow (vision verdicts add theirs)
     let deviceRepVerdict = () => {};
     let lastCountAt = -1e9; const strikeTimes = []; let floodUntil = -1e9;
-    let uncountedAttempts = 0; let lastAttemptCueAt = -1e9;
+    let uncountedAttempts = 0;
     let lastCountSide = null; let settledSinceCount = true;
     // the EYES: one frame at the contact of a counted pass → the vision model's verdict (contact surface,
     // ankle lock, …) → the set log, the accuracy and a live cue (confident findings only)
@@ -333,7 +340,7 @@ export function useExpertExecution({
     // rep (the device's or the eyes', anywhere in the body) is said right in that rep, short; nothing waits.
     // The device's line (~0.9 s) and the eyes' line (2–5 s) each speak once per rep: the eyes say a DIFFERENT
     // point than the device already said (never the same thing twice for one rep).
-    let visionInFlight = 0; let lastLookAt = -1e9; const visOcc = {}; const visCoached = {}; 
+    let visionInFlight = 0; let lastLookAt = -1e9; 
     let cleanStreak = 0; let lastPraiseAt = -1e9;
     const visionRule = (f) => ({
       id: `vis_${f.code}`, severity: 'error', major: f.severity === 'major', vision: true,
@@ -439,13 +446,9 @@ export function useExpertExecution({
         // the eyes' verdict of this rep: clean (looked, no major / pass error), not clean, or not seen (null)
         if (rec) { rec.visClean = judged ? !anyBad : null; if (anyBad) errorSeen(found.map(f => `vis_${f.code}`).concat(hits.filter(h => h.violated).map(h => h.rule.id))); judgeClean(rec, repIdx + 1); }
         console.info(`[Vision] rep #${repIdx + 1}${prosthetic ? ' (prosthesis kicks)' : ''}: ${found.map(f => `${f.severity}:${f.code}(${f.confidence})`).join(', ') || 'no finding'} | good: ${goods.map(g => g.text).join(' / ') || '-'}`);
-        // the streaks of what the eyes saw in THIS looked rep (an unjudged look neither counts nor resets)
         const passBad = hits.find(h => h.violated);
         if (restOnly || !countingRef.current || performance.now() < floodUntil) return;
         const repNo = repIdx + 1;
-        const seenAt = performance.now() - 4000;     // (the frame was taken ~at the count)
-        // candidates, the most important first: the pass surface / a major finding, then a SURE minor one
-        const saidDev = repSaidId.get(repNo);
         // (the body picture for the next lines — what the eyes saw, the root first)
         {
           const seen = [...found].sort((a, b) => (b.severity === 'major') - (a.severity === 'major') || b.confidence - a.confidence);
@@ -453,28 +456,11 @@ export function useExpertExecution({
             major: seen.find(f => f.severity === 'major' && f.confidence >= VISION_BODY_CONFIDENCE) || null };
           if (!seen.length && goods.length) bodyNow.items = [`(${goods[0].text})`];
         }
-        if (saidDev) { console.info(`[Coach] the eyes (rep ${repNo}) → the body picture (the pass already has its line)`); return; }
-        const cands = [
-          ...(passBad && passBad.rule.id !== saidDev ? [{ key: passBad.rule.id, pass: passBad }] : []),
-          ...found.filter(f => f.severity === 'major').sort((a, b) => b.confidence - a.confidence).map(f => ({ key: `vis_${f.code}`, f })),
-          ...found.filter(f => f.severity !== 'major' && f.confidence >= VISION_MINOR_SAY).sort((a, b) => b.confidence - a.confidence).map(f => ({ key: `vis_${f.code}`, f })),
-        ];
-        if (!cands.length) return;
-        const top = cands[0];
-        if (repSaidVis.has(repNo) || !cueStillTrue(repNo, seenAt)) { console.info(`[Coach] vision cue skipped (rep ${repNo}: ${top.key})`); return; }
-        repSaidVis.add(repNo);
-        cleanStreak = 0;
-        if (top.pass) { sayCorrection({ ...top.pass.rule, side }, liveCue(top.pass.rule, he0), 1.1, he0, null, repNo); noteCorrected(top.pass.rule.id, top.pass.rule.msg?.he); return; }
         {
-          const f = top.f;
-          visOcc[f.code] = (visOcc[f.code] || 0) + 1; visCoached[f.code] = visOcc[f.code];
-          noteCorrected(`vis_${f.code}`, f.cue);
-          const cue = liveText(f.cue);
-          lastCorrectionAt = performance.now();
-          holdSpeech(estimateSpeechMs(cue, 1.1));
-          speakRef.current?.(cue, { rate: 1.1, kind: 'correction', preempt: true, validIf: () => cueStillTrue(repNo, seenAt) });
-          console.info(`[Coach] vision cue (rep ${repNo}): ${f.code}`);
-          return;
+          const rec = recOf(repNo);
+          for (const f of found) if (f.severity === 'major' || f.confidence >= VISION_MINOR_SAY) rec.vis.set(f.code, f);
+          if (passBad) rec.dev.set(passBad.rule.id, passBad.rule);
+          checkCritical(repNo);                                // (the blocks decide what is said)
         }
       });
     };
@@ -484,7 +470,7 @@ export function useExpertExecution({
     deviceRepVerdict = (res) => {
       const at = performance.now(); const repAt = repCountRef.current;
       const errs = new Set((res.issues || []).filter(i => i.severity === 'error' || i.severity === 'danger').map(i => i.id));
-      // the correction is said NOW, at the count: the errors of this pass (a first unconfirmed reading included)
+      // the errors of this pass go into its block record AT the count (a first unconfirmed reading included)
       {
         const now0 = new Set(errs);
         for (const [id, d] of Object.entries(tracker.dynActive || {})) if ((d.rule?.severity === 'error' || d.rule?.severity === 'danger') && d.until - DYNAMIC_SHOW_MS >= at - 1500) now0.add(id);
@@ -504,31 +490,100 @@ export function useExpertExecution({
         devicePolicy(list, repAt, res);
       }, 900);
     };
-    // the device's errors of a counted rep → said by the "one yes, one no" policy (one correction per rep)
+    // the device's errors of a counted rep → the block memory (the blocks decide what is said)
     const ruleById = (id, res) => (res?.issues || []).find(i => i.id === id) || tracker.dynActive?.[id]?.rule
       || [...(profile.dynamics || []), ...(profile.rules || [])].find(r => r.id === id) || null;
-    const repSaidId = new Map(); const repSaidVis = new Set();
     // the WHOLE BODY as the eyes saw it at the last look (≤ 12 s old) — every live correction links it to the leg
     let bodyNow = { items: [], at: -1e9, major: null };
     const bodyFresh = () => (performance.now() - bodyNow.at <= 12000 ? bodyNow : { items: [], major: null });
-    const devicePolicy = (list, repNo, res) => {
-      if (restOnly || !countingRef.current || performance.now() < floodUntil || repSaidId.has(repNo)) return;
-      const rules = list.map(id => ruleById(id, res)).filter(Boolean)
-        .sort((a, b) => (b.severity === 'danger') - (a.severity === 'danger') || isMajorRule(b) - isMajorRule(a));
-      // no leg error measured, but the eyes see a MAJOR body fault that keeps happening → the line is about it, now
-      const bm = bodyFresh().major;
-      if (!rules.length && bm) {
-        const vr = visionRule(bm);
-        repSaidId.set(repNo, vr.id);
-        console.info(`[Coach] body cue at the count (rep ${repNo}): ${bm.code}`);
-        sayCorrection(vr, bm.cue, 1.1, isHeRef.current, null, repNo);
-        return;
+    // ===== BLOCKS OF 3 REPS (owner, 2026-10-25): the coach reads the PATTERN, not every single rep =====
+    //  • the same CRITICAL error 2–3 times in the last 3 reps → a SMART STOP: the count + the timer freeze, the AI
+    //    explains (live, 18–30 words), then the trainee continues from the same point
+    //  • a non-critical error repeated in a block → one short live line at the block's end
+    //  • an error seen ONCE in its block → never said in the set; the rest's analysis mentions it ("in rep X …")
+    const blockRecs = new Map();               // repNo → { dev: Map(id → rule), vis: Map(code → finding) }
+    let blockBase = 0, windowStart = 1, stopsThisSet = 0; const stoppedKeys = new Set();
+    let stopActive = false, stopUntil = 0;
+    const resetBlocks = () => { blockRecs.clear(); blockBase = 0; windowStart = 1; stopsThisSet = 0; stoppedKeys.clear(); oneOffsRef.current = []; };
+    const recOf = (n) => { let r = blockRecs.get(n); if (!r) { r = { dev: new Map(), vis: new Map() }; blockRecs.set(n, r); } return r; };
+    const keyRule = (k, rec) => (k.startsWith('dev:') ? rec.dev.get(k.slice(4)) : visionRule(rec.vis.get(k.slice(4))));
+    const isCritical = (k, rec) => (k.startsWith('dev:') ? (() => { const r = rec.dev.get(k.slice(4)); return r?.severity === 'danger' || isMajorRule(r); })() : rec.vis.get(k.slice(4))?.severity === 'major');
+    const keysOf = (rec) => [...[...rec.dev.keys()].map(id => `dev:${id}`), ...[...rec.vis.keys()].map(c => `vis:${c}`)];
+    const releaseStop = (why) => {
+      if (!stopActive) return;
+      stopActive = false; setCoachStop(null);
+      evidenceAccept(kinetic, performance.now());              // the movement during the stop never carries into a rep
+      console.info(`[Coach] smart stop released (${why}) — continue from rep ${repCountRef.current}`);
+    };
+    const smartStop = (key, rule, times, repNo) => {
+      stopActive = true; stopUntil = performance.now() + STOP_MAX_MS; stopsThisSet += 1; stoppedKeys.add(key); windowStart = repNo + 1;
+      setCoachStop({ text: null });
+      console.info(`[Coach] SMART STOP at rep ${repNo}: ${key} ×${times} in the last 3 reps`);
+      const he0 = isHeRef.current;
+      const facts = cueFactsFor(rule, he0);
+      facts.timesInBlock = times;
+      aiStop(facts).then((t) => {
+        if (disposed || !stopActive) return;
+        if (!t) { releaseStop('the AI did not answer — no fixed sentence'); return; }
+        const s = isPassDrill ? passWords(t) : t;
+        setCoachStop({ text: s });
+        holdSpeech(estimateSpeechMs(s, 1.1));
+        speakRef.current?.(s, { rate: 1.1, kind: 'stop', preempt: true });
+        recentCues.push(s); if (recentCues.length > 8) recentCues.shift();
+        lastCorrectionAt = performance.now(); cleanStreak = 0;
+        noteCorrected(rule.id, rule.msg?.he || s);
+        const until = estimateSpeechMs(s, 1.1) + STOP_AFTER_SPEECH_MS;
+        stopUntil = performance.now() + until + 2000;
+        setTimeout(() => releaseStop('explained'), until);
+      });
+    };
+    /** After new evidence about rep `repNo`: a critical error ≥ 2 times in the last 3 reps → the smart stop. */
+    const checkCritical = (repNo) => {
+      if (restOnly || !countingRef.current || stopActive || stopsThisSet >= MAX_STOPS_PER_SET) return;
+      const counts = new Map();
+      for (let n = Math.max(windowStart, repNo - 2); n <= repNo; n++) {
+        const rec = blockRecs.get(n); if (!rec) continue;
+        for (const k of keysOf(rec)) if (isCritical(k, rec) && !stoppedKeys.has(k)) { const c = counts.get(k) || { n: 0, rec }; c.n += 1; c.rec = rec; counts.set(k, c); }
       }
-      if (!rules.length) return;
-      const top = rules[0];
-      repSaidId.set(repNo, top.id);
-      console.info(`[Coach] device cue (rep ${repNo}): ${top.id}`);
-      sayCorrection(top, liveCue(top, isHeRef.current), 1.1, isHeRef.current, null, repNo);
+      const hit = [...counts.entries()].filter(([, c]) => c.n >= 2).sort((a, b) => b[1].n - a[1].n)[0];
+      if (hit) smartStop(hit[0], keyRule(hit[0], hit[1].rec), hit[1].n, repNo);
+    };
+    /** A block of 3 reps ended (+ the eyes' time): a repeated non-critical error → one short line; a single slip → the rest. */
+    const closeBlock = (from, to) => {
+      if (to < from) return;
+      const counts = new Map();
+      for (let n = from; n <= to; n++) {
+        const rec = blockRecs.get(n); if (!rec) continue;
+        for (const k of keysOf(rec)) { const c = counts.get(k) || { n: 0, rec, reps: [] }; c.n += 1; c.rec = rec; c.reps.push(n); counts.set(k, c); }
+      }
+      for (const [k, c] of counts) if (c.n === 1 && !stoppedKeys.has(k)) {
+        const r = keyRule(k, c.rec);
+        const what = r?.msg ? (isHeRef.current ? r.msg.he : r.msg.en) : null;
+        if (what && !oneOffsRef.current.some(o => o.what === what)) { oneOffsRef.current.push({ rep: c.reps[0], what }); if (oneOffsRef.current.length > 6) oneOffsRef.current.shift(); }
+      }
+      if (restOnly || !countingRef.current || stopActive || stopsSince(from)) return;
+      const rep = [...counts.entries()].filter(([k, c]) => c.n >= 2 && !stoppedKeys.has(k)).sort((a, b) => b[1].n - a[1].n)[0];
+      if (rep) {
+        const rule = keyRule(rep[0], rep[1].rec);
+        console.info(`[Coach] block ${from}–${to}: ${rep[0]} ×${rep[1].n} → one short line`);
+        sayCorrection(rule, liveCue(rule, isHeRef.current), 1.1, isHeRef.current, null, repCountRef.current);
+      }
+    };
+    let lastStopRep = -1;
+    const stopsSince = (from) => lastStopRep >= from;
+    const closeLastBlock = () => { const n = repCountRef.current; if (n > blockBase) { const b = blockBase; blockBase = n; closeBlock(b + 1, n); } };
+    const noteRepBlock = (repNo) => {
+      checkCritical(repNo);
+      if (stopActive && lastStopRep < repNo) lastStopRep = repNo;
+      if (repNo - blockBase >= BLOCK_REPS) {
+        const from = blockBase + 1; blockBase = repNo;
+        setTimeout(() => { if (!disposed) closeBlock(from, repNo); }, BLOCK_EYES_WAIT_MS);   // (the eyes of the last rep answer ~3 s later)
+      }
+    };
+    const devicePolicy = (list, repNo, res) => {
+      const rec = recOf(repNo);
+      for (const id of list) { const rule = ruleById(id, res); if (rule) rec.dev.set(id, rule); }
+      noteRepBlock(repNo);
     };
     // a HOLD (a plank, a wall sit): the coach looks every few seconds of the hold
     let lastHoldLook = -1e9;
@@ -669,9 +724,11 @@ export function useExpertExecution({
         workingRef.current = updateWork(work, profile, r, now);
 
         // ---- Exact rep counting (a new set starts from zero) ----
-        if (countingRef.current && !wasCounting) { restNotesRef.current = []; repVerdicts.length = 0; judgedBefore = 0; lastCountAt = -1e9; floodUntil = -1e9; setLogRef.current = resetSetLog(tracker); repCountRef.current = 0; strikeCountRef.current = 0; earlyRef.current = false; repScores.length = 0; setRepAccuracy(null); }
+        if (countingRef.current && !wasCounting) { resetBlocks(); restNotesRef.current = []; repVerdicts.length = 0; judgedBefore = 0; lastCountAt = -1e9; floodUntil = -1e9; setLogRef.current = resetSetLog(tracker); repCountRef.current = 0; strikeCountRef.current = 0; earlyRef.current = false; repScores.length = 0; setRepAccuracy(null); }
+        if (!countingRef.current && wasCounting) closeLastBlock();           // the set ended: its last (partial) block
         wasCounting = countingRef.current;
-        if (countingRef.current && r.inView && countOpenRef.current) {
+        if (stopActive && performance.now() > stopUntil) releaseStop('timeout');
+        if (countingRef.current && r.inView && countOpenRef.current && !stopActive) {
           for (const ev of r.events) {
             // the coach brain learns from every real attempt and the errors seen in it
             if (brain && (ev.type === 'rep' || ev.type === 'strike' || ev.type === 'partialRep')) {
@@ -712,11 +769,6 @@ export function useExpertExecution({
                 const devRule = (r.issues || []).find(i => i.severity === 'error' || i.severity === 'danger');
                 const rule = devRule || uncountedPassRule(!S.ok ? 'small' : P.reason === 'walk-across' ? 'moved' : 'support', isPassDrill);
                 uncountedAttempts += 1;
-                if (now - lastAttemptCueAt >= ATTEMPT_CUE_GAP_MS && performance.now() - lastCorrectionAt >= 2500) {
-                  lastAttemptCueAt = now;
-                  console.info(`[Coach] uncounted pass → ${rule.id}`);
-                  sayCorrection({ ...rule, side: P.side || ev.side || null }, liveCue(rule, isHeRef.current), 1.1, isHeRef.current);
-                }
                 const note = isHeRef.current ? `${uncountedAttempts} מסירות לא נספרו (${rule.msg?.he || ''})` : `${uncountedAttempts} passes did not count (${rule.msg?.en || ''})`;
                 const n = restNotesRef.current; const k = n.findIndex(x => /לא נספרו|did not count/.test(x)); if (k >= 0) n[k] = note; else n.push(note);
               }
@@ -885,7 +937,7 @@ export function useExpertExecution({
   const ghostSpec = useMemo(() => (active && profile?.ghost ? { profile } : null), [active, profile]);
 
   return {
-    active, profile, setLogRef, restNotesRef, lastRepCleanRef, inViewRef, startReadyRef, countOpenRef, repCountRef, workingRef, earlyRef, strikeCountRef, brainRef,
+    active, profile, setLogRef, restNotesRef, oneOffsRef, coachStop, lastRepCleanRef, inViewRef, startReadyRef, countOpenRef, repCountRef, workingRef, earlyRef, strikeCountRef, brainRef,
     missingPart, setup, readyFlash, startPrompt, issue, accuracy, repAccuracy, cadence, unsure, ghostSpec, statsRef,
   };
 }

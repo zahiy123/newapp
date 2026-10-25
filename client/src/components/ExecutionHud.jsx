@@ -11,7 +11,7 @@ import { cameraViewHint } from '../engine/training/viewPrompts';
 export default function ExecutionHud({ execution, isHe }) {
   if (!execution?.active) return null;
   // the accuracy shown = the REAL reps' accuracy only ("—" until the first counted rep)
-  const { profile, setup, readyFlash, startPrompt, issue, repAccuracy, cadence, unsure } = execution;
+  const { profile, setup, readyFlash, startPrompt, issue, repAccuracy, cadence, unsure, coachStop } = execution;
   const accuracy = typeof repAccuracy === 'number' ? repAccuracy : null;
   // The most specific sport's first focus (rehab + sport → the sport's)
   const lastSport = profile.sportContexts?.[profile.sportContexts.length - 1];
@@ -30,6 +30,13 @@ export default function ExecutionHud({ execution, isHe }) {
         <div className="absolute top-11 left-1/2 -translate-x-1/2 z-[16] pointer-events-none opacity-90 bg-sky-600 text-white rounded-xl px-3 py-1.5 text-sm font-bold shadow-lg text-center max-w-[86%] leading-snug">
           {'🏁'} {isHe ? 'קח עמדת פתיחה — בדיוק כמו הצללית' : 'Get into the start position — exactly like the Ghost'}
           <div className="text-[11px] font-medium opacity-90">{isHe ? 'מתחילים ברגע שאתה בעמדה' : "We start the moment you're in position"}</div>
+        </div>
+      )}
+      {coachStop && (
+        <div className="absolute top-11 left-1/2 -translate-x-1/2 z-[17] pointer-events-none opacity-95 bg-indigo-600 text-white rounded-xl px-3 py-1.5 text-sm font-bold shadow-lg text-center max-w-[86%] leading-snug">
+          {'⏸'} {isHe ? 'עצירה קצרה — המאמן מסביר' : 'A short stop — the coach explains'}
+          {coachStop.text && <div className="text-[12px] font-medium opacity-95 mt-0.5">{coachStop.text}</div>}
+          <div className="text-[11px] font-medium opacity-80">{isHe ? 'הספירה והטיימר מוקפאים — ממשיכים מאותה נקודה' : 'The count and the timer are frozen — you continue from the same point'}</div>
         </div>
       )}
       {!setup && readyFlash && (

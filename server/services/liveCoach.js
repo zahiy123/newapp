@@ -34,6 +34,7 @@ export const CUE_HEDGE_MS = 1300;
 export const CUE_MODEL = CUE_MODELS[0];
 export const DEBRIEF_MODELS = ['claude-opus-5-5', 'claude-sonnet-5'];
 export const MAX_CUE_CHARS = 110;
+export const MAX_STOP_CHARS = 260;      // the smart stop's short explanation (18–30 words)
 
 const clip = (v, n = 300) => String(v ?? '').replace(/[\x00-\x1f]/g, ' ').slice(0, n);
 
@@ -105,6 +106,8 @@ Ground rules — never break them:
 const MOMENTS = {
   setup: 'NOW: the trainee is getting into position in front of the camera, maybe in a SMALL ROOM. Say the ONE positioning fix given in "what", in your own words — precise, warm, with authority — at most 12 words, one sentence. Never add another fix.',
   start: 'NOW: the trainee is seen clearly but not yet in the start stance. Tell them, in your own words, exactly what "what" says to do to start — at most 12 words, one sentence, with drive.',
+  // THE SMART STOP (owner, 2026-10-25): the same critical error 2–3 times in a block of 3 reps → a short human stop
+  stop: 'NOW: you STOP the set for a moment — the SAME critical error keeps repeating ("what"; "why" / "how" = the expert knowledge; "timesInBlock" = how many of the last reps; "bodyNow" = what you see in the whole body). In your own words, as the best professional coach: open with a short natural stop (like "wait, let\'s stop for a second"), then ONE focused professional explanation — why it matters and EXACTLY how to do it on the next rep (the body and the leg as one chain when they are connected; name the support leg / the kicking leg explicitly) — then release them to continue. 18 to 30 words, 2–3 short spoken sentences. Real football terms only.',
   praise: 'NOW: the last reps were MEASURED correct. Give ONE short, genuine, specific praise for exactly the good point in "what" — 3 to 6 words, one sentence, warm. Never a generic "good job"; never a number.',
   ready: 'NOW: you can see the trainee clearly and the exercise is about to begin. Tell them so and to start — warm, short, at most 8 words. No technique, no numbers.',
   motivate: 'NOW: a natural moment for ONE genuine, warm encouragement (the moment and the intent are in "what"). In your own words, at most 10 words. Never praise a performance, never claim a technique fact, never a number. If the trainee is tired / frustrated: calm and supportive.',
@@ -120,6 +123,11 @@ Do not repeat or paraphrase closely any of the recent lines listed. Output ONLY 
     const user = JSON.stringify({
       exercise: clip(f.exercise, 80), sport: clip(f.sport, 40), body: clip(f.body, 120),
       what: clip(f.error?.what, 200), recentLines: (f.recent || []).slice(-4).map(x => clip(x, 90)),
+      ...(f.mode === 'stop' ? {
+        why: clip(f.error?.why, 300), how: clip(f.error?.how, 300), timesInBlock: f.timesInBlock ?? null,
+        bodyNow: (f.bodyNow || []).slice(0, 3).map(x => clip(x, 80)),
+        side: f.side === 'left' || f.side === 'right' ? f.side : null, kickingProsthesis: !!f.kickingProsthesis,
+      } : {}),
     });
     return { system, user };
   }
@@ -169,6 +177,7 @@ ${f.prefetch ? '1. Do NOT open with the set in numbers (the coach says them firs
 5. ONE clear goal for the next set (or, if lastSet, what to take to next time).
 If nothing was measured (attempts 0 and no errors) say honestly that you could not see the movement clearly and what to do so you can.
 "visualNotes" are what a vision model saw in single frames — weaker evidence than the measurement: use a note only if it agrees with the measured errors / clean items, never to contradict them, and never invent a number from it.
+"oneOffs" (owner, 2026-10-25) = single slips that happened ONCE in their block of reps and were NOT said during the set: mention the most relevant one in ONE short sentence — "I noticed in rep X you did Y — watch it in the next set" (in your own words).
 Then add the spoken extras given (the leg switch / a mental cue), if any.
 Return ONLY JSON: {"speech":"<the spoken analysis>","card":[{"kind":"fix|good|focus|note","title":"<short line>","detail":["<short line>", ...]}]} — the card is a short written version of the same analysis (max 5 items).`;
   const user = JSON.stringify({
@@ -183,6 +192,7 @@ Return ONLY JSON: {"speech":"<the spoken analysis>","card":[{"kind":"fix|good|fo
     measuredClean: (f.clean || []).slice(0, 4).map(x => clip(x, 80)),
     extras: (f.extras || []).filter(Boolean).map(x => clip(x, 160)),
     visualNotes: (f.visual || []).filter(Boolean).slice(-6).map(x => clip(x, 160)),
+    oneOffs: (f.oneOffs || []).slice(0, 4).map(o => ({ rep: o?.rep ?? null, what: clip(o?.what, 100) })).filter(o => o.what),
     judgedNothing: !!f.judgedNothing,
   });
   return { system, user };
@@ -238,7 +248,7 @@ export async function generateCue(facts, { timeoutMs = 3000, askFn = ask } = {})
     let raw;
     try { raw = await hedged(() => askFn(model, prompt, 80, timeoutMs, 'off'), CUE_HEDGE_MS); } catch (err) { if (isModelError(err)) continue; throw err; }
     const text = String(raw || '').replace(/["“”«»]/g, '').replace(/\s+/g, ' ').trim();
-    if (!text || /^SKIP/i.test(text) || text.length > MAX_CUE_CHARS || !numbersGrounded(text, facts) || !directionsKept(text, facts)) return null;
+    if (!text || /^SKIP/i.test(text) || text.length > (facts.mode === 'stop' ? MAX_STOP_CHARS : MAX_CUE_CHARS) || !numbersGrounded(text, facts) || !directionsKept(text, facts)) return null;
     if (!passWordsOk(text, facts)) return null;                                  // a pass is never a "kick" / "יפה"
     if ((facts.recent || []).some(r => r && r.trim() === text)) return null;   // never the same words twice
     if (wordCount(text) <= MAX_CUE_WORDS || facts.mode) return text;

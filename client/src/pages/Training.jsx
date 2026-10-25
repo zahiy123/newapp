@@ -610,6 +610,7 @@ export default function Training() {
   // Feedback tracking
   const lastSpokenRef = useRef('');
   const timerRef = useRef(null);
+  const coachStopRef = useRef(false);                // the coach's smart stop is on (the timer freezes)
   const analyzerRef = useRef(null);
   const badFormCountRef = useRef(0);
   const goodFormCountRef = useRef(0);
@@ -943,6 +944,7 @@ export default function Training() {
   const guideLatchRef = useRef({ phase: null, on: false });
   const setupRef = useRef(null);                   // the expert module's positioning fix (null = positioned)
   setupRef.current = execution.setup;
+  coachStopRef.current = !!execution.coachStop;
   // the expert module owns positioning: the older pipeline's view / distance lines stay silent while it runs
   const expertOwnsViewRef = useRef(false);
   expertOwnsViewRef.current = !!execution.active;
@@ -1848,6 +1850,7 @@ export default function Training() {
   useEffect(() => {
     if (phase === PHASE.EXERCISING) {
       timerRef.current = setInterval(() => {
+        if (coachStopRef.current) return;              // (the coach's smart stop freezes the timer)
         setTimer(prev => prev + 1);
         // Active timer: only increment when moving with good form
         const state = exerciseStateRef.current;
@@ -2950,6 +2953,7 @@ export default function Training() {
       sport: sportContexts.join('+'), lp: limbProfile || {}, legacy: legacySetLogRef.current, whyOf: techniqueWhy,
       extras: debriefExtras,
       visual: [...visionNotesRef.current.slice(-4), ...(execution.restNotesRef?.current || [])],
+      oneOffs: execution.oneOffsRef?.current || [],
     });
     // the analysis was requested near the END of the set (prefetched) — the coach says the numbers at once and
     // the AI's analysis follows without a wait; without a prefetch, the full request now
