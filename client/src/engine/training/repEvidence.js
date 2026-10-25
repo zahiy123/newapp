@@ -149,7 +149,8 @@ export function evidenceRange(ev, returnShare = RETURN_SHARE) {
 // (the pelvis travels, both legs alternate with similar ranges).
 export const KICK_WINDOW_MS = 1200;
 export const KICK_MAX_TRAVEL = 0.35;
-export const KICK_MAX_TRAVEL_FAST = 0.45;     // a FAST strong pass (>= 350 deg/s) moves the pelvis more (owner, 2026-10-21)
+export const KICK_MAX_TRAVEL_FAST = 0.45;
+export const KICK_MAX_TRAVEL_SLOW = 0.38;     // a FAST strong pass (>= 350 deg/s) moves the pelvis more (owner, 2026-10-21)
 export const KICK_OTHER_KNEE_DEG = 25;
 export const KICK_DOMINANCE = 0.6;
 export const KICK_MAX_WIDTH_CHANGE = 0.18;
@@ -203,7 +204,8 @@ export function inPlaceCheck(ev) {
   if (hips.length >= 2 && torso) {
     const travel = Math.hypot(spread(hips.map(h => h.x)), spread(hips.map(h => h.y)));
     out.travel = Math.round((travel / torso) * 100) / 100;
-    out.travelMax = strikeSwing(ev).peakVel >= KICK_FAST_SWING_DEG_S ? KICK_MAX_TRAVEL_FAST : KICK_MAX_TRAVEL;
+    // graded by the pass's speed (owner, 2026-10-25): < 250 °/s 0.38 · ≥ 250 °/s 0.45 (a natural body shift in a real pass)
+    out.travelMax = strikeSwing(ev).peakVel >= KICK_MID_SWING_DEG_S ? KICK_MAX_TRAVEL_FAST : KICK_MAX_TRAVEL_SLOW;
     if (travel > out.travelMax * torso) return { ...out, reason: 'walk-across' };
   }
   // THE SUPPORT ANCHOR (owner, 2026-10-20): the support leg is judged by its FOOT staying planted on the floor —

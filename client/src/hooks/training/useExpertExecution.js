@@ -64,7 +64,15 @@ export const BLOCK_EYES_WAIT_MS = 3500;     // a block closes once the eyes answ
 export const MAX_STOPS_PER_SET = 2;         // a smart stop is rare — the same error stops the set once
 export const STOP_MAX_MS = 15000;           // a stop never lasts longer (the AI late / silent → released)
 export const STOP_AFTER_SPEECH_MS = 600;
-export const BLOCK_HOLD_MS = 1500;          // the most a block's end holds the count for its last evidence      // an uncounted pass is answered at most every 8 s (owner, 2026-10-22)
+export const BLOCK_HOLD_MS = 1500;          // the most a block's end holds the count for its last evidence
+// the device's contact-surface rules (toe / laces …) = the eyes' 'contact' category — one error
+export const CONTACT_RULE = /^(pass_toe|pass_laces|kick_toe|kick_laces)$|contact/;
+const FLOW_TAGS = ['cyclic', 'conditioning', 'plyometric', 'acceleration', 'agility', 'cardio', 'endurance'];
+const FLOW_NAME = /ריצ|ספרינט|קפיצ|זריזות|סיבולת|דילוג|ברפי|האצה|קרדיו|כושר|run|sprint|jump|skip|agility|cardio|burpee|endurance|shuttle|ladder/i;
+/** A flow drill (cardio, speed, agility, conditioning): the coach never stops it — corrections on the move. */
+export function isFlowDrill(profile, name = '') {
+  return profile?.kind === 'cyclic' || (profile?.tags || []).some(t => FLOW_TAGS.includes(t)) || FLOW_NAME.test(String(name || ''));
+}      // an uncounted pass is answered at most every 8 s (owner, 2026-10-22)
 /** The rule told for an uncounted pass: too small / the body moved / the support foot moved. */
 export function uncountedPassRule(kind, pass = true) {
   const what = pass ? 'מסירה' : 'בעיטה', whatEn = pass ? 'pass' : 'kick';
@@ -361,6 +369,7 @@ export function useExpertExecution({
       return shortWhole(s);
     };
     let lastCorrectionAt = -1e9;                    // no praise within 10 s of a correction
+    const flowDrill = isFlowDrill(profile, exerciseName);   // cardio / speed / agility: no hard stops
     const isPassDrill = isPassExercise(profile, exerciseName);
     // a correction is an instruction FOR THE NEXT PASS: still true while at most ONE newer pass was done and
     // ≤ 8 s passed; older than that it is about the past → dropped (field video 2026-10-21 b: the eyes' cue
@@ -511,9 +520,21 @@ export function useExpertExecution({
     const stopRepOf = new Map();               // stopped key → the rep the stop came after
     const resetBlocks = () => { blockRecs.clear(); blockBase = 0; windowStart = 1; stopsThisSet = 0; stoppedKeys.clear(); stopRepOf.clear(); oneOffsRef.current = []; holdActive = false; };
     const recOf = (n) => { let r = blockRecs.get(n); if (!r) { r = { dev: new Map(), vis: new Map() }; blockRecs.set(n, r); } return r; };
-    const keyRule = (k, rec) => (k.startsWith('dev:') ? rec.dev.get(k.slice(4)) : visionRule(rec.vis.get(k.slice(4))));
-    const isCritical = (k, rec) => (k.startsWith('dev:') ? (() => { const r = rec.dev.get(k.slice(4)); return r?.severity === 'danger' || isMajorRule(r); })() : rec.vis.get(k.slice(4))?.severity === 'major');
-    const keysOf = (rec) => [...[...rec.dev.keys()].map(id => `dev:${id}`), ...[...rec.vis.keys()].map(c => `vis:${c}`)];
+    // (owner, 2026-10-25: the device's toe / laces measurement and the eyes' 'contact' finding are ONE error — one
+    //  stop at most, then short reminders; one line in the rest)
+    const devContact = (rec) => [...rec.dev.entries()].find(([id]) => CONTACT_RULE.test(id)) || null;
+    const keyRule = (k, rec) => {
+      if (k === 'contact') { const d = devContact(rec); return d ? d[1] : visionRule(rec.vis.get('contact')); }
+      return k.startsWith('dev:') ? rec.dev.get(k.slice(4)) : visionRule(rec.vis.get(k.slice(4)));
+    };
+    const isCritical = (k, rec) => {
+      if (k === 'contact') { const d = devContact(rec); return !!(d && (d[1]?.severity === 'danger' || isMajorRule(d[1]))) || rec.vis.get('contact')?.severity === 'major'; }
+      return k.startsWith('dev:') ? (() => { const r = rec.dev.get(k.slice(4)); return r?.severity === 'danger' || isMajorRule(r); })() : rec.vis.get(k.slice(4))?.severity === 'major';
+    };
+    const keysOf = (rec) => [...new Set([
+      ...[...rec.dev.keys()].map(id => (CONTACT_RULE.test(id) ? 'contact' : `dev:${id}`)),
+      ...[...rec.vis.keys()].map(c => (c === 'contact' ? 'contact' : `vis:${c}`)),
+    ])];
     const releaseStop = (why) => {
       if (!stopActive) return;
       stopActive = false; setCoachStop(null);
@@ -531,10 +552,11 @@ export function useExpertExecution({
       // the whole body of THIS rep (the eyes' other clear findings) — the stop may name a 2nd problem, organised
       // + every other CLEAR problem of the block (the contact surface, the hands, the chest…) — named in order
       const extra = [];
+      const canon = (k) => (k === 'vis:contact' || (k.startsWith('dev:') && CONTACT_RULE.test(k.slice(4))) ? 'contact' : k);
       for (let n = from; n <= repNo; n++) {
         const rr = blockRecs.get(n); if (!rr) continue;
-        for (const [k, r] of rr.dev) if (`dev:${k}` !== key && isCritical(`dev:${k}`, rr)) extra.push(isHeRef.current ? r.msg?.he : r.msg?.en);
-        for (const [c, f] of rr.vis) if (`vis:${c}` !== key && (f.severity === 'major' || f.confidence >= VISION_MINOR_SAY)) extra.push(f.what || f.cue);
+        for (const [k, r] of rr.dev) if (canon(`dev:${k}`) !== key && isCritical(canon(`dev:${k}`), rr)) extra.push(isHeRef.current ? r.msg?.he : r.msg?.en);
+        for (const [c, f] of rr.vis) if (canon(`vis:${c}`) !== key && (f.severity === 'major' || f.confidence >= VISION_MINOR_SAY)) extra.push(f.what || f.cue);
       }
       if (extra.length) facts.bodyNow = [...new Set([...extra.filter(Boolean), ...(facts.bodyNow || [])])].slice(0, 3);
       aiStop(facts).then((t) => {
@@ -576,6 +598,8 @@ export function useExpertExecution({
      *  (≤ BLOCK_HOLD_MS) until it is in; else nothing holds. */
     const endBlock = (from, to) => {
       setTimeout(() => { if (!disposed) closeBlock(from, to); }, BLOCK_EYES_WAIT_MS);   // (the line / the slips — the eyes' time)
+      // a FLOW drill never stops the heart rate: the block's critical repeat is said on the move by closeBlock
+      if (flowDrill) return;
       if (restOnly || !countingRef.current || stopActive || stopsThisSet >= MAX_STOPS_PER_SET) return;
       const first = blockCritical(from, to);
       if (first.best && first.best[1].n >= 2) { smartStop(first.best[0], keyRule(first.best[0], first.best[1].rec), first.best[1].n, to, from); return; }
@@ -605,8 +629,9 @@ export function useExpertExecution({
       }
       if (restOnly || !countingRef.current || stopActive || stopsSince(from)) return;
       const back = (k, c) => stoppedKeys.has(k) && c.reps.every(n => n > (stopRepOf.get(k) ?? Infinity));
+      // (a flow drill: a critical repeat comes first — it is said here, short, on the move, instead of a stop)
       const rep = [...counts.entries()].filter(([k, c]) => c.n >= 2 && (!stoppedKeys.has(k) || back(k, c)))
-        .sort((a, b) => (back(b[0], b[1]) - back(a[0], a[1])) || (b[1].n - a[1].n))[0];
+        .sort((a, b) => (back(b[0], b[1]) - back(a[0], a[1])) || (flowDrill ? isCritical(b[0], b[1].rec) - isCritical(a[0], a[1].rec) : 0) || (b[1].n - a[1].n))[0];
       if (rep) {
         const rule = keyRule(rep[0], rep[1].rec);
         console.info(`[Coach] block ${from}–${to}: ${rep[0]} ×${rep[1].n}${back(rep[0], rep[1]) ? ' (back after its stop)' : ''} → one short line`);
@@ -866,12 +891,14 @@ export function useExpertExecution({
         if (!code && okSince !== null && now - okSince >= SETUP_CLEAR_MS) { problemSince = null; setupRepeats = 0; }
         const problemSettled = !!code && problemSince !== null && now - problemSince >= SETUP_SETTLE_MS;
         // the card: shown once settled, kept until the positioning is good for SETUP_CLEAR_MS
-        const showCode = problemSettled ? code : (shownCode && !(okSince !== null && now - okSince >= SETUP_CLEAR_MS) ? shownCode : null);
+        const coachTalking = stopActive || holdActive || (countingRef.current && !!window.speechSynthesis?.speaking);
+        const showCode0 = problemSettled ? code : (shownCode && !(okSince !== null && now - okSince >= SETUP_CLEAR_MS) ? shownCode : null);
+        const showCode = coachTalking ? null : showCode0;                    // (owner, 2026-10-25: no banner over the coach)
         if (showCode !== shownCode) { shownCode = showCode; setSetup(showCode ? r.setup || shownSetup : null); if (showCode) shownSetup = r.setup; }
         if (code) {
           readySince = null;
           announcedReady = false;
-          if (problemSettled && !quietRef.current && now - (spokenByCode[code] || -1e9) >= SETUP_REPEAT_MS
+          if (problemSettled && !coachTalking && !quietRef.current && now - (spokenByCode[code] || -1e9) >= SETUP_REPEAT_MS
             && now - lastSetupSpokenAt >= Math.min(60000, SETUP_ANY_GAP_MS * 2 ** setupRepeats) && now - lastVoice > 4000) {
             spokenByCode[code] = now; spokenCode = code; spokenAt = now; lastVoice = now; hadProblemShown = true; lastSetupSpokenAt = now;
             setupRepeats += 1;                       // not fixed → the next reminder comes later (10 → 20 → 40 → 60 s)

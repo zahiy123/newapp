@@ -1862,7 +1862,7 @@ export default function Training() {
       if (busy || !v || !v.videoWidth) return;
       busy = true;
       try {
-        const k = Math.min(1, 960 / v.videoWidth);
+        const k = Math.min(1, 800 / v.videoWidth);
         const t = performance.now(); const lm = poseLandmarksRef.current;
         const bmp = await createImageBitmap(v, { resizeWidth: Math.round(v.videoWidth * k), resizeHeight: Math.round(v.videoHeight * k), resizeQuality: 'medium' });
         if (!alive) { bmp.close?.(); return; }
@@ -1870,7 +1870,7 @@ export default function Training() {
         ring.push({ t, bmp, lm });
         while (ring.length && t - ring[0].t > 1500) ring.shift().bmp.close?.();
       } catch { /* a frame skipped */ } finally { busy = false; }
-    }, 80);
+    }, 100);
     return () => { alive = false; clearInterval(id); for (const f of frameRingRef.current) f.bmp.close?.(); frameRingRef.current = []; };
   }, [phase]);
 

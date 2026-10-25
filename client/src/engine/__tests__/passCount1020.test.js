@@ -241,7 +241,7 @@ describe('owner 2026-10-21 (c): pass words, whole short lines, a fast pass may m
     const fast = inPlaceCheck(run(frames(), 30).ev);
     expect(fast.travelMax).toBe(0.45);
     expect(fast.reason).not.toBe('walk-across');
-    expect(inPlaceCheck(run(frames(), 100).ev).reason).toBe('walk-across');
+    expect(inPlaceCheck(run(frames(), 100).ev).ok).toBe(false);          // (a slower move of the whole body: still not a pass)
   });
 });
 
@@ -282,5 +282,23 @@ describe('owner 2026-10-25: the eyes get the PEAK frame', () => {
     const t = strikePeakTime(ev);
     expect(t).toBeGreaterThan(250);
     expect(t).toBeLessThan(450);          // between the frames of the biggest jump (-22 → 15)
+  });
+});
+
+describe('owner 2026-10-25 (b): one contact error, flow drills never stop, a graded pelvis', () => {
+  it('the device toe / laces rules are the contact category; cardio / agility drills are flow drills', async () => {
+    const { CONTACT_RULE, isFlowDrill } = await import('../../hooks/training/useExpertExecution');
+    expect(CONTACT_RULE.test('pass_toe')).toBe(true);
+    expect(CONTACT_RULE.test('pass_laces')).toBe(true);
+    expect(CONTACT_RULE.test('support_leg')).toBe(false);
+    expect(isFlowDrill({ kind: 'cyclic', tags: [] }, '')).toBe(true);
+    expect(isFlowDrill({ kind: 'reps', tags: ['plyometric'] }, '')).toBe(true);
+    expect(isFlowDrill({ kind: 'reps', tags: [] }, 'ריצת זריזות בסולם')).toBe(true);
+    expect(isFlowDrill({ kind: 'strike', tags: ['strike', 'ballSkill'] }, 'מסירה בצל')).toBe(false);
+  });
+  it('a pass at 300 deg/s may move the pelvis 0.45; a slow one 0.38', () => {
+    const fr = () => [-10, -22, -12, 8, 25].map((d, i) => legBody(d, { dx: i * 0.02 }));
+    expect(inPlaceCheck(run(fr(), 60).ev).travelMax).toBe(0.45);
+    expect(inPlaceCheck(run(fr(), 200).ev).travelMax).toBe(0.38);
   });
 });

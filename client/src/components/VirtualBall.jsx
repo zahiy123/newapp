@@ -197,7 +197,9 @@ export default function VirtualBall({ mode = 'incoming', target = 'foot', kind =
             if (window.__GHOST_DEBUG) window.__ballDebug = { mode, live, hidden: hiddenRef.current ? 'not-positioned' : 'no-feet', at: now };
             out(null, map); raf = requestAnimationFrame(draw); return;
           }
-          const floorY = Math.min(map.box.y + map.box.h - r * 0.3, ground);
+          // the ball sits on the REAL floor line — with the feet near the picture's bottom it may be partly cut,
+          // never lifted above the feet (owner, 2026-10-25: 'the ball feels too high')
+          const floorY = Math.min(map.box.y + map.box.h + r * 0.6, ground);
           const size = bodyPx * 0.07;
           const cueAt = (p) => ({ x: p.x, y: Math.max(map.box.y + size * 1.4, p.y - bodyPx * 0.22) });
           let ball = null;
