@@ -63,7 +63,8 @@ export const BLOCK_REPS = 3;
 export const BLOCK_EYES_WAIT_MS = 3500;     // a block closes once the eyes answered about its last rep
 export const MAX_STOPS_PER_SET = 2;         // a smart stop is rare — the same error stops the set once
 export const STOP_MAX_MS = 15000;           // a stop never lasts longer (the AI late / silent → released)
-export const STOP_AFTER_SPEECH_MS = 600;      // an uncounted pass is answered at most every 8 s (owner, 2026-10-22)
+export const STOP_AFTER_SPEECH_MS = 600;
+export const BLOCK_HOLD_MS = 1500;          // the most a block's end holds the count for its last evidence      // an uncounted pass is answered at most every 8 s (owner, 2026-10-22)
 /** The rule told for an uncounted pass: too small / the body moved / the support foot moved. */
 export function uncountedPassRule(kind, pass = true) {
   const what = pass ? 'מסירה' : 'בעיטה', whatEn = pass ? 'pass' : 'kick';
@@ -216,7 +217,8 @@ export function useExpertExecution({
   nameRef.current = playerName;
   const statsRef = useRef({ dangers: 0, errors: {} });
   const setLogRef = useRef(null);            // the current set's measured log (the rest's debrief)
-  const oneOffsRef = useRef([]);            // single slips of the set (rep + what) — the rest says the main one
+  const oneOffsRef = useRef([]);
+  const setProblemsRef = useRef(null);         // () => { problems, fixed } — the set's problems for the rest            // single slips of the set (rep + what) — the rest says the main one
   const [coachStop, setCoachStop] = useState(null);   // the smart stop: { text } while the coach explains
   const restNotesRef = useRef([]);           // the brain's notes kept for the rest's analysis (never said in the set)
   const lastRepCleanRef = useRef(null);      // the last counted kick / pass was measured clean (the ball's "Nice!")
@@ -403,7 +405,7 @@ export function useExpertExecution({
     const lookAtRep = async (repIdx, side, atT = null) => {
       const now0 = performance.now();
       // the eyes look at EVERY counted rep (up to 2 looks in flight — a look takes 2–5 s, a pass ~3 s)
-      if (visionInFlight >= 2 || now0 - lastLookAt < 700) return;
+      if (visionInFlight >= 2 || now0 - lastLookAt < 700) { recOf(repIdx + 1).visDone = true; return; }
       visionInFlight += 1; lastLookAt = now0;
       // the frames are prepared IN THE BACKGROUND (an async bitmap + encode — never a stall in the live video)
       let frame = null, legsFrame = null, composite = false;
@@ -415,7 +417,7 @@ export function useExpertExecution({
           profile.kind === 'strike' ? Promise.resolve(captureFrameRef?.current?.()) : Promise.resolve(null),
         ]);
       } catch { frame = null; }
-      if (!frame || disposed) { visionInFlight = Math.max(0, visionInFlight - 1); return; }
+      if (!frame || disposed) { visionInFlight = Math.max(0, visionInFlight - 1); recOf(repIdx + 1).visDone = true; return; }
       const leg = activeLegRef.current || side;
       const prosthetic = isProstheticLeg(limbProfile || {}, leg);
       const isPass = profile.id === 'shadowPass' && !prosthetic;          // (no foot-surface judgement on a prosthesis)
@@ -429,6 +431,7 @@ export function useExpertExecution({
         exercise: exerciseName, sport: contextsKey, body: bodyText(limbProfile || {}), keyPoints: [...kp, ...emphasis], goal: sessionGoalRef.current || '',
         name: nameRef.current, recent: recentCues.slice(-4) }).then((v) => {
         visionInFlight = Math.max(0, visionInFlight - 1);
+        if (!v) recOf(repIdx + 1).visDone = true;             // (no answer — the block never waits for it)
         if (disposed || !v) return;
         const hits = isPass ? visionRuleHits(v, profile) : [];
         for (const h of hits) logRule(tracker.log, h.rule, h.violated, null);
@@ -447,8 +450,8 @@ export function useExpertExecution({
         if (rec) { rec.visClean = judged ? !anyBad : null; if (anyBad) errorSeen(found.map(f => `vis_${f.code}`).concat(hits.filter(h => h.violated).map(h => h.rule.id))); judgeClean(rec, repIdx + 1); }
         console.info(`[Vision] rep #${repIdx + 1}${prosthetic ? ' (prosthesis kicks)' : ''}: ${found.map(f => `${f.severity}:${f.code}(${f.confidence})`).join(', ') || 'no finding'} | good: ${goods.map(g => g.text).join(' / ') || '-'}`);
         const passBad = hits.find(h => h.violated);
-        if (restOnly || !countingRef.current || performance.now() < floodUntil) return;
         const repNo = repIdx + 1;
+        if (restOnly || !countingRef.current || performance.now() < floodUntil) { recOf(repNo).visDone = true; return; }
         // (the body picture for the next lines — what the eyes saw, the root first)
         {
           const seen = [...found].sort((a, b) => (b.severity === 'major') - (a.severity === 'major') || b.confidence - a.confidence);
@@ -460,7 +463,7 @@ export function useExpertExecution({
           const rec = recOf(repNo);
           for (const f of found) if (f.severity === 'major' || f.confidence >= VISION_MINOR_SAY) rec.vis.set(f.code, f);
           if (passBad) rec.dev.set(passBad.rule.id, passBad.rule);
-          checkCritical(repNo);                                // (the blocks decide what is said)
+          rec.visDone = true;                                  // (the block's end decides what is said)
         }
       });
     };
@@ -504,7 +507,9 @@ export function useExpertExecution({
     const blockRecs = new Map();               // repNo → { dev: Map(id → rule), vis: Map(code → finding) }
     let blockBase = 0, windowStart = 1, stopsThisSet = 0; const stoppedKeys = new Set();
     let stopActive = false, stopUntil = 0;
-    const resetBlocks = () => { blockRecs.clear(); blockBase = 0; windowStart = 1; stopsThisSet = 0; stoppedKeys.clear(); oneOffsRef.current = []; };
+    let holdActive = false;                    // the block's verdict is awaited — counting held (≤ BLOCK_HOLD_MS)
+    const stopRepOf = new Map();               // stopped key → the rep the stop came after
+    const resetBlocks = () => { blockRecs.clear(); blockBase = 0; windowStart = 1; stopsThisSet = 0; stoppedKeys.clear(); stopRepOf.clear(); oneOffsRef.current = []; holdActive = false; };
     const recOf = (n) => { let r = blockRecs.get(n); if (!r) { r = { dev: new Map(), vis: new Map() }; blockRecs.set(n, r); } return r; };
     const keyRule = (k, rec) => (k.startsWith('dev:') ? rec.dev.get(k.slice(4)) : visionRule(rec.vis.get(k.slice(4))));
     const isCritical = (k, rec) => (k.startsWith('dev:') ? (() => { const r = rec.dev.get(k.slice(4)); return r?.severity === 'danger' || isMajorRule(r); })() : rec.vis.get(k.slice(4))?.severity === 'major');
@@ -515,16 +520,23 @@ export function useExpertExecution({
       evidenceAccept(kinetic, performance.now());              // the movement during the stop never carries into a rep
       console.info(`[Coach] smart stop released (${why}) — continue from rep ${repCountRef.current}`);
     };
-    const smartStop = (key, rule, times, repNo) => {
+    const smartStop = (key, rule, times, repNo, from = repNo) => {
       stopActive = true; stopUntil = performance.now() + STOP_MAX_MS; stopsThisSet += 1; stoppedKeys.add(key); windowStart = repNo + 1;
+      stopRepOf.set(key, repNo); lastStopRep = repNo;
       setCoachStop({ text: null });
       console.info(`[Coach] SMART STOP at rep ${repNo}: ${key} ×${times} in the last 3 reps`);
       const he0 = isHeRef.current;
       const facts = cueFactsFor(rule, he0);
       facts.timesInBlock = times;
       // the whole body of THIS rep (the eyes' other clear findings) — the stop may name a 2nd problem, organised
-      const rr = blockRecs.get(repNo);
-      if (rr) { const extra = [...rr.vis.values()].map(f => f.what || f.cue).filter(Boolean); if (extra.length) facts.bodyNow = [...new Set([...extra, ...(facts.bodyNow || [])])].slice(0, 3); }
+      // + every other CLEAR problem of the block (the contact surface, the hands, the chest…) — named in order
+      const extra = [];
+      for (let n = from; n <= repNo; n++) {
+        const rr = blockRecs.get(n); if (!rr) continue;
+        for (const [k, r] of rr.dev) if (`dev:${k}` !== key && isCritical(`dev:${k}`, rr)) extra.push(isHeRef.current ? r.msg?.he : r.msg?.en);
+        for (const [c, f] of rr.vis) if (`vis:${c}` !== key && (f.severity === 'major' || f.confidence >= VISION_MINOR_SAY)) extra.push(f.what || f.cue);
+      }
+      if (extra.length) facts.bodyNow = [...new Set([...extra.filter(Boolean), ...(facts.bodyNow || [])])].slice(0, 3);
       aiStop(facts).then((t) => {
         if (disposed || !stopActive) return;
         if (!t) { releaseStop('the AI did not answer — no fixed sentence'); return; }
@@ -540,16 +552,42 @@ export function useExpertExecution({
         setTimeout(() => releaseStop('explained'), until);
       });
     };
-    /** After new evidence about rep `repNo`: a critical error ≥ 2 times in the last 3 reps → the smart stop. */
-    const checkCritical = (repNo) => {
-      if (restOnly || !countingRef.current || stopActive || stopsThisSet >= MAX_STOPS_PER_SET) return;
-      const counts = new Map();
-      for (let n = Math.max(windowStart, repNo - 2); n <= repNo; n++) {
-        const rec = blockRecs.get(n); if (!rec) continue;
+    /** The block's critical keys: { best: [key, { n, rec }] | null, pending: reps whose evidence is not in yet }. */
+    const blockCritical = (from, to) => {
+      const counts = new Map(); let pending = 0;
+      for (let n = from; n <= to; n++) {
+        const rec = blockRecs.get(n);
+        if (!rec || !rec.devDone || !rec.visDone) pending += 1;
+        if (!rec) continue;
         for (const k of keysOf(rec)) if (isCritical(k, rec) && !stoppedKeys.has(k)) { const c = counts.get(k) || { n: 0, rec }; c.n += 1; c.rec = rec; counts.set(k, c); }
       }
-      const hit = [...counts.entries()].filter(([, c]) => c.n >= 2).sort((a, b) => b[1].n - a[1].n)[0];
-      if (hit) smartStop(hit[0], keyRule(hit[0], hit[1].rec), hit[1].n, repNo);
+      const best = [...counts.entries()].sort((a, b) => b[1].n - a[1].n)[0] || null;
+      return { best, pending };
+    };
+    const releaseHold = (why) => {
+      if (!holdActive) return;
+      holdActive = false; setCoachStop(null);
+      evidenceAccept(kinetic, performance.now());
+      console.info(`[Coach] block hold released (${why})`);
+    };
+    /** The block's LAST rep was counted (owner, 2026-10-25): the decision is made NOW, between rep 3 and rep 4 —
+     *  a critical error ≥ 2× → the stop at once; a possible one still waiting for its evidence → the count is held
+     *  (≤ BLOCK_HOLD_MS) until it is in; else nothing holds. */
+    const endBlock = (from, to) => {
+      setTimeout(() => { if (!disposed) closeBlock(from, to); }, BLOCK_EYES_WAIT_MS);   // (the line / the slips — the eyes' time)
+      if (restOnly || !countingRef.current || stopActive || stopsThisSet >= MAX_STOPS_PER_SET) return;
+      const first = blockCritical(from, to);
+      if (first.best && first.best[1].n >= 2) { smartStop(first.best[0], keyRule(first.best[0], first.best[1].rec), first.best[1].n, to, from); return; }
+      if (!first.pending || !first.best && first.pending < 2) return;
+      holdActive = true; setCoachStop({ hold: true });
+      const t0 = performance.now();
+      console.info(`[Coach] block ${from}–${to}: holding for the evidence (${first.pending} rep(s) pending)`);
+      const poll = setInterval(() => {
+        if (disposed || !holdActive) { clearInterval(poll); return; }
+        const c = blockCritical(from, to);
+        if (c.best && c.best[1].n >= 2) { clearInterval(poll); holdActive = false; smartStop(c.best[0], keyRule(c.best[0], c.best[1].rec), c.best[1].n, to, from); return; }
+        if (!c.pending || performance.now() - t0 >= BLOCK_HOLD_MS) { clearInterval(poll); releaseHold(c.pending ? 'timeout' : 'no pattern'); }
+      }, 120);
     };
     /** A block of 3 reps ended (+ the eyes' time): a repeated non-critical error → one short line; a single slip → the rest. */
     const closeBlock = (from, to) => {
@@ -575,18 +613,34 @@ export function useExpertExecution({
     let lastStopRep = -1;
     const stopsSince = (from) => lastStopRep >= from;
     const closeLastBlock = () => { const n = repCountRef.current; if (n > blockBase) { const b = blockBase; blockBase = n; closeBlock(b + 1, n); } };
-    const noteRepBlock = (repNo) => {
-      checkCritical(repNo);
-      if (stopActive && lastStopRep < repNo) lastStopRep = repNo;
-      if (repNo - blockBase >= BLOCK_REPS) {
-        const from = blockBase + 1; blockBase = repNo;
-        setTimeout(() => { if (!disposed) closeBlock(from, repNo); }, BLOCK_EYES_WAIT_MS);   // (the eyes of the last rep answer ~3 s later)
-      }
+    /** A rep was counted: the block's end is decided right here. */
+    const onCounted = (repNo) => {
+      recOf(repNo);
+      if (repNo - blockBase >= BLOCK_REPS) { const from = blockBase + 1; blockBase = repNo; endBlock(from, repNo); }
     };
     const devicePolicy = (list, repNo, res) => {
       const rec = recOf(repNo);
       for (const id of list) { const rule = ruleById(id, res); if (rule) rec.dev.set(id, rule); }
-      noteRepBlock(repNo);
+      rec.devDone = true;
+    };
+    // ---------- 4. the set's problems for the rest (all of them; the ones FIXED after a stop are told as fixed) ----------
+    setProblemsRef.current = () => {
+      const all = new Map();
+      for (const [n, rec] of [...blockRecs.entries()].sort((a, b) => a[0] - b[0])) {
+        for (const k of keysOf(rec)) {
+          const r = keyRule(k, rec); const what = r?.msg ? (isHeRef.current ? r.msg.he : r.msg.en) : null;
+          if (!what) continue;
+          const e = all.get(k) || { what, reps: [], critical: false }; e.reps.push(n); e.critical = e.critical || isCritical(k, rec); all.set(k, e);
+        }
+      }
+      const last = repCountRef.current; const problems = [], fixed = [];
+      for (const [k, e] of all) {
+        const sr = stopRepOf.get(k);
+        if (sr != null && last - sr >= 3 && !e.reps.some(n => n > sr)) { fixed.push(e.what); continue; }
+        problems.push({ what: e.what, times: e.reps.length, reps: e.reps.slice(0, 6), critical: e.critical });
+      }
+      problems.sort((a, b) => (b.critical - a.critical) || (b.times - a.times));
+      return { problems: problems.slice(0, 6), fixed };
     };
     // a HOLD (a plank, a wall sit): the coach looks every few seconds of the hold
     let lastHoldLook = -1e9;
@@ -731,7 +785,7 @@ export function useExpertExecution({
         if (!countingRef.current && wasCounting) closeLastBlock();           // the set ended: its last (partial) block
         wasCounting = countingRef.current;
         if (stopActive && performance.now() > stopUntil) releaseStop('timeout');
-        if (countingRef.current && r.inView && countOpenRef.current && !stopActive) {
+        if (countingRef.current && r.inView && countOpenRef.current && !stopActive && !holdActive) {
           for (const ev of r.events) {
             // the coach brain learns from every real attempt and the errors seen in it
             if (brain && (ev.type === 'rep' || ev.type === 'strike' || ev.type === 'partialRep')) {
@@ -742,6 +796,7 @@ export function useExpertExecution({
               evidenceAccept(kinetic, now); repCountRef.current += 1; earlyRef.current = true;
               noteRepScore(r);
               lookAtRep(repVerdicts.length ? repVerdicts.length - 1 : 0, null);
+              onCounted(repCountRef.current);
             }
             // the reason of every detected kick, in the console (the owner's videos show exactly why it did or did not count)
             if (ev.type === 'strike' && profile.kind === 'strike') {
@@ -789,6 +844,7 @@ export function useExpertExecution({
               lastRepCleanRef.current = !(r.issues || []).some(i => i.severity === 'error' || i.severity === 'danger');
               if (kickSide === 'left' || kickSide === 'right') onStrikeSideRef.current?.(kickSide);   // the leg of a REAL counted kick
               lookAtRep(repVerdicts.length - 1, kickSide, peakT);
+              onCounted(repCountRef.current);
             }
           }
           if (profile.kind === 'cyclic' && workingRef.current) earlyRef.current = true;
@@ -941,7 +997,7 @@ export function useExpertExecution({
   const ghostSpec = useMemo(() => (active && profile?.ghost ? { profile } : null), [active, profile]);
 
   return {
-    active, profile, setLogRef, restNotesRef, oneOffsRef, coachStop, lastRepCleanRef, inViewRef, startReadyRef, countOpenRef, repCountRef, workingRef, earlyRef, strikeCountRef, brainRef,
+    active, profile, setLogRef, restNotesRef, oneOffsRef, setProblemsRef, coachStop, lastRepCleanRef, inViewRef, startReadyRef, countOpenRef, repCountRef, workingRef, earlyRef, strikeCountRef, brainRef,
     missingPart, setup, readyFlash, startPrompt, issue, accuracy, repAccuracy, cadence, unsure, ghostSpec, statsRef,
   };
 }

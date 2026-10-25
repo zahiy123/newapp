@@ -2977,6 +2977,7 @@ export default function Training() {
       extras: debriefExtras,
       visual: [...visionNotesRef.current.slice(-4), ...(execution.restNotesRef?.current || [])],
       oneOffs: execution.oneOffsRef?.current || [],
+      problems: execution.setProblemsRef?.current?.() || null,
     });
     // the analysis was requested near the END of the set (prefetched) — the coach says the numbers at once and
     // the AI's analysis follows without a wait; without a prefetch, the full request now
@@ -3067,6 +3068,7 @@ export default function Training() {
       setNo: currentSet, lastSet: currentSet >= totalSets, he: isHe, name: playerName, exercise: currentExercise?.name || '',
       sport: sportContexts.join('+'), lp: limbProfile || {}, legacy: legacySetLogRef.current, whyOf: techniqueWhy,
       extras: [], visual: visionNotesRef.current.slice(-4),
+      oneOffs: execution.oneOffsRef?.current || [], problems: execution.setProblemsRef?.current?.() || null,
     });
     debriefPrefetchRef.current = { key, promise: aiDebrief({ ...facts, prefetch: true }) };
     // eslint-disable-next-line react-hooks/exhaustive-deps

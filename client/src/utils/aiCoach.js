@@ -3,7 +3,7 @@
 import { apiUrl, fetchWithTimeout } from './api';
 
 export const CUE_DEADLINE_MS = 4000;       // a sideline cue (Sonnet 5, thinking off ~1.0–1.3 s; hedged at 1.3 s; the server gives up at 2.5 s)
-export const DEBRIEF_DEADLINE_MS = 27000;  // the rest's analysis (Opus: ~8–12 s measured; the card says it is analysing)
+export const DEBRIEF_DEADLINE_MS = 30000;  // the rest's analysis (Opus: ~8–12 s measured; the card says it is analysing)
 
 // The AI coach's health, shown on the screen (owner, 2026-10-20: the credit ran out and the coach silently fell
 // back to fixed lines). 'ok' | 'credit' | 'auth' | 'rate' | 'overloaded' | 'error' | 'unreachable'

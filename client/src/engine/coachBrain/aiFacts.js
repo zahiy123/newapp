@@ -82,6 +82,8 @@ export function debriefFacts(o) {
     errors, clean: goods, extras: (o.extras || []).filter(Boolean),
     visual: (o.visual || []).filter(Boolean).slice(-4),
     oneOffs: (o.oneOffs || []).slice(0, 4),
+    setProblems: (o.problems?.problems || []).slice(0, 6),
+    fixedAfterStop: (o.problems?.fixed || []).slice(0, 4),
     judgedNothing: !errors.length && !goods.length,
   };
 }
