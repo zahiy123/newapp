@@ -285,11 +285,11 @@ export function footballPatterns(t) {
       name: t('הטעיה — צעד מעל הכדור', 'Stepover'), cue: t('הרגל מקיפה את הכדור, הכתפיים מוכרות', 'The leg circles the ball, the shoulders sell it') },
     jockeyStance: { source: { profile: 'jockeyStance' }, qualities: ['stability', 'strength', 'technique', 'sportSkill'], sports: ['field'], needs: ['standing', 'bilateralStance'],
       name: t("עמידת הגנה — ג'וקי", 'Defensive jockey stance'), cue: t('נמוך, בזווית, עיניים על הכדור', 'Low, side-on, eyes on the ball') },
-    lateralBounds: { source: { profile: 'lateralBounds' }, qualities: ['plyometric', 'agility', 'power'], sports: ['field', 'court'], needs: ['standing', 'twoLegs'],
+    lateralBounds: { source: { profile: 'lateralBounds' }, qualities: ['plyometric', 'agility', 'power'], sports: ['field', 'court', 'racket'], needs: ['standing', 'twoLegs'],
       name: t('ניתורים לצדדים', 'Lateral bounds'), cue: t('דחוף לצד, נחת רך ועצור', 'Push sideways, land soft and stick it') },
-    singleLegHop: { source: { profile: 'singleLegHop' }, qualities: ['plyometric', 'balance', 'singleLegStrength'], sports: ['field', 'court'], needs: ['standing'], unilateral: true, splitSides: true,
+    singleLegHop: { source: { profile: 'singleLegHop' }, qualities: ['plyometric', 'balance', 'singleLegStrength'], sports: ['field', 'court', 'racket'], needs: ['standing'], unilateral: true, splitSides: true,
       name: t('ניתורים על רגל אחת', 'Single-leg hops'), cue: t('נחיתה רכה, הברך מעל האצבעות', 'A soft landing, the knee over the toes') },
-    stickLanding: { source: { profile: 'stickLanding' }, qualities: ['plyometric', 'stability', 'rehab'], sports: ['field', 'court'], needs: ['standing', 'twoLegs'],
+    stickLanding: { source: { profile: 'stickLanding' }, qualities: ['plyometric', 'stability', 'rehab'], sports: ['field', 'court', 'racket'], needs: ['standing', 'twoLegs'],
       name: t('נחיתה ויציבות', 'Stick landing'), cue: t('נחת על שתי הרגליים ועצור שתי שניות', 'Land on both feet and hold for two seconds') },
   };
 }

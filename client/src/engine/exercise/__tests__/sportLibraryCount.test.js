@@ -8,6 +8,7 @@ import { createExecutionTracker, updateExecution } from '../profileEvaluator.js'
 import { getLimbProfile } from '../../limbProfile.js';
 import { footballProfiles } from '../sports/football.js';
 import { basketballProfiles } from '../sports/basketball.js';
+import { tennisProfiles } from '../sports/tennis.js';
 
 const lp = getLimbProfile({ disability: 'none', scanData: { classification: 'NATURAL' } });
 const frame = (p, t) => profileGhostPose(p, t, lp).landmarks.map(q => (q.visibility ? { ...q, x: 0.5 + q.x * 0.17, y: 0.5 + q.y * 0.17, z: (q.z ?? 0) * 0.17 } : q));
@@ -22,6 +23,8 @@ const NEW = Object.keys(footballProfiles({
   UPRIGHT_TORSO: () => ({}), KNEE_VALGUS: () => ({}), KNEE_IN: () => ({}),
 }).profiles).concat(Object.keys(basketballProfiles({
   jumpSquat: EXPERT_PROFILES.jumpSquat, runInPlace: EXPERT_PROFILES.runInPlace, gkStance: EXPERT_PROFILES.gkStance, UPRIGHT_TORSO: () => ({}),
+}).profiles)).concat(Object.keys(tennisProfiles({
+  jumpSquat: EXPERT_PROFILES.jumpSquat, gkStance: EXPERT_PROFILES.gkStance, UPRIGHT_TORSO: () => ({}),
 }).profiles));
 
 describe('the sport libraries: every movement is counted on its correct execution', () => {

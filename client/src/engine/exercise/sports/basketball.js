@@ -210,6 +210,6 @@ export function basketballPatterns(t) {
     defensiveStance: legs('defensiveStance', 'עמידת הגנה', 'Defensive stance', 'נמוך ורחב, ידיים פעילות', 'Low and wide, active hands', ['stability', 'strength', 'sportSkill'], ['standing', 'bilateralStance']),
     boxOut: legs('boxOut', 'חסימת ריבאונד — בוקס אאוט', 'Box out', 'ישבן אחורה, מרפקים החוצה', 'Hips back, elbows out', ['stability', 'strength', 'sportSkill'], ['standing', 'bilateralStance']),
     tripleThreat: legs('tripleThreat', 'עמידת שלושת האיומים', 'Triple-threat stance', 'כדור במותן, ברכיים כפופות', 'Ball at the hip, knees bent', ['stability', 'technique', 'sportSkill'], ['standing', 'bilateralStance']),
-    quickFeet: legs('quickFeet', 'רגליים מהירות', 'Quick feet', 'על הכריות, צעדים זעירים ומהירים', 'On the balls of the feet, tiny fast steps', ['agility', 'speed', 'conditioning']),
+    quickFeet: { ...legs('quickFeet', 'רגליים מהירות', 'Quick feet', 'על הכריות, צעדים זעירים ומהירים', 'On the balls of the feet, tiny fast steps', ['agility', 'speed', 'conditioning']), sports: ['court', 'racket'] },
   };
 }

@@ -30,6 +30,7 @@
 
 import { footballProfiles } from './sports/football.js';
 import { basketballProfiles } from './sports/basketball.js';
+import { tennisProfiles } from './sports/tennis.js';
 
 const msg = (he, en) => ({ he, en });
 
@@ -745,6 +746,9 @@ const BASKETBALL = basketballProfiles({
 });
 Object.assign(RAW_EXPERT, BASKETBALL.profiles);
 Object.assign(TAGS, BASKETBALL.tags);
+const TENNIS = tennisProfiles({ jumpSquat: RAW_EXPERT.jumpSquat, gkStance: RAW_EXPERT.gkStance, UPRIGHT_TORSO });
+Object.assign(RAW_EXPERT, TENNIS.profiles);
+Object.assign(TAGS, TENNIS.tags);
 
 /** @type {Object<string, Object>} */
 // HOW to fix — the coach's practical instruction for the rest's analysis (the what + the why are in the rule)
@@ -769,7 +773,7 @@ const HOW = {
   'singleLegSquat.too_shallow': msg('רד לאט, עם שליטה, עד שהברך בכ-90 מעלות — אחוז במשהו יציב אם צריך', 'Lower slowly, under control, to about 90° at the knee — hold something steady if needed'),
   'singleLegLunge.too_shallow': msg('הורד את האגן ישר למטה עד שהברך הקדמית קרובה ל-90 מעלות', 'Lower the hips straight down until the front knee is near 90°'),
 };
-Object.assign(HOW, FOOTBALL.how, BASKETBALL.how);
+Object.assign(HOW, FOOTBALL.how, BASKETBALL.how, TENNIS.how);
 export const EXPERT_PROFILES = Object.freeze(Object.fromEntries(
   Object.entries(RAW_EXPERT).map(([id, p]) => [id, Object.freeze({
     dynamics: [], ...p, tags: TAGS[id] || [],
@@ -817,9 +821,9 @@ const CUE_TO_PROFILE = {
   chestControl: 'chestControl', crutchChestControl: 'fullBody',
   // arms (standing)
   pull: 'armsStanding', tricep: 'armsStanding', row: 'armsStanding', pullApart: 'armsStanding', shrug: 'armsStanding',
-  dip: 'armsStanding', shooting: 'setShot', handDribble: 'dribblePound', stroke: 'armsStanding',
-  volley: 'armsStanding', serve: 'armsStanding', bouncePass: 'bouncePass', chestPass: 'chestPass',
-  overheadPass: 'overheadPass', hookShot: 'armsStanding', smash: 'armsStanding', gkDistribution: 'armsStanding',
+  dip: 'armsStanding', shooting: 'setShot', handDribble: 'dribblePound', stroke: 'forehand',
+  volley: 'forehandVolley', serve: 'shadowServe', bouncePass: 'bouncePass', chestPass: 'chestPass',
+  overheadPass: 'overheadPass', hookShot: 'armsStanding', smash: 'shadowSmash', gkDistribution: 'armsStanding',
   rehabPendulum: 'armsStanding', rehabExtRot: 'armsStanding', rehabElbowExt: 'armsStanding',
   rehabPronSup: 'armsStanding', rehabWallAngel: 'armsStanding', rehabReach: 'armsStanding',
   // floor
@@ -829,8 +833,8 @@ const CUE_TO_PROFILE = {
   rehabPelvicTilt: 'floorCore', rehabSLR: 'floorCore',
   // seated (wheelchair)
   wheelchairShooting: 'setShot', wheelchairDribble: 'dribblePound', wheelchairPass: 'chestPass',
-  wheelchairStroke: 'seatedArms', wheelchairServe: 'seatedArms', wcBouncePass: 'bouncePass',
-  wcPushSprint: 'seatedArms', wcSmash: 'seatedArms',
+  wheelchairStroke: 'forehand', wheelchairServe: 'shadowServe', wcBouncePass: 'bouncePass',
+  wcPushSprint: 'seatedArms', wcSmash: 'shadowSmash',
 };
 
 /** Every profile by id (expert + family). */
