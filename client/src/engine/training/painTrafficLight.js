@@ -124,3 +124,40 @@ export function painFacts({ level, zone, exercise, isHe = true }) {
     : `The trainee reported pain in: ${where}. The decision: ${action === 'continue' ? 'continue as usual and watch the pain' : action === 'reduce' ? 'continue with a lower load — fewer reps and one set less' : 'stop the exercise now; the pain is logged'}`;
   return { mode: 'pain', light: painLight(level), action, zone: zone || null, exercise: exercise || '', error: { what } };
 }
+
+// ---- Recurrence prevention (the approved spec): the pain log protects the next workouts ----
+export const PAIN_MEMORY_DAYS = 14;
+
+/**
+ * The exercises a recent pain report protects: a RED report on an exercise in the last 14 days, or two
+ * YELLOW reports on it → that exercise runs at the lower load next time. Returns Map(name → { level, zone }).
+ */
+export function painProtected(entries, { now = Date.now(), days = PAIN_MEMORY_DAYS } = {}) {
+  const since = now - days * 864e5;
+  const byEx = new Map();
+  for (const e of entries || []) {
+    const at = Number(e?.at) || 0;
+    if (!e?.exercise || e.exercise === 'warm-up' || at < since) continue;
+    const l = painLight(e.level);
+    const cur = byEx.get(e.exercise) || { red: 0, yellow: 0, level: 0, zone: null };
+    if (l === 'red') cur.red += 1;
+    if (l === 'yellow') cur.yellow += 1;
+    if (Number(e.level) > cur.level) { cur.level = Number(e.level); cur.zone = e.zone || null; }
+    byEx.set(e.exercise, cur);
+  }
+  const out = new Map();
+  for (const [name, c] of byEx) if (c.red > 0 || c.yellow >= 2) out.set(name, { level: c.level, zone: c.zone });
+  return out;
+}
+
+/** Today's exercises with the protected ones at the lower load (pure — the list is copied, never mutated). */
+export function protectFromPain(exercises, entries, opts) {
+  const prot = painProtected(entries, opts);
+  if (!prot.size) return exercises;
+  return (exercises || []).map((ex) => {
+    const p = prot.get(ex?.name);
+    if (!p || ex.painProtected) return ex;
+    const r = reducedLoad({ reps: ex.reps, sets: ex.sets, currentSet: 1 });
+    return { ...ex, reps: typeof ex.reps === 'string' ? String(r.reps) : r.reps, sets: r.sets, painProtected: p };
+  });
+}

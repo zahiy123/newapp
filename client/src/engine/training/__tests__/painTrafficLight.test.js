@@ -62,3 +62,27 @@ describe('Pain Traffic Light — the record and the AI facts', () => {
     expect(/\d/.test(f.error.what)).toBe(false);
   });
 });
+
+describe('Pain Traffic Light — the next workouts are protected', () => {
+  const now = 100 * 864e5;
+  const day = 864e5;
+  it('a red report in the last 14 days, or two yellows, lowers that exercise next time', async () => {
+    const { protectFromPain, painProtected } = await import('../painTrafficLight.js');
+    const log = [
+      { exercise: 'סקוואט', level: 7, zone: 'knee', at: now - 2 * day },
+      { exercise: 'לאנג׳', level: 4, at: now - day }, { exercise: 'לאנג׳', level: 5, at: now - 3 * day },
+      { exercise: 'פלאנק', level: 4, at: now - day },
+      { exercise: 'גשר', level: 8, at: now - 20 * day },
+      { exercise: 'warm-up', level: 9, at: now - day },
+    ];
+    const prot = painProtected(log, { now });
+    expect([...prot.keys()].sort()).toEqual(['סקוואט', 'לאנג׳'].sort());
+    const out = protectFromPain([
+      { name: 'סקוואט', reps: '10', sets: 3 }, { name: 'לאנג׳', reps: 8, sets: 3 }, { name: 'פלאנק', reps: 30, sets: 2 },
+    ], log, { now });
+    expect(out[0]).toMatchObject({ reps: '6', sets: 2, painProtected: { level: 7, zone: 'knee' } });
+    expect(out[1]).toMatchObject({ reps: 5, sets: 2 });
+    expect(out[2].painProtected).toBeUndefined();
+    expect(protectFromPain(out, log, { now })[0].reps).toBe('6');   // never lowered twice
+  });
+});

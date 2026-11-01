@@ -45,7 +45,7 @@ import { brainSummary, brainBall } from '../engine/coachBrain/brain';
 import { buildDebrief } from '../engine/coachBrain/debrief';
 import { debriefFacts, legacyCueFacts, bodyText } from '../engine/coachBrain/aiFacts';
 import { aiCue, aiDebrief, aiBriefing, aiLine, aiPain, getAiStatus, onAiStatus } from '../utils/aiCoach';
-import { painLight, painAction, reducedLoad, zonesFor, painEntry, painFacts } from '../engine/training/painTrafficLight';
+import { painLight, painAction, reducedLoad, zonesFor, painEntry, painFacts, protectFromPain } from '../engine/training/painTrafficLight';
 import { kickingSide } from '../engine/incomingBall';
 import { ballModeFor, virtualBallWanted, handSide, ballLook, realBallInPlay } from '../engine/virtualBall';
 import { rebuildPlanFromCatalog, planContext } from '../engine/catalog/planBuilder';
@@ -676,6 +676,7 @@ export default function Training() {
   });
   const sessionSavedRef = useRef(false);
   const rawExercisesRef = useRef([]);      // the day's exercises before the equipment fit
+  const painHistoryRef = useRef([]);       // the trainee's recent pain log (protects the exercises that hurt)
   const aiSummaryRef = useRef(null);
 
   // Build the day's exercises from the plan for TODAY's reality (check-in answers; null = profile defaults)
@@ -704,7 +705,7 @@ export default function Training() {
     }
     // HARD equipment fit: never offer an exercise the trainee can't do (e.g. a ball drill without a ball)
     rawExercisesRef.current = loaded;
-    return fitExercises(loaded, availableEquipment(eff, { hasBall: status?.hasBall })).exercises;
+    return protectFromPain(fitExercises(loaded, availableEquipment(eff, { hasBall: status?.hasBall })).exercises, painHistoryRef.current);
   }
 
   // Check-in answered → rebuild today's workout from the answers, remember them for next time
@@ -738,6 +739,15 @@ export default function Training() {
       const loadedExercises = buildTodayExercises(planSourceRef.current, null);
       setExercises(loadedExercises);
       resetVisionSession();
+
+      // The pain log (the last 14 days): an exercise that hurt (red, or yellow twice) runs lighter today
+      try {
+        const painSnap = await getDocs(query(collection(db, 'users', user.uid, 'painLog'), orderBy('date', 'desc'), limit(40)));
+        painHistoryRef.current = painSnap.docs.map(d => d.data());
+        if (painHistoryRef.current.length) setExercises(prev => protectFromPain(prev, painHistoryRef.current));
+      } catch (err) {
+        console.warn('[Pain] the pain log was not loaded:', err.message);
+      }
 
       // Load per-exercise score history from Firestore (last 5 workouts)
       try {
@@ -1234,8 +1244,9 @@ export default function Training() {
     let reduced = null;
     if (action === 'reduce' && currentExercise) {
       reduced = reducedLoad({ reps: currentExercise.reps, sets: totalSets, currentSet });
-      const idx = currentIdx;
-      setExercises(prev => prev.map((e, i) => (i === idx ? { ...e, reps: reduced.reps, sets: reduced.sets, painReduced: true } : e)));
+      // IN PLACE, on purpose: a new exercise object would re-run the exercise-setup effect and reset the set
+      // in progress to zero; the count / the set's end read currentExercise.reps live
+      Object.assign(currentExercise, { reps: typeof currentExercise.reps === 'string' ? String(reduced.reps) : reduced.reps, sets: reduced.sets, painReduced: true });
       setTotalSets(reduced.sets);
     }
     if (action === 'stop') {
@@ -2097,7 +2108,7 @@ export default function Training() {
     setShowBallQuestion(false);
     sessionDataRef.current.ballAvailable = hasBall;
     const fitted = fitExercises(rawExercisesRef.current, availableEquipment(userProfile, { hasBall }));
-    if (fitted.exercises.length) setExercises(fitted.exercises);
+    if (fitted.exercises.length) setExercises(protectFromPain(fitted.exercises, painHistoryRef.current));
     if (fitted.substitutions.length) sessionDataRef.current.equipmentSubstitutions = fitted.substitutions;
     if (explicit && user?.uid) {
       updateDoc(doc(db, 'users', user.uid), { hasBall }).catch(err => console.error('[Ball] save failed:', err));
@@ -3657,6 +3668,11 @@ export default function Training() {
                 <div className="text-xs text-gray-500">{'🎤'} {isHe ? 'או אמור "תרגיל הבא"' : 'or say "next exercise"'}</div>
               )}
             </div>
+          </div>
+        )}
+        {currentExercise?.painProtected && [PHASE.BRIEFING, PHASE.CALIBRATING, PHASE.EXERCISING, PHASE.RESTING].includes(phase) && (
+          <div className="absolute top-12 left-1/2 -translate-x-1/2 z-20 pointer-events-none rounded-full bg-amber-500/95 text-white text-xs font-bold px-3 py-1 shadow" dir={isHe ? 'rtl' : 'ltr'}>
+            {'🚦'} {isHe ? 'עומס מופחת — דיווחת על כאב בתרגיל הזה לאחרונה' : 'Lighter load — you reported pain in this exercise recently'}
           </div>
         )}
         {phase === PHASE.EXERCISING && currentExercise?.sideSwitch && (
