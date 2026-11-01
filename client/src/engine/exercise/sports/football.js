@@ -41,7 +41,7 @@ export function footballProfiles(base) {
   const profiles = {
     // ---------- 1. Instep (laces) pass — a driven pass along the ground ----------
     instepPass: {
-      ...shadowPass, id: 'instepPass', name: msg('מסירה בגב כף הרגל', 'Instep pass'),
+      ...shadowPass, id: 'instepPass', name: msg('מסירה בגב כף הרגל', 'Instep pass'), contactSurface: 'laces',
       strikeByFoot: true,
       dynamics: [BALANCE,
         TOE('instepPass_toe', 'פגעת עם קצה הנעל — במסירה בגב כף הרגל האצבעות מכוונות למטה', 'You struck with the tip — in an instep pass the toes point down',
@@ -51,7 +51,7 @@ export function footballProfiles(base) {
     },
     // ---------- 2. Outside-foot pass ----------
     outsidePass: {
-      ...shadowPass, id: 'outsidePass', name: msg('מסירה בצד החיצוני', 'Outside-foot pass'),
+      ...shadowPass, id: 'outsidePass', name: msg('מסירה בצד החיצוני', 'Outside-foot pass'), contactSurface: 'outside',
       strikeByFoot: true,
       dynamics: [BALANCE,
         TOE('outsidePass_toe', 'פגעת עם קצה הנעל — במסירה בחוץ כף הרגל מסתובבת פנימה ופוגעת בצד החיצוני', 'You struck with the tip — in an outside pass the foot turns in and meets the ball with its outside',
@@ -61,7 +61,7 @@ export function footballProfiles(base) {
     },
     // ---------- 3. Lofted pass / chip ----------
     loftedPass: {
-      ...footballKick, id: 'loftedPass', name: msg('מסירה מוגבהת', 'Lofted pass'),
+      ...footballKick, id: 'loftedPass', name: msg('מסירה מוגבהת', 'Lofted pass'), contactSurface: 'laces',
       rules: [{ ...LEAN_BACK, value: 42 }],
       dynamics: [BALANCE,
         TOE('loftedPass_toe', 'פגעת עם קצה הנעל — במסירה מוגבהת פוגעים בחלק התחתון של הכדור עם גב כף הרגל', 'You struck with the tip — a lofted pass meets the bottom of the ball with the instep',
@@ -71,7 +71,7 @@ export function footballProfiles(base) {
     },
     // ---------- 4. Volley (shadow) ----------
     shadowVolley: {
-      ...footballKick, id: 'shadowVolley', name: msg('וולה בצל', 'Shadow volley'),
+      ...footballKick, id: 'shadowVolley', name: msg('וולה בצל', 'Shadow volley'), contactSurface: 'laces',
       rules: [{ ...LEAN_BACK, value: 30 }],
       dynamics: [BALANCE],
       ghost: strikeGhost('laces', KICK_KF.map(k => (k.t >= 0.43 && k.t <= 0.64 ? { ...k, a: { ...k.a, 'B.thigh': Math.max(k.a['B.thigh'], k.t === 0.43 ? 30 : 55) } } : k))),

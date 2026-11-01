@@ -615,6 +615,7 @@ export default function Training() {
   const lastSpokenRef = useRef('');
   const timerRef = useRef(null);
   const coachStopRef = useRef(false);
+  const setCompleteAfterStopRef = useRef(false);     // the set's last rep came during a stop — complete after it
   const prevSetRef = useRef(null);                   // the previous set's problems { idx, setNo, problems, fixed }
   const prevSetOf = (idx) => (prevSetRef.current && prevSetRef.current.idx === idx ? prevSetRef.current : null);                // the coach's smart stop is on (the timer freezes)
   const analyzerRef = useRef(null);
@@ -890,6 +891,7 @@ export default function Training() {
     keyPoints: exerciseKeyPoints,
     // the leg this set is for (a split set: the kicking leg of this half) — a prosthesis → the prosthesis technique
     activeLeg: activeKickLegRef.current,
+    targetReps: parseInt(currentExercise?.reps, 10) || null,
     // today's goal — the coach knows what the day is for
     sessionGoal: sessionGoalRef.current,
     effortRef: voiceEffortRef,
@@ -951,6 +953,13 @@ export default function Training() {
   const setupRef = useRef(null);                   // the expert module's positioning fix (null = positioned)
   setupRef.current = execution.setup;
   coachStopRef.current = !!execution.coachStop;
+  useEffect(() => {
+    if (!execution.coachStop && setCompleteAfterStopRef.current && phaseRef.current === PHASE.EXERCISING) {
+      setCompleteAfterStopRef.current = false;
+      handleSetComplete();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [execution.coachStop]);
   // the expert module owns positioning: the older pipeline's view / distance lines stay silent while it runs
   const expertOwnsViewRef = useRef(false);
   expertOwnsViewRef.current = !!execution.active;
@@ -1722,6 +1731,7 @@ export default function Training() {
           const targetReps = parseInt(currentExercise?.reps) || 10;
           if (fb.count >= targetReps) {
             exerciseStateRef.current = newState;
+            if (coachStopRef.current) { setCompleteAfterStopRef.current = true; return; }
             handleSetComplete();
             return;
           }

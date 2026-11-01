@@ -193,8 +193,10 @@ export function useExpertExecution({
   enabled, counting = false, quiet = false, cueKey, exerciseName, catalogId = null, sportContexts, limbProfile, landmarksRef,
   isHe, playerName = '', speakPriority, recordClips = false, onClips,
   brainEnabled = false, effortRef = null, onStrikeSide = null, captureFrameRef = null, bodyFrameRef = null, compositeFrameRef = null, keyPoints = null,
-  activeLeg = null, sessionGoal = null,
+  activeLeg = null, sessionGoal = null, targetReps = null,
 }) {
+  const targetRepsRef = useRef(targetReps);
+  targetRepsRef.current = targetReps;
   const sessionGoalRef = useRef(sessionGoal);
   sessionGoalRef.current = sessionGoal;
   const activeLegRef = useRef(activeLeg);
@@ -438,7 +440,8 @@ export function useExpertExecution({
       // + the SPORT's own emphasis + today's goal — the coach knows the sport and the day
       const kp = ((keyPointsRef.current || []).length ? keyPointsRef.current : (profile.keyPoints || [])).filter(x => !kickProsthesis || !PROSTHESIS_IMPOSSIBLE.test(x));
       const emphasis = (profile.sportEmphasis || []).map(e => e?.he || e?.text || '').filter(Boolean).slice(0, 4);
-      aiBodyVision({ frame, legsFrame, composite, atPeak: atT != null, isPass, passDrill: isPassDrill, kickingProsthesis: kickProsthesis, lang: he0 ? 'he' : 'en', side: leg,
+      aiBodyVision({ frame, legsFrame, composite, atPeak: atT != null, isPass, passDrill: isPassDrill, kickingProsthesis: kickProsthesis,
+        footStrike: profile.kind === 'strike', contactWanted: profile.contactSurface || (profile.ghost?.foot === 'inside' ? 'inside' : 'laces'), lang: he0 ? 'he' : 'en', side: leg,
         exercise: exerciseName, sport: contextsKey, body: bodyText(limbProfile || {}), keyPoints: [...kp, ...emphasis], goal: sessionGoalRef.current || '',
         name: nameRef.current, recent: recentCues.slice(-4) }).then((v) => {
         visionInFlight = Math.max(0, visionInFlight - 1);
@@ -575,6 +578,16 @@ export function useExpertExecution({
       stopPrefetch = { key, from, promise: aiStop(stopFacts(key, keyRule(key, rec), n, to, from)) };
     };
     const smartStop = (key, rule, times, repNo, from = repNo) => {
+      // the set's LAST rep (owner, 2026-11-01: "it stopped me at rep 5, began to explain and jumped to the next
+      // exercise"): the set ends at this count — no live stop; the error leads the rest's analysis instead
+      const tgt = Number(targetRepsRef.current) || 0;
+      if (tgt > 0 && repNo >= tgt) {
+        stoppedKeys.add(key); stopRepOf.set(key, repNo);
+        const r = rule?.msg ? (isHeRef.current ? rule.msg.he : rule.msg.en) : null;
+        if (r) { const n = restNotesRef.current; n.unshift(isHeRef.current ? `טעות שחזרה בסוף הסט — להסביר עכשיו: ${r}` : `A repeated error at the set's end — explain it now: ${r}`); if (n.length > 5) n.pop(); }
+        console.info(`[Coach] the set's last rep (${repNo}/${tgt}) — no live stop; ${key} goes to the rest's analysis`);
+        return;
+      }
       stopActive = true; stopUntil = performance.now() + STOP_MAX_MS; stopsThisSet += 1; stoppedKeys.add(key); windowStart = repNo + 1;
       stopRepOf.set(key, repNo); lastStopRep = repNo;
       setCoachStop({ text: null });
