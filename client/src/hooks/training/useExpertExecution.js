@@ -65,7 +65,6 @@ export const MAX_STOPS_PER_SET = 2;         // a smart stop is rare — the same
 export const STOP_MAX_MS = 20000;           // a stop never lasts longer (the AI late / silent → released)
 export const STOP_WAIT_MS = 9000;           // the stop waits this long for its explanation (+ one retry inside it)
 export const STOP_AFTER_SPEECH_MS = 600;
-export const BLOCK_HOLD_MS = 1500;          // the most a block's end holds the count for its last evidence
 // the device's contact-surface rules (toe / laces …) = the eyes' 'contact' category — one error
 export const CONTACT_RULE = /^(pass_toe|pass_laces|kick_toe|kick_laces)$|contact/;
 const FLOW_TAGS = ['cyclic', 'conditioning', 'plyometric', 'acceleration', 'agility', 'cardio', 'endurance'];
@@ -474,7 +473,7 @@ export function useExpertExecution({
           for (const f of found) if (f.severity === 'major' || f.confidence >= VISION_MINOR_SAY) rec.vis.set(f.code, f);
           if (passBad) rec.dev.set(passBad.rule.id, passBad.rule);
           rec.visDone = true;                                  // (the block's end decides what is said)
-          maybePrefetchStop();
+          maybePrefetchStop(); checkLate();
         }
       });
     };
@@ -519,9 +518,12 @@ export function useExpertExecution({
     let blockBase = 0, windowStart = 1, stopsThisSet = 0; const stoppedKeys = new Set();
     let stopActive = false, stopUntil = 0;
     let stopPrefetch = null;                   // { key, from, promise } — requested when the 2nd occurrence is seen
-    let holdActive = false;                    // the block's verdict is awaited — counting held (≤ BLOCK_HOLD_MS)
+    // a pattern that completed AFTER its block's end (the eyes answer ~3 s late) → the stop comes at the END of the
+    // rep being done now — the exact frame it is counted — never in the middle of a rep (owner, 2026-11-01)
+    let pendingStop = null;                    // { key, rule, n, from, to }
+    let lateCheck = null;                      // { from, to } — a block whose verdict may still complete
     const stopRepOf = new Map();               // stopped key → the rep the stop came after
-    const resetBlocks = () => { stopPrefetch = null; blockRecs.clear(); blockBase = 0; windowStart = 1; stopsThisSet = 0; stoppedKeys.clear(); stopRepOf.clear(); oneOffsRef.current = []; holdActive = false; };
+    const resetBlocks = () => { stopPrefetch = null; blockRecs.clear(); blockBase = 0; windowStart = 1; stopsThisSet = 0; stoppedKeys.clear(); stopRepOf.clear(); oneOffsRef.current = []; pendingStop = null; lateCheck = null; };
     const recOf = (n) => { let r = blockRecs.get(n); if (!r) { r = { dev: new Map(), vis: new Map() }; blockRecs.set(n, r); } return r; };
     // (owner, 2026-10-25: the device's toe / laces measurement and the eyes' 'contact' finding are ONE error — one
     //  stop at most, then short reminders; one line in the rest)
@@ -589,6 +591,7 @@ export function useExpertExecution({
         const s = isPassDrill ? passWords(t) : t;
         setCoachStop({ text: s });
         holdSpeech(estimateSpeechMs(s, 1.1));
+        try { window.speechSynthesis?.cancel(); } catch { /* the stop speaks at once — any other line yields */ }
         speakRef.current?.(s, { rate: 1.1, kind: 'stop', preempt: true });
         recentCues.push(s); if (recentCues.length > 8) recentCues.shift();
         lastCorrectionAt = performance.now(); cleanStreak = 0;
@@ -612,14 +615,10 @@ export function useExpertExecution({
       const best = [...counts.entries()].sort((a, b) => b[1].n - a[1].n)[0] || null;
       return { best, pending };
     };
-    const releaseHold = (why) => {
-      if (!holdActive) return;
-      holdActive = false; setCoachStop(null);
-      console.info(`[Coach] block hold released (${why})`);
-    };
-    /** The block's LAST rep was counted (owner, 2026-10-25): the decision is made NOW, between rep 3 and rep 4 —
-     *  a critical error ≥ 2× → the stop at once; a possible one still waiting for its evidence → the count is held
-     *  (≤ BLOCK_HOLD_MS) until it is in; else nothing holds. */
+    /** The block's LAST rep was counted (owner, 2026-11-01 — ZERO LATENCY): the decision is made in THIS frame with
+     *  the evidence in hand (reps 1–2 seen by the eyes, rep 3 measured by the device at its count) — a critical error
+     *  ≥ 2× → the stop at once, the count frozen at rep 3, the explanation (requested early) said at once. Nothing is
+     *  held: a pattern that completes later (rep 3's eyes) stops the set at the end of the rep then in progress. */
     const endBlock = (from, to) => {
       setTimeout(() => { if (!disposed) closeBlock(from, to); }, BLOCK_EYES_WAIT_MS);   // (the line / the slips — the eyes' time)
       // a FLOW drill never stops the heart rate: the block's critical repeat is said on the move by closeBlock
@@ -627,16 +626,18 @@ export function useExpertExecution({
       if (restOnly || !countingRef.current || stopActive || stopsThisSet >= MAX_STOPS_PER_SET) return;
       const first = blockCritical(from, to);
       if (first.best && first.best[1].n >= 2) { smartStop(first.best[0], keyRule(first.best[0], first.best[1].rec), first.best[1].n, to, from); return; }
-      if (!first.pending || !first.best && first.pending < 2) return;
-      holdActive = true; setCoachStop({ hold: true }); evidenceAccept(kinetic, performance.now());
-      const t0 = performance.now();
-      console.info(`[Coach] block ${from}–${to}: holding for the evidence (${first.pending} rep(s) pending)`);
-      const poll = setInterval(() => {
-        if (disposed || !holdActive) { clearInterval(poll); return; }
-        const c = blockCritical(from, to);
-        if (c.best && c.best[1].n >= 2) { clearInterval(poll); holdActive = false; smartStop(c.best[0], keyRule(c.best[0], c.best[1].rec), c.best[1].n, to, from); return; }
-        if (!c.pending || performance.now() - t0 >= BLOCK_HOLD_MS) { clearInterval(poll); releaseHold(c.pending ? 'timeout' : 'no pattern'); }
-      }, 120);
+      // (still possible — evidence pending: watched; never a hold)
+      lateCheck = first.pending && (first.best || first.pending >= 2) ? { from, to } : null;
+    };
+    /** New evidence for a watched block: the pattern completed → the stop waits for the END of the current rep. */
+    const checkLate = () => {
+      if (!lateCheck || pendingStop || stopActive || stopsThisSet >= MAX_STOPS_PER_SET || !countingRef.current) return;
+      const c = blockCritical(lateCheck.from, lateCheck.to);
+      if (c.best && c.best[1].n >= 2) {
+        pendingStop = { key: c.best[0], rule: keyRule(c.best[0], c.best[1].rec), n: c.best[1].n, from: lateCheck.from, to: lateCheck.to };
+        console.info(`[Coach] the pattern of block ${lateCheck.from}–${lateCheck.to} completed (${c.best[0]} ×${c.best[1].n}) — the stop comes at the end of this rep`);
+        lateCheck = null;
+      } else if (!c.pending) lateCheck = null;
     };
     /** A block of 3 reps ended (+ the eyes' time): a repeated non-critical error → one short line; a single slip → the rest. */
     const closeBlock = (from, to) => {
@@ -668,13 +669,20 @@ export function useExpertExecution({
     /** A rep was counted: the block's end is decided right here. */
     const onCounted = (repNo) => {
       recOf(repNo);
+      // a pattern completed during this rep → the stop NOW, in the frame this rep ends
+      if (pendingStop && !stopActive && countingRef.current) {
+        const p = pendingStop; pendingStop = null;
+        if (repNo - blockBase >= BLOCK_REPS) blockBase = repNo;
+        smartStop(p.key, p.rule, p.n, repNo, p.from);
+        return;
+      }
       if (repNo - blockBase >= BLOCK_REPS) { const from = blockBase + 1; blockBase = repNo; endBlock(from, repNo); }
     };
     const devicePolicy = (list, repNo, res) => {
       const rec = recOf(repNo);
       for (const id of list) { const rule = ruleById(id, res); if (rule) rec.dev.set(id, rule); }
       rec.devDone = true;
-      maybePrefetchStop();
+      maybePrefetchStop(); checkLate();
     };
     // ---------- 4. the set's problems for the rest (all of them; the ones FIXED after a stop are told as fixed) ----------
     setProblemsRef.current = () => {
@@ -838,7 +846,7 @@ export function useExpertExecution({
         if (!countingRef.current && wasCounting) closeLastBlock();           // the set ended: its last (partial) block
         wasCounting = countingRef.current;
         if (stopActive && performance.now() > stopUntil) releaseStop('timeout');
-        if (countingRef.current && r.inView && countOpenRef.current && !stopActive && !holdActive) {
+        if (countingRef.current && r.inView && countOpenRef.current && !stopActive) {
           for (const ev of r.events) {
             // the coach brain learns from every real attempt and the errors seen in it
             if (brain && (ev.type === 'rep' || ev.type === 'strike' || ev.type === 'partialRep')) {
@@ -916,7 +924,7 @@ export function useExpertExecution({
         if (!code && okSince !== null && now - okSince >= SETUP_CLEAR_MS) { problemSince = null; setupRepeats = 0; }
         const problemSettled = !!code && problemSince !== null && now - problemSince >= SETUP_SETTLE_MS;
         // the card: shown once settled, kept until the positioning is good for SETUP_CLEAR_MS
-        const coachTalking = stopActive || holdActive || (countingRef.current && !!window.speechSynthesis?.speaking);
+        const coachTalking = stopActive || (countingRef.current && !!window.speechSynthesis?.speaking);
         const showCode0 = problemSettled ? code : (shownCode && !(okSince !== null && now - okSince >= SETUP_CLEAR_MS) ? shownCode : null);
         const showCode = coachTalking ? null : showCode0;                    // (owner, 2026-10-25: no banner over the coach)
         if (showCode !== shownCode) { shownCode = showCode; setSetup(showCode ? r.setup || shownSetup : null); if (showCode) shownSetup = r.setup; }
