@@ -1,5 +1,5 @@
 # Project Manifest — AI Kinetic Training Platform
-## Last Updated: 2026-10-18
+## Last Updated: 2026-11-01
 
 ---
 
@@ -179,10 +179,11 @@ Readiness Rating (1-5 emoji, 3 seconds)
 | 79 | `checkpoint-2026-11-01-strength-library` | `9cf8520` | yes | + THE STRENGTH LIBRARY: 12 general (goblet / sumo / split squat, reverse lunge, Romanian deadlift, hammer curl, Arnold press, diamond / wide push-up, bent-over row, overhead triceps, upright row) + 6 adaptive / rehab (sit to stand, wall push-up, scapular row, wall slide, rehab knee march, supported split squat); the rehab-only track gets the 6; the wheelchair sports get 6 seated-capable strength movements; the strength catalog 673 (the rehab track 369); 81 expert profiles in all — **awaiting the owner's check (NOT complete)** |
 | 80 | `checkpoint-2026-11-01-adaptive-library` | `0e04b1b` | yes | + the wheelchair + crutch movements: 6 seated (shadow wheelchair push, one-arm pass, straight punches, armrest lift, overhead reach, face pull) and 2 crutch (crutch press, crutch support hold — only for a trainee on crutches); the amputee-football track gets face pull / scapular row / overhead triceps / wall push-up / rehab knee march (+ the crutch two on crutches); per track (the trainee's body applied): wheelchair basketball 364, wheelchair tennis 367, amputee football 240 (263 on crutches); 89 expert profiles — **awaiting the owner's check (NOT complete)** |
 | 81 | `checkpoint-2026-11-01-feet-laststop` | `c12efbb` | yes (superseded — the owner returned to #74) | + the eyes judge the FEET in every exercise (stance, toes, heels, weight) and the contact surface of EVERY foot strike against its own correct surface (inside / laces / outside); never a smart stop on the set's last rep (the error leads the rest's analysis); a set never completes during a stop — **awaiting the owner's check (NOT complete)** |
-| 82 | `checkpoint-2026-11-01-back-to-74` | `696a47e` (code = `8f1750d`) | **yes — the current production (2026-11-01; bundle `index-CP4IP34W.js`, the very bundle of #74)** | THE OWNER RETURNED TO #74 ('now it works less well; exercises I can always add — I prefer to finish the app'): the client + server code exactly as `checkpoint-2026-11-01-instant-stop`; the exercise libraries #75–#81 (football / basketball / tennis / strength / adaptive, the feet + last-rep fixes) are NOT in production — kept in the history and the tags to bring back later, one at a time, each field-tested — **awaiting the owner's check (NOT complete)** |
+| 82 | `checkpoint-2026-11-01-back-to-74` | `696a47e` (code = `8f1750d`) | yes | THE OWNER RETURNED TO #74 ('now it works less well; exercises I can always add — I prefer to finish the app'): the client + server code exactly as `checkpoint-2026-11-01-instant-stop`; the exercise libraries #75–#81 (football / basketball / tennis / strength / adaptive, the feet + last-rep fixes) are NOT in production — kept in the history and the tags to bring back later, one at a time, each field-tested — **awaiting the owner's check (NOT complete)** |
+| 83 | `checkpoint-2026-11-01-pain-light` | `7bf600a` (+ `92d8ca3`) | **yes — the current production (2026-11-01; bundle `index-CpE2avzh.js`)** | THE PAIN TRAFFIC LIGHT (Stage 3 #15, step 1 of the approved finish order) on top of #74: a '🚦 כואב לי' button in every workout phase + by voice ('כואב לי', 'בברך, ארבע'); where (zones; the residual limb only for an amputee) + 0–10; the DEVICE decides — 0–3 continue, 4–5 a lower load in place (reps × 0.6, one set less), 6+ the exercise stops (next exercise / end the workout); every report saved with the workout (`painReports`) and in `users/{uid}/painLog`; the next workouts protect an exercise with a red report in 14 days or two yellows (lighter, a chip on screen); the coach's words live by Sonnet 5 (mode 'pain', no diagnosis, no numbers; a stop is always heard) — **awaiting the owner's check (NOT complete)** |
 
 **How to return to a checkpoint:**
-- **To a deployed point (#1, #2, #3, #5, #8, #9, #10, #11, #12, #13, #14, #15, #16, #17, #18, #19, #20, #21, #22, #23, #24, #25, #26, #27, #28, #29, #30, #31, #32, #33, #34, #35, #36, #37, #38, #39, #40, #41, #42, #43, #44, #45, #46, #47, #48, #49, #50, #51, #52, #53, #54, #55, #56, #57, #58, #59, #60, #61, #62, #63, #64, #65, #66, #67, #68, #69, #70, #71, #72, #73, #74, #75, #76, #77, #78, #79, #80, #81, #82): instant rollback with no code change** — Vercel → Deployments → the deployment of that commit → "Promote to Production".
+- **To a deployed point (#1, #2, #3, #5, #8, #9, #10, #11, #12, #13, #14, #15, #16, #17, #18, #19, #20, #21, #22, #23, #24, #25, #26, #27, #28, #29, #30, #31, #32, #33, #34, #35, #36, #37, #38, #39, #40, #41, #42, #43, #44, #45, #46, #47, #48, #49, #50, #51, #52, #53, #54, #55, #56, #57, #58, #59, #60, #61, #62, #63, #64, #65, #66, #67, #68, #69, #70, #71, #72, #73, #74, #75, #76, #77, #78, #79, #80, #81, #82, #83): instant rollback with no code change** — Vercel → Deployments → the deployment of that commit → "Promote to Production".
 - **To any point in the code:** `git checkout <tag>` to look at it, or create a branch from it (`git checkout -b restore-<n> <tag>`) and deploy that branch / merge it into `main` after approval.
 - Look at it without changing anything: `git checkout checkpoint-stage2-stable` (then `git checkout main` to come back).
 - Undo later work on `main` safely (keeps history): `git revert <commits after the checkpoint>`, then push → Vercel redeploys.
@@ -280,6 +281,7 @@ Readiness Rating (1-5 emoji, 3 seconds)
 | (11-01) 'add the wheelchair and crutch movements, then I'll try a workout — if it is like last time we continue, if not we fix' | the wheelchair tracks 134 / 147, under 150 | `engine/exercise/sports/adaptive.js` — 8 arm-measured profiles (combine 'max'); the gate caught a 'push' tag pulling the push-up's slow-lowering rule onto the wheelchair push stroke, and the rule 'a prosthesis user never hears crutches' (the amputee labels reworded neutrally; crutch-only movements filtered out unless `lp.crutches`); cueKey wcPushSprint → the wheelchair push. Verified: client 1006 (23 known only), the count test 52 / 52, build, Vercel success, bundle grep | Pushed — awaiting the owner's workout test |
 | (11-01, the owner's workout on #80, no video) 'it looks good — but (1) he did not say anything about the foot: he must look at the whole body in every sport, every exercise, every situation; (2) he stopped me at rep 5, began to explain and jumped to the next exercise' | (1) the eyes' contact check ran only for the shadow pass (`isPass` = shadowPass); the other strikes and every non-strike exercise had no explicit feet in the scan; (2) a stop on the set's LAST rep: the count reached the target at that very frame → the set completed (the rest / the next exercise) over the explanation | (1) the body-vision prompt: the FEET (stance width, toes direction, heels down / lifted, weight) in every exercise; any foot strike (`footStrike` = kind 'strike' on a natural foot) gets the contact clause with the exercise's own correct surface (`contactSurface`: instep / lofted / volley = laces, outside pass = outside, the pass = inside) — another visible surface = a major 'contact' finding; 'outside' added to the contact values. Live: the instep pass frame → the support leg, the chest AND the contact returned. (2) `smartStop` on rep ≥ the set's target → no live stop, the error goes first into the rest's notes; Training: a set's last count during a stop completes only after the stop (`setCompleteAfterStopRef`). Verified: client 1006 (23 known only), server 25, lint 0, build, Vercel success, bundle grep | Pushed — awaiting check |
 | (11-01) 'let's go back to restore point 74 and continue the app from there — now it works less well; exercises I can always add, I prefer to finish the app' | — | the client + server restored to `8f1750d` with a new commit (`git checkout 8f1750d -- client/src server` + the 6 files added later removed) — no history rewritten; `git diff 8f1750d` on client/src + server = empty; the served bundle is #74's own (`index-CP4IP34W.js`); Render redeploys the #74 server. Verified: client 954 (23 known only — exactly #74's), server 25, build, Vercel success | Pushed — awaiting check |
+| (11-01) 'back at #74 the coaching was perfect, nothing to add; the free server until the pilot ends; what is the progress screen — bring everything we did and decided for the whole app, then we finish it and what is left' → the status page; then 'I go with you, let's build it as you wrote' | — | A status page (artifact): the stages, what was built, the binding decisions, what is left, what the progress screen is, the finish order (approved). STEP 1 built — the Pain Traffic Light: `painTrafficLight.js` (levels, the lower load, zones, voice parsing, the entry, the AI facts, the 14-day protection) + tests; `useVoiceCommand` hears 'כואב לי' / a level / a zone (echo-guarded); Training: the button, the panel, continue / lighter (in place — a new object would reset the set) / stop, `painReports` in the workout, `users/{uid}/painLog`, the protected-exercise chip; the server MOMENTS.pain (Sonnet 5, no diagnosis / numbers; live ~2 s). Verified: client 963 (23 known only), server 26, build, Vercel success, bundle grep, Render live line | Pushed — awaiting check (#83) |
 | (10-12) Today's goal is neither said nor shown at the start | The goal line was spoken, but the warm-up's first line cut it at once; the 6 s chip sat under the coaching banners | A protected goal line (`holdSpeech`: nothing cuts it, the next lines queue after it); a big goal card above every HUD for 8 s + a "🎯 מטרת היום" line under the camera for the whole workout; a fallback to the plan day's focus | Awaiting check |
 
 **🟡 Implemented, never confirmed by the owner (NOT complete):**
@@ -536,6 +538,8 @@ The platform coaches like a REAL coach for every sport: an exact kinematic analy
 | 11-01 | Wheelchair + crutch movements | 8 adaptive movements; WC basketball 364, WC tennis 367, amputee 240 / 263 | Pushed — the owner tests a workout next |
 | 11-01 | The feet in every exercise; no stop on the last rep | the eyes' feet + per-exercise contact; the last-rep rule | Pushed — awaiting check |
 | 11-01 | Back to #74 — finish the app first, exercises later | the code = #74; the libraries kept in tags | Pushed — awaiting check |
+| 11-01 | The whole-app status + what is left; the finish order approved | the status page; order: pain light → two-way voice → notebook + styles → Stage 4 progress → 4B → pilot | Approved by the owner |
+| 11-01 | Step 1 — the Pain Traffic Light | button + voice, zones, 0–10, continue / lighter / stop, pain log, next-workout protection, live AI words | Pushed — awaiting check (#83) |
 
 ---
 
@@ -765,6 +769,12 @@ Every round ends with its summary HERE (what was asked → what was found → wh
 - Done: 18 strength movements (12 general, 6 adaptive / rehab), the rehab and wheelchair tracks; the gate caught an equipment name.
 - Verified: client 999, build, Vercel success, bundle `index-B17RNApR.js`. Status: awaiting the owner's check; the 8 sports' libraries are in.
 
+**Round 11-01 h — the whole-app status; step 1: the Pain Traffic Light** (`92d8ca3` + `7bf600a`, restore #83)
+- Asked: the whole picture (done / decided / left), what the progress screen is; then build in the order proposed.
+- Done: the status page; the finish order approved and recorded; the Pain Traffic Light — button + voice, where + 0–10, 0–3 continue / 4–5 lighter / 6+ stop, the pain log + the workout record, the next workouts protect a painful exercise, the coach's words live by Sonnet 5.
+- Caught before shipping: a lighter load through `setExercises` would have re-run the exercise setup and zeroed the set in progress — changed in place.
+- Verified: client 963, server 26, build, Vercel success (bundle `index-CpE2avzh.js`), Render live pain line. Status: awaiting the owner's check; next = step 2, two-way voice.
+
 **Round 11-01 f — wheelchair + crutch movements** (`0e04b1b`, restore #80)
 - Done: 6 seated + 2 crutch movements; the amputee track's upper-body work; crutch-only filtering.
 - Verified: client 1006, build, Vercel success, bundle `index-z6mI0ksK.js`. Status: the owner tests a workout next — continue if like last time, else fix.
@@ -772,7 +782,20 @@ Every round ends with its summary HERE (what was asked → what was found → wh
 ---
 
 
-## Next stage — proposal (2026-11-01, awaiting the owner's approval — NOT started)
+## The finish order — APPROVED by the owner (2026-11-01: "I go with you, let's build it as you wrote")
+
+Production stays at the #74 coach (the owner: "the way it coached there was perfect, nothing to add"); the free server stays until the end of the pilot; more fixes come from the pilot, after everything is finished.
+
+| Step | What | Status |
+|---|---|---|
+| 1 | The Pain Traffic Light (Stage 3 #15) — report by button / voice, continue / lighter / stop, the pain log, next-workout protection | **Built — #83, awaiting the owner's check** |
+| 2 | Full two-way voice (Stage 3 #13) — "כואב לי", "עוד אחת", "הפסקה", "עצור", "חזור" | Next |
+| 3 | The Coach Notebook (#17) + adaptive coach styles (#12) | Then |
+| 4 | Stage 4 — the progress screen + load adaptation | Then |
+| 5 | Stage 4B — the physio portal (if the pilot includes clinics) | Then |
+| 6 | The pilot | Last |
+
+## (Superseded) Next stage — proposal of 2026-11-01
 
 Status today: 32 patterns (26 expert, 6 generic), 10 sport contexts, ~325 variations per family; the block / smart-stop / live-voice model now runs on every expert exercise (reps + strikes: the zero-latency stop; holds + cyclic: corrections on the move).
 
@@ -1769,7 +1792,7 @@ Two critical corrections to the existing onboarding (Stages 1B/1C), completed **
     - Danger thresholds are **personal**: derived from `ghostProfile` ROM limits and `riskZones`, not generic values.
     - **Design for Stage 4B:** thresholds are computed by a single `getEffectiveLimits()` function, so clinician-set limits (4B) can later be merged in as the strictest layer without rewriting the coach.
     - Critical alerts use a local, pre-generated phrase (zero latency) and never wait for Claude.
-15. **Pain Traffic Light Protocol [approved 2026-09-28]:**
+15. **Pain Traffic Light Protocol [approved 2026-09-28] — BUILT 2026-11-01 (#83, awaiting the owner's check; `engine/training/painTrafficLight.js`). Not yet: the coach asking after a suspicious movement, a longer rest, the start-of-workout check of the area (→ the Coach Notebook, step 3), the weekly plan prompt (→ Stage 4 load adaptation):**
     - Pain is reported by voice (#13), by tapping a body map on screen, or when the coach asks after a suspicious movement.
     - 🟢 **0-3 Green:** continue as planned.
     - 🟡 **4-5 Yellow:** automatic load reduction (fewer reps, less range, longer rest, or a regression exercise), a calm tone, and a re-check after the set.
@@ -2067,3 +2090,4 @@ Two critical corrections to the existing onboarding (Stages 1B/1C), completed **
 - **2026-11-01:** Pushed `0e04b1b` → deployed (bundle `index-z6mI0ksK.js`), verified. Restore point `checkpoint-2026-11-01-adaptive-library` (#80). Awaiting the owner's check — NOT complete.
 - **2026-11-01:** Pushed `c12efbb` → deployed (bundle `index-BB-DSJlQ.js`), verified; Render deployed (live: the contact returned for the instep pass). Restore point `checkpoint-2026-11-01-feet-laststop` (#81). Awaiting the owner's check — NOT complete.
 - **2026-11-01:** At the owner's request the app returned to restore point #74: pushed `696a47e` (the client + server = `8f1750d`) → deployed, the served bundle `index-CP4IP34W.js` (#74's own). Restore point `checkpoint-2026-11-01-back-to-74` (#82). The libraries #75–#81 stay in the tags. Awaiting the owner's check — NOT complete.
+- **2026-11-01:** The finish order approved (pain light → two-way voice → notebook + styles → Stage 4 → 4B → pilot). Step 1, the Pain Traffic Light: pushed `92d8ca3` + `7bf600a` → deployed (bundle `index-CpE2avzh.js`), verified; Render live. Restore point `checkpoint-2026-11-01-pain-light` (#83). Awaiting the owner's check — NOT complete.
