@@ -1868,7 +1868,7 @@ export default function Training() {
         if (!alive) { bmp.close?.(); return; }
         const ring = frameRingRef.current;
         ring.push({ t, bmp, lm });
-        while (ring.length && t - ring[0].t > 1500) ring.shift().bmp.close?.();
+        while (ring.length && t - ring[0].t > 2500) ring.shift().bmp.close?.();       // (a slow rep's bottom too)
       } catch { /* a frame skipped */ } finally { busy = false; }
     }, 100);
     return () => { alive = false; clearInterval(id); for (const f of frameRingRef.current) f.bmp.close?.(); frameRingRef.current = []; };

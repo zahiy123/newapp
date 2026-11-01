@@ -244,7 +244,8 @@ export function updateMotion(ms, landmarks, metrics, t) {
     else if (c.stage === 'peak' && prog < COUNT_PEAK) { c.stage = 'returning'; c.departAt = t; }
     else if (c.stage === 'returning' && prog >= COUNT_PEAK) { c.stage = 'peak'; }            // still at the bottom
     else if (c.stage === 'returning' && prog <= COUNT_AT) {
-      events.push({ type: 'repCount', toPeakMs: c.peakAt - c.leaveAt, returnMs: t - c.departAt });
+      // peakT: the middle of the rep's deepest stretch (the eyes judge THIS moment — the bottom of a squat, …)
+      events.push({ type: 'repCount', toPeakMs: c.peakAt - c.leaveAt, returnMs: t - c.departAt, peakT: (c.peakAt + c.departAt) / 2 });
       c.stage = 'counted';
     } else if (c.stage === 'counted' && prog <= COUNT_ARM) { c.stage = 'ready'; }
     const r = ms.rep;

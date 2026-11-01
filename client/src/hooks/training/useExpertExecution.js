@@ -63,7 +63,8 @@ export const BLOCK_REPS = 3;
 export const BLOCK_EYES_WAIT_MS = 3500;     // a block closes once the eyes answered about its last rep
 export const MAX_STOPS_PER_SET = 2;         // a smart stop is rare — the same error stops the set once
 export const STOP_MAX_MS = 20000;           // a stop never lasts longer (the AI late / silent → released)
-export const STOP_WAIT_MS = 9000;           // the stop waits this long for its explanation (+ one retry inside it)
+export const STOP_WAIT_MS = 9000;
+export const LOOK_EVERY_MS = 6000;          // a hold / a cyclic drill: the eyes look this often           // the stop waits this long for its explanation (+ one retry inside it)
 export const STOP_AFTER_SPEECH_MS = 600;
 // the device's contact-surface rules (toe / laces …) = the eyes' 'contact' category — one error
 export const CONTACT_RULE = /^(pass_toe|pass_laces|kick_toe|kick_laces)$|contact/;
@@ -369,7 +370,8 @@ export function useExpertExecution({
       return shortWhole(s);
     };
     let lastCorrectionAt = -1e9;                    // no praise within 10 s of a correction
-    const flowDrill = isFlowDrill(profile, exerciseName);   // cardio / speed / agility: no hard stops
+    // cardio / speed / agility and HOLDS (a plank, a wall sit): never a hard stop — the correction on the move
+    const flowDrill = isFlowDrill(profile, exerciseName) || profile.kind === 'hold';
     const isPassDrill = isPassExercise(profile, exerciseName);
     // a correction is an instruction FOR THE NEXT PASS: still true while at most ONE newer pass was done and
     // ≤ 8 s passed; older than that it is about the past → dropped (field video 2026-10-21 b: the eyes' cue
@@ -856,7 +858,7 @@ export function useExpertExecution({
             if (countsReps && profile.kind === 'reps' && isValidRep(ev) && r.quality?.confident !== false && evidenceOk(kinetic, now)) {
               evidenceAccept(kinetic, now); repCountRef.current += 1; earlyRef.current = true;
               noteRepScore(r);
-              lookAtRep(repVerdicts.length ? repVerdicts.length - 1 : 0, null);
+              lookAtRep(repVerdicts.length ? repVerdicts.length - 1 : 0, null, typeof ev.peakT === 'number' ? ev.peakT : null);
               onCounted(repCountRef.current);
             }
             // the reason of every detected kick, in the console (the owner's videos show exactly why it did or did not count)
@@ -910,7 +912,13 @@ export function useExpertExecution({
             }
           }
           if (profile.kind === 'cyclic' && workingRef.current) earlyRef.current = true;
-          if (profile.kind === 'hold' && r.inView && now - lastHoldLook > 6000) { lastHoldLook = now; repVerdicts.push({ judged: false, error: false }); lookAtRep(repVerdicts.length - 1, null); }
+          // a HOLD / a CYCLIC drill (no reps): the eyes look every few seconds; every 3 looks are a block — a repeated
+          // error is said on the move (never a stop — owner, 2026-11-01: the same standard in every exercise)
+          if ((profile.kind === 'hold' || profile.kind === 'cyclic') && r.inView && now - lastHoldLook > LOOK_EVERY_MS) {
+            lastHoldLook = now; repVerdicts.push({ judged: false, error: false });
+            lookAtRep(repVerdicts.length - 1, null);
+            onCounted(repVerdicts.length);
+          }
         } else if (profile.kind === 'strike' && r.events.some(ev => ev.type === 'strike')) {
           console.info(`[Kick] not counted: counting closed | set running=${!!countingRef.current} inView=${r.inView} started=${startedOnce} positioning=${r.setup?.code || 'ok'}`);
         }
