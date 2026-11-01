@@ -51,7 +51,7 @@ describe('Catalog — every exercise has a live Ghost', () => {
       expect(r.accuracy, key).toBeGreaterThanOrEqual(85);
     }
     expect(seen.size).toBeGreaterThan(60);
-  });
+  }, 60000);   // (every variation of every sport library — ~1,700 Ghost runs)
 
   it('a working-side variation moves that leg in the Ghost', () => {
     const left = catalogGhostSpec('shadowKick|standard|full|left|k6');
