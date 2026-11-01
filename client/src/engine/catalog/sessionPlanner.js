@@ -135,7 +135,7 @@ export function buildSession({ goal, family, sportFamily = null, lp = {}, seed, 
   // cooldown; the session is then ordered prep → main → support → cooldown
   const ORDER = ['main', 'support', 'sport', 'prep', 'cooldown'];
   // A sport with a dedicated skill block (amputee football: kicks in EVERY session) gets it after support
-  const template = sportBlock ? [...TEMPLATE(g), { role: 'sport', n: sportBlock.n, want: sportBlock.want }] : TEMPLATE(g);
+  const template = sportBlock ? [...TEMPLATE(g), { role: 'sport', n: sportBlock.n, want: sportBlock.want, only: sportBlock.only || null }] : TEMPLATE(g);
   const blocks = template.slice().sort((a, b) => ORDER.indexOf(a.role) - ORDER.indexOf(b.role));
   for (const block of blocks) {
     const doseOk = (it) => (block.role === 'prep' ? PREP_DOSES.has(it.variation.dose)
@@ -145,7 +145,7 @@ export function buildSession({ goal, family, sportFamily = null, lp = {}, seed, 
     const source = block.role === 'sport' && sportFamily && sportFamily !== fam
       ? buildCatalog(sportFamily, lp).filter(it => allowedInGoal(it, g) && (!patterns || patterns.has(it.patternId)))
       : catalog;
-    let cands = block.role === 'sport' ? source.filter(it => it.variation.tempo !== 'explosive') : source.filter(doseOk);
+    let cands = block.role === 'sport' ? source.filter(it => it.variation.tempo !== 'explosive' && (!block.only || block.only.includes(it.patternId))) : source.filter(doseOk);
     // rehab + sport: the support block uses the SPORT's technique patterns, gently (no explosive)
     if (g === 'rehabSport' && block.role === 'support') cands = cands.filter(it => it.variation.tempo !== 'explosive');
     for (let k = 0; k < block.n; k++) {
@@ -162,7 +162,7 @@ export function buildSession({ goal, family, sportFamily = null, lp = {}, seed, 
 
 // Similar movements belong together (owner): every kick / pass of the session forms one run, placed
 // where the first of them stands, in a teaching progression; repeats of any movement sit side by side
-const SKILL_ORDER = ['shadowPass', 'shadowKick'];
+const SKILL_ORDER = ['shadowPass', 'instepPass', 'outsidePass', 'loftedPass', 'shadowVolley', 'shadowKick'];
 const isKickSkill = (x) => SKILL_ORDER.includes(x.item.patternId);
 export function groupSimilar(items) {
   const skills = items.filter(isKickSkill).sort((a, b) =>

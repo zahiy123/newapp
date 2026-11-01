@@ -436,7 +436,7 @@ export function useExpertExecution({
       const kickProsthesis = profile.kind === 'strike' && prosthetic;
       // the technique the eyes judge: the exercise's key points (a prosthesis: never the ankle / toes / point / flex)
       // + the SPORT's own emphasis + today's goal — the coach knows the sport and the day
-      const kp = (keyPointsRef.current || []).filter(x => !kickProsthesis || !PROSTHESIS_IMPOSSIBLE.test(x));
+      const kp = ((keyPointsRef.current || []).length ? keyPointsRef.current : (profile.keyPoints || [])).filter(x => !kickProsthesis || !PROSTHESIS_IMPOSSIBLE.test(x));
       const emphasis = (profile.sportEmphasis || []).map(e => e?.he || e?.text || '').filter(Boolean).slice(0, 4);
       aiBodyVision({ frame, legsFrame, composite, atPeak: atT != null, isPass, passDrill: isPassDrill, kickingProsthesis: kickProsthesis, lang: he0 ? 'he' : 'en', side: leg,
         exercise: exerciseName, sport: contextsKey, body: bodyText(limbProfile || {}), keyPoints: [...kp, ...emphasis], goal: sessionGoalRef.current || '',

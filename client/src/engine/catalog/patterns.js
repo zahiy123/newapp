@@ -16,6 +16,8 @@
 //   names      Hebrew / English (the Hebrew name keeps the analyzer keyword of the movement)
 // ============================================================
 
+import { footballPatterns } from '../exercise/sports/football.js';
+
 const t = (he, en) => ({ he, en });
 
 /** @type {Object<string, Object>} */
@@ -92,6 +94,8 @@ export const PATTERNS = Object.freeze({
     name: t('תנועת מסירת חזה בצל', 'Shadow chest pass'), cue: t('דחוף את הכדור הדמיוני אל חזה השותף', "Push the imaginary ball to your partner's chest") },
   shadowStroke: { source: { move: 'twist' }, qualities: ['technique', 'sportSkill', 'core'], sports: ['racket', 'seated'], needs: [],
     name: t('פורהנד בצל — תנועת מכה באוויר', 'Shadow forehand — stroke in the air'), cue: t('הכתפיים מסתובבות, הזרוע עוקבת', 'The shoulders turn, the arm follows') },
+  // ---- The sport movement libraries (owner, 2026-11-01) ----
+  ...footballPatterns(t),
 });
 
 /** Pattern ids usable for a sport family (+ the generic 'all' patterns). */

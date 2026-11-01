@@ -12,6 +12,9 @@
 //   sportLabel(sport, pattern) the sport's name / cue for a pattern (or null)
 // ============================================================
 
+// the football movement library (owner, 2026-11-01): ball skills, passes, agility, landing
+const FOOTBALL_SKILLS = ['instepPass', 'outsidePass', 'loftedPass', 'shadowVolley', 'shadowHeader', 'chestControl', 'soleTrap', 'toeTaps', 'juggling', 'stepOver'];
+const FOOTBALL_ATHLETIC = ['jockeyStance', 'lateralBounds', 'singleLegHop', 'stickLanding'];
 const LOWER_STRENGTH = ['squat', 'miniSquat', 'lunge', 'wallSit', 'hipHinge', 'gluteBridge'];
 const SPEED = ['runInPlace', 'highKnees', 'buttKicks', 'aSkip', 'accelMarch'];
 const ARM_ISOLATION = ['lateralRaise', 'frontRaise', 'rehabFrontRaise', 'bicepCurl', 'rehabElbowFlex'];
@@ -26,17 +29,19 @@ export const AMPUTEE_FOOTBALL_CATEGORIES = Object.freeze({
   // one-leg strength — on crutches it is crutch-supported (owner, 2026-10-06)
   singleLegStrength: ['singleLegSquat', 'singleLegLunge'],
   crutchUpperBody: ['pushUp', 'shoulderPress'],
-  kicks: ['shadowKick', 'shadowPass'],
+  kicks: ['shadowKick', 'shadowPass', 'instepPass', 'outsidePass', 'loftedPass', 'shadowVolley'],
+  // the ball skills an amputee player does on the working leg / on the crutches (owner, 2026-11-01)
+  ballSkills: ['soleTrap', 'juggling', 'shadowHeader', 'chestControl', 'singleLegHop'],
 });
 const AMPUTEE_FOOTBALL = Object.values(AMPUTEE_FOOTBALL_CATEGORIES).flat();
 
 export const SPORT_PATTERNS = Object.freeze({
-  football: [...LOWER_STRENGTH, ...SPEED, 'jumpSquat', 'lateralShuffle', 'kneeUpBalance', 'singleLegSquat', 'singleLegLunge', 'plank', 'pushUp', 'trunkRotation', 'shadowKick', 'shadowPass'],
+  football: [...LOWER_STRENGTH, ...SPEED, 'jumpSquat', 'lateralShuffle', 'kneeUpBalance', 'singleLegSquat', 'singleLegLunge', 'plank', 'pushUp', 'trunkRotation', 'shadowKick', 'shadowPass', ...FOOTBALL_SKILLS, ...FOOTBALL_ATHLETIC],
   footballAmputee: AMPUTEE_FOOTBALL,
   // Amputee goalkeeper (arm amputees): low stance, lateral power, reactions, core
   // Amputee goalkeeper (often an arm amputee): ready stance, lateral power, reactions, core,
   // the working arm / shoulder; the distribution kick
-  footballAmputeeGK: [...LOWER_STRENGTH, 'gkStance', 'jumpSquat', 'lateralShuffle', 'kneeUpBalance', 'singleLegSquat', 'plank', 'shoulderPress', 'lateralRaise', 'highKnees', 'accelMarch', 'trunkRotation', 'shadowKick'],
+  footballAmputeeGK: [...LOWER_STRENGTH, 'gkStance', 'jumpSquat', 'lateralShuffle', 'kneeUpBalance', 'singleLegSquat', 'plank', 'shoulderPress', 'lateralRaise', 'highKnees', 'accelMarch', 'trunkRotation', 'shadowKick', 'lateralBounds', 'stickLanding', 'chestControl'],
   basketball: [...LOWER_STRENGTH, ...SPEED, 'jumpSquat', 'lateralShuffle', 'kneeUpBalance', 'singleLegSquat', 'singleLegLunge', 'plank', 'pushUp', 'shoulderPress', 'trunkRotation', 'shadowChestPass'],
   tennis: [...LOWER_STRENGTH, ...SPEED, 'jumpSquat', 'lateralShuffle', 'kneeUpBalance', 'singleLegSquat', 'singleLegLunge', 'plank', 'lateralRaise', 'trunkRotation', 'shadowStroke'],
   // Wheelchair sports: shoulders (protect them), pushing strength, trunk, the sport motion
@@ -58,6 +63,15 @@ export const SPORT_LABELS = Object.freeze({
     shoulderPress: { name: t('לחיצת כתפיים — כוח כתפיים', 'Shoulder press — shoulder strength'), cue: t('דחוף את התקרה — כתפיים חזקות ויציבות', 'Push the ceiling — strong, stable shoulders') },
     shadowKick: { name: t('בעיטה בצל — טכניקת בעיטה', 'Shadow kick — kicking technique'), cue: t('הירך מובילה, הרגל מצליפה, החזה מעל הכדור הדמיוני', 'The hip leads, the leg whips through, chest over the imaginary ball') },
     shadowPass: { name: t('מסירה בצל — פנים כף הרגל', 'Shadow pass — inside of the foot'), cue: t('כף רגל פתוחה, תנופה קצרה ומדויקת — כמו מסירה לחבר', 'Foot open, a short accurate swing — like a pass to a teammate') },
+    instepPass: { name: t('מסירה בגב כף הרגל — מסירה נמוכה וחזקה', 'Instep pass — a low driven pass'), cue: t('אצבעות למטה, שרוכים במרכז הכדור, ברך מעל הכדור', 'Toes down, laces through the middle, knee over the ball') },
+    outsidePass: { name: t('מסירה בצד החיצוני — מסירה מפתיעה', 'Outside-foot pass — the surprise pass'), cue: t('כף הרגל פנימה, צד חיצוני לכדור, תנועה קצרה', 'Foot turned in, the outside to the ball, a short swing') },
+    loftedPass: { name: t('מסירה מוגבהת — מעל השחקן', 'Lofted pass — over the player'), cue: t('מתחת לכדור, משקל על רגל העמידה, המשך תנועה גבוה', 'Under the ball, weight on the support leg, a high follow-through') },
+    shadowVolley: { name: t('וולה בצל — בעיטה מהאוויר', 'Shadow volley — striking from the air'), cue: t('ברך מעל הכדור, קרסול נעול, חזה קדימה', 'Knee over the ball, ankle locked, chest forward') },
+    soleTrap: { name: t('עצירה בסוליה — שליטה בכדור', 'Sole trap — ball control'), cue: t('משקל מעל רגל העמידה, הסוליה עולה על הכדור', 'Weight over the support leg, the sole on the ball') },
+    juggling: { name: t("ג'אגלינג — מגע ושליטה", 'Juggling — touch and control'), cue: t('נגיעות קטנות בגב כף הרגל, קרסול נעול', 'Small touches with the instep, ankle locked') },
+    shadowHeader: { name: t('נגיחה בצל — מהבטן והירכיים', 'Shadow header — from the abs and hips'), cue: t('הגו משתחרר קדימה, המצח פוגע, צוואר נעול', 'The trunk releases forward, the forehead strikes, neck locked') },
+    chestControl: { name: t('עצירה בחזה — קבלת כדור גבוה', 'Chest control — receiving a high ball'), cue: t('החזה פתוח, בולמים בברכיים, הכדור לרגל', 'Chest open, absorb with the knees, the ball to the foot') },
+    singleLegHop: { name: t('ניתורים על רגל אחת — יציבות לבעיטה', 'Single-leg hops — stability for the kick'), cue: t('נחיתה רכה, הברך מעל האצבעות, האגן ישר', 'A soft landing, knee over the toes, pelvis level') },
     singleLegSquat: { name: t('סקוואט על רגל אחת — כוח לרגל הבעיטה', 'Single-leg squat — strength for the kicking leg'), cue: t('רד לאט על הרגל המתפקדת והתרומם בכוח', 'Lower slowly on the working leg, drive back up') },
     singleLegLunge: { name: t("לאנג' על רגל אחת — כוח ויציבות", 'Single-leg lunge — strength and stability'), cue: t('רד ישר למטה על הרגל הקדמית, הגו זקוף', 'Drop straight down on the front leg, tall trunk') },
   },
@@ -93,7 +107,8 @@ export function relevantPatterns({ track, sport, lp = {} }) {
 
 // Sports whose every session carries a dedicated block of the sport's skill (owner: kick volume)
 export const SPORT_SKILL_BLOCK = Object.freeze({
-  footballAmputee: { n: 3, want: ['technique', 'sportSkill'] },
+  // (the kick volume block draws ONLY kicks / passes — the ball skills come in the other blocks)
+  footballAmputee: { n: 3, want: ['technique', 'sportSkill'], only: AMPUTEE_FOOTBALL_CATEGORIES.kicks },
   football: { n: 2, want: ['technique', 'sportSkill'] },
 });
 

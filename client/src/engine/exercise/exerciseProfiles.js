@@ -28,6 +28,8 @@
 // (the same angleCosine the rep counters use).
 // ============================================================
 
+import { footballProfiles } from './sports/football.js';
+
 const msg = (he, en) => ({ he, en });
 
 // ---- Shared rules ----
@@ -729,6 +731,15 @@ RAW_EXPERT.highKnees = {
 };
 TAGS.highKnees = TAGS.runInPlace;
 
+// ---- The sport movement libraries (owner, 2026-11-01): each sport's base movements, full profiles ----
+const FOOTBALL = footballProfiles({
+  footballKick: RAW_EXPERT.footballKick, shadowPass: RAW_EXPERT.shadowPass, runInPlace: RAW_EXPERT.runInPlace,
+  jumpSquat: RAW_EXPERT.jumpSquat, singleLegSquat: RAW_EXPERT.singleLegSquat, gkStance: RAW_EXPERT.gkStance,
+  UPRIGHT_TORSO, KNEE_VALGUS, KNEE_IN,
+});
+Object.assign(RAW_EXPERT, FOOTBALL.profiles);
+Object.assign(TAGS, FOOTBALL.tags);
+
 /** @type {Object<string, Object>} */
 // HOW to fix — the coach's practical instruction for the rest's analysis (the what + the why are in the rule)
 const HOW = {
@@ -752,6 +763,7 @@ const HOW = {
   'singleLegSquat.too_shallow': msg('רד לאט, עם שליטה, עד שהברך בכ-90 מעלות — אחוז במשהו יציב אם צריך', 'Lower slowly, under control, to about 90° at the knee — hold something steady if needed'),
   'singleLegLunge.too_shallow': msg('הורד את האגן ישר למטה עד שהברך הקדמית קרובה ל-90 מעלות', 'Lower the hips straight down until the front knee is near 90°'),
 };
+Object.assign(HOW, FOOTBALL.how);
 export const EXPERT_PROFILES = Object.freeze(Object.fromEntries(
   Object.entries(RAW_EXPERT).map(([id, p]) => [id, Object.freeze({
     dynamics: [], ...p, tags: TAGS[id] || [],
@@ -787,7 +799,7 @@ const CUE_TO_PROFILE = {
   // legs (standing)
   running: 'runInPlace', highKnees: 'highKnees', kick: 'footballKick', buttKicks: 'buttKicks',
   calfRaise: 'legsStanding',
-  amputeeKick: 'legsStanding', pass: 'legsStanding', firstTouch: 'legsStanding', juggle: 'legsStanding',
+  amputeeKick: 'legsStanding', pass: 'legsStanding', firstTouch: 'soleTrap', juggle: 'juggling',
   dribbling: 'legsStanding', footwork: 'legsStanding', splitStep: 'legsStanding', coneDrill: 'legsStanding',
   quickTurns: 'legsStanding', shieldBall: 'legsStanding', crossover: 'legsStanding', defensiveSlide: 'legsStanding',
   crutchPass: 'legsStanding', crutchDribble: 'legsStanding', crutchAgility: 'legsStanding', crutchPivot: 'legsStanding',
@@ -795,8 +807,8 @@ const CUE_TO_PROFILE = {
   rehabKneeFlex: 'legsStanding', rehabSitToStand: 'legsStanding', gkPositioning: 'legsStanding',
   // full body (standing)
   jump: 'fullBody', amputeeSprint: 'fullBody', layup: 'fullBody', spinMove: 'fullBody',
-  postMoves: 'fullBody', gkDive: 'fullBody', gkReaction: 'fullBody', headers: 'fullBody', crutchHeader: 'fullBody',
-  chestControl: 'fullBody', crutchChestControl: 'fullBody',
+  postMoves: 'fullBody', gkDive: 'fullBody', gkReaction: 'fullBody', headers: 'shadowHeader', crutchHeader: 'fullBody',
+  chestControl: 'chestControl', crutchChestControl: 'fullBody',
   // arms (standing)
   pull: 'armsStanding', tricep: 'armsStanding', row: 'armsStanding', pullApart: 'armsStanding', shrug: 'armsStanding',
   dip: 'armsStanding', shooting: 'armsStanding', handDribble: 'armsStanding', stroke: 'armsStanding',

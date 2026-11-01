@@ -10,6 +10,7 @@
 //
 // id = "pattern|tempo|range|side|dose" — deterministic, parsed back by catalogItem().
 // ============================================================
+import { FOOTBALL_STRIKES, FOOTBALL_PASSES } from '../exercise/sports/football.js';
 
 import { PATTERNS, patternsForFamily, patternFitsBody } from './patterns.js';
 import { EXPERT_PROFILES } from '../exercise/exerciseProfiles.js';
@@ -147,7 +148,7 @@ export function catalogGhostSpec(id, profile = null) {
   if (pat.source.profile) {
     const spec = { profile: profile || variationProfile(id) };
     // a shadow kick / pass has no real ball → the Ghost kicks a shadow ball (depth, realism)
-    if (KICK_PATTERNS.has(v.pattern)) spec.ball = v.pattern === 'shadowPass' ? 'pass' : 'kick';
+    if (KICK_PATTERNS.has(v.pattern)) spec.ball = PASS_PATTERNS.has(v.pattern) ? 'pass' : 'kick';
     return spec;
   }
   return { move: pat.source.move, ...(v.side === 'left' || v.side === 'right' ? { side: v.side } : {}) };
@@ -179,7 +180,8 @@ export function catalogItem(id) {
   };
 }
 
-export const KICK_PATTERNS = new Set(['shadowKick', 'shadowPass']);
+export const KICK_PATTERNS = new Set(['shadowKick', 'shadowPass', ...FOOTBALL_STRIKES]);
+const PASS_PATTERNS = new Set(['shadowPass', ...FOOTBALL_PASSES]);
 const legAffectedSide = (lp, s) => ['prosthetic', 'absent'].includes(lp?.[`${s}_leg`]?.state);
 
 /** Can this trainee work on EACH leg (split sets)? An active below-knee prosthesis can; absent / above-knee / crutches / wheelchair cannot. */
@@ -230,7 +232,7 @@ export function toExercise(item, isHe = true, label = null, { canSplit = true } 
   // Split sets: the target covers BOTH legs (each leg gets the full dose → the set is twice as long).
   // splitMode: 'kick' = the working (kicking) leg alternates; 'stand' = the leg you stand / work on
   const split = item.variation.side === 'bothSides' && canSplit;
-  const splitMode = item.patternId === 'shadowPass' ? 'pass' : KICK_PATTERNS.has(item.patternId) ? 'kick' : 'stand';
+  const splitMode = PASS_PATTERNS.has(item.patternId) ? 'pass' : KICK_PATTERNS.has(item.patternId) ? 'kick' : 'stand';
   // Kicks / passes (owner): a FULL, separate set per leg (base leg set, then the other leg's set) →
   // twice the sets, the reps per set unchanged. Balance / one-leg work: the leg switches mid-set.
   const perSet = split && (splitMode === 'kick' || splitMode === 'pass');
