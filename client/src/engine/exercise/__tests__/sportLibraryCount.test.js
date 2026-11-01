@@ -10,6 +10,7 @@ import { footballProfiles } from '../sports/football.js';
 import { basketballProfiles } from '../sports/basketball.js';
 import { tennisProfiles } from '../sports/tennis.js';
 import { strengthProfiles } from '../sports/strength.js';
+import { adaptiveProfiles } from '../sports/adaptive.js';
 
 const lp = getLimbProfile({ disability: 'none', scanData: { classification: 'NATURAL' } });
 const frame = (p, t) => profileGhostPose(p, t, lp).landmarks.map(q => (q.visibility ? { ...q, x: 0.5 + q.x * 0.17, y: 0.5 + q.y * 0.17, z: (q.z ?? 0) * 0.17 } : q));
@@ -29,7 +30,7 @@ const NEW = Object.keys(footballProfiles({
 }).profiles)).concat(Object.keys(strengthProfiles({
   squat: EXPERT_PROFILES.squat, lunge: EXPERT_PROFILES.lunge, hipHinge: EXPERT_PROFILES.hipHinge, pushUp: EXPERT_PROFILES.pushUp,
   bicepCurl: EXPERT_PROFILES.bicepCurl, shoulderPress: EXPERT_PROFILES.shoulderPress, UPRIGHT_TORSO: () => ({}), KNEE_VALGUS: () => ({}),
-}).profiles));
+}).profiles)).concat(Object.keys(adaptiveProfiles({ UPRIGHT_TORSO: () => ({}) }).profiles));
 
 describe('the sport libraries: every movement is counted on its correct execution', () => {
   for (const id of NEW) {

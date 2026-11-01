@@ -22,6 +22,8 @@ const BASKETBALL_SKILLS = [...BASKETBALL_ARM_SKILLS, 'jumpShot', 'reboundJump', 
 const TENNIS_ARM_SKILLS = ['backhand', 'shadowServe', 'shadowSmash', 'forehandVolley', 'backhandVolley', 'trophyHold'];
 const TENNIS_SKILLS = [...TENNIS_ARM_SKILLS, 'splitStep', 'readyPosition', 'openStanceLoad'];
 // the adaptive / rehab strength library (owner, 2026-11-01)
+// wheelchair-specific seated work (owner, 2026-11-01)
+const WHEELCHAIR = ['wheelchairPush', 'oneArmPass', 'seatedPunch', 'armrestLift', 'overheadReach', 'facePull'];
 const SEATED_STRENGTH = ['scapularRow', 'wallSlide', 'hammerCurl', 'overheadTricep', 'arnoldPress', 'uprightRow'];
 const REHAB_STRENGTH = ['sitToStand', 'wallPushUp', 'scapularRow', 'wallSlide', 'rehabMarch', 'supportedSplitSquat'];
 const LOWER_STRENGTH = ['squat', 'miniSquat', 'lunge', 'wallSit', 'hipHinge', 'gluteBridge'];
@@ -34,10 +36,11 @@ export const GENERIC_DRILLS = ['armCircles', 'kneeLiftMarch'];
 // Amputee football: the four functional categories, nothing else
 export const AMPUTEE_FOOTBALL_CATEGORIES = Object.freeze({
   core: ['plank', 'gluteBridge', 'trunkRotation'],
-  singleLegBalance: ['kneeUpBalance'],
+  singleLegBalance: ['kneeUpBalance', 'rehabMarch'],
   // one-leg strength — on crutches it is crutch-supported (owner, 2026-10-06)
   singleLegStrength: ['singleLegSquat', 'singleLegLunge'],
-  crutchUpperBody: ['pushUp', 'shoulderPress'],
+  // (+ the crutch library — owner, 2026-11-01: the press that moves you on the crutches, the support hold, the pulls)
+  crutchUpperBody: ['pushUp', 'shoulderPress', 'crutchPress', 'crutchHold', 'facePull', 'scapularRow', 'overheadTricep', 'wallPushUp'],
   kicks: ['shadowKick', 'shadowPass', 'instepPass', 'outsidePass', 'loftedPass', 'shadowVolley'],
   // the ball skills an amputee player does on the working leg / on the crutches (owner, 2026-11-01)
   ballSkills: ['soleTrap', 'juggling', 'shadowHeader', 'chestControl', 'singleLegHop'],
@@ -55,8 +58,8 @@ export const SPORT_PATTERNS = Object.freeze({
   tennis: [...LOWER_STRENGTH, ...SPEED, 'jumpSquat', 'lateralShuffle', 'kneeUpBalance', 'singleLegSquat', 'singleLegLunge', 'plank', 'lateralRaise', 'trunkRotation', 'shadowStroke', ...TENNIS_SKILLS, 'quickFeet', 'lateralBounds', 'singleLegHop', 'stickLanding'],
   // Wheelchair sports: shoulders (protect them), pushing strength, trunk, the sport motion
   // (+ the seated-capable strength: scapular row, wall slide, hammer curl, overhead triceps, Arnold press, upright row)
-  basketballWheelchair: ['trunkRotation', 'shoulderPress', 'lateralRaise', 'frontRaise', 'bicepCurl', 'shadowChestPass', ...BASKETBALL_ARM_SKILLS, ...SEATED_STRENGTH],
-  tennisWheelchair: ['trunkRotation', 'shoulderPress', 'lateralRaise', 'frontRaise', 'bicepCurl', 'shadowStroke', ...TENNIS_ARM_SKILLS, ...SEATED_STRENGTH],
+  basketballWheelchair: ['trunkRotation', 'shoulderPress', 'lateralRaise', 'frontRaise', 'bicepCurl', 'shadowChestPass', ...BASKETBALL_ARM_SKILLS, ...SEATED_STRENGTH, ...WHEELCHAIR],
+  tennisWheelchair: ['trunkRotation', 'shoulderPress', 'lateralRaise', 'frontRaise', 'bicepCurl', 'shadowStroke', ...TENNIS_ARM_SKILLS, ...SEATED_STRENGTH, ...WHEELCHAIR.filter(p => p !== 'oneArmPass')],
   running: [...LOWER_STRENGTH, ...SPEED, 'jumpSquat', 'kneeUpBalance', 'singleLegSquat', 'singleLegLunge', 'plank'],
   fitness: null,     // general fitness: all generic patterns
 });
@@ -73,6 +76,13 @@ export const SPORT_LABELS = Object.freeze({
     shoulderPress: { name: t('לחיצת כתפיים — כוח כתפיים', 'Shoulder press — shoulder strength'), cue: t('דחוף את התקרה — כתפיים חזקות ויציבות', 'Push the ceiling — strong, stable shoulders') },
     shadowKick: { name: t('בעיטה בצל — טכניקת בעיטה', 'Shadow kick — kicking technique'), cue: t('הירך מובילה, הרגל מצליפה, החזה מעל הכדור הדמיוני', 'The hip leads, the leg whips through, chest over the imaginary ball') },
     shadowPass: { name: t('מסירה בצל — פנים כף הרגל', 'Shadow pass — inside of the foot'), cue: t('כף רגל פתוחה, תנופה קצרה ומדויקת — כמו מסירה לחבר', 'Foot open, a short accurate swing — like a pass to a teammate') },
+    crutchPress: { name: t('לחיצת קביים — כוח להתקדמות', 'Crutch press — the power to move'), cue: t('דחוף את הקביים עד יישור — זה הכוח שמניע אותך במגרש', 'Press the crutches straight — the power that moves you on the pitch') },
+    crutchHold: { name: t('החזקה על הקביים — יציבות', 'Crutch support hold — stability'), cue: t('מרפקים ישרים, גוף זקוף — יציבות לכל בעיטה', 'Elbows straight, body tall — stability for every kick') },
+    facePull: { name: t('משיכה אל הפנים — כתפיים בריאות', 'Face pull — healthy shoulders'), cue: t('מרפקים גבוהים, שכמות יחד — מאזן את כל עבודת הדחיפה', 'Elbows high, blades together — balances all the pushing work') },
+    scapularRow: { name: t('חתירה — שכמות חזקות', 'Scapular row — strong shoulder blades'), cue: t('מרפקים לצלעות, שכמות יחד — יציבות בפלג הגוף העליון', 'Elbows to the ribs, blades together — upper-body stability') },
+    overheadTricep: { name: t('פשיטת מרפקים — כוח טרייספס', 'Overhead extension — triceps strength'), cue: t('יישור מלא למעלה, מרפקים ליד הראש', 'A full extension overhead, elbows by the head') },
+    wallPushUp: { name: t('שכיבות סמיכה על הקיר — כוח דחיפה', 'Wall push-up — pushing strength'), cue: t('גוף ישר, חזה לקיר ודחוף', 'Body straight, chest to the wall and push') },
+    rehabMarch: { name: t('הרמת ברך — שליטה ברגל העבודה', 'Knee march — control of the working leg'), cue: t('לאט ובשליטה, האגן ישר', 'Slowly and controlled, pelvis level') },
     instepPass: { name: t('מסירה בגב כף הרגל — מסירה נמוכה וחזקה', 'Instep pass — a low driven pass'), cue: t('אצבעות למטה, שרוכים במרכז הכדור, ברך מעל הכדור', 'Toes down, laces through the middle, knee over the ball') },
     outsidePass: { name: t('מסירה בצד החיצוני — מסירה מפתיעה', 'Outside-foot pass — the surprise pass'), cue: t('כף הרגל פנימה, צד חיצוני לכדור, תנועה קצרה', 'Foot turned in, the outside to the ball, a short swing') },
     loftedPass: { name: t('מסירה מוגבהת — מעל השחקן', 'Lofted pass — over the player'), cue: t('מתחת לכדור, משקל על רגל העמידה, המשך תנועה גבוה', 'Under the ball, weight on the support leg, a high follow-through') },
@@ -101,10 +111,12 @@ const armLimited = (lp) => ['left_arm', 'right_arm'].some(k => ['limited', 'abse
  * @param {{ track: string, sport: string|null, lp?: Object }} p
  * @returns {Set<string>|null} allowed pattern ids (null = no restriction)
  */
+// the crutch movements exist only for a trainee on crutches (a prosthesis user never hears "crutches")
+const CRUTCH_ONLY = ['crutchPress', 'crutchHold'];
 export function relevantPatterns({ track, sport, lp = {} }) {
   if (track !== 'rehab_only') {
     const list = SPORT_PATTERNS[sport];
-    return list ? new Set(list) : null;
+    return list ? new Set(lp?.crutches ? list : list.filter(p => !CRUTCH_ONLY.includes(p))) : null;
   }
   // rehab only: functional for the limitation
   if (armLimited(lp)) {

@@ -20,6 +20,7 @@ import { footballPatterns } from '../exercise/sports/football.js';
 import { basketballPatterns } from '../exercise/sports/basketball.js';
 import { tennisPatterns } from '../exercise/sports/tennis.js';
 import { strengthPatterns } from '../exercise/sports/strength.js';
+import { adaptivePatterns } from '../exercise/sports/adaptive.js';
 
 const t = (he, en) => ({ he, en });
 
@@ -104,6 +105,7 @@ export const PATTERNS = Object.freeze({
   ...basketballPatterns(t),
   ...tennisPatterns(t),
   ...strengthPatterns(t),
+  ...adaptivePatterns(t),
 });
 
 /** Pattern ids usable for a sport family (+ the generic 'all' patterns). */

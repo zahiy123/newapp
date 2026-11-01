@@ -43,7 +43,7 @@ const PATTERN_MODE = {
   shadowVolley: ['incoming', 'foot', 'kick'], shadowHeader: ['incoming', 'head', null], chestControl: ['incoming', 'chest', null],
   juggling: ['juggle', 'foot', null],
   bouncePass: ['throw', 'hands', null], overheadPass: ['throw', 'hands', null], setShot: ['throw', 'hands', null], jumpShot: ['throw', 'hands', null],
-  dribblePound: ['handDribble', 'hand', null],
+  dribblePound: ['handDribble', 'hand', null], oneArmPass: ['throw', 'hands', null],
   shadowStroke: ['incoming', 'hand', null], backhand: ['incoming', 'hand', null], shadowServe: ['incoming', 'hand', null],
   shadowSmash: ['incoming', 'hand', null], forehandVolley: ['incoming', 'hand', null], backhandVolley: ['incoming', 'hand', null], soleTrap: ['dribble', 'feet', null], toeTaps: ['dribble', 'feet', null], stepOver: ['dribble', 'feet', null],
 };

@@ -32,6 +32,7 @@ import { footballProfiles } from './sports/football.js';
 import { basketballProfiles } from './sports/basketball.js';
 import { tennisProfiles } from './sports/tennis.js';
 import { strengthProfiles } from './sports/strength.js';
+import { adaptiveProfiles } from './sports/adaptive.js';
 
 const msg = (he, en) => ({ he, en });
 
@@ -756,6 +757,9 @@ const STRENGTH = strengthProfiles({
 });
 Object.assign(RAW_EXPERT, STRENGTH.profiles);
 Object.assign(TAGS, STRENGTH.tags);
+const ADAPTIVE = adaptiveProfiles({ UPRIGHT_TORSO });
+Object.assign(RAW_EXPERT, ADAPTIVE.profiles);
+Object.assign(TAGS, ADAPTIVE.tags);
 
 /** @type {Object<string, Object>} */
 // HOW to fix — the coach's practical instruction for the rest's analysis (the what + the why are in the rule)
@@ -845,7 +849,7 @@ const CUE_TO_PROFILE = {
   // seated (wheelchair)
   wheelchairShooting: 'setShot', wheelchairDribble: 'dribblePound', wheelchairPass: 'chestPass',
   wheelchairStroke: 'forehand', wheelchairServe: 'shadowServe', wcBouncePass: 'bouncePass',
-  wcPushSprint: 'seatedArms', wcSmash: 'shadowSmash',
+  wcPushSprint: 'wheelchairPush', wcSmash: 'shadowSmash',
 };
 
 /** Every profile by id (expert + family). */
