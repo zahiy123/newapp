@@ -7,6 +7,7 @@ import { profileGhostPose } from '../profileGhost.js';
 import { createExecutionTracker, updateExecution } from '../profileEvaluator.js';
 import { getLimbProfile } from '../../limbProfile.js';
 import { footballProfiles } from '../sports/football.js';
+import { basketballProfiles } from '../sports/basketball.js';
 
 const lp = getLimbProfile({ disability: 'none', scanData: { classification: 'NATURAL' } });
 const frame = (p, t) => profileGhostPose(p, t, lp).landmarks.map(q => (q.visibility ? { ...q, x: 0.5 + q.x * 0.17, y: 0.5 + q.y * 0.17, z: (q.z ?? 0) * 0.17 } : q));
@@ -19,9 +20,11 @@ const NEW = Object.keys(footballProfiles({
   footballKick: EXPERT_PROFILES.footballKick, shadowPass: EXPERT_PROFILES.shadowPass, runInPlace: EXPERT_PROFILES.runInPlace,
   jumpSquat: EXPERT_PROFILES.jumpSquat, singleLegSquat: EXPERT_PROFILES.singleLegSquat, gkStance: EXPERT_PROFILES.gkStance,
   UPRIGHT_TORSO: () => ({}), KNEE_VALGUS: () => ({}), KNEE_IN: () => ({}),
-}).profiles);
+}).profiles).concat(Object.keys(basketballProfiles({
+  jumpSquat: EXPERT_PROFILES.jumpSquat, runInPlace: EXPERT_PROFILES.runInPlace, gkStance: EXPERT_PROFILES.gkStance, UPRIGHT_TORSO: () => ({}),
+}).profiles));
 
-describe('the football library: every movement is counted on its correct execution', () => {
+describe('the sport libraries: every movement is counted on its correct execution', () => {
   for (const id of NEW) {
     const p = EXPERT_PROFILES[id];
     if (p.kind !== 'reps' && p.kind !== 'strike') continue;

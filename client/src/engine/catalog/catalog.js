@@ -54,6 +54,11 @@ const DOSES = Object.freeze({
     i30: { sets: 3, reps: '30', rest: 30, label: t('3×30 שניות', '3×30 s'), fit: ['endurance', 'conditioning', 'mobility', 'activation', 'technique'] },
     i45: { sets: 3, reps: '45', rest: 45, label: t('3×45 שניות', '3×45 s'), fit: ['endurance', 'conditioning', 'mobility'] },
   },
+  // a SPORT SKILL done in reps (a pass, a shot, a header — owner, 2026-11-01): technique doses
+  skill: {
+    sk8: { sets: 3, reps: '8', rest: 60, label: t('3×8', '3×8'), focus: t('בעוצמה', 'power'), fit: ['technique', 'sportSkill', 'power'] },
+    sk12: { sets: 3, reps: '12', rest: 45, label: t('3×12', '3×12'), focus: t('בדיוק', 'accuracy'), fit: ['technique', 'sportSkill', 'coordination'] },
+  },
   strike: {
     // a kick set is either POWER (few, full force) or ACCURACY (more, controlled) — named in the exercise
     k6: { sets: 3, reps: '6', rest: 60, label: t('3×6', '3×6'), focus: t('בעוצמה', 'power'), fit: ['technique', 'power', 'sportSkill'] },
@@ -73,6 +78,8 @@ function doseKind(patternId) {
   if (prof.kind === 'hold') return 'hold';
   if (prof.kind === 'strike') return 'strike';
   if (prof.kind === 'cyclic') return 'timed';
+  // a sport skill done in reps: technique doses (it belongs in a technique session)
+  if ((PATTERNS[patternId].qualities || []).includes('sportSkill')) return 'skill';
   return 'reps';
 }
 
@@ -224,7 +231,7 @@ export function buildCatalog(family, lp = {}) {
 /** Catalog item → an exercise object for the training screen / plan views. */
 export function toExercise(item, isHe = true, label = null, { canSplit = true } = {}) {
   const d = item.dose;
-  const timed = doseKind(item.patternId) !== 'reps' && doseKind(item.patternId) !== 'strike';
+  const timed = !['reps', 'strike', 'skill'].includes(doseKind(item.patternId));
   // a sport label renames the movement in the sport's language; the variation part is kept
   const variant = (lang) => item.name[lang].split(' — ').slice(PATTERNS[item.patternId].name[lang].split(' — ').length).join(' — ');
   const name = label ? { he: [label.name.he, variant('he')].filter(Boolean).join(' · '), en: [label.name.en, variant('en')].filter(Boolean).join(' · ') } : item.name;

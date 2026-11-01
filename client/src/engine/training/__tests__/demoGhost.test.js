@@ -15,7 +15,8 @@ describe('Demo Ghost for an exercise', () => {
 
   it('family exercises get a demo only when an animated movement truly matches', () => {
     expect(demoGhostFor(getExerciseProfile('footwork'), 'footwork')).toEqual({ move: 'side_steps' });
-    expect(demoGhostFor(getExerciseProfile('chestPass'), 'chestPass')).toEqual({ move: 'chest_pass' });
+    // (since 2026-11-01 the chest pass is an EXPERT movement — its own measured profile Ghost)
+    expect(demoGhostFor(getExerciseProfile('chestPass'), 'chestPass').profile.id).toBe('chestPass');
     expect(demoGhostFor(getExerciseProfile('crunch'), 'crunch')).toBeNull();      // no misleading demo
     expect(ghostPose({ move: 'side_steps' }, 0.3, {}).segments.length).toBeGreaterThan(5);
   });

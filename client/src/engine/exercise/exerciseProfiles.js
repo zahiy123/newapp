@@ -29,6 +29,7 @@
 // ============================================================
 
 import { footballProfiles } from './sports/football.js';
+import { basketballProfiles } from './sports/basketball.js';
 
 const msg = (he, en) => ({ he, en });
 
@@ -739,6 +740,11 @@ const FOOTBALL = footballProfiles({
 });
 Object.assign(RAW_EXPERT, FOOTBALL.profiles);
 Object.assign(TAGS, FOOTBALL.tags);
+const BASKETBALL = basketballProfiles({
+  jumpSquat: RAW_EXPERT.jumpSquat, runInPlace: RAW_EXPERT.runInPlace, gkStance: RAW_EXPERT.gkStance, UPRIGHT_TORSO,
+});
+Object.assign(RAW_EXPERT, BASKETBALL.profiles);
+Object.assign(TAGS, BASKETBALL.tags);
 
 /** @type {Object<string, Object>} */
 // HOW to fix — the coach's practical instruction for the rest's analysis (the what + the why are in the rule)
@@ -763,7 +769,7 @@ const HOW = {
   'singleLegSquat.too_shallow': msg('רד לאט, עם שליטה, עד שהברך בכ-90 מעלות — אחוז במשהו יציב אם צריך', 'Lower slowly, under control, to about 90° at the knee — hold something steady if needed'),
   'singleLegLunge.too_shallow': msg('הורד את האגן ישר למטה עד שהברך הקדמית קרובה ל-90 מעלות', 'Lower the hips straight down until the front knee is near 90°'),
 };
-Object.assign(HOW, FOOTBALL.how);
+Object.assign(HOW, FOOTBALL.how, BASKETBALL.how);
 export const EXPERT_PROFILES = Object.freeze(Object.fromEntries(
   Object.entries(RAW_EXPERT).map(([id, p]) => [id, Object.freeze({
     dynamics: [], ...p, tags: TAGS[id] || [],
@@ -806,14 +812,14 @@ const CUE_TO_PROFILE = {
   crutchShield: 'legsStanding', crutchBalance: 'legsStanding', rehabWeightShift: 'legsStanding',
   rehabKneeFlex: 'legsStanding', rehabSitToStand: 'legsStanding', gkPositioning: 'legsStanding',
   // full body (standing)
-  jump: 'fullBody', amputeeSprint: 'fullBody', layup: 'fullBody', spinMove: 'fullBody',
+  jump: 'fullBody', amputeeSprint: 'fullBody', layup: 'layupDrive', spinMove: 'fullBody',
   postMoves: 'fullBody', gkDive: 'fullBody', gkReaction: 'fullBody', headers: 'shadowHeader', crutchHeader: 'fullBody',
   chestControl: 'chestControl', crutchChestControl: 'fullBody',
   // arms (standing)
   pull: 'armsStanding', tricep: 'armsStanding', row: 'armsStanding', pullApart: 'armsStanding', shrug: 'armsStanding',
-  dip: 'armsStanding', shooting: 'armsStanding', handDribble: 'armsStanding', stroke: 'armsStanding',
-  volley: 'armsStanding', serve: 'armsStanding', bouncePass: 'armsStanding', chestPass: 'armsStanding',
-  overheadPass: 'armsStanding', hookShot: 'armsStanding', smash: 'armsStanding', gkDistribution: 'armsStanding',
+  dip: 'armsStanding', shooting: 'setShot', handDribble: 'dribblePound', stroke: 'armsStanding',
+  volley: 'armsStanding', serve: 'armsStanding', bouncePass: 'bouncePass', chestPass: 'chestPass',
+  overheadPass: 'overheadPass', hookShot: 'armsStanding', smash: 'armsStanding', gkDistribution: 'armsStanding',
   rehabPendulum: 'armsStanding', rehabExtRot: 'armsStanding', rehabElbowExt: 'armsStanding',
   rehabPronSup: 'armsStanding', rehabWallAngel: 'armsStanding', rehabReach: 'armsStanding',
   // floor
@@ -822,8 +828,8 @@ const CUE_TO_PROFILE = {
   donkeyKick: 'floorCore', hollowBody: 'floorCore', plankTap: 'floorCore', rehabCatCow: 'floorCore',
   rehabPelvicTilt: 'floorCore', rehabSLR: 'floorCore',
   // seated (wheelchair)
-  wheelchairShooting: 'seatedArms', wheelchairDribble: 'seatedArms', wheelchairPass: 'seatedArms',
-  wheelchairStroke: 'seatedArms', wheelchairServe: 'seatedArms', wcBouncePass: 'seatedArms',
+  wheelchairShooting: 'setShot', wheelchairDribble: 'dribblePound', wheelchairPass: 'chestPass',
+  wheelchairStroke: 'seatedArms', wheelchairServe: 'seatedArms', wcBouncePass: 'bouncePass',
   wcPushSprint: 'seatedArms', wcSmash: 'seatedArms',
 };
 

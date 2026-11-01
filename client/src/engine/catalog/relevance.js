@@ -15,6 +15,9 @@
 // the football movement library (owner, 2026-11-01): ball skills, passes, agility, landing
 const FOOTBALL_SKILLS = ['instepPass', 'outsidePass', 'loftedPass', 'shadowVolley', 'shadowHeader', 'chestControl', 'soleTrap', 'toeTaps', 'juggling', 'stepOver'];
 const FOOTBALL_ATHLETIC = ['jockeyStance', 'lateralBounds', 'singleLegHop', 'stickLanding'];
+// the basketball movement library (owner, 2026-11-01); the arm skills serve the wheelchair player too
+const BASKETBALL_ARM_SKILLS = ['bouncePass', 'overheadPass', 'setShot', 'dribblePound'];
+const BASKETBALL_SKILLS = [...BASKETBALL_ARM_SKILLS, 'jumpShot', 'reboundJump', 'blockJump', 'layupDrive', 'defensiveStance', 'boxOut', 'tripleThreat', 'quickFeet'];
 const LOWER_STRENGTH = ['squat', 'miniSquat', 'lunge', 'wallSit', 'hipHinge', 'gluteBridge'];
 const SPEED = ['runInPlace', 'highKnees', 'buttKicks', 'aSkip', 'accelMarch'];
 const ARM_ISOLATION = ['lateralRaise', 'frontRaise', 'rehabFrontRaise', 'bicepCurl', 'rehabElbowFlex'];
@@ -42,10 +45,10 @@ export const SPORT_PATTERNS = Object.freeze({
   // Amputee goalkeeper (often an arm amputee): ready stance, lateral power, reactions, core,
   // the working arm / shoulder; the distribution kick
   footballAmputeeGK: [...LOWER_STRENGTH, 'gkStance', 'jumpSquat', 'lateralShuffle', 'kneeUpBalance', 'singleLegSquat', 'plank', 'shoulderPress', 'lateralRaise', 'highKnees', 'accelMarch', 'trunkRotation', 'shadowKick', 'lateralBounds', 'stickLanding', 'chestControl'],
-  basketball: [...LOWER_STRENGTH, ...SPEED, 'jumpSquat', 'lateralShuffle', 'kneeUpBalance', 'singleLegSquat', 'singleLegLunge', 'plank', 'pushUp', 'shoulderPress', 'trunkRotation', 'shadowChestPass'],
+  basketball: [...LOWER_STRENGTH, ...SPEED, 'jumpSquat', 'lateralShuffle', 'kneeUpBalance', 'singleLegSquat', 'singleLegLunge', 'plank', 'pushUp', 'shoulderPress', 'trunkRotation', 'shadowChestPass', ...BASKETBALL_SKILLS, 'lateralBounds', 'singleLegHop', 'stickLanding'],
   tennis: [...LOWER_STRENGTH, ...SPEED, 'jumpSquat', 'lateralShuffle', 'kneeUpBalance', 'singleLegSquat', 'singleLegLunge', 'plank', 'lateralRaise', 'trunkRotation', 'shadowStroke'],
   // Wheelchair sports: shoulders (protect them), pushing strength, trunk, the sport motion
-  basketballWheelchair: ['trunkRotation', 'shoulderPress', 'lateralRaise', 'frontRaise', 'bicepCurl', 'shadowChestPass'],
+  basketballWheelchair: ['trunkRotation', 'shoulderPress', 'lateralRaise', 'frontRaise', 'bicepCurl', 'shadowChestPass', ...BASKETBALL_ARM_SKILLS],
   tennisWheelchair: ['trunkRotation', 'shoulderPress', 'lateralRaise', 'frontRaise', 'bicepCurl', 'shadowStroke'],
   running: [...LOWER_STRENGTH, ...SPEED, 'jumpSquat', 'kneeUpBalance', 'singleLegSquat', 'singleLegLunge', 'plank'],
   fitness: null,     // general fitness: all generic patterns

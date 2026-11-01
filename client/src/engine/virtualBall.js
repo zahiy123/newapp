@@ -41,7 +41,9 @@ const PATTERN_MODE = {
   shadowKick: ['incoming', 'foot', 'kick'], shadowPass: ['incoming', 'foot', 'pass'], shadowChestPass: ['throw', 'hands', null],
   instepPass: ['incoming', 'foot', 'pass'], outsidePass: ['incoming', 'foot', 'pass'], loftedPass: ['incoming', 'foot', 'pass'],
   shadowVolley: ['incoming', 'foot', 'kick'], shadowHeader: ['incoming', 'head', null], chestControl: ['incoming', 'chest', null],
-  juggling: ['juggle', 'foot', null], soleTrap: ['dribble', 'feet', null], toeTaps: ['dribble', 'feet', null], stepOver: ['dribble', 'feet', null],
+  juggling: ['juggle', 'foot', null],
+  bouncePass: ['throw', 'hands', null], overheadPass: ['throw', 'hands', null], setShot: ['throw', 'hands', null], jumpShot: ['throw', 'hands', null],
+  dribblePound: ['handDribble', 'hand', null], soleTrap: ['dribble', 'feet', null], toeTaps: ['dribble', 'feet', null], stepOver: ['dribble', 'feet', null],
 };
 // by the name (exercises from any source): the most specific first
 const NAME_MODE = [
