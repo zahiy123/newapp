@@ -14,12 +14,22 @@
 import { useEffect, useRef, useState } from 'react';
 import { isNextCommand, acceptCommand, ECHO_WINDOW_MS, COMMAND_ECHO_RE } from '../engine/training/voiceCommands';
 import { coachSaidRecently } from './useSpeech';
+import { isPainReport, spokenLevel, spokenZone, PAIN_ECHO_RE } from '../engine/training/painTrafficLight';
+
+// the coach's own pain question names "0 to 10" — a number in its line may echo back as the trainee's level
+const LEVEL_ECHO_RE = /אפס|עשר|zero|ten|\d/i;
 
 const RESTART_MS = 300;
 
-export function useVoiceCommand({ active, lang = 'he-IL', onNext }) {
+// Pain Traffic Light (2026-11-01): "כואב לי" (+ where / how much, when said) → onPain({ level, zone });
+// while the pain panel waits (`awaitingPainRef.current`), a level / a zone alone is enough.
+export function useVoiceCommand({ active, lang = 'he-IL', onNext, onPain, awaitingPainRef = null, amputee = false }) {
   const onNextRef = useRef(onNext);
   useEffect(() => { onNextRef.current = onNext; }, [onNext]);
+  const onPainRef = useRef(onPain);
+  useEffect(() => { onPainRef.current = onPain; }, [onPain]);
+  const amputeeRef = useRef(amputee);
+  useEffect(() => { amputeeRef.current = amputee; }, [amputee]);
   const [listening, setListening] = useState(false);
   const [status, setStatus] = useState('off');
   const armRef = useRef(null);                 // start from a user tap (set by the effect)
@@ -48,6 +58,18 @@ export function useVoiceCommand({ active, lang = 'he-IL', onNext }) {
         r.onresult = (e) => {
           for (let i = e.resultIndex; i < e.results.length; i++) {
             const res = e.results[i];
+            if (res.isFinal !== false && onPainRef.current) {
+              const txt = Array.from(res).map(a => a.transcript).find(t => isPainReport(t)
+                || (awaitingPainRef?.current && (spokenLevel(t) != null || spokenZone(t, { amputee: amputeeRef.current }))));
+              if (txt != null) {
+                const report = isPainReport(txt);
+                if (report && coachSaidRecently(PAIN_ECHO_RE, ECHO_WINDOW_MS)) continue;   // the coach's own words
+                let level = spokenLevel(txt);
+                if (level != null && coachSaidRecently(LEVEL_ECHO_RE, 3000)) level = null;
+                const zone = spokenZone(txt, { amputee: amputeeRef.current });
+                if (report || level != null || zone) { onPainRef.current({ level, zone, report }); return; }
+              }
+            }
             if (!Array.from(res).some(a => isNextCommand(a.transcript))) continue;
             if (!acceptCommand({ isFinal: res.isFinal !== false, coachSaidCommandWord: coachSaidRecently(COMMAND_ECHO_RE, ECHO_WINDOW_MS) })) continue;
             onNextRef.current?.();

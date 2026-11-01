@@ -72,6 +72,13 @@ export async function aiStop(facts) {
   return t && t.length <= 240 ? t : null;
 }
 
+/** The coach's words on a pain report (the device already decided the action), or null. */
+export async function aiPain(facts) {
+  const j = await post('/api/coach/live-cue', { ...facts, mode: 'pain' }, 8500);
+  const t = typeof j?.cue === 'string' ? j.cue.trim() : '';
+  return t && t.length <= 240 ? t : null;
+}
+
 /** A short coach line (positioning / start / ready / motivation) worded by the AI from the facts, or null. */
 export async function aiLine(facts) {
   return aiCue(facts);

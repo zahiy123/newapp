@@ -110,6 +110,8 @@ const MOMENTS = {
   stop: 'NOW: you STOP the set for a moment — the SAME critical error keeps repeating ("what"; "why" / "how" = the expert knowledge; "timesInBlock" = how many of the last reps; "bodyNow" = what you see in the whole body). In your own words, as the best professional coach: open with a short natural stop (like "wait, let\'s stop for a second"), then a SHARP, organised fix — EXACTLY what to do on the next rep. If "bodyNow" shows a second clear problem at the same time (e.g. the hands in the pockets AND the toes), name both in ONE ordered sentence (first this, then that) — never a mix; the support leg / the kicking leg named explicitly. A CLEAR, COMPLETE professional explanation the trainee fully understands — what is wrong, why, and exactly how to do it: 15 to 25 words, 2 short sentences. Real football terms only — in a PASS drill describe a too-strong pass as "תנופה חזקה מדי" / "מסירה חזקה מדי", never with the word בעיטה / בעט.',
   praise: 'NOW: the last reps were MEASURED correct. Give ONE short, genuine, specific praise for exactly the good point in "what" — 3 to 6 words, one sentence, warm. Never a generic "good job"; never a number.',
   ready: 'NOW: you can see the trainee clearly and the exercise is about to begin. Tell them so and to start — warm, short, at most 8 words. No technique, no numbers.',
+  // THE PAIN TRAFFIC LIGHT (owner decision 2026-09-28): the DEVICE already decided ("action"); you only say it
+  pain: 'NOW: the trainee just REPORTED PAIN ("what" = where, and what the coach decided: "action" continue / reduce / stop). In your own words, as a caring professional coach + physiotherapist: acknowledge the pain seriously and calmly (never dismiss it, never "push through"), then say the decision exactly as given — continue and watch it / continue lighter (fewer reps, one set less) / stop this exercise now. For "stop": add that if the pain does not pass or comes back, they should check it with a physiotherapist or a doctor. NEVER diagnose, never name an injury, never a medical claim, never a number. 12 to 25 words, 1–2 short sentences, calm warm tone.',
   motivate: 'NOW: a natural moment for ONE genuine, warm encouragement (the moment and the intent are in "what"). In your own words, at most 10 words. Never praise a performance, never claim a technique fact, never a number. If the trainee is tired / frustrated: calm and supportive.',
 };
 
@@ -123,6 +125,7 @@ Do not repeat or paraphrase closely any of the recent lines listed. Output ONLY 
     const user = JSON.stringify({
       exercise: clip(f.exercise, 80), sport: clip(f.sport, 40), body: clip(f.body, 120),
       what: clip(f.error?.what, 200), recentLines: (f.recent || []).slice(-4).map(x => clip(x, 90)),
+      ...(f.mode === 'pain' ? { action: ['continue', 'reduce', 'stop'].includes(f.action) ? f.action : null } : {}),
       ...(f.mode === 'stop' ? {
         why: clip(f.error?.why, 300), how: clip(f.error?.how, 300), timesInBlock: f.timesInBlock ?? null,
         bodyNow: (f.bodyNow || []).slice(0, 3).map(x => clip(x, 80)),
@@ -255,9 +258,9 @@ export async function generateCue(facts, { timeoutMs = 3000, askFn = ask } = {})
   const prompt = buildCuePrompt(facts);
   for (const model of CUE_MODELS) {
     let raw;
-    try { raw = await hedged(() => askFn(model, prompt, facts.mode === 'stop' ? 220 : 80, facts.mode === 'stop' ? Math.max(timeoutMs, 8000) : timeoutMs, 'off'), facts.mode === 'stop' ? 4500 : CUE_HEDGE_MS); } catch (err) { if (isModelError(err)) continue; throw err; }
+    try { raw = await hedged(() => askFn(model, prompt, facts.mode === 'stop' || facts.mode === 'pain' ? 220 : 80, facts.mode === 'stop' || facts.mode === 'pain' ? Math.max(timeoutMs, 8000) : timeoutMs, 'off'), facts.mode === 'stop' || facts.mode === 'pain' ? 4500 : CUE_HEDGE_MS); } catch (err) { if (isModelError(err)) continue; throw err; }
     const text = String(raw || '').replace(/["“”«»]/g, '').replace(/\s+/g, ' ').trim();
-    if (!text || /^SKIP/i.test(text) || text.length > (facts.mode === 'stop' ? MAX_STOP_CHARS : MAX_CUE_CHARS) || !numbersGrounded(text, facts) || !directionsKept(text, facts)) return null;
+    if (!text || /^SKIP/i.test(text) || text.length > (facts.mode === 'stop' || facts.mode === 'pain' ? MAX_STOP_CHARS : MAX_CUE_CHARS) || !numbersGrounded(text, facts) || !directionsKept(text, facts)) return null;
     if (!passWordsOk(text, facts)) return null;                                  // a pass is never a "kick" / "יפה"
     if ((facts.recent || []).some(r => r && r.trim() === text)) return null;   // never the same words twice
     if (wordCount(text) <= MAX_CUE_WORDS || facts.mode) return text;

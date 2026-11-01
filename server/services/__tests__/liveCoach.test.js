@@ -116,3 +116,14 @@ test('the whole-body eyes: findings parsed with guards — no numbers, readable 
   assert.equal(await generateBodyVision({ frame: bigFrame }, { askFn: async () => '{"findings":[{"code":"x",}]' }), null);
   assert.equal(await generateBodyVision({ frame: 'tiny' }, { askFn: async () => reply }), null);
 });
+
+test('the pain traffic light: the prompt carries the device decision; a long calm line is kept, a number is not', async () => {
+  const f = { lang: 'he', exercise: 'סקוואט', mode: 'pain', action: 'stop', error: { what: 'המתאמן דיווח על כאב בברך. ההחלטה: עוצרים את התרגיל עכשיו; הכאב נרשם ביומן' } };
+  const { system, user } = buildCuePrompt(f);
+  assert.match(system, /REPORTED PAIN/);
+  assert.match(system, /NEVER diagnose/);
+  assert.equal(JSON.parse(user).action, 'stop');
+  const line = 'אני שומע אותך, עוצרים את התרגיל עכשיו. אם הכאב בברך לא עובר, כדאי לבדוק אותו אצל פיזיותרפיסט.';
+  assert.equal(await generateCue(f, { askFn: async () => line }), line);
+  assert.equal(await generateCue(f, { askFn: async () => 'עוצרים, תנוח 5 דקות.' }), null);
+});

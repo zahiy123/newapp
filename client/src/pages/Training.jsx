@@ -44,7 +44,8 @@ import { useVoiceProsody } from '../hooks/useVoiceProsody';
 import { brainSummary, brainBall } from '../engine/coachBrain/brain';
 import { buildDebrief } from '../engine/coachBrain/debrief';
 import { debriefFacts, legacyCueFacts, bodyText } from '../engine/coachBrain/aiFacts';
-import { aiCue, aiDebrief, aiBriefing, aiLine, getAiStatus, onAiStatus } from '../utils/aiCoach';
+import { aiCue, aiDebrief, aiBriefing, aiLine, aiPain, getAiStatus, onAiStatus } from '../utils/aiCoach';
+import { painLight, painAction, reducedLoad, zonesFor, painEntry, painFacts } from '../engine/training/painTrafficLight';
 import { kickingSide } from '../engine/incomingBall';
 import { ballModeFor, virtualBallWanted, handSide, ballLook, realBallInPlay } from '../engine/virtualBall';
 import { rebuildPlanFromCatalog, planContext } from '../engine/catalog/planBuilder';
@@ -669,6 +670,7 @@ export default function Training() {
   // Session tracking for stats
   const sessionDataRef = useRef({
     exerciseResults: [],
+    painReports: [],
     startTime: null,
     warmUpCompleted: false,
   });
@@ -1172,6 +1174,98 @@ export default function Training() {
     return () => { clearTimeout(tm); setCoachCheer(false); };
   }, [phase, currentSet]);
 
+  // ---- THE PAIN TRAFFIC LIGHT (owner decision 2026-09-28; built 2026-11-01) ----
+  // A button on the screen or "כואב לי" by voice → the workout pauses, the trainee says / taps where and how
+  // much (0–10). The DEVICE decides: 0–3 continue, 4–5 a lower load, 6+ the exercise stops; every report is
+  // saved with the workout and in the pain log. The AI only words the coach's line about the decision.
+  const isAmputee = ['left_leg', 'right_leg', 'left_arm', 'right_arm']
+    .some(k => limbProfile?.[k]?.state === 'prosthetic' || limbProfile?.[k]?.state === 'absent');
+  const painZones = zonesFor({ amputee: isAmputee });
+  const [pain, setPain] = useState(null);          // null | { stage: 'ask'|'decided', zone, level, pausedByPain, reduced }
+  const painOpenRef = useRef(false);
+  painOpenRef.current = !!pain;
+  const painRef = useRef(null);
+  painRef.current = pain;
+  const painResumeTmRef = useRef(null);
+  const PAIN_PHASES = [PHASE.WARM_UP, PHASE.BRIEFING, PHASE.CHECKING_EQUIPMENT, PHASE.CALIBRATING, PHASE.EXERCISING,
+    PHASE.RESTING, PHASE.EXERCISE_DONE, PHASE.PAUSED];
+
+  function openPain(seed = {}) {
+    if (painRef.current) return;
+    const pausedByPain = phase === PHASE.EXERCISING || phase === PHASE.WARM_UP;
+    if (pausedByPain) handlePauseExercise(); else stopSpeech();
+    const p = { stage: 'ask', zone: seed.zone || null, level: null, pausedByPain };
+    painRef.current = p; painOpenRef.current = true;
+    setPain(p);
+    if (seed.level != null) { decidePain(seed.level, seed.zone || null); return; }
+    // (safety stays on the device — the question is the device's own; the coach's words come after the answer)
+    speakCritical(isHe ? 'כמה כואב, מאפס עד עשר? ואיפה?' : 'How much does it hurt, zero to ten? And where?', { rate: 1.1 });
+  }
+
+  function onPainHeard({ level, zone }) {
+    const p = painRef.current;
+    if (!p) { openPain({ level, zone }); return; }
+    if (p.stage !== 'ask') return;
+    if (level != null) decidePain(level, zone || p.zone);
+    else if (zone) setPain({ ...p, zone });
+  }
+
+  function closePain({ resume = true } = {}) {
+    clearTimeout(painResumeTmRef.current);
+    const p = painRef.current;
+    painRef.current = null; painOpenRef.current = false;
+    setPain(null);
+    if (resume && p?.pausedByPain && pausedStateRef.current) handleResumeExercise();
+  }
+
+  function decidePain(level, zone) {
+    const p = painRef.current;
+    if (!p || p.stage !== 'ask' || painLight(level) == null) return;
+    const action = painAction(level);
+    const exName = isHe ? currentExercise?.name : (currentExercise?.nameEn || currentExercise?.name);
+    const entry = painEntry({
+      level, zone, exercise: phase === PHASE.WARM_UP || p.pausedByPain && pausedStateRef.current?.wasPhase === PHASE.WARM_UP ? 'warm-up' : (currentExercise?.name || null),
+      set: currentSet, rep: displayReps, phase: pausedStateRef.current?.wasPhase || phase,
+    });
+    sessionDataRef.current.painReports = [...(sessionDataRef.current.painReports || []), entry];
+    if (user) addDoc(collection(db, 'users', user.uid, 'painLog'), { ...entry, date: Timestamp.now(), sport: userProfile?.sport || '' })
+      .catch(err => console.warn('[Pain] the pain log was not saved:', err.message));
+    console.info(`[Pain] level ${level} (${entry.light}) at ${zone || '—'} → ${action}`);
+    let reduced = null;
+    if (action === 'reduce' && currentExercise) {
+      reduced = reducedLoad({ reps: currentExercise.reps, sets: totalSets, currentSet });
+      const idx = currentIdx;
+      setExercises(prev => prev.map((e, i) => (i === idx ? { ...e, reps: reduced.reps, sets: reduced.sets, painReduced: true } : e)));
+      setTotalSets(reduced.sets);
+    }
+    if (action === 'stop') {
+      // the exercise stops here: nothing resumes it (the trainee chooses the next exercise or ends the workout)
+      if (phase !== PHASE.PAUSED) handlePauseExercise();
+      pausedStateRef.current = null; pausedWarmUpRef.current = null;
+    }
+    const next = { ...p, stage: 'decided', level, zone, reduced };
+    painRef.current = next;
+    setPain(next);
+    // the coach's words about the decision — live AI; a stop is always heard (the device's own safety line if the AI fails)
+    aiPain({ ...painFacts({ level, zone, exercise: exName, isHe }), lang: isHe ? 'he' : 'en', name: playerName, sport: userProfile?.sport || '' })
+      .then((line) => {
+        if (painRef.current !== next) return;
+        const say = line || (action === 'stop'
+          ? (isHe ? 'עוצרים את התרגיל עכשיו. אם הכאב לא עובר, תבדוק אותו אצל פיזיותרפיסט.' : "We stop this exercise now. If the pain doesn't pass, have it checked by a physiotherapist.")
+          : null);
+        if (say) speakCritical(say, { rate: 1.05 });
+        if (action === 'stop') return;
+        // continue / lighter: back to the work once the coach finished speaking (or a tap on "continue")
+        const waitDone = () => {
+          if (painRef.current !== next) return;
+          if (isSpeaking()) { painResumeTmRef.current = setTimeout(waitDone, 400); return; }
+          painResumeTmRef.current = setTimeout(() => { if (painRef.current === next) closePain(); }, 2500);
+        };
+        painResumeTmRef.current = setTimeout(waitDone, 600);
+      });
+  }
+  useEffect(() => () => clearTimeout(painResumeTmRef.current), []);
+
   // "Next" by voice — ONLY while waiting for the trainee's decision (a finished warm-up move or exercise)
   const goNextWarmUp = () => {
     clearInterval(warmUpTimerRef.current);
@@ -1187,6 +1281,9 @@ export default function Training() {
   const voiceNext = useVoiceCommand({
     active: !!voiceNextAction,
     lang: isHe ? 'he-IL' : 'en-US',
+    awaitingPainRef: painOpenRef,
+    amputee: isAmputee,
+    onPain: ({ level, zone }) => onPainHeard({ level, zone }),
     onNext: () => {
       // a move by voice is always shown, so it is never mistaken for an automatic skip
       setFeedback({ type: 'info', text: isHe ? '🎤 שמעתי "תרגיל הבא" — עוברים' : '🎤 Heard "next exercise" — moving on' });
@@ -1892,7 +1989,7 @@ export default function Training() {
           // the next set NEVER starts over the coach's analysis (owner, 2026-10-20): at the end of the countdown it
           // waits — while the analysis is still coming (≤ 30 s) or the coach is still speaking
           const analysing = debriefPendingRef.current && Date.now() - debriefPendingRef.current < 30000;
-          if (prev <= 1 && (analysing || isSpeaking())) { setRestWaiting(true); return 1; }
+          if (prev <= 1 && (analysing || isSpeaking() || painOpenRef.current)) { setRestWaiting(true); return 1; }
           if (prev <= 1) { setRestWaiting(false); clearInterval(timerRef.current); startNextSet(); return 0; }
           return prev - 1;
         });
@@ -2653,6 +2750,7 @@ export default function Training() {
       totalCalories: sessionDataRef.current.exerciseResults.reduce((s, e) => s + (e.calories || 0), 0),
       warmUpCompleted: sessionDataRef.current.warmUpCompleted,
       exercises: sessionDataRef.current.exerciseResults,
+      painReports: sessionDataRef.current.painReports || [],
       technicalQuality,
       personalBests: [],
       aiSummary: null,
@@ -4050,6 +4148,86 @@ export default function Training() {
                 {isHe ? 'ממשיכים רק כשאתה מוכן' : 'We move on only when you are ready'}
                 {voiceNext.listening && (isHe ? ' — לחץ, או אמור "תרגיל הבא" 🎤' : ' — tap, or say "next exercise" 🎤')}
               </div>
+            </div>
+          </div>
+        )}
+
+        {/* THE PAIN TRAFFIC LIGHT — always one tap away (or "כואב לי" by voice) */}
+        {PAIN_PHASES.includes(phase) && !pain && (
+          <button onClick={() => openPain()}
+            className="absolute bottom-[8.5rem] left-2 z-[19] rounded-full bg-rose-600/90 hover:bg-rose-600 text-white text-xs font-bold px-3 py-1.5 shadow-lg"
+            dir={isHe ? 'rtl' : 'ltr'}>
+            {'🚦'} {isHe ? 'כואב לי' : 'It hurts'}
+          </button>
+        )}
+        {pain && (
+          <div className="absolute inset-0 z-[60] bg-black/75 flex items-center justify-center px-4" dir={isHe ? 'rtl' : 'ltr'}>
+            <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md p-5 space-y-4 max-h-full overflow-y-auto">
+              {pain.stage === 'ask' ? (
+                <>
+                  <div className="text-center">
+                    <div className="text-lg font-extrabold text-gray-900">{'🚦'} {isHe ? 'רמזור כאב' : 'Pain check'}</div>
+                    <div className="text-sm text-gray-500">{isHe ? 'איפה כואב, וכמה (0 = בכלל לא, 10 = הכי חזק)' : 'Where, and how much (0 = none, 10 = worst)'}</div>
+                  </div>
+                  <div className="flex flex-wrap gap-2 justify-center">
+                    {painZones.map(z => (
+                      <button key={z.id} onClick={() => setPain({ ...pain, zone: z.id })}
+                        className={`px-3 py-1.5 rounded-full text-sm font-semibold border ${pain.zone === z.id ? 'bg-gray-900 text-white border-gray-900' : 'bg-white text-gray-700 border-gray-300'}`}>
+                        {isHe ? z.he : z.en}
+                      </button>
+                    ))}
+                  </div>
+                  <div className="grid grid-cols-6 gap-2">
+                    {Array.from({ length: 11 }, (_, n) => {
+                      const l = painLight(n);
+                      const c = l === 'green' ? 'bg-emerald-600' : l === 'yellow' ? 'bg-amber-500' : 'bg-red-600';
+                      return (
+                        <button key={n} onClick={() => decidePain(n, pain.zone)}
+                          className={`${c} text-white font-extrabold text-lg rounded-xl py-2 tabular-nums`}>{n}</button>
+                      );
+                    })}
+                  </div>
+                  <div className="text-xs text-gray-500 text-center">
+                    {isHe ? '0–3 ממשיכים · 4–5 מורידים עומס · 6 ומעלה עוצרים את התרגיל' : '0–3 continue · 4–5 lighter load · 6+ the exercise stops'}
+                    {voiceNext.listening && (isHe ? ' · אפשר גם להגיד, למשל "בברך, ארבע" 🎤' : ' · or say it, e.g. "knee, four" 🎤')}
+                  </div>
+                  <button onClick={() => closePain()} className="block mx-auto text-sm text-gray-500 underline">
+                    {isHe ? 'טעות, אין כאב — ממשיכים' : 'No pain — continue'}
+                  </button>
+                </>
+              ) : (() => {
+                const l = painLight(pain.level);
+                const zoneName = painZones.find(z => z.id === pain.zone);
+                const where = zoneName ? (isHe ? ` ב${zoneName.he}` : ` (${zoneName.en})`) : '';
+                return (
+                  <>
+                    <div className={`rounded-xl px-4 py-3 text-white text-center ${l === 'green' ? 'bg-emerald-600' : l === 'yellow' ? 'bg-amber-500' : 'bg-red-600'}`}>
+                      <div className="text-sm font-semibold opacity-90">{isHe ? `כאב${where}: ` : `Pain${where}: `}<span className="tabular-nums">{pain.level}/10</span></div>
+                      <div className="text-lg font-extrabold">
+                        {l === 'green' ? (isHe ? 'ממשיכים — תגיד לי אם זה עולה' : 'We continue — tell me if it rises')
+                          : l === 'yellow' ? (isHe ? 'ממשיכים בעומס נמוך יותר' : 'We continue with a lighter load')
+                            : (isHe ? 'התרגיל נעצר' : 'This exercise stops')}
+                      </div>
+                      {l === 'yellow' && pain.reduced && (
+                        <div className="text-sm tabular-nums">{isHe ? `${pain.reduced.reps} חזרות · ${pain.reduced.sets} סטים` : `${pain.reduced.reps} reps · ${pain.reduced.sets} sets`}</div>
+                      )}
+                    </div>
+                    <div className="text-xs text-gray-500 text-center">{isHe ? 'הדיווח נשמר ביומן הכאב שלך' : 'Saved in your pain log'}</div>
+                    {l === 'red' ? (
+                      <div className="space-y-2">
+                        <button onClick={() => { closePain({ resume: false }); handleNextExercise(); }}
+                          className="w-full py-3 rounded-xl bg-gray-900 text-white font-bold">{isHe ? '▶ לתרגיל הבא' : '▶ Next exercise'}</button>
+                        <button onClick={() => { closePain({ resume: false }); recordExerciseResult(); saveSession('partial'); handleStopCamera(); navigate('/'); }}
+                          className="w-full py-3 rounded-xl bg-white border border-gray-300 text-gray-800 font-bold">{isHe ? 'לסיים את האימון' : 'End the workout'}</button>
+                      </div>
+                    ) : (
+                      <button onClick={() => closePain()} className="w-full py-3 rounded-xl bg-emerald-600 text-white font-bold">
+                        {isHe ? '▶ ממשיכים' : '▶ Continue'}
+                      </button>
+                    )}
+                  </>
+                );
+              })()}
             </div>
           </div>
         )}
