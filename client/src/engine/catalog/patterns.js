@@ -16,12 +16,6 @@
 //   names      Hebrew / English (the Hebrew name keeps the analyzer keyword of the movement)
 // ============================================================
 
-import { footballPatterns } from '../exercise/sports/football.js';
-import { basketballPatterns } from '../exercise/sports/basketball.js';
-import { tennisPatterns } from '../exercise/sports/tennis.js';
-import { strengthPatterns } from '../exercise/sports/strength.js';
-import { adaptivePatterns } from '../exercise/sports/adaptive.js';
-
 const t = (he, en) => ({ he, en });
 
 /** @type {Object<string, Object>} */
@@ -94,18 +88,10 @@ export const PATTERNS = Object.freeze({
     name: t('עמידת מוכנות שוער', 'Goalkeeper ready stance'), cue: t('נמוך, משקל על כריות כפות הרגליים, ידיים מוכנות', 'Low, weight on the balls of the feet, hands ready') },
   shadowPass: { source: { profile: 'shadowPass' }, qualities: ['technique', 'sportSkill', 'balance'], sports: ['field'], needs: ['standing'], unilateral: true,
     name: t('מסירה בצל — פנים כף הרגל', 'Shadow pass — inside of the foot'), cue: t('כף הרגל פתוחה, תנופה קצרה ומדויקת אל המטרה', 'Foot open, a short accurate swing to the target') },
-  // (owner, 2026-11-01: the chest pass is now MEASURED — the expert chest pass profile)
-  shadowChestPass: { source: { profile: 'chestPass' }, qualities: ['technique', 'sportSkill', 'upperBody'], sports: ['court', 'seated'], needs: ['arms'],
+  shadowChestPass: { source: { move: 'chest_pass' }, qualities: ['technique', 'sportSkill', 'upperBody'], sports: ['court', 'seated'], needs: ['arms'],
     name: t('תנועת מסירת חזה בצל', 'Shadow chest pass'), cue: t('דחוף את הכדור הדמיוני אל חזה השותף', "Push the imaginary ball to your partner's chest") },
-  // (owner, 2026-11-01: the shadow forehand is now MEASURED — the expert forehand profile)
-  shadowStroke: { source: { profile: 'forehand' }, qualities: ['technique', 'sportSkill', 'upperBody'], sports: ['racket', 'seated'], needs: ['arms'],
+  shadowStroke: { source: { move: 'twist' }, qualities: ['technique', 'sportSkill', 'core'], sports: ['racket', 'seated'], needs: [],
     name: t('פורהנד בצל — תנועת מכה באוויר', 'Shadow forehand — stroke in the air'), cue: t('הכתפיים מסתובבות, הזרוע עוקבת', 'The shoulders turn, the arm follows') },
-  // ---- The sport movement libraries (owner, 2026-11-01) ----
-  ...footballPatterns(t),
-  ...basketballPatterns(t),
-  ...tennisPatterns(t),
-  ...strengthPatterns(t),
-  ...adaptivePatterns(t),
 });
 
 /** Pattern ids usable for a sport family (+ the generic 'all' patterns). */

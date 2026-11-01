@@ -28,12 +28,6 @@
 // (the same angleCosine the rep counters use).
 // ============================================================
 
-import { footballProfiles } from './sports/football.js';
-import { basketballProfiles } from './sports/basketball.js';
-import { tennisProfiles } from './sports/tennis.js';
-import { strengthProfiles } from './sports/strength.js';
-import { adaptiveProfiles } from './sports/adaptive.js';
-
 const msg = (he, en) => ({ he, en });
 
 // ---- Shared rules ----
@@ -735,32 +729,6 @@ RAW_EXPERT.highKnees = {
 };
 TAGS.highKnees = TAGS.runInPlace;
 
-// ---- The sport movement libraries (owner, 2026-11-01): each sport's base movements, full profiles ----
-const FOOTBALL = footballProfiles({
-  footballKick: RAW_EXPERT.footballKick, shadowPass: RAW_EXPERT.shadowPass, runInPlace: RAW_EXPERT.runInPlace,
-  jumpSquat: RAW_EXPERT.jumpSquat, singleLegSquat: RAW_EXPERT.singleLegSquat, gkStance: RAW_EXPERT.gkStance,
-  UPRIGHT_TORSO, KNEE_VALGUS, KNEE_IN,
-});
-Object.assign(RAW_EXPERT, FOOTBALL.profiles);
-Object.assign(TAGS, FOOTBALL.tags);
-const BASKETBALL = basketballProfiles({
-  jumpSquat: RAW_EXPERT.jumpSquat, runInPlace: RAW_EXPERT.runInPlace, gkStance: RAW_EXPERT.gkStance, UPRIGHT_TORSO,
-});
-Object.assign(RAW_EXPERT, BASKETBALL.profiles);
-Object.assign(TAGS, BASKETBALL.tags);
-const TENNIS = tennisProfiles({ jumpSquat: RAW_EXPERT.jumpSquat, gkStance: RAW_EXPERT.gkStance, UPRIGHT_TORSO });
-Object.assign(RAW_EXPERT, TENNIS.profiles);
-Object.assign(TAGS, TENNIS.tags);
-const STRENGTH = strengthProfiles({
-  squat: RAW_EXPERT.squat, lunge: RAW_EXPERT.lunge, hipHinge: RAW_EXPERT.hipHinge, pushUp: RAW_EXPERT.pushUp,
-  bicepCurl: RAW_EXPERT.bicepCurl, shoulderPress: RAW_EXPERT.shoulderPress, UPRIGHT_TORSO, KNEE_VALGUS,
-});
-Object.assign(RAW_EXPERT, STRENGTH.profiles);
-Object.assign(TAGS, STRENGTH.tags);
-const ADAPTIVE = adaptiveProfiles({ UPRIGHT_TORSO });
-Object.assign(RAW_EXPERT, ADAPTIVE.profiles);
-Object.assign(TAGS, ADAPTIVE.tags);
-
 /** @type {Object<string, Object>} */
 // HOW to fix — the coach's practical instruction for the rest's analysis (the what + the why are in the rule)
 const HOW = {
@@ -784,11 +752,6 @@ const HOW = {
   'singleLegSquat.too_shallow': msg('רד לאט, עם שליטה, עד שהברך בכ-90 מעלות — אחוז במשהו יציב אם צריך', 'Lower slowly, under control, to about 90° at the knee — hold something steady if needed'),
   'singleLegLunge.too_shallow': msg('הורד את האגן ישר למטה עד שהברך הקדמית קרובה ל-90 מעלות', 'Lower the hips straight down until the front knee is near 90°'),
 };
-Object.assign(HOW, FOOTBALL.how, BASKETBALL.how, TENNIS.how, STRENGTH.how);
-// a strength variant measured like its parent keeps the parent's how-to for the shared rules
-for (const [id, parent] of [['gobletSquat', 'squat'], ['sumoSquat', 'squat'], ['splitSquat', 'lunge'], ['reverseLunge', 'lunge'], ['romanianDeadlift', 'hipHinge'], ['hammerCurl', 'bicepCurl'], ['arnoldPress', 'shoulderPress'], ['diamondPushUp', 'pushUp'], ['widePushUp', 'pushUp'], ['wallSlide', 'shoulderPress']]) {
-  for (const [k, v] of Object.entries(HOW)) if (k.startsWith(`${parent}.`)) HOW[`${id}.${k.slice(parent.length + 1)}`] ||= v;
-}
 export const EXPERT_PROFILES = Object.freeze(Object.fromEntries(
   Object.entries(RAW_EXPERT).map(([id, p]) => [id, Object.freeze({
     dynamics: [], ...p, tags: TAGS[id] || [],
@@ -824,21 +787,21 @@ const CUE_TO_PROFILE = {
   // legs (standing)
   running: 'runInPlace', highKnees: 'highKnees', kick: 'footballKick', buttKicks: 'buttKicks',
   calfRaise: 'legsStanding',
-  amputeeKick: 'legsStanding', pass: 'legsStanding', firstTouch: 'soleTrap', juggle: 'juggling',
+  amputeeKick: 'legsStanding', pass: 'legsStanding', firstTouch: 'legsStanding', juggle: 'legsStanding',
   dribbling: 'legsStanding', footwork: 'legsStanding', splitStep: 'legsStanding', coneDrill: 'legsStanding',
   quickTurns: 'legsStanding', shieldBall: 'legsStanding', crossover: 'legsStanding', defensiveSlide: 'legsStanding',
   crutchPass: 'legsStanding', crutchDribble: 'legsStanding', crutchAgility: 'legsStanding', crutchPivot: 'legsStanding',
   crutchShield: 'legsStanding', crutchBalance: 'legsStanding', rehabWeightShift: 'legsStanding',
-  rehabKneeFlex: 'legsStanding', rehabSitToStand: 'sitToStand', gkPositioning: 'legsStanding',
+  rehabKneeFlex: 'legsStanding', rehabSitToStand: 'legsStanding', gkPositioning: 'legsStanding',
   // full body (standing)
-  jump: 'fullBody', amputeeSprint: 'fullBody', layup: 'layupDrive', spinMove: 'fullBody',
-  postMoves: 'fullBody', gkDive: 'fullBody', gkReaction: 'fullBody', headers: 'shadowHeader', crutchHeader: 'fullBody',
-  chestControl: 'chestControl', crutchChestControl: 'fullBody',
+  jump: 'fullBody', amputeeSprint: 'fullBody', layup: 'fullBody', spinMove: 'fullBody',
+  postMoves: 'fullBody', gkDive: 'fullBody', gkReaction: 'fullBody', headers: 'fullBody', crutchHeader: 'fullBody',
+  chestControl: 'fullBody', crutchChestControl: 'fullBody',
   // arms (standing)
-  pull: 'armsStanding', tricep: 'overheadTricep', row: 'bentOverRow', pullApart: 'armsStanding', shrug: 'armsStanding',
-  dip: 'armsStanding', shooting: 'setShot', handDribble: 'dribblePound', stroke: 'forehand',
-  volley: 'forehandVolley', serve: 'shadowServe', bouncePass: 'bouncePass', chestPass: 'chestPass',
-  overheadPass: 'overheadPass', hookShot: 'armsStanding', smash: 'shadowSmash', gkDistribution: 'armsStanding',
+  pull: 'armsStanding', tricep: 'armsStanding', row: 'armsStanding', pullApart: 'armsStanding', shrug: 'armsStanding',
+  dip: 'armsStanding', shooting: 'armsStanding', handDribble: 'armsStanding', stroke: 'armsStanding',
+  volley: 'armsStanding', serve: 'armsStanding', bouncePass: 'armsStanding', chestPass: 'armsStanding',
+  overheadPass: 'armsStanding', hookShot: 'armsStanding', smash: 'armsStanding', gkDistribution: 'armsStanding',
   rehabPendulum: 'armsStanding', rehabExtRot: 'armsStanding', rehabElbowExt: 'armsStanding',
   rehabPronSup: 'armsStanding', rehabWallAngel: 'armsStanding', rehabReach: 'armsStanding',
   // floor
@@ -847,9 +810,9 @@ const CUE_TO_PROFILE = {
   donkeyKick: 'floorCore', hollowBody: 'floorCore', plankTap: 'floorCore', rehabCatCow: 'floorCore',
   rehabPelvicTilt: 'floorCore', rehabSLR: 'floorCore',
   // seated (wheelchair)
-  wheelchairShooting: 'setShot', wheelchairDribble: 'dribblePound', wheelchairPass: 'chestPass',
-  wheelchairStroke: 'forehand', wheelchairServe: 'shadowServe', wcBouncePass: 'bouncePass',
-  wcPushSprint: 'wheelchairPush', wcSmash: 'shadowSmash',
+  wheelchairShooting: 'seatedArms', wheelchairDribble: 'seatedArms', wheelchairPass: 'seatedArms',
+  wheelchairStroke: 'seatedArms', wheelchairServe: 'seatedArms', wcBouncePass: 'seatedArms',
+  wcPushSprint: 'seatedArms', wcSmash: 'seatedArms',
 };
 
 /** Every profile by id (expert + family). */

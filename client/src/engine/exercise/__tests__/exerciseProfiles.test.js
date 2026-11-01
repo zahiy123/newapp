@@ -98,7 +98,7 @@ describe('Ghost ⇄ profile sync — the Ghost demonstrates exactly the profile'
         const got = measureProfile(p, profileGhostPose(p, t, lpOk).landmarks, lpOk);
         for (const j of Object.keys(p.joints)) {
           if (typeof want[j] !== 'number' || typeof got[j] !== 'number') continue;
-          if (p.ghost.base === 'lunge' && j === 'knee') continue;   // min of both knees (back knee by IK) — range checked below (the lunge + its variants)
+          if (p.id === 'lunge' && j === 'knee') continue;   // min of both knees (back knee by IK) — range checked below
           if (p.id === 'gluteBridge' && t === 0) continue;  // rest = hips on the floor (closest reachable angle)
           expect(Math.abs(got[j] - want[j]), `${p.id}.${j}@${t}`).toBeLessThan(1);
         }

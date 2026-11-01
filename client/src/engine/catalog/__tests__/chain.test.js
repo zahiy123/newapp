@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { goalOptions, selectedSessionGoals, trackOf, sportFamilyOf, PROFILE_GOALS, patternsFor } from '../trackGoals.js';
 import { SPORT_PATTERNS, ARM_ISOLATION, GENERIC_DRILLS, AMPUTEE_FOOTBALL_CATEGORIES, SPORT_LABELS } from '../relevance.js';
 import { rebuildPlanFromCatalog, planContext } from '../planBuilder.js';
-import { catalogGhostSpec, parseCatalogId, KICK_PATTERNS } from '../catalog.js';
+import { catalogGhostSpec, parseCatalogId } from '../catalog.js';
 import { PATTERNS } from '../patterns.js';
 import { SPORT_LIBRARY } from '../../sports/sportLibrary.js';
 import { getLimbProfile } from '../../limbProfile.js';
@@ -192,7 +192,7 @@ describe('No generic filler anywhere in sport / rehab tracks (owner rule)', () =
 describe('Kick volume, working-leg kicks, split balance sets', () => {
   const plan = { weeks: Array.from({ length: 2 }, () => ({ days: [{}, {}, {}] })) };
   const days = (profile, lp) => rebuildPlanFromCatalog(plan, planContext(profile, lp, 's')).weeks.flatMap(w => w.days);
-  const KICKS = KICK_PATTERNS;    // (the kicks + passes, incl. the football library's — owner, 2026-11-01)
+  const KICKS = new Set(['shadowKick', 'shadowPass']);
 
   it('amputee football with an ACTIVE prosthesis: ≥3 kick / pass exercises, each ONE exercise split base leg → prosthesis', () => {
     for (const profile of [{ sport: 'rehab', trainingTrack: 'rehab_sport', rehabSport: 'footballAmputee' }, { sport: 'footballAmputee' }]) {

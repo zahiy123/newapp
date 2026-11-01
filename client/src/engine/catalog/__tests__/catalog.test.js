@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { PATTERNS, patternFitsBody } from '../patterns.js';
-import { buildCatalog, catalogItem, variationProfile, catalogGhostSpec, variationAxes, parseCatalogId, KICK_PATTERNS } from '../catalog.js';
+import { buildCatalog, catalogItem, variationProfile, catalogGhostSpec, variationAxes, parseCatalogId } from '../catalog.js';
 import { buildSession, coherenceReport, inferGoal, GOALS } from '../sessionPlanner.js';
 import { rebuildPlanFromCatalog, planContext } from '../planBuilder.js';
 import { ghostPose } from '../../warmupGhost.js';
@@ -51,7 +51,7 @@ describe('Catalog — every exercise has a live Ghost', () => {
       expect(r.accuracy, key).toBeGreaterThanOrEqual(85);
     }
     expect(seen.size).toBeGreaterThan(60);
-  }, 60000);   // (every variation of every sport library — ~1,700 Ghost runs)
+  });
 
   it('a working-side variation moves that leg in the Ghost', () => {
     const left = catalogGhostSpec('shadowKick|standard|full|left|k6');
@@ -183,8 +183,7 @@ describe('Day goal + plan rebuild', () => {
       }
     }
     expect(built.weeks[0].days[0].goal).toBe('speed');
-    // (the technique day has kicks / passes — since 2026-11-01 from the whole football library)
-    expect(built.weeks[0].days[2].exercises.some(e => KICK_PATTERNS.has(e.catalogId.split('|')[0]))).toBe(true);
+    expect(built.weeks[0].days[2].exercises.some(e => e.catalogId.startsWith('shadowKick'))).toBe(true);
   });
 
   it('every variation axis set is non-empty', () => {
