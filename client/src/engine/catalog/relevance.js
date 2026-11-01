@@ -21,6 +21,9 @@ const BASKETBALL_SKILLS = [...BASKETBALL_ARM_SKILLS, 'jumpShot', 'reboundJump', 
 // the tennis movement library (owner, 2026-11-01); every stroke serves the wheelchair player too
 const TENNIS_ARM_SKILLS = ['backhand', 'shadowServe', 'shadowSmash', 'forehandVolley', 'backhandVolley', 'trophyHold'];
 const TENNIS_SKILLS = [...TENNIS_ARM_SKILLS, 'splitStep', 'readyPosition', 'openStanceLoad'];
+// the adaptive / rehab strength library (owner, 2026-11-01)
+const SEATED_STRENGTH = ['scapularRow', 'wallSlide', 'hammerCurl', 'overheadTricep', 'arnoldPress', 'uprightRow'];
+const REHAB_STRENGTH = ['sitToStand', 'wallPushUp', 'scapularRow', 'wallSlide', 'rehabMarch', 'supportedSplitSquat'];
 const LOWER_STRENGTH = ['squat', 'miniSquat', 'lunge', 'wallSit', 'hipHinge', 'gluteBridge'];
 const SPEED = ['runInPlace', 'highKnees', 'buttKicks', 'aSkip', 'accelMarch'];
 const ARM_ISOLATION = ['lateralRaise', 'frontRaise', 'rehabFrontRaise', 'bicepCurl', 'rehabElbowFlex'];
@@ -51,8 +54,9 @@ export const SPORT_PATTERNS = Object.freeze({
   basketball: [...LOWER_STRENGTH, ...SPEED, 'jumpSquat', 'lateralShuffle', 'kneeUpBalance', 'singleLegSquat', 'singleLegLunge', 'plank', 'pushUp', 'shoulderPress', 'trunkRotation', 'shadowChestPass', ...BASKETBALL_SKILLS, 'lateralBounds', 'singleLegHop', 'stickLanding'],
   tennis: [...LOWER_STRENGTH, ...SPEED, 'jumpSquat', 'lateralShuffle', 'kneeUpBalance', 'singleLegSquat', 'singleLegLunge', 'plank', 'lateralRaise', 'trunkRotation', 'shadowStroke', ...TENNIS_SKILLS, 'quickFeet', 'lateralBounds', 'singleLegHop', 'stickLanding'],
   // Wheelchair sports: shoulders (protect them), pushing strength, trunk, the sport motion
-  basketballWheelchair: ['trunkRotation', 'shoulderPress', 'lateralRaise', 'frontRaise', 'bicepCurl', 'shadowChestPass', ...BASKETBALL_ARM_SKILLS],
-  tennisWheelchair: ['trunkRotation', 'shoulderPress', 'lateralRaise', 'frontRaise', 'bicepCurl', 'shadowStroke', ...TENNIS_ARM_SKILLS],
+  // (+ the seated-capable strength: scapular row, wall slide, hammer curl, overhead triceps, Arnold press, upright row)
+  basketballWheelchair: ['trunkRotation', 'shoulderPress', 'lateralRaise', 'frontRaise', 'bicepCurl', 'shadowChestPass', ...BASKETBALL_ARM_SKILLS, ...SEATED_STRENGTH],
+  tennisWheelchair: ['trunkRotation', 'shoulderPress', 'lateralRaise', 'frontRaise', 'bicepCurl', 'shadowStroke', ...TENNIS_ARM_SKILLS, ...SEATED_STRENGTH],
   running: [...LOWER_STRENGTH, ...SPEED, 'jumpSquat', 'kneeUpBalance', 'singleLegSquat', 'singleLegLunge', 'plank'],
   fitness: null,     // general fitness: all generic patterns
 });
@@ -107,7 +111,8 @@ export function relevantPatterns({ track, sport, lp = {} }) {
     // a limited arm: arm range-of-motion work IS the rehab (arm circles here are real ROM work)
     return null;
   }
-  const base = ['squat', 'miniSquat', 'lunge', 'wallSit', 'hipHinge', 'gluteBridge', 'pushUp', 'plank', 'kneeUpBalance', 'singleLegSquat', 'singleLegLunge', 'trunkRotation'];
+  // (+ the adaptive / rehab strength library — owner, 2026-11-01)
+  const base = ['squat', 'miniSquat', 'lunge', 'wallSit', 'hipHinge', 'gluteBridge', 'pushUp', 'plank', 'kneeUpBalance', 'singleLegSquat', 'singleLegLunge', 'trunkRotation', ...REHAB_STRENGTH];
   return new Set(legAffected(lp) ? base : [...base, ...ARM_ISOLATION]);
 }
 

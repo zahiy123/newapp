@@ -31,6 +31,7 @@
 import { footballProfiles } from './sports/football.js';
 import { basketballProfiles } from './sports/basketball.js';
 import { tennisProfiles } from './sports/tennis.js';
+import { strengthProfiles } from './sports/strength.js';
 
 const msg = (he, en) => ({ he, en });
 
@@ -749,6 +750,12 @@ Object.assign(TAGS, BASKETBALL.tags);
 const TENNIS = tennisProfiles({ jumpSquat: RAW_EXPERT.jumpSquat, gkStance: RAW_EXPERT.gkStance, UPRIGHT_TORSO });
 Object.assign(RAW_EXPERT, TENNIS.profiles);
 Object.assign(TAGS, TENNIS.tags);
+const STRENGTH = strengthProfiles({
+  squat: RAW_EXPERT.squat, lunge: RAW_EXPERT.lunge, hipHinge: RAW_EXPERT.hipHinge, pushUp: RAW_EXPERT.pushUp,
+  bicepCurl: RAW_EXPERT.bicepCurl, shoulderPress: RAW_EXPERT.shoulderPress, UPRIGHT_TORSO, KNEE_VALGUS,
+});
+Object.assign(RAW_EXPERT, STRENGTH.profiles);
+Object.assign(TAGS, STRENGTH.tags);
 
 /** @type {Object<string, Object>} */
 // HOW to fix — the coach's practical instruction for the rest's analysis (the what + the why are in the rule)
@@ -773,7 +780,11 @@ const HOW = {
   'singleLegSquat.too_shallow': msg('רד לאט, עם שליטה, עד שהברך בכ-90 מעלות — אחוז במשהו יציב אם צריך', 'Lower slowly, under control, to about 90° at the knee — hold something steady if needed'),
   'singleLegLunge.too_shallow': msg('הורד את האגן ישר למטה עד שהברך הקדמית קרובה ל-90 מעלות', 'Lower the hips straight down until the front knee is near 90°'),
 };
-Object.assign(HOW, FOOTBALL.how, BASKETBALL.how, TENNIS.how);
+Object.assign(HOW, FOOTBALL.how, BASKETBALL.how, TENNIS.how, STRENGTH.how);
+// a strength variant measured like its parent keeps the parent's how-to for the shared rules
+for (const [id, parent] of [['gobletSquat', 'squat'], ['sumoSquat', 'squat'], ['splitSquat', 'lunge'], ['reverseLunge', 'lunge'], ['romanianDeadlift', 'hipHinge'], ['hammerCurl', 'bicepCurl'], ['arnoldPress', 'shoulderPress'], ['diamondPushUp', 'pushUp'], ['widePushUp', 'pushUp'], ['wallSlide', 'shoulderPress']]) {
+  for (const [k, v] of Object.entries(HOW)) if (k.startsWith(`${parent}.`)) HOW[`${id}.${k.slice(parent.length + 1)}`] ||= v;
+}
 export const EXPERT_PROFILES = Object.freeze(Object.fromEntries(
   Object.entries(RAW_EXPERT).map(([id, p]) => [id, Object.freeze({
     dynamics: [], ...p, tags: TAGS[id] || [],
@@ -814,13 +825,13 @@ const CUE_TO_PROFILE = {
   quickTurns: 'legsStanding', shieldBall: 'legsStanding', crossover: 'legsStanding', defensiveSlide: 'legsStanding',
   crutchPass: 'legsStanding', crutchDribble: 'legsStanding', crutchAgility: 'legsStanding', crutchPivot: 'legsStanding',
   crutchShield: 'legsStanding', crutchBalance: 'legsStanding', rehabWeightShift: 'legsStanding',
-  rehabKneeFlex: 'legsStanding', rehabSitToStand: 'legsStanding', gkPositioning: 'legsStanding',
+  rehabKneeFlex: 'legsStanding', rehabSitToStand: 'sitToStand', gkPositioning: 'legsStanding',
   // full body (standing)
   jump: 'fullBody', amputeeSprint: 'fullBody', layup: 'layupDrive', spinMove: 'fullBody',
   postMoves: 'fullBody', gkDive: 'fullBody', gkReaction: 'fullBody', headers: 'shadowHeader', crutchHeader: 'fullBody',
   chestControl: 'chestControl', crutchChestControl: 'fullBody',
   // arms (standing)
-  pull: 'armsStanding', tricep: 'armsStanding', row: 'armsStanding', pullApart: 'armsStanding', shrug: 'armsStanding',
+  pull: 'armsStanding', tricep: 'overheadTricep', row: 'bentOverRow', pullApart: 'armsStanding', shrug: 'armsStanding',
   dip: 'armsStanding', shooting: 'setShot', handDribble: 'dribblePound', stroke: 'forehand',
   volley: 'forehandVolley', serve: 'shadowServe', bouncePass: 'bouncePass', chestPass: 'chestPass',
   overheadPass: 'overheadPass', hookShot: 'armsStanding', smash: 'shadowSmash', gkDistribution: 'armsStanding',
