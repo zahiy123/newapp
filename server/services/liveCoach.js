@@ -111,7 +111,7 @@ const MOMENTS = {
   praise: 'NOW: the last reps were MEASURED correct. Give ONE short, genuine, specific praise for exactly the good point in "what" — 3 to 6 words, one sentence, warm. Never a generic "good job"; never a number.',
   ready: 'NOW: you can see the trainee clearly and the exercise is about to begin. Tell them so and to start — warm, short, at most 8 words. No technique, no numbers.',
   // THE PAIN TRAFFIC LIGHT (owner decision 2026-09-28): the DEVICE already decided ("action"); you only say it
-  pain: 'NOW: the trainee just REPORTED PAIN ("what" = where, and what the coach decided: "action" continue / reduce / stop). In your own words, as a caring professional coach + physiotherapist: acknowledge the pain seriously and calmly (never dismiss it, never "push through"), then say the decision exactly as given — continue and watch it / continue lighter (fewer reps, one set less) / stop this exercise now. For "stop": add that if the pain does not pass or comes back, they should check it with a physiotherapist or a doctor. NEVER diagnose, never name an injury, never a medical claim, never a number. 12 to 25 words, 1–2 short sentences, calm warm tone.',
+  pain: 'NOW: the trainee just REPORTED PAIN ("what" = where, and what the coach decided: "action" continue / reduce / stop). In your own words, as a caring professional coach + physiotherapist: acknowledge the pain seriously and calmly (never dismiss it, never "push through"), then say the decision exactly as given — continue and watch it / continue lighter (fewer reps, one set less) / stop this exercise now / ("safe") the trainee CHOSE to go on in safe mode — tell them exactly how: only a few more reps, very slow, a small comfortable range, stop at once if the pain rises, and that you are with them on every rep. For "stop" and "safe": add that if the pain does not pass or comes back, they should check it with a physiotherapist or a doctor. NEVER diagnose, never name an injury, never a medical claim, never a number. 12 to 25 words, 1–2 short sentences, calm warm tone.',
   motivate: 'NOW: a natural moment for ONE genuine, warm encouragement (the moment and the intent are in "what"). In your own words, at most 10 words. Never praise a performance, never claim a technique fact, never a number. If the trainee is tired / frustrated: calm and supportive.',
 };
 
@@ -125,7 +125,7 @@ Do not repeat or paraphrase closely any of the recent lines listed. Output ONLY 
     const user = JSON.stringify({
       exercise: clip(f.exercise, 80), sport: clip(f.sport, 40), body: clip(f.body, 120),
       what: clip(f.error?.what, 200), recentLines: (f.recent || []).slice(-4).map(x => clip(x, 90)),
-      ...(f.mode === 'pain' ? { action: ['continue', 'reduce', 'stop'].includes(f.action) ? f.action : null } : {}),
+      ...(f.mode === 'pain' ? { action: ['continue', 'reduce', 'stop', 'safe'].includes(f.action) ? f.action : null } : {}),
       ...(f.mode === 'stop' ? {
         why: clip(f.error?.why, 300), how: clip(f.error?.how, 300), timesInBlock: f.timesInBlock ?? null,
         bodyNow: (f.bodyNow || []).slice(0, 3).map(x => clip(x, 80)),

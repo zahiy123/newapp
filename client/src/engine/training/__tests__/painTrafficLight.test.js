@@ -86,3 +86,21 @@ describe('Pain Traffic Light — the next workouts are protected', () => {
     expect(protectFromPain(out, log, { now })[0].reps).toBe('6');   // never lowered twice
   });
 });
+
+describe('Pain Traffic Light — safe mode (a minimal load instead of a stop)', () => {
+  it('only this set, a few more reps (30 %, at least 2), offered once per exercise on red', async () => {
+    const { microLoad, canSafeMode, safeModeFacts, painProtected } = await import('../painTrafficLight.js');
+    expect(microLoad({ reps: 10, currentSet: 2, done: 4 })).toEqual({ reps: 7, sets: 2 });
+    expect(microLoad({ reps: 5, currentSet: 1, done: 0 })).toEqual({ reps: 2, sets: 1 });
+    expect(microLoad({ reps: 10, currentSet: 1, done: 9 })).toEqual({ reps: 10, sets: 1 });
+    expect(canSafeMode(7)).toBe(true);
+    expect(canSafeMode(6)).toBe(true);
+    expect(canSafeMode(5)).toBe(false);
+    expect(canSafeMode(8, { alreadySafe: true })).toBe(false);
+    const f = safeModeFacts({ zone: 'stump', exercise: 'סקוואט' });
+    expect(f.action).toBe('safe');
+    expect(/\d/.test(f.error.what)).toBe(false);
+    const prot = painProtected([{ exercise: 'סקוואט', level: 7, choice: 'safe_mode', at: 1000 }], { now: 2000 });
+    expect(prot.get('סקוואט')).toMatchObject({ level: 7, safeMode: true });
+  });
+});

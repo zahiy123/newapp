@@ -45,7 +45,7 @@ import { brainSummary, brainBall } from '../engine/coachBrain/brain';
 import { buildDebrief } from '../engine/coachBrain/debrief';
 import { debriefFacts, legacyCueFacts, bodyText } from '../engine/coachBrain/aiFacts';
 import { aiCue, aiDebrief, aiBriefing, aiLine, aiPain, getAiStatus, onAiStatus } from '../utils/aiCoach';
-import { painLight, painAction, reducedLoad, zonesFor, painEntry, painFacts, protectFromPain } from '../engine/training/painTrafficLight';
+import { painLight, painAction, reducedLoad, microLoad, canSafeMode, zonesFor, painEntry, painFacts, safeModeFacts, protectFromPain } from '../engine/training/painTrafficLight';
 import { kickingSide } from '../engine/incomingBall';
 import { ballModeFor, virtualBallWanted, handSide, ballLook, realBallInPlay } from '../engine/virtualBall';
 import { rebuildPlanFromCatalog, planContext } from '../engine/catalog/planBuilder';
@@ -1203,11 +1203,12 @@ export default function Training() {
   function openPain(seed = {}) {
     if (painRef.current) return;
     const pausedByPain = phase === PHASE.EXERCISING || phase === PHASE.WARM_UP;
-    if (pausedByPain) handlePauseExercise(); else stopSpeech();
-    const p = { stage: 'ask', zone: seed.zone || null, level: null, pausedByPain };
+    if (pausedByPain) handlePauseExercise(); else if (!seed.recheck) stopSpeech();
+    const p = { stage: 'ask', zone: seed.zone || null, level: null, pausedByPain, recheck: !!seed.recheck };
     painRef.current = p; painOpenRef.current = true;
     setPain(p);
     if (seed.level != null) { decidePain(seed.level, seed.zone || null); return; }
+    if (seed.recheck) return;          // (the safe set's re-check: shown, never cutting the coach's analysis)
     // (safety stays on the device — the question is the device's own; the coach's words come after the answer)
     speakCritical(isHe ? 'כמה כואב, מאפס עד עשר? ואיפה?' : 'How much does it hurt, zero to ten? And where?', { rate: 1.1 });
   }
@@ -1238,8 +1239,10 @@ export default function Training() {
       set: currentSet, rep: displayReps, phase: pausedStateRef.current?.wasPhase || phase,
     });
     sessionDataRef.current.painReports = [...(sessionDataRef.current.painReports || []), entry];
-    if (user) addDoc(collection(db, 'users', user.uid, 'painLog'), { ...entry, date: Timestamp.now(), sport: userProfile?.sport || '' })
-      .catch(err => console.warn('[Pain] the pain log was not saved:', err.message));
+    const logRef = user
+      ? addDoc(collection(db, 'users', user.uid, 'painLog'), { ...entry, date: Timestamp.now(), sport: userProfile?.sport || '' })
+        .catch(err => { console.warn('[Pain] the pain log was not saved:', err.message); return null; })
+      : Promise.resolve(null);
     console.info(`[Pain] level ${level} (${entry.light}) at ${zone || '—'} → ${action}`);
     let reduced = null;
     if (action === 'reduce' && currentExercise) {
@@ -1249,12 +1252,17 @@ export default function Training() {
       Object.assign(currentExercise, { reps: typeof currentExercise.reps === 'string' ? String(reduced.reps) : reduced.reps, sets: reduced.sets, painReduced: true });
       setTotalSets(reduced.sets);
     }
+    let stopSnap = null;
     if (action === 'stop') {
-      // the exercise stops here: nothing resumes it (the trainee chooses the next exercise or ends the workout)
+      // the exercise stops here: nothing resumes it — unless the trainee CHOOSES safe mode (the snapshot is kept for it)
       if (phase !== PHASE.PAUSED) handlePauseExercise();
+      stopSnap = { paused: pausedStateRef.current, warm: pausedWarmUpRef.current };
       pausedStateRef.current = null; pausedWarmUpRef.current = null;
     }
-    const next = { ...p, stage: 'decided', level, zone, reduced };
+    const wasPhase = stopSnap?.paused?.wasPhase || phase;
+    const safeOk = action === 'stop' && !!currentExercise && wasPhase !== PHASE.EXERCISE_DONE
+      && canSafeMode(level, { alreadySafe: !!currentExercise.safeMode });
+    const next = { ...p, stage: 'decided', level, zone, reduced, entry, logRef, stopSnap, safeOk };
     painRef.current = next;
     setPain(next);
     // the coach's words about the decision — live AI; a stop is always heard (the device's own safety line if the AI fails)
@@ -1276,6 +1284,48 @@ export default function Training() {
       });
   }
   useEffect(() => () => clearTimeout(painResumeTmRef.current), []);
+
+  // SAFE MODE (owner, 2026-11-01): on red, the trainee may go on at a MINIMAL load instead of stopping —
+  // only this set, a few more reps, very slow and small, the coach close by; re-checked at the set's end
+  function chooseSafeMode() {
+    const p = painRef.current;
+    if (!p || p.stage !== 'decided' || !p.safeOk || !currentExercise) return;
+    const snap = p.stopSnap || {};
+    const was = snap.paused?.wasPhase || phase;
+    const resting = was === PHASE.RESTING;
+    const fresh = [PHASE.BRIEFING, PHASE.CHECKING_EQUIPMENT, PHASE.CALIBRATING, PHASE.IDLE].includes(was);
+    if (was !== PHASE.WARM_UP) {
+      const m = microLoad({ reps: currentExercise.reps, currentSet: resting ? currentSet + 1 : currentSet, done: resting || fresh ? 0 : displayReps });
+      // IN PLACE (as the lighter load): a new object would reset the set in progress
+      Object.assign(currentExercise, { reps: typeof currentExercise.reps === 'string' ? String(m.reps) : m.reps, sets: m.sets, safeMode: true });
+      setTotalSets(m.sets);
+    }
+    // the pain log: this report ended in safe mode (the next workouts know the exercise needed a minimal load)
+    p.entry.choice = 'safe_mode';
+    p.logRef.then(ref => { if (ref) updateDoc(ref, { choice: 'safe_mode' }).catch(err => console.warn('[Pain] the safe-mode choice was not saved:', err.message)); });
+    console.info(`[Pain] safe mode chosen (level ${p.level}) — ${currentExercise.reps} reps, set ${currentSet}/${currentExercise.sets}`);
+    clearTimeout(painResumeTmRef.current);
+    painRef.current = null; painOpenRef.current = false;
+    setPain(null);
+    pausedStateRef.current = snap.paused || null; pausedWarmUpRef.current = snap.warm || null;
+    if (was === PHASE.EXERCISING || was === PHASE.WARM_UP) handleResumeExercise();
+    else { pausedStateRef.current = null; pausedWarmUpRef.current = null; setPhase(resting ? PHASE.RESTING : PHASE.IDLE); }
+    aiPain({ ...safeModeFacts({ zone: p.zone, exercise: isHe ? currentExercise.name : (currentExercise.nameEn || currentExercise.name), isHe }), lang: isHe ? 'he' : 'en', name: playerName, sport: userProfile?.sport || '' })
+      .then((line) => {
+        speakCritical(line || (isHe ? 'מצב בטוח: לאט מאוד, טווח קטן ונוח. אם הכאב עולה, עוצרים מיד.' : 'Safe mode: very slow, a small comfortable range. If the pain rises, stop at once.'), { rate: 1.05 });
+      });
+  }
+  // the safe set ended → the coach re-checks the pain (shown at once; never cuts the analysis)
+  const safeRecheckRef = useRef(null);
+  useEffect(() => {
+    if (!(phase === PHASE.RESTING || phase === PHASE.EXERCISE_DONE) || !currentExercise?.safeMode) return undefined;
+    const key = `${currentIdx}:${currentSet}`;
+    if (safeRecheckRef.current === key) return undefined;
+    safeRecheckRef.current = key;
+    const tm = setTimeout(() => openPain({ recheck: true }), 1200);
+    return () => clearTimeout(tm);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [phase]);
 
   // "Next" by voice — ONLY while waiting for the trainee's decision (a finished warm-up move or exercise)
   const goNextWarmUp = () => {
@@ -3670,9 +3720,15 @@ export default function Training() {
             </div>
           </div>
         )}
-        {currentExercise?.painProtected && [PHASE.BRIEFING, PHASE.CALIBRATING, PHASE.EXERCISING, PHASE.RESTING].includes(phase) && (
+        {currentExercise?.safeMode && [PHASE.EXERCISING, PHASE.RESTING, PHASE.IDLE].includes(phase) ? (
+          <div className="absolute top-12 left-1/2 -translate-x-1/2 z-20 pointer-events-none rounded-2xl bg-sky-700/95 text-white text-xs font-bold px-3 py-1.5 shadow text-center max-w-[90%]" dir={isHe ? 'rtl' : 'ltr'}>
+            {'🛡️'} {isHe ? 'מצב בטוח — לאט מאוד, טווח קטן ונוח. כואב יותר? לחץ "כואב לי"' : 'Safe mode — very slow, a small comfortable range. More pain? Tap "It hurts"'}
+          </div>
+        ) : currentExercise?.painProtected && [PHASE.BRIEFING, PHASE.CALIBRATING, PHASE.EXERCISING, PHASE.RESTING].includes(phase) && (
           <div className="absolute top-12 left-1/2 -translate-x-1/2 z-20 pointer-events-none rounded-full bg-amber-500/95 text-white text-xs font-bold px-3 py-1 shadow" dir={isHe ? 'rtl' : 'ltr'}>
-            {'🚦'} {isHe ? 'עומס מופחת — דיווחת על כאב בתרגיל הזה לאחרונה' : 'Lighter load — you reported pain in this exercise recently'}
+            {'🚦'} {currentExercise.painProtected.safeMode
+              ? (isHe ? 'עומס מופחת — בפעם האחרונה התרגיל הזה דרש עומס מינימלי' : 'Lighter load — last time this exercise needed a minimal load')
+              : (isHe ? 'עומס מופחת — דיווחת על כאב בתרגיל הזה לאחרונה' : 'Lighter load — you reported pain in this exercise recently')}
           </div>
         )}
         {phase === PHASE.EXERCISING && currentExercise?.sideSwitch && (
@@ -4182,7 +4238,7 @@ export default function Training() {
               {pain.stage === 'ask' ? (
                 <>
                   <div className="text-center">
-                    <div className="text-lg font-extrabold text-gray-900">{'🚦'} {isHe ? 'רמזור כאב' : 'Pain check'}</div>
+                    <div className="text-lg font-extrabold text-gray-900">{'🚦'} {pain.recheck ? (isHe ? 'איך הכאב עכשיו?' : 'How is the pain now?') : (isHe ? 'רמזור כאב' : 'Pain check')}</div>
                     <div className="text-sm text-gray-500">{isHe ? 'איפה כואב, וכמה (0 = בכלל לא, 10 = הכי חזק)' : 'Where, and how much (0 = none, 10 = worst)'}</div>
                   </div>
                   <div className="flex flex-wrap gap-2 justify-center">
@@ -4231,6 +4287,13 @@ export default function Training() {
                     <div className="text-xs text-gray-500 text-center">{isHe ? 'הדיווח נשמר ביומן הכאב שלך' : 'Saved in your pain log'}</div>
                     {l === 'red' ? (
                       <div className="space-y-2">
+                        {pain.safeOk && (
+                          <button onClick={chooseSafeMode}
+                            className="w-full py-3 rounded-xl bg-sky-700 text-white font-bold">
+                            {'🛡️'} {isHe ? 'להמשיך במצב בטוח — עומס מינימלי' : 'Go on in safe mode — minimal load'}
+                            <div className="text-xs font-normal opacity-90">{isHe ? 'רק עוד כמה חזרות, לאט מאוד וטווח קטן' : 'Only a few more reps, very slow, a small range'}</div>
+                          </button>
+                        )}
                         <button onClick={() => { closePain({ resume: false }); handleNextExercise(); }}
                           className="w-full py-3 rounded-xl bg-gray-900 text-white font-bold">{isHe ? '▶ לתרגיל הבא' : '▶ Next exercise'}</button>
                         <button onClick={() => { closePain({ resume: false }); recordExerciseResult(); saveSession('partial'); handleStopCamera(); navigate('/'); }}

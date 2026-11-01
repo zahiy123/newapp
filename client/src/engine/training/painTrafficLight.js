@@ -42,6 +42,23 @@ export function reducedLoad({ reps, sets, currentSet = 1 }) {
   return { reps: newReps, sets: newSets };
 }
 
+// SAFE MODE (owner, 2026-11-01): on a red report the trainee may choose to go on at a MINIMAL load instead
+// of stopping — only this set, a few more reps (30 % of the target, at least 2), very slow and small, the coach
+// close by, and a pain re-check at the set's end. Offered once per exercise: a second red there → only stop.
+export const MICRO_LOAD = 0.3;
+export const MICRO_MIN_REPS = 2;
+/** The minimal load: { reps (the set's new target = done + the few left), sets (this set is the last) }. */
+export function microLoad({ reps, currentSet = 1, done = 0 }) {
+  const r = parseInt(reps, 10);
+  if (!(Number.isFinite(r) && r > 0)) return { reps, sets: currentSet };
+  const left = Math.max(MICRO_MIN_REPS, Math.round(r * MICRO_LOAD));
+  return { reps: Math.min(r, Math.max(0, done) + left), sets: Math.max(1, currentSet) };
+}
+/** May the trainee choose safe mode now? (red, and not already in safe mode on this exercise) */
+export function canSafeMode(level, { alreadySafe = false } = {}) {
+  return painLight(level) === 'red' && !alreadySafe;
+}
+
 // Where it hurts — the trainee taps one (or says it). 'stump' only for an amputee.
 export const PAIN_ZONES = [
   { id: 'knee', he: 'ברך', en: 'Knee', words: ['ברך', 'בברך', 'הברך', 'knee'] },
@@ -125,6 +142,16 @@ export function painFacts({ level, zone, exercise, isHe = true }) {
   return { mode: 'pain', light: painLight(level), action, zone: zone || null, exercise: exercise || '', error: { what } };
 }
 
+/** The AI facts when the trainee chose safe mode (the device already set the minimal load). */
+export function safeModeFacts({ zone, exercise, isHe = true }) {
+  const z = PAIN_ZONES.find(x => x.id === zone);
+  const where = z ? (isHe ? z.he : z.en) : (isHe ? 'לא צוין' : 'not given');
+  const what = isHe
+    ? `המתאמן דיווח על כאב חזק ב${where} ובחר להמשיך במצב בטוח: עומס מינימלי — רק עוד כמה חזרות בסט הזה, קצב איטי מאוד, טווח תנועה קטן ונוח; לעצור מיד אם הכאב עולה; בסוף הסט בודקים שוב את הכאב`
+    : `The trainee reported strong pain in: ${where} and chose to go on in SAFE MODE: a minimal load — only a few more reps in this set, a very slow pace, a small comfortable range; stop at once if the pain rises; the pain is re-checked at the set's end`;
+  return { mode: 'pain', light: 'red', action: 'safe', zone: zone || null, exercise: exercise || '', error: { what } };
+}
+
 // ---- Recurrence prevention (the approved spec): the pain log protects the next workouts ----
 export const PAIN_MEMORY_DAYS = 14;
 
@@ -139,14 +166,15 @@ export function painProtected(entries, { now = Date.now(), days = PAIN_MEMORY_DA
     const at = Number(e?.at) || 0;
     if (!e?.exercise || e.exercise === 'warm-up' || at < since) continue;
     const l = painLight(e.level);
-    const cur = byEx.get(e.exercise) || { red: 0, yellow: 0, level: 0, zone: null };
+    const cur = byEx.get(e.exercise) || { red: 0, yellow: 0, level: 0, zone: null, safeMode: false };
+    if (e.choice === 'safe_mode') cur.safeMode = true;
     if (l === 'red') cur.red += 1;
     if (l === 'yellow') cur.yellow += 1;
     if (Number(e.level) > cur.level) { cur.level = Number(e.level); cur.zone = e.zone || null; }
     byEx.set(e.exercise, cur);
   }
   const out = new Map();
-  for (const [name, c] of byEx) if (c.red > 0 || c.yellow >= 2) out.set(name, { level: c.level, zone: c.zone });
+  for (const [name, c] of byEx) if (c.red > 0 || c.yellow >= 2) out.set(name, { level: c.level, zone: c.zone, ...(c.safeMode ? { safeMode: true } : {}) });
   return out;
 }
 
