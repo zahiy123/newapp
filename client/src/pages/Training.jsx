@@ -49,6 +49,7 @@ import { aiCue, aiDebrief, aiBriefing, aiLine, aiPain, aiOpening, aiAnswer, aiNo
 import { defaultStyle, shouldSoften, effectiveStyle, rateFactor, isStyle } from '../engine/training/coachStyle';
 import { notebookFacts, worstPain, notesText, openingFacts, painToCheck } from '../engine/training/coachNotebook';
 import { measurableJoints, createRomTracker, addRomFrame, summarizeRom } from '../engine/progress/rom';
+import { startedTired, qualityDropped, lighterFrom, decideLoadStep, applyLoadStep } from '../engine/progress/loadAdaptation';
 import { painLight, painAction, reducedLoad, microLoad, canSafeMode, zonesFor, painEntry, painFacts, safeModeFacts, protectFromPain } from '../engine/training/painTrafficLight';
 import { kickingSide } from '../engine/incomingBall';
 import { ballModeFor, virtualBallWanted, handSide, ballLook, realBallInPlay } from '../engine/virtualBall';
@@ -685,6 +686,9 @@ export default function Training() {
   // STAGE 4 — the workout's data for the progress screen: every set's measured result, and the range of motion
   const setDetailsRef = useRef([]);        // [{ idx, set, reps, accuracy, problems:[{key,what,times,critical}], fixed:[{key,what}] }]
   const romTrackerRef = useRef(null);      // the session's joint angles (engine/progress/rom.js)
+  const loadStepRef = useRef({ step: 0, raised: false });   // the graded load step (rule 3)
+  const autoLevelRef = useRef(0);          // today's lighter level (rules 1–2)
+  const [loadRaised, setLoadRaised] = useState(false);
   const aiSummaryRef = useRef(null);
 
   // Build the day's exercises from the plan for TODAY's reality (check-in answers; null = profile defaults)
@@ -713,7 +717,7 @@ export default function Training() {
     }
     // HARD equipment fit: never offer an exercise the trainee can't do (e.g. a ball drill without a ball)
     rawExercisesRef.current = loaded;
-    return protectFromPain(fitExercises(loaded, availableEquipment(eff, { hasBall: status?.hasBall })).exercises, painHistoryRef.current);
+    return applyLoadStep(protectFromPain(fitExercises(loaded, availableEquipment(eff, { hasBall: status?.hasBall })).exercises, painHistoryRef.current), loadStepRef.current.step);
   }
 
   // Check-in answered → rebuild today's workout from the answers, remember them for next time
@@ -787,6 +791,15 @@ export default function Training() {
           });
         });
         exerciseHistoryRef.current = history;
+        // RULE 3 — graded progress: 2 easy, fully accurate workouts in a row at the same step → one step up
+        const decided = decideLoadStep([...histSnap.docs].reverse().map(d => d.data()));
+        loadStepRef.current = decided;
+        sessionDataRef.current.loadStep = decided.step;
+        setLoadRaised(decided.raised);
+        if (decided.step > 0) {
+          console.info(`[Load] step ${decided.step}${decided.raised ? ' (raised today)' : ''}`);
+          setExercises(prev => applyLoadStep(prev, decided.step));
+        }
       } catch (err) {
         console.error('Failed to load exercise history:', err);
       }
@@ -2312,7 +2325,7 @@ export default function Training() {
     setShowBallQuestion(false);
     sessionDataRef.current.ballAvailable = hasBall;
     const fitted = fitExercises(rawExercisesRef.current, availableEquipment(userProfile, { hasBall }));
-    if (fitted.exercises.length) setExercises(protectFromPain(fitted.exercises, painHistoryRef.current));
+    if (fitted.exercises.length) setExercises(applyLoadStep(protectFromPain(fitted.exercises, painHistoryRef.current), loadStepRef.current.step));
     if (fitted.substitutions.length) sessionDataRef.current.equipmentSubstitutions = fitted.substitutions;
     if (explicit && user?.uid) {
       updateDoc(doc(db, 'users', user.uid), { hasBall }).catch(err => console.error('[Ball] save failed:', err));
@@ -2931,6 +2944,14 @@ export default function Training() {
     const sets = setDetailsRef.current.filter(s => s.idx === currentIdx).map(({ idx, ...s }) => s);   // eslint-disable-line no-unused-vars
     setDetailsRef.current = setDetailsRef.current.filter(s => s.idx !== currentIdx);
     const accs = sets.map(s => s.accuracy).filter(a => typeof a === 'number');
+    if (qualityDropped(sets) && currentIdx < exercises.length - 1 && autoLevelRef.current < 2) {
+      const level = autoLevelRef.current + 1;
+      autoLevelRef.current = level;
+      const from = currentIdx + 1;
+      setExercises(prev => lighterFrom(prev, from, level, 'quality_drop'));
+      sessionDataRef.current.loadAdjustments = [...(sessionDataRef.current.loadAdjustments || []), { reason: 'quality_drop', exercise: currentExercise.name, accuracy: accs, fromExercise: from, level, at: Date.now() }];
+      console.info(`[Load] the accuracy fell across ${currentExercise.name} (${accs.join(' → ')}) → lighter (level ${level}) from exercise ${from + 1}`);
+    }
     sessionDataRef.current.exerciseResults.push({
       key: currentExercise.cueKey || currentExercise.id || currentExercise.name,
       sets,
@@ -2975,6 +2996,9 @@ export default function Training() {
       rom: romTrackerRef.current ? summarizeRom(romTrackerRef.current) : {},
       at: Date.now(),
       dataVersion: 2,                    // Stage 4: per-set results + the range of motion
+      readiness: readinessRating || null,
+      loadStep: loadStepRef.current.step || 0,
+      loadAdjustments: sessionDataRef.current.loadAdjustments || [],
       technicalQuality,
       personalBests: [],
       aiSummary: null,
@@ -3147,23 +3171,15 @@ export default function Training() {
     if (currentIdx === 0 && !checkIn) return;      // today's check-in first (the overlay asks for it)
     // Apply readiness adjustment once at workout start
     if (readinessRating > 0 && !readinessApplied && exercises.length > 0) {
-      const adjusted = exercises.map(ex => {
-        const orig = { ...ex };
-        if (readinessRating <= 2) {
-          // Low readiness: reduce volume
-          orig.sets = Math.max(1, (ex.sets || 3) - 1);
-          orig.restSeconds = (ex.restSeconds || 60) + 15;
-        } else if (readinessRating >= 4) {
-          // High readiness: bump reps slightly
-          const repsNum = parseInt(ex.reps, 10);
-          if (!isNaN(repsNum)) {
-            orig.reps = String(repsNum + 1);
-          }
-        }
-        return orig;
-      });
-      // Update exercises in the parent state (setExercises comes from the plan loader)
-      setExercises(adjusted);
+      // RULE 1 (owner, 2026-11-03): tired / exhausted at the start → a controlled reduction that starts only
+      // AFTER the warm-up and the first exercise (both as planned). Rule 3 is the only way up — no boost here.
+      if (startedTired(readinessRating)) {
+        autoLevelRef.current = Math.max(autoLevelRef.current, 1);
+        const from = Math.max(1, currentIdx + 1);
+        setExercises(prev => lighterFrom(prev, from, 1, 'tired'));
+        sessionDataRef.current.loadAdjustments = [...(sessionDataRef.current.loadAdjustments || []), { reason: 'tired', fromExercise: from, level: 1, at: Date.now() }];
+        console.info(`[Load] tired at the start → lighter from exercise ${from + 1}`);
+      }
       setReadinessApplied(true);
     }
 
@@ -3900,6 +3916,12 @@ export default function Training() {
           <div className="absolute top-12 left-1/2 -translate-x-1/2 z-20 pointer-events-none rounded-2xl bg-sky-700/95 text-white text-xs font-bold px-3 py-1.5 shadow text-center max-w-[90%]" dir={isHe ? 'rtl' : 'ltr'}>
             {'🛡️'} {isHe ? 'מצב בטוח — לאט מאוד, טווח קטן ונוח. כואב יותר? לחץ "כואב לי"' : 'Safe mode — very slow, a small comfortable range. More pain? Tap "It hurts"'}
           </div>
+        ) : !currentExercise?.painProtected && currentExercise?.autoLighter && [PHASE.BRIEFING, PHASE.CALIBRATING, PHASE.EXERCISING, PHASE.RESTING].includes(phase) ? (
+          <div className="absolute top-12 left-1/2 -translate-x-1/2 z-20 pointer-events-none rounded-full bg-slate-700/95 text-white text-xs font-bold px-3 py-1 shadow" dir={isHe ? 'rtl' : 'ltr'}>
+            {'🔽'} {currentExercise.autoLighter.reason === 'quality_drop'
+              ? (isHe ? 'עומס מותאם — הדיוק ירד לאורך התרגיל הקודם' : 'Adjusted load — the accuracy fell across the last exercise')
+              : (isHe ? 'עומס מותאם — התחלת את האימון עייף' : 'Adjusted load — you started the workout tired')}
+          </div>
         ) : currentExercise?.painProtected && [PHASE.BRIEFING, PHASE.CALIBRATING, PHASE.EXERCISING, PHASE.RESTING].includes(phase) && (
           <div className="absolute top-12 left-1/2 -translate-x-1/2 z-20 pointer-events-none rounded-full bg-amber-500/95 text-white text-xs font-bold px-3 py-1 shadow" dir={isHe ? 'rtl' : 'ltr'}>
             {'🚦'} {currentExercise.painProtected.safeMode
@@ -4262,6 +4284,11 @@ export default function Training() {
         {phase === PHASE.IDLE && cameraActive && exercises.length > 0 && (checkIn || currentIdx > 0) && (
           <div className="absolute inset-0 flex items-center justify-center z-[6]">
             <div className="text-center space-y-4">
+              {loadRaised && (
+                <div dir={isHe ? 'rtl' : 'ltr'} className="bg-emerald-600 text-white rounded-2xl shadow-xl px-4 py-2.5 max-w-sm mx-auto text-sm font-semibold">
+                  {'📈'} {isHe ? 'העומס עלה היום בשלב קטן — 2 אימונים ברצף בקלות ובדיוק מלא' : 'The load is up a small step today — 2 easy, fully accurate workouts in a row'}
+                </div>
+              )}
               {/* THE COACH NOTEBOOK — the coach remembers the last workout (and checks a pain it noted) */}
               {opening && (
                 <div dir={isHe ? 'rtl' : 'ltr'} className="bg-white/95 rounded-2xl shadow-xl px-4 py-3 max-w-sm mx-auto text-start space-y-2">
@@ -4331,9 +4358,6 @@ export default function Training() {
                   </div>
                   {readinessRating > 0 && readinessRating <= 2 && (
                     <div className="text-sm text-amber-600 mt-2">{t('training.readinessAdjusted')}</div>
-                  )}
-                  {readinessRating >= 4 && (
-                    <div className="text-sm text-green-600 mt-2">{t('training.readinessBoosted')}</div>
                   )}
                 </div>
               )}

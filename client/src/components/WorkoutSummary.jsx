@@ -142,7 +142,7 @@ export default function WorkoutSummary({ sessionData, profile, sport, isHe, onBa
       {exercises.some(ex => (ex.sets || []).length > 0) && (
         <div className="bg-gray-50 rounded-xl shadow p-4 space-y-3">
           <h3 className="text-sm font-semibold text-gray-600">{isHe ? 'דוח האימון' : 'Workout report'}</h3>
-          <WorkoutReport workout={{ exercises, painReports: sessionData?.painReports || [], dataVersion: 2 }} isHe={isHe} />
+          <WorkoutReport workout={{ exercises, painReports: sessionData?.painReports || [], loadAdjustments: sessionData?.loadAdjustments || [], loadStep: sessionData?.loadStep || 0, dataVersion: 2 }} isHe={isHe} />
         </div>
       )}
 

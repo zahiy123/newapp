@@ -71,6 +71,17 @@ export default function WorkoutReport({ workout, isHe }) {
           )}
         </div>
       ))}
+      {((workout?.loadAdjustments || []).length > 0 || workout?.loadStep > 0) && (
+        <div className="bg-white rounded-xl border border-gray-200 p-3 space-y-1 text-sm text-gray-800">
+          <div className="text-sm font-semibold text-gray-700">{'⚖️'} {isHe ? 'התאמת עומס' : 'Load adaptation'}</div>
+          {workout?.loadStep > 0 && <div>{'📈'} {isHe ? `רמת עומס: +${workout.loadStep * 10}% (בזכות אימונים ברצף בקלות ובדיוק)` : `Load level: +${workout.loadStep * 10}% (earned by easy, accurate workouts in a row)`}</div>}
+          {(workout?.loadAdjustments || []).map((a, i) => (
+            <div key={i}>{'🔽'} {a.reason === 'quality_drop'
+              ? (isHe ? `הדיוק ירד לאורך "${a.exercise}" (${(a.accuracy || []).join(' → ')}%) — התרגילים הבאים הוקלו` : `The accuracy fell across "${a.exercise}" (${(a.accuracy || []).join(' → ')}%) — the next exercises were lighter`)
+              : (isHe ? 'התחלת עייף — מהתרגיל השני העומס הוקל' : 'You started tired — lighter from the second exercise')}</div>
+          ))}
+        </div>
+      )}
       {r.pain.length > 0 && (
         <div className="bg-white rounded-xl border border-gray-200 p-3 space-y-1.5">
           <div className="text-sm font-semibold text-gray-700">{'🚦'} {isHe ? 'דיווחי כאב באימון' : 'Pain reports'}</div>

@@ -80,6 +80,17 @@ export default function Progress() {
         </div>
       )}
 
+      {(() => {
+        const last = [...oldestFirst].reverse().find(w => w.dataVersion >= 2);
+        const step = Number(last?.loadStep) || 0;
+        return last ? (
+          <div className="rounded-xl bg-white shadow px-4 py-3 text-sm text-gray-800">
+            {'⚖️'} {isHe ? 'רמת העומס שלך: ' : 'Your load level: '}<span className="font-bold tabular-nums">{step > 0 ? `+${step * 10}%` : (isHe ? 'בסיס' : 'base')}</span>
+            <span className="text-gray-500"> · {isHe ? 'עולה בשלב קטן אחרי 2 אימונים ברצף בקלות ובדיוק מלא (90%+, בלי כאב)' : 'rises a small step after 2 easy, fully accurate workouts in a row (90%+, no pain)'}</span>
+          </div>
+        ) : null;
+      })()}
+
       {/* 1. Per exercise */}
       <section className="space-y-3">
         <h2 className="text-lg font-bold text-gray-800">{isHe ? 'תרגילים' : 'Exercises'}</h2>
