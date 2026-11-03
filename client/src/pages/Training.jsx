@@ -26,7 +26,8 @@ import TrainingViewControls from '../components/TrainingViewControls';
 import CoachVoicePicker from '../components/CoachVoicePicker';
 import { pickCoachVoice } from '../engine/voicePick';
 import { coachMode, COACH_IDS } from '../engine/coachAvatar';
-import { setCoachVoice, setSpeechOpen, holdSpeech, setSpeechRateFactor } from '../hooks/useSpeech';
+import { setCoachVoice, setSpeechOpen, holdSpeech, setSpeechRateFactor, lastCoachLine } from '../hooks/useSpeech';
+import { commandAllowed } from '../engine/training/voiceCommands';
 import { techniqueWhy } from '../utils/techniqueWhy';
 import { useVoiceCommand } from '../hooks/useVoiceCommand';
 import { READY_DRIVE, withDrive, splitLegOrder, legLabel, splitStartText, splitSwitchText, splitWorkingSide, setLegHalf, legSetStartText, legSetNextText, isStrikeMode } from '../engine/training/coachFlow';
@@ -44,7 +45,7 @@ import { useVoiceProsody } from '../hooks/useVoiceProsody';
 import { brainSummary, brainBall } from '../engine/coachBrain/brain';
 import { buildDebrief } from '../engine/coachBrain/debrief';
 import { debriefFacts, legacyCueFacts, bodyText } from '../engine/coachBrain/aiFacts';
-import { aiCue, aiDebrief, aiBriefing, aiLine, aiPain, aiOpening, aiNotebook, setCoachStyleAI, setNotebookContext, getAiStatus, onAiStatus } from '../utils/aiCoach';
+import { aiCue, aiDebrief, aiBriefing, aiLine, aiPain, aiOpening, aiAnswer, aiNotebook, setCoachStyleAI, setNotebookContext, getAiStatus, onAiStatus } from '../utils/aiCoach';
 import { defaultStyle, shouldSoften, effectiveStyle, rateFactor, isStyle } from '../engine/training/coachStyle';
 import { notebookFacts, worstPain, notesText, openingFacts, painToCheck } from '../engine/training/coachNotebook';
 import { painLight, painAction, reducedLoad, microLoad, canSafeMode, zonesFor, painEntry, painFacts, safeModeFacts, protectFromPain } from '../engine/training/painTrafficLight';
@@ -1407,6 +1408,56 @@ export default function Training() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [phase]);
 
+  // ---- TWO-WAY VOICE (Stage 3 #13, 2026-11-03): break / stop / continue / one more / repeat / a question ----
+  // Every command is SHOWN when acted on (never mistaken for something automatic); a command that makes no
+  // sense in this phase is ignored; the pain panel, when open, takes the voice first.
+  function onVoiceCommand(cmd) {
+    if (painRef.current || !cmd) return;
+    if (!commandAllowed(cmd.type, phase)) { console.info(`[Voice] "${cmd.text}" (${cmd.type}) ignored in ${phase}`); return; }
+    const show = (he, en) => setFeedback({ type: 'info', text: `🎤 ${isHe ? he : en}` });
+    console.info(`[Voice] ${cmd.type}: "${cmd.text}"`);
+    if (cmd.type === 'stop' || cmd.type === 'pause') {
+      stopSpeech();
+      if (phase === PHASE.EXERCISING || phase === PHASE.WARM_UP) handlePauseExercise();
+      show(cmd.type === 'stop' ? 'שמעתי "עצור" — עצרנו. אמור "ממשיכים" כשתהיה מוכן' : 'שמעתי "הפסקה" — עצרנו. אמור "ממשיכים" כשתהיה מוכן',
+        cmd.type === 'stop' ? 'Heard "stop" — stopped. Say "continue" when ready' : 'Heard "break" — paused. Say "continue" when ready');
+      return;
+    }
+    if (cmd.type === 'resume') {
+      if (pausedStateRef.current) { show('שמעתי "ממשיכים"', 'Heard "continue"'); handleResumeExercise(); }
+      return;
+    }
+    if (cmd.type === 'oneMore') {
+      if (!currentExercise) return;
+      if (currentExercise.safeMode) { show('במצב בטוח לא מוסיפים חזרות', 'No extra reps in safe mode'); return; }
+      const r = parseInt(currentExercise.reps, 10);
+      if (!Number.isFinite(r)) return;
+      // IN PLACE (as the pain light's load): a new object would reset the set in progress
+      Object.assign(currentExercise, { reps: typeof currentExercise.reps === 'string' ? String(r + 1) : r + 1 });
+      show(`עוד אחת! היעד עכשיו: ${r + 1}`, `One more! The target is now ${r + 1}`);
+      return;
+    }
+    if (cmd.type === 'repeat') {
+      const line = lastCoachLine();
+      if (line) speakCritical(line, { rate: 1.05 });
+      return;
+    }
+    if (cmd.type === 'question') {
+      show(`שאלת: "${cmd.text}"`, `You asked: "${cmd.text}"`);
+      const exName = isHe ? currentExercise?.name : (currentExercise?.nameEn || currentExercise?.name);
+      aiAnswer({
+        lang: isHe ? 'he' : 'en', name: playerName, sport: userProfile?.sport || '', exercise: exName || '',
+        body: limbProfile?.affectedLegs?.length ? `${limbProfile.affectedLegs.join(', ')} prosthetic / absent${limbProfile.crutches ? ', crutches' : ''}` : '',
+        error: { what: cmd.text },
+        context: { phase, lastLine: lastCoachLine(), kickingLeg: activeKickLegRef.current || null, setNo: phase === PHASE.WARM_UP ? null : currentSet, of: phase === PHASE.WARM_UP ? null : totalSets },
+      }).then((ans) => {
+        if (!ans) { setFeedback({ type: 'info', text: isHe ? '🎤 לא הצלחתי לענות על זה עכשיו — נסה לשאול שוב' : "🎤 I couldn't answer that right now — try again" }); return; }
+        setFeedback({ type: 'info', text: `🗣️ ${ans}` });
+        speakCritical(ans, { rate: 1.05 });
+      });
+    }
+  }
+
   // "Next" by voice — ONLY while waiting for the trainee's decision (a finished warm-up move or exercise)
   const goNextWarmUp = () => {
     clearInterval(warmUpTimerRef.current);
@@ -1425,6 +1476,7 @@ export default function Training() {
     awaitingPainRef: painOpenRef,
     amputee: isAmputee,
     onPain: ({ level, zone }) => onPainHeard({ level, zone }),
+    onCommand: (cmd) => onVoiceCommand(cmd),
     onNext: () => {
       // a move by voice is always shown, so it is never mistaken for an automatic skip
       setFeedback({ type: 'info', text: isHe ? '🎤 שמעתי "תרגיל הבא" — עוברים' : '🎤 Heard "next exercise" — moving on' });
@@ -3747,7 +3799,7 @@ export default function Training() {
           <div
             onClick={voiceNext.status === 'listening' ? undefined : () => voiceNext.arm()}
             className={`absolute bottom-24 left-2 z-[18] rounded-full text-white text-[11px] font-bold px-2.5 py-1 ${voiceNext.status === 'listening' ? 'pointer-events-none bg-emerald-700/80' : 'cursor-pointer bg-gray-800/85 underline'}`} dir={isHe ? 'rtl' : 'ltr'}>
-            {'🎤'} {voiceNext.status === 'listening' ? (isHe ? 'אמור "תרגיל הבא"' : 'Say "next exercise"')
+            {'🎤'} {voiceNext.status === 'listening' ? (isHe ? 'אפשר להגיד: תרגיל הבא · הפסקה · ממשיכים · עוד אחת · תחזור · כואב לי · או לשאול שאלה' : 'Say: next exercise · break · continue · one more · repeat · it hurts · or ask a question')
               : voiceNext.status === 'needsTap' ? (isHe ? 'הקש כאן להפעלת המיקרופון' : 'Tap here to turn the mic on')
               : voiceNext.status === 'denied' ? (isHe ? 'אין הרשאת מיקרופון — אפשר בהגדרות הדפדפן' : 'No mic permission — allow it in the browser settings')
               : voiceNext.status === 'unsupported' ? (isHe ? 'הדפדפן לא תומך בפקודה קולית — השתמש בכפתור' : 'No voice commands in this browser — use the button')

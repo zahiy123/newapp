@@ -123,6 +123,8 @@ const MOMENTS = {
   pain: 'NOW: the trainee just REPORTED PAIN ("what" = where, and what the coach decided: "action" continue / reduce / stop). In your own words, as a caring professional coach + physiotherapist: acknowledge the pain seriously and calmly (never dismiss it, never "push through"), then say the decision exactly as given — continue and watch it / continue lighter (fewer reps, one set less) / stop this exercise now / ("safe") the trainee CHOSE to go on in safe mode — tell them exactly how: only a few more reps, very slow, a small comfortable range, stop at once if the pain rises, and that you are with them on every rep. For "stop" and "safe": add that if the pain does not pass or comes back, they should check it with a physiotherapist or a doctor. NEVER diagnose, never name an injury, never a medical claim, never a number. 12 to 25 words, 1–2 short sentences, calm warm tone.',
   // THE COACH NOTEBOOK (Stage 3 #17): the workout is about to begin; "what" = your own notes of the last workout
   opening: 'NOW: a new workout is about to begin. "what" = YOUR OWN NOTES from the trainee\'s last workout (and how long ago). Open like a coach who remembers them: ONE short personal line that ends with ONE question about how they are today. If "painArea" is given, the question MUST be about exactly that body area, named with exactly that word (never another body part, never diagnose). Otherwise refer to ONE concrete point from the notes (what improved / the focus for today). Never invent anything that is not in the notes; never a number except one given. 10 to 22 words, warm and natural.',
+  // TWO-WAY VOICE (Stage 3 #13): the trainee asked the coach a question out loud
+  answer: 'NOW: the trainee ASKED you a question out loud ("what" = the question as the microphone heard it; "context" = the exercise, where we are in the workout and your own last line). Answer like the best coach + physiotherapist standing next to them: directly, correct, practical — 1 to 3 short spoken sentences, at most 35 words. Use general professional knowledge and the context only; NEVER invent a measured fact about this trainee (no numbers about their reps / accuracy / angles unless given in the context). A medical / pain question: careful, never diagnose; if it matters suggest a physiotherapist or a doctor; a pain right now → tell them to say or tap "כואב לי". Respect a prosthesis / crutches as given in "body"; "context.kickingLeg" (when given) is the leg that kicks / passes now and the other one is the support leg — never mix them up; in a pass the ankle lock is of the KICKING foot. If the words are unclear or clearly not meant for the coach, output exactly: SKIP',
   motivate: 'NOW: a natural moment for ONE genuine, warm encouragement (the moment and the intent are in "what"). In your own words, at most 10 words. Never praise a performance, never claim a technique fact, never a number. If the trainee is tired / frustrated: calm and supportive.',
 };
 
@@ -137,6 +139,7 @@ Do not repeat or paraphrase closely any of the recent lines listed. Output ONLY 
       exercise: clip(f.exercise, 80), sport: clip(f.sport, 40), body: clip(f.body, 120),
       what: clip(f.error?.what, 200), recentLines: (f.recent || []).slice(-4).map(x => clip(x, 90)),
       ...(f.mode === 'opening' && f.painArea ? { painArea: clip(f.painArea, 30) } : {}),
+      ...(f.mode === 'answer' ? { context: { phase: clip(f.context?.phase, 30), lastLine: clip(f.context?.lastLine, 200), setNo: f.context?.setNo ?? null, of: f.context?.of ?? null, kickingLeg: ['left', 'right'].includes(f.context?.kickingLeg) ? f.context.kickingLeg : null } } : {}),
       ...(f.mode === 'pain' ? { action: ['continue', 'reduce', 'stop', 'safe'].includes(f.action) ? f.action : null } : {}),
       ...(f.mode === 'stop' ? {
         why: clip(f.error?.why, 300), how: clip(f.error?.how, 300), timesInBlock: f.timesInBlock ?? null,
@@ -271,9 +274,9 @@ export async function generateCue(facts, { timeoutMs = 3000, askFn = ask } = {})
   const prompt = buildCuePrompt(facts);
   for (const model of CUE_MODELS) {
     let raw;
-    try { raw = await hedged(() => askFn(model, prompt, ['stop', 'pain', 'opening'].includes(facts.mode) ? 220 : 80, facts.mode === 'stop' || facts.mode === 'pain' ? Math.max(timeoutMs, 8000) : timeoutMs, 'off'), facts.mode === 'stop' || facts.mode === 'pain' ? 4500 : CUE_HEDGE_MS); } catch (err) { if (isModelError(err)) continue; throw err; }
+    try { raw = await hedged(() => askFn(model, prompt, ['stop', 'pain', 'opening', 'answer'].includes(facts.mode) ? 220 : 80, ['stop', 'pain', 'answer'].includes(facts.mode) ? Math.max(timeoutMs, 8000) : timeoutMs, 'off'), ['stop', 'pain', 'answer'].includes(facts.mode) ? 4500 : CUE_HEDGE_MS); } catch (err) { if (isModelError(err)) continue; throw err; }
     const text = String(raw || '').replace(/["“”«»]/g, '').replace(/\s+/g, ' ').trim();
-    if (!text || /^SKIP/i.test(text) || text.length > (['stop', 'pain', 'opening'].includes(facts.mode) ? MAX_STOP_CHARS : MAX_CUE_CHARS) || !numbersGrounded(text, facts) || !directionsKept(text, facts)) return null;
+    if (!text || /^SKIP/i.test(text) || text.length > (['stop', 'pain', 'opening', 'answer'].includes(facts.mode) ? MAX_STOP_CHARS : MAX_CUE_CHARS) || !numbersGrounded(text, facts) || !directionsKept(text, facts)) return null;
     if (!passWordsOk(text, facts)) return null;                                  // a pass is never a "kick" / "יפה"
     if (facts.mode === 'opening' && facts.painArea && !text.includes(String(facts.painArea))) return null;   // the pain's own area, never another
     if ((facts.recent || []).some(r => r && r.trim() === text)) return null;   // never the same words twice

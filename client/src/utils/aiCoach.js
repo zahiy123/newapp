@@ -87,6 +87,17 @@ export async function aiPain(facts) {
   return t && t.length <= 240 ? t : null;
 }
 
+/** The coach's spoken answer to the trainee's question (two-way voice), or null. */
+export async function aiAnswer(facts) {
+  // (one retry: the trainee asked — a guarded-out first answer must not leave them without one)
+  for (let i = 0; i < 2; i++) {
+    const j = await post('/api/coach/live-cue', { ...facts, mode: 'answer' }, 9000);
+    const t = typeof j?.cue === 'string' ? j.cue.trim() : '';
+    if (t && t.length <= 240) return t;
+  }
+  return null;
+}
+
 /** The coach's opening line of a workout, worded live from the last notebook entry, or null. */
 export async function aiOpening(facts) {
   const j = await post('/api/coach/live-cue', { ...facts, mode: 'opening' }, 8500);

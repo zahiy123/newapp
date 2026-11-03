@@ -155,3 +155,12 @@ test('the opening line from the notebook uses the long-line limit', async () => 
   const line = 'זהי, בפעם הקודמת הברך הציקה לך בסקוואט, ושמנו מיקוד על היציבות שלה. איך היא מרגישה היום?';
   assert.equal(await generateCue(f, { askFn: async () => line }), line);
 });
+
+test('two-way voice: a question gets a live answer; an invented performance number is rejected', async () => {
+  const f = { lang: 'he', mode: 'answer', exercise: 'מסירה בצל', error: { what: 'למה צריך לנעול את הקרסול' }, context: { phase: 'resting', lastLine: 'נעל את הקרסול' } };
+  assert.match(buildCuePrompt(f).system, /ASKED you a question/);
+  assert.equal(JSON.parse(buildCuePrompt(f).user).context.phase, 'resting');
+  const ok = 'קרסול נעול הופך את כף הרגל למשטח קשיח, והכדור יוצא מדויק וחזק יותר.';
+  assert.equal(await generateCue(f, { askFn: async () => ok }), ok);
+  assert.equal(await generateCue(f, { askFn: async () => 'עשית 7 מסירות טובות, הקרסול חשוב.' }), null);
+});

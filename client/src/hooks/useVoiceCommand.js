@@ -12,8 +12,8 @@
 // Uses the browser's SpeechRecognition where it exists; elsewhere the on-screen button works.
 
 import { useEffect, useRef, useState } from 'react';
-import { isNextCommand, acceptCommand, ECHO_WINDOW_MS, COMMAND_ECHO_RE } from '../engine/training/voiceCommands';
-import { coachSaidRecently } from './useSpeech';
+import { isNextCommand, acceptCommand, ECHO_WINDOW_MS, COMMAND_ECHO_RE, parseVoiceCommand, isEchoOf } from '../engine/training/voiceCommands';
+import { coachSaidRecently, recentCoachLines } from './useSpeech';
 import { isPainReport, spokenLevel, spokenZone, PAIN_ECHO_RE } from '../engine/training/painTrafficLight';
 
 // the coach's own pain question names "0 to 10" — a number in its line may echo back as the trainee's level
@@ -23,7 +23,10 @@ const RESTART_MS = 300;
 
 // Pain Traffic Light (2026-11-01): "כואב לי" (+ where / how much, when said) → onPain({ level, zone });
 // while the pain panel waits (`awaitingPainRef.current`), a level / a zone alone is enough.
-export function useVoiceCommand({ active, lang = 'he-IL', onNext, onPain, awaitingPainRef = null, amputee = false }) {
+// Two-way voice (2026-11-03): onCommand({ type: 'stop'|'pause'|'resume'|'oneMore'|'repeat'|'question', text }).
+export function useVoiceCommand({ active, lang = 'he-IL', onNext, onPain, onCommand, awaitingPainRef = null, amputee = false }) {
+  const onCommandRef = useRef(onCommand);
+  useEffect(() => { onCommandRef.current = onCommand; }, [onCommand]);
   const onNextRef = useRef(onNext);
   useEffect(() => { onNextRef.current = onNext; }, [onNext]);
   const onPainRef = useRef(onPain);
@@ -70,7 +73,16 @@ export function useVoiceCommand({ active, lang = 'he-IL', onNext, onPain, awaiti
                 if (report || level != null || zone) { onPainRef.current({ level, zone, report }); return; }
               }
             }
-            if (!Array.from(res).some(a => isNextCommand(a.transcript))) continue;
+            if (!Array.from(res).some(a => isNextCommand(a.transcript))) {
+              // the other commands / a question — final only, never the coach's own words heard back
+              if (res.isFinal === false || !onCommandRef.current) continue;
+              const said = res[0]?.transcript || '';
+              const cmd = parseVoiceCommand(said);
+              if (!cmd) continue;
+              if (isEchoOf(said, recentCoachLines(10000))) { console.info('[Voice] ignored — the coach\'s own words:', said); continue; }
+              onCommandRef.current(cmd);
+              return;
+            }
             if (!acceptCommand({ isFinal: res.isFinal !== false, coachSaidCommandWord: coachSaidRecently(COMMAND_ECHO_RE, ECHO_WINDOW_MS) })) continue;
             onNextRef.current?.();
             return;

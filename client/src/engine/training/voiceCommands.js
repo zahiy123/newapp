@@ -44,3 +44,60 @@ export const COMMAND_ECHO_RE = /תרגיל הבא|next exercise/i;
 export function acceptCommand({ isFinal = true, coachSaidCommandWord = false }) {
   return isFinal && !coachSaidCommandWord;
 }
+
+// ============================================================
+// TWO-WAY VOICE (Stage 3 #13, owner decision 2026-09-28; built 2026-11-03)
+// Beyond "תרגיל הבא" and "כואב לי" (painTrafficLight): a break, stop, continue, one more, repeat — and a free
+// QUESTION to the coach ("למה?", "איך עושים…?") that Claude answers live. Parsed locally; the coach's own
+// words never count (the echo guard compares the heard text with the coach's recent lines).
+// Short words ("עצור", "חזור", "הפסקה") count only as the WHOLE utterance (≤ 3 words) — inside a longer
+// sentence they are everyday words ("חזור לעמידה" is the coach's own instruction).
+// ============================================================
+
+const WHOLE = (n) => n.split(' ').length <= 3;
+const INTENTS = [
+  { type: 'stop', phrases: ['עצור', 'תעצור', 'עצור את התרגיל', 'תעצור את התרגיל', 'stop', 'stop the exercise'], whole: true },
+  { type: 'pause', phrases: ['הפסקה', 'אני צריך הפסקה', 'אני צריכה הפסקה', 'צריך הפסקה', 'רגע הפסקה', 'break', 'i need a break', 'pause'], whole: false },
+  { type: 'resume', phrases: ['ממשיכים', 'נמשיך', 'המשך', 'תמשיך', 'אני מוכן', 'אני מוכנה', 'continue', 'resume', "let's go", 'lets go'], whole: true },
+  { type: 'oneMore', phrases: ['עוד אחת', 'עוד אחד', 'עוד חזרה', 'עוד חזרה אחת', 'one more', 'one more rep'], whole: false },
+  { type: 'repeat', phrases: ['חזור', 'תחזור', 'תחזור על זה', 'חזור על זה', 'מה אמרת', 'לא שמעתי', 'תגיד שוב', 'repeat', 'say again', 'say that again', 'what did you say'], whole: true },
+];
+const QUESTION_START = ['למה', 'איך', 'מה', 'כמה', 'איפה', 'מתי', 'האם', 'אפשר', 'מותר', 'why', 'how', 'what', 'when', 'where', 'should', 'can', 'is', 'do'];
+
+/** The command in the text: { type: 'stop'|'pause'|'resume'|'oneMore'|'repeat'|'question', text } or null. */
+export function parseVoiceCommand(text) {
+  const n = norm(text);
+  if (!n) return null;
+  for (const it of INTENTS) {
+    if (it.whole) {
+      if (WHOLE(n) && it.phrases.some(p => n === p || n === `${p} בבקשה` || n.endsWith(` ${p}`) && WHOLE(n))) return { type: it.type, text: n };
+    } else {
+      const tail = ` ${n.split(' ').slice(-COMMAND_TAIL_WORDS).join(' ')} `;
+      if (it.phrases.some(p => tail.includes(` ${p} `))) return { type: it.type, text: n };
+    }
+  }
+  const words = n.split(' ');
+  if (words.length >= 2 && words.length <= 25 && QUESTION_START.includes(words[0])) return { type: 'question', text: String(text).trim() };
+  return null;
+}
+
+/** Is the heard text (mostly) the coach's own line coming back through the mic? (≥ 60 % of its words in one line) */
+export function isEchoOf(text, coachLines) {
+  const w = norm(text).split(' ').filter(x => x.length > 1);
+  if (!w.length) return false;
+  return (coachLines || []).some((line) => {
+    const set = new Set(norm(line).split(' '));
+    return w.filter(x => set.has(x)).length / w.length >= 0.6;
+  });
+}
+
+/** Which commands make sense in which phase (anything else is ignored, never a surprise). */
+export function commandAllowed(type, phase) {
+  switch (type) {
+    case 'stop': case 'pause': return ['warm_up', 'exercising', 'briefing', 'calibrating', 'checking_equipment'].includes(phase);
+    case 'resume': return phase === 'paused';
+    case 'oneMore': return phase === 'exercising';
+    case 'repeat': case 'question': return phase !== 'environment_scan';
+    default: return false;
+  }
+}

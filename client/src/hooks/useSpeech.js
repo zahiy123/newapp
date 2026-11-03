@@ -35,6 +35,13 @@ export function coachSaidRecently(re, ms = 5000) {
 // the coach style's speech-rate factor (Stage 3 #12): 1 = the #74 coach; calm / balanced speak a little slower
 let speechRateFactor = 1;
 export function setSpeechRateFactor(f) { speechRateFactor = Number(f) > 0 ? Number(f) : 1; }
+/** The coach's lines of the last `ms` (the two-way voice's echo guard), newest last. */
+export function recentCoachLines(ms = 8000) {
+  const now = Date.now();
+  return coachLines.filter(l => now - l.at <= ms).map(l => l.text);
+}
+/** The coach's last spoken line ("תחזור" repeats it), or ''. */
+export function lastCoachLine() { return coachLines.length ? coachLines[coachLines.length - 1].text : ''; }
 export function getCoachVoice() { return coachVoice; }
 export function setCoachVoice(gender) { coachVoice = gender === 'male' || gender === 'female' ? gender : null; }
 /** The coach's chosen / best device voice (explicit — from getVoices()), and whether it is surely of its gender. */
