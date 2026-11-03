@@ -1471,7 +1471,7 @@ export default function Training() {
     : [PHASE.BRIEFING, PHASE.CHECKING_EQUIPMENT, PHASE.CALIBRATING, PHASE.EXERCISING, PHASE.PAUSED, PHASE.RESTING, PHASE.EXERCISE_DONE].includes(phase)
       || (phase === PHASE.IDLE && warmUpDone && exercises.length > 0) ? 'exercise' : null;
   const voiceNext = useVoiceCommand({
-    active: !!voiceNextAction,
+    active: FEATURES.VOICE_COMMANDS && !!voiceNextAction,
     lang: isHe ? 'he-IL' : 'en-US',
     awaitingPainRef: painOpenRef,
     amputee: isAmputee,

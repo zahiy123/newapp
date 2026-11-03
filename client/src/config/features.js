@@ -24,4 +24,8 @@ export const FEATURES = Object.freeze({
   // Voice prosody: the trainee's audible effort from the microphone (on the device only, nothing
   // recorded / sent) feeds the coach brain. Off → the brain works without the effort signal.
   VOICE_PROSODY: true,
+  // Voice COMMANDS / two-way voice (the trainee speaks to the coach: "תרגיל הבא", "כואב לי", "הפסקה",
+  // questions). OFF by the owner (2026-11-03: "it does not work — skip it, only the coach speaks"): the mic
+  // does not listen for commands; every action stays on the screen's buttons. On → restore points #85 / #86.
+  VOICE_COMMANDS: false,
 });
