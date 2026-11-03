@@ -85,8 +85,15 @@ export default function Progress() {
         const step = Number(last?.loadStep) || 0;
         return last ? (
           <div className="rounded-xl bg-white shadow px-4 py-3 text-sm text-gray-800">
-            {'⚖️'} {isHe ? 'רמת העומס שלך: ' : 'Your load level: '}<span className="font-bold tabular-nums">{step > 0 ? `+${step * 10}%` : (isHe ? 'בסיס' : 'base')}</span>
-            <span className="text-gray-500"> · {isHe ? 'עולה בשלב קטן אחרי 2 אימונים ברצף בקלות ובדיוק מלא (90%+, בלי כאב)' : 'rises a small step after 2 easy, fully accurate workouts in a row (90%+, no pain)'}</span>
+            {'📈'} {isHe ? 'רמת מורכבות התרגילים: ' : 'Exercise complexity: '}<span className="font-bold tabular-nums">{step > 0 ? (isHe ? `שלב ${step}` : `level ${step}`) : (isHe ? 'בסיס' : 'base')}</span>
+            <span className="text-gray-500"> · {isHe ? 'עולה לגרסה מאתגרת יותר של התרגיל אחרי 2 אימונים ברצף בקלות ובדיוק מלא (90%+, בלי כאב)' : 'moves to a more demanding version of each exercise after 2 easy, fully accurate workouts in a row (90%+, no pain)'}</span>
+            {(last.exercises || []).some(e => e.upgradedFrom) && (
+              <div className="mt-1 text-emerald-800">
+                {(last.exercises || []).filter(e => e.upgradedFrom).map((e, i) => (
+                  <div key={i}>{'📈'} {isHe ? 'העלאת רמת מורכבות התרגיל: ' : 'Complexity up: '}{e.upgradedFrom.name !== e.name ? `${e.upgradedFrom.name} ← ${e.name}` : e.name}</div>
+                ))}
+              </div>
+            )}
           </div>
         ) : null;
       })()}

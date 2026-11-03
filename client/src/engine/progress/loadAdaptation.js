@@ -10,14 +10,14 @@
 //     rises by more than the noise) and by ≥ 15 points in total → the NEXT exercises run lighter.
 //  3. GRADED PROGRESS — 2 workouts in a row done easily and fully accurately (every exercise completed, every
 //     measured accuracy ≥ 90, no pain ≥ 4, no lighter / safe exercise, not started tired) → the next workout
-//     runs one small step heavier (+10 % reps, at least +1). The next step needs 2 NEW such workouts at the
-//     new level (the step is saved with every workout).
+//     does a HARDER VERSION of each exercise (the owner, 2026-11-03: never more reps / shorter rest —
+//     complexity.js: full range → the next movement on its ladder → a slow controlled tempo). The next step
+//     needs 2 NEW such workouts at the new level (the step is saved with every workout).
 // A workout's reductions are levels, not compounding: level 1 = reps × 0.8 + 15 s rest; level 2 (a second
 // reason in the same workout) = reps × 0.65 + 30 s rest. Never below 3 reps / 1 set.
 // ============================================================
 
 export const LIGHTER = { 1: { reps: 0.8, rest: 15 }, 2: { reps: 0.65, rest: 30 } };
-export const STEP_UP = 0.1;
 export const MAX_STEP = 5;
 export const DROP_MIN = 15;          // points of accuracy lost over the exercise
 export const DROP_NOISE = 3;         // a set may rise this much and the fall still counts as steady
@@ -95,16 +95,4 @@ export function decideLoadStep(history) {
   const sameStep = pair.every(w => (Number(w.loadStep) || 0) === step);
   if (sameStep && pair.every(easyWorkout) && step < MAX_STEP) return { step: step + 1, raised: true };
   return { step, raised: false };
-}
-
-/** Today's exercises at the load step (+10 % reps per step, at least +1 per step); a pain-protected one is never raised. */
-export function applyLoadStep(exercises, step) {
-  if (!(step > 0)) return exercises;
-  return (exercises || []).map((ex) => {
-    if (ex.painProtected || ex.loadStep) return ex;
-    const r = num(ex.reps);
-    if (r == null) return ex;
-    const up = Math.max(step, Math.round(r * STEP_UP * step));
-    return { ...ex, reps: keepType(ex.reps, r + up), loadStep: step };
-  });
 }

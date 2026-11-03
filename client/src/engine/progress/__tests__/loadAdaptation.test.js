@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { startedTired, qualityDropped, lighterFrom, easyWorkout, decideLoadStep, applyLoadStep } from '../loadAdaptation.js';
+import { startedTired, qualityDropped, lighterFrom, easyWorkout, decideLoadStep } from '../loadAdaptation.js';
 
 const ex = (name, reps = 10, sets = 3, extra = {}) => ({ name, reps, sets, restSeconds: 60, ...extra });
 
@@ -56,13 +56,5 @@ describe('Rule 3 — graded progress after 2 easy, fully accurate workouts in a 
     expect(decideLoadStep([easy(), easy(), easy(1), easy(1)])).toEqual({ step: 2, raised: true });
     expect(decideLoadStep([easy(), easy(0, { painReports: [{ level: 5 }] })])).toEqual({ step: 0, raised: false });
     expect(decideLoadStep([easy(2), { dataVersion: 2, status: 'completed', loadStep: 2, exercises: [] }])).toEqual({ step: 2, raised: false });
-  });
-  it('the step: +10 % reps (at least +1), never on a pain-protected exercise, never twice', () => {
-    const out = applyLoadStep([ex('a', 10), ex('b', '5'), ex('c', 10, 3, { painProtected: { level: 7 } }), { name: 'd', reps: '30s' }], 1);
-    expect(out[0]).toMatchObject({ reps: 11, loadStep: 1 });
-    expect(out[1].reps).toBe('6');
-    expect(out[2].reps).toBe(10);
-    expect(applyLoadStep(out, 1)[0].reps).toBe(11);
-    expect(applyLoadStep([ex('a', 10)], 0)[0].reps).toBe(10);
   });
 });

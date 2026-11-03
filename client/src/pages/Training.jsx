@@ -49,7 +49,8 @@ import { aiCue, aiDebrief, aiBriefing, aiLine, aiPain, aiOpening, aiAnswer, aiNo
 import { defaultStyle, shouldSoften, effectiveStyle, rateFactor, isStyle } from '../engine/training/coachStyle';
 import { notebookFacts, worstPain, notesText, openingFacts, painToCheck } from '../engine/training/coachNotebook';
 import { measurableJoints, createRomTracker, addRomFrame, summarizeRom } from '../engine/progress/rom';
-import { startedTired, qualityDropped, lighterFrom, decideLoadStep, applyLoadStep } from '../engine/progress/loadAdaptation';
+import { startedTired, qualityDropped, lighterFrom, decideLoadStep } from '../engine/progress/loadAdaptation';
+import { applyComplexityStep } from '../engine/progress/complexity';
 import { painLight, painAction, reducedLoad, microLoad, canSafeMode, zonesFor, painEntry, painFacts, safeModeFacts, protectFromPain } from '../engine/training/painTrafficLight';
 import { kickingSide } from '../engine/incomingBall';
 import { ballModeFor, virtualBallWanted, handSide, ballLook, realBallInPlay } from '../engine/virtualBall';
@@ -697,6 +698,7 @@ export default function Training() {
     const eff = applyCheckIn(data, status);
     const week = plan.weeks[weekIdx];
     const sport = data.sport || plan.sport || 'fitness';
+    const lp0 = trainingLimbs(getLimbProfile(eff), eff.todayMobility);
     let loaded = null;
     if (FEATURES.CATALOG_PLANS) {
       // Coherent catalog session for this day (same builder + seed as the dashboard), for today's body / ball / place
@@ -717,7 +719,7 @@ export default function Training() {
     }
     // HARD equipment fit: never offer an exercise the trainee can't do (e.g. a ball drill without a ball)
     rawExercisesRef.current = loaded;
-    return applyLoadStep(protectFromPain(fitExercises(loaded, availableEquipment(eff, { hasBall: status?.hasBall })).exercises, painHistoryRef.current), loadStepRef.current.step);
+    return applyComplexityStep(protectFromPain(fitExercises(loaded, availableEquipment(eff, { hasBall: status?.hasBall })).exercises, painHistoryRef.current), loadStepRef.current.step, lp0, (data.language || 'he') === 'he');
   }
 
   // Check-in answered → rebuild today's workout from the answers, remember them for next time
@@ -798,7 +800,7 @@ export default function Training() {
         setLoadRaised(decided.raised);
         if (decided.step > 0) {
           console.info(`[Load] step ${decided.step}${decided.raised ? ' (raised today)' : ''}`);
-          setExercises(prev => applyLoadStep(prev, decided.step));
+          setExercises(prev => applyComplexityStep(prev, decided.step, limbProfile || {}, isHe));
         }
       } catch (err) {
         console.error('Failed to load exercise history:', err);
@@ -2325,7 +2327,7 @@ export default function Training() {
     setShowBallQuestion(false);
     sessionDataRef.current.ballAvailable = hasBall;
     const fitted = fitExercises(rawExercisesRef.current, availableEquipment(userProfile, { hasBall }));
-    if (fitted.exercises.length) setExercises(applyLoadStep(protectFromPain(fitted.exercises, painHistoryRef.current), loadStepRef.current.step));
+    if (fitted.exercises.length) setExercises(applyComplexityStep(protectFromPain(fitted.exercises, painHistoryRef.current), loadStepRef.current.step, limbProfile || {}, isHe));
     if (fitted.substitutions.length) sessionDataRef.current.equipmentSubstitutions = fitted.substitutions;
     if (explicit && user?.uid) {
       updateDoc(doc(db, 'users', user.uid), { hasBall }).catch(err => console.error('[Ball] save failed:', err));
@@ -2957,6 +2959,7 @@ export default function Training() {
       sets,
       accuracy: accs.length ? Math.round(accs.reduce((a, b) => a + b, 0) / accs.length) : null,
       name: currentExercise.name,
+      ...(currentExercise.upgradedFrom ? { upgradedFrom: currentExercise.upgradedFrom } : {}),
       repsTarget: parseInt(currentExercise.reps) || 0,
       repsActual: displayReps,
       setsTarget: totalSets,
@@ -3916,6 +3919,11 @@ export default function Training() {
           <div className="absolute top-12 left-1/2 -translate-x-1/2 z-20 pointer-events-none rounded-2xl bg-sky-700/95 text-white text-xs font-bold px-3 py-1.5 shadow text-center max-w-[90%]" dir={isHe ? 'rtl' : 'ltr'}>
             {'🛡️'} {isHe ? 'מצב בטוח — לאט מאוד, טווח קטן ונוח. כואב יותר? לחץ "כואב לי"' : 'Safe mode — very slow, a small comfortable range. More pain? Tap "It hurts"'}
           </div>
+        ) : currentExercise?.upgradedFrom && !currentExercise?.autoLighter && [PHASE.BRIEFING, PHASE.CALIBRATING, PHASE.EXERCISING].includes(phase) ? (
+          <div className="absolute top-12 left-1/2 -translate-x-1/2 z-20 pointer-events-none rounded-full bg-emerald-700/95 text-white text-xs font-bold px-3 py-1 shadow" dir={isHe ? 'rtl' : 'ltr'}>
+            {'📈'} {isHe ? 'העלאת רמת מורכבות התרגיל' : 'Exercise complexity up'}
+            {currentExercise.upgradedFrom.name !== currentExercise.name ? (isHe ? ` — במקום ${currentExercise.upgradedFrom.name}` : ` — instead of ${currentExercise.upgradedFrom.name}`) : ''}
+          </div>
         ) : !currentExercise?.painProtected && currentExercise?.autoLighter && [PHASE.BRIEFING, PHASE.CALIBRATING, PHASE.EXERCISING, PHASE.RESTING].includes(phase) ? (
           <div className="absolute top-12 left-1/2 -translate-x-1/2 z-20 pointer-events-none rounded-full bg-slate-700/95 text-white text-xs font-bold px-3 py-1 shadow" dir={isHe ? 'rtl' : 'ltr'}>
             {'🔽'} {currentExercise.autoLighter.reason === 'quality_drop'
@@ -4286,7 +4294,7 @@ export default function Training() {
             <div className="text-center space-y-4">
               {loadRaised && (
                 <div dir={isHe ? 'rtl' : 'ltr'} className="bg-emerald-600 text-white rounded-2xl shadow-xl px-4 py-2.5 max-w-sm mx-auto text-sm font-semibold">
-                  {'📈'} {isHe ? 'העומס עלה היום בשלב קטן — 2 אימונים ברצף בקלות ובדיוק מלא' : 'The load is up a small step today — 2 easy, fully accurate workouts in a row'}
+                  {'📈'} {isHe ? 'העלאת רמת מורכבות התרגיל — 2 אימונים ברצף בקלות ובדיוק מלא, היום גרסה מאתגרת יותר' : 'Exercise complexity up — 2 easy, fully accurate workouts in a row; a more demanding version today'}
                 </div>
               )}
               {/* THE COACH NOTEBOOK — the coach remembers the last workout (and checks a pain it noted) */}

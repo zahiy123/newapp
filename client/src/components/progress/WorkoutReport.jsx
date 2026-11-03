@@ -25,6 +25,7 @@ export default function WorkoutReport({ workout, isHe }) {
               <div className="text-xs text-gray-500 tabular-nums">
                 {e.reps ?? '–'}/{e.repsTarget ?? '–'} {isHe ? 'חזרות' : 'reps'} · {e.setsDone ?? '–'}/{e.setsTarget ?? '–'} {isHe ? 'סטים' : 'sets'}
                 {e.safeMode && <span className="ms-2 text-sky-700 font-semibold">{'🛡️'} {isHe ? 'מצב בטוח' : 'safe mode'}</span>}
+                {e.upgradedFrom && <span className="ms-2 text-emerald-700 font-semibold">{'📈'} {isHe ? 'העלאת רמת מורכבות התרגיל' : 'complexity up'}{e.upgradedFrom.name && e.upgradedFrom.name !== e.name ? (isHe ? ` (במקום ${e.upgradedFrom.name})` : ` (instead of ${e.upgradedFrom.name})`) : ''}</span>}
                 {e.lighter && !e.safeMode && <span className="ms-2 text-amber-700 font-semibold">{'🚦'} {isHe ? 'עומס מופחת' : 'lighter'}</span>}
               </div>
             </div>
@@ -74,7 +75,7 @@ export default function WorkoutReport({ workout, isHe }) {
       {((workout?.loadAdjustments || []).length > 0 || workout?.loadStep > 0) && (
         <div className="bg-white rounded-xl border border-gray-200 p-3 space-y-1 text-sm text-gray-800">
           <div className="text-sm font-semibold text-gray-700">{'⚖️'} {isHe ? 'התאמת עומס' : 'Load adaptation'}</div>
-          {workout?.loadStep > 0 && <div>{'📈'} {isHe ? `רמת עומס: +${workout.loadStep * 10}% (בזכות אימונים ברצף בקלות ובדיוק)` : `Load level: +${workout.loadStep * 10}% (earned by easy, accurate workouts in a row)`}</div>}
+          {workout?.loadStep > 0 && <div>{'📈'} {isHe ? `העלאת רמת מורכבות התרגיל — שלב ${workout.loadStep} (בזכות אימונים ברצף בקלות ובדיוק מלא)` : `Exercise complexity up — level ${workout.loadStep} (earned by easy, fully accurate workouts in a row)`}</div>}
           {(workout?.loadAdjustments || []).map((a, i) => (
             <div key={i}>{'🔽'} {a.reason === 'quality_drop'
               ? (isHe ? `הדיוק ירד לאורך "${a.exercise}" (${(a.accuracy || []).join(' → ')}%) — התרגילים הבאים הוקלו` : `The accuracy fell across "${a.exercise}" (${(a.accuracy || []).join(' → ')}%) — the next exercises were lighter`)
