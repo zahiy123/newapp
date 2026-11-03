@@ -48,6 +48,7 @@ import { debriefFacts, legacyCueFacts, bodyText } from '../engine/coachBrain/aiF
 import { aiCue, aiDebrief, aiBriefing, aiLine, aiPain, aiOpening, aiAnswer, aiNotebook, setCoachStyleAI, setNotebookContext, getAiStatus, onAiStatus } from '../utils/aiCoach';
 import { defaultStyle, shouldSoften, effectiveStyle, rateFactor, isStyle } from '../engine/training/coachStyle';
 import { notebookFacts, worstPain, notesText, openingFacts, painToCheck } from '../engine/training/coachNotebook';
+import { measurableJoints, createRomTracker, addRomFrame, summarizeRom } from '../engine/progress/rom';
 import { painLight, painAction, reducedLoad, microLoad, canSafeMode, zonesFor, painEntry, painFacts, safeModeFacts, protectFromPain } from '../engine/training/painTrafficLight';
 import { kickingSide } from '../engine/incomingBall';
 import { ballModeFor, virtualBallWanted, handSide, ballLook, realBallInPlay } from '../engine/virtualBall';
@@ -681,6 +682,9 @@ export default function Training() {
   const rawExercisesRef = useRef([]);      // the day's exercises before the equipment fit
   const painHistoryRef = useRef([]);       // the trainee's recent pain log (protects the exercises that hurt)
   const lastNoteRef = useRef(null);        // the coach notebook's last entry (Stage 3 #17)
+  // STAGE 4 — the workout's data for the progress screen: every set's measured result, and the range of motion
+  const setDetailsRef = useRef([]);        // [{ idx, set, reps, accuracy, problems:[{key,what,times,critical}], fixed:[{key,what}] }]
+  const romTrackerRef = useRef(null);      // the session's joint angles (engine/progress/rom.js)
   const aiSummaryRef = useRef(null);
 
   // Build the day's exercises from the plan for TODAY's reality (check-in answers; null = profile defaults)
@@ -1484,6 +1488,15 @@ export default function Training() {
       else if (voiceNextAction === 'exercise') handleNextExercise();
     },
   });
+
+  // STAGE 4 — the range of motion: the joints' angles 10 times a second while the trainee works
+  useEffect(() => {
+    if (phase !== PHASE.EXERCISING && phase !== PHASE.WARM_UP) return undefined;
+    if (!romTrackerRef.current) romTrackerRef.current = createRomTracker(measurableJoints(limbProfile || {}));
+    const id = setInterval(() => addRomFrame(romTrackerRef.current, poseLandmarksRef.current), 100);
+    return () => clearInterval(id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [phase]);
 
   // what the mic heard (the trainee's own words) — shown for 5 s, so the trainee SEES that the coach hears them
   const [heardShown, setHeardShown] = useState(null);
@@ -2915,7 +2928,13 @@ export default function Training() {
       }, 1500);
     }
 
+    const sets = setDetailsRef.current.filter(s => s.idx === currentIdx).map(({ idx, ...s }) => s);   // eslint-disable-line no-unused-vars
+    setDetailsRef.current = setDetailsRef.current.filter(s => s.idx !== currentIdx);
+    const accs = sets.map(s => s.accuracy).filter(a => typeof a === 'number');
     sessionDataRef.current.exerciseResults.push({
+      key: currentExercise.cueKey || currentExercise.id || currentExercise.name,
+      sets,
+      accuracy: accs.length ? Math.round(accs.reduce((a, b) => a + b, 0) / accs.length) : null,
       name: currentExercise.name,
       repsTarget: parseInt(currentExercise.reps) || 0,
       repsActual: displayReps,
@@ -2953,6 +2972,9 @@ export default function Training() {
       warmUpCompleted: sessionDataRef.current.warmUpCompleted,
       exercises: sessionDataRef.current.exerciseResults,
       painReports: sessionDataRef.current.painReports || [],
+      rom: romTrackerRef.current ? summarizeRom(romTrackerRef.current) : {},
+      at: Date.now(),
+      dataVersion: 2,                    // Stage 4: per-set results + the range of motion
       technicalQuality,
       personalBests: [],
       aiSummary: null,
@@ -3277,6 +3299,13 @@ export default function Training() {
     const setEndedAt = Date.now();
     setRestDebrief({ pending: true, items: [{ kind: 'note', title: isHe ? 'המאמן מנתח את הסט…' : 'The coach is analysing the set…' }] });
     const setProblemsNow = execution.setProblemsRef?.current?.() || null;
+    setDetailsRef.current.push({
+      idx: currentIdx, set: currentSet, reps: finalReps,
+      accuracy: typeof setAcc === 'number' ? Math.round(setAcc) : null,
+      problems: (setProblemsNow?.problems || []).map(p => ({ key: p.key || null, what: p.what, times: p.times, critical: !!p.critical })),
+      fixed: (setProblemsNow?.fixed || []).map((w, i) => ({ key: setProblemsNow?.fixedKeys?.[i] || null, what: w })),
+      ...(currentExercise?.safeMode ? { safeMode: true } : {}), ...(currentExercise?.painReduced ? { lighter: true } : {}),
+    });
     const facts = debriefFacts({
       log: execution.setLogRef?.current || null, profile: execution.profile, reps: finalReps, accuracy: setAcc,
       setNo: currentSet, lastSet, he: isHe, name: playerName, exercise: currentExercise?.name || '',

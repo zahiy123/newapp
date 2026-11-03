@@ -694,14 +694,14 @@ export function useExpertExecution({
           const e = all.get(k) || { what, reps: [], critical: false }; e.reps.push(n); e.critical = e.critical || isCritical(k, rec); all.set(k, e);
         }
       }
-      const last = repCountRef.current; const problems = [], fixed = [];
+      const last = repCountRef.current; const problems = [], fixed = [], fixedKeys = [];
       for (const [k, e] of all) {
         const sr = stopRepOf.get(k);
-        if (sr != null && last - sr >= 3 && !e.reps.some(n => n > sr)) { fixed.push(e.what); continue; }
-        problems.push({ what: e.what, times: e.reps.length, reps: e.reps.slice(0, 6), critical: e.critical });
+        if (sr != null && last - sr >= 3 && !e.reps.some(n => n > sr)) { fixed.push(e.what); fixedKeys.push(k); continue; }
+        problems.push({ key: k, what: e.what, times: e.reps.length, reps: e.reps.slice(0, 6), critical: e.critical });
       }
       problems.sort((a, b) => (b.critical - a.critical) || (b.times - a.times));
-      return { problems: problems.slice(0, 6), fixed };
+      return { problems: problems.slice(0, 6), fixed, fixedKeys };
     };
     // a HOLD (a plank, a wall sit): the coach looks every few seconds of the hold
     let lastHoldLook = -1e9;
