@@ -86,7 +86,16 @@ export function numbersGrounded(text, facts) {
   return (String(text).match(/\d+(?:\.\d+)?/g) || []).every(n => allowed.has(n) || Number(n) <= 3);
 }
 
-const COACH_PERSONA = (he) => `You are the world's best ${he ? 'Israeli ' : ''}football / sports coach AND an expert sports physiotherapist, standing next to the trainee and watching THIS movement. You speak ${he ? 'natural spoken Hebrew (masculine singular, like a real Israeli coach on the sideline)' : 'natural spoken English'}.
+// ADAPTIVE COACH STYLES (Stage 3 #12, 2026-11-01). 'energetic' = the field-proven #74 coach, the prompt unchanged.
+// 'calm' (the rehab default, and automatically after a pain report / a low readiness) and 'balanced' add a tone line.
+export const COACH_STYLES = ['energetic', 'balanced', 'calm'];
+export function styleLine(style) {
+  if (style === 'calm') return '\nSTYLE — CALM: speak calmly, patiently and warmly, like a physiotherapist who believes in the trainee: no shouting, no pressure, short reassuring sentences; still precise and professional.';
+  if (style === 'balanced') return '\nSTYLE — BALANCED: supportive but demanding — warm, clear and confident, energy without shouting.';
+  return '';
+}
+const COACH_PERSONA = (he, style = null) => `${COACH_PERSONA_BASE(he)}${styleLine(style)}`;
+const COACH_PERSONA_BASE = (he) => `You are the world's best ${he ? 'Israeli ' : ''}football / sports coach AND an expert sports physiotherapist, standing next to the trainee and watching THIS movement. You speak ${he ? 'natural spoken Hebrew (masculine singular, like a real Israeli coach on the sideline)' : 'natural spoken English'}.
 Ground rules — never break them:
 - Use ONLY the measured facts given. Never invent a number, a body part or an event. Numbers only exactly as given.
 - The expert knowledge given for each error ("what" / "why" / "how") is the ONLY technique truth. Say the SAME instruction in your own fresh words — never add another instruction, never change a direction (in / out, up / down, forward / back, left / right), never reverse it. If unsure, stay closer to the given words.
@@ -112,6 +121,8 @@ const MOMENTS = {
   ready: 'NOW: you can see the trainee clearly and the exercise is about to begin. Tell them so and to start — warm, short, at most 8 words. No technique, no numbers.',
   // THE PAIN TRAFFIC LIGHT (owner decision 2026-09-28): the DEVICE already decided ("action"); you only say it
   pain: 'NOW: the trainee just REPORTED PAIN ("what" = where, and what the coach decided: "action" continue / reduce / stop). In your own words, as a caring professional coach + physiotherapist: acknowledge the pain seriously and calmly (never dismiss it, never "push through"), then say the decision exactly as given — continue and watch it / continue lighter (fewer reps, one set less) / stop this exercise now / ("safe") the trainee CHOSE to go on in safe mode — tell them exactly how: only a few more reps, very slow, a small comfortable range, stop at once if the pain rises, and that you are with them on every rep. For "stop" and "safe": add that if the pain does not pass or comes back, they should check it with a physiotherapist or a doctor. NEVER diagnose, never name an injury, never a medical claim, never a number. 12 to 25 words, 1–2 short sentences, calm warm tone.',
+  // THE COACH NOTEBOOK (Stage 3 #17): the workout is about to begin; "what" = your own notes of the last workout
+  opening: 'NOW: a new workout is about to begin. "what" = YOUR OWN NOTES from the trainee\'s last workout (and how long ago). Open like a coach who remembers them: ONE short personal line that ends with ONE question about how they are today. If "painArea" is given, the question MUST be about exactly that body area, named with exactly that word (never another body part, never diagnose). Otherwise refer to ONE concrete point from the notes (what improved / the focus for today). Never invent anything that is not in the notes; never a number except one given. 10 to 22 words, warm and natural.',
   motivate: 'NOW: a natural moment for ONE genuine, warm encouragement (the moment and the intent are in "what"). In your own words, at most 10 words. Never praise a performance, never claim a technique fact, never a number. If the trainee is tired / frustrated: calm and supportive.',
 };
 
@@ -119,12 +130,13 @@ export function buildCuePrompt(f) {
   const he = f.lang !== 'en';
   const moment = MOMENTS[f.mode];
   if (moment) {
-    const system = `${COACH_PERSONA(he)}
+    const system = `${COACH_PERSONA(he, f.style)}
 ${isPassFacts(f) ? PASS_RULE + '\n' : ''}${moment} ${f.name ? `You may use the name ${clip(f.name, 20)} (not every time).` : ''}
 Do not repeat or paraphrase closely any of the recent lines listed. Output ONLY the spoken sentence.`;
     const user = JSON.stringify({
       exercise: clip(f.exercise, 80), sport: clip(f.sport, 40), body: clip(f.body, 120),
       what: clip(f.error?.what, 200), recentLines: (f.recent || []).slice(-4).map(x => clip(x, 90)),
+      ...(f.mode === 'opening' && f.painArea ? { painArea: clip(f.painArea, 30) } : {}),
       ...(f.mode === 'pain' ? { action: ['continue', 'reduce', 'stop', 'safe'].includes(f.action) ? f.action : null } : {}),
       ...(f.mode === 'stop' ? {
         why: clip(f.error?.why, 300), how: clip(f.error?.how, 300), timesInBlock: f.timesInBlock ?? null,
@@ -134,7 +146,7 @@ Do not repeat or paraphrase closely any of the recent lines listed. Output ONLY 
     });
     return { system, user };
   }
-  const system = `${COACH_PERSONA(he)}
+  const system = `${COACH_PERSONA(he, f.style)}
 ${isPassFacts(f) ? PASS_RULE + '\n' : ''}NOW: the trainee is IN THE MIDDLE OF A SET. Give ONE immediate correction, like a shout from the sideline of the best professional coach: sharp, technical, specific to THIS rep — 3 to 5 words (never more than 6), ONE COMPLETE short sentence, NO name.
 WHOLE BODY, ONE CHAIN (owner, 2026-10-21): "error" is what the device MEASURED (the leg / the movement); "bodyNow" is what the coach's eyes see in the WHOLE body (chest, pelvis, posture, support leg). Treat them as ONE movement chain: when the body causes the leg error (e.g. the chest leaning back → the leg swings up; the pelvis open → the foot does not turn out), name the ROOT in the body and its effect on the leg in one instruction; otherwise give the single most important fix. Never generic, never filler, never a vague 'focus' — a concrete action a top coach would shout (it must be SAID in under 2 seconds, the next pass is coming; the deep why / how is said in the rest). It must tell them what to do on the very next rep — exactly the instruction of "what" / "how", nothing else.
 ${f.tone === 'calm' ? 'The trainee is tired / frustrated right now: say it calmly and supportively, one simple thing.' : ''}
@@ -157,7 +169,7 @@ Do not repeat or paraphrase closely any of the recent cues listed.${(f.previousF
 /** The prompt of the exercise briefing (pure — tested). */
 export function buildBriefingPrompt(f) {
   const he = f.lang !== 'en';
-  const system = `${COACH_PERSONA(he)}
+  const system = `${COACH_PERSONA(he, f.style)}
 NOW: the exercise is about to begin. Introduce and TEACH it to THIS trainee like the best coach + physiotherapist: what the exercise is for, then the technique — ONLY the steps and the key point given, in your own fresh words, adapted to the trainee's body (a prosthesis / crutches as given) — and end with a short cue to get ready. About 45–75 words, flowing spoken sentences. ${f.name ? `Address the trainee as ${clip(f.name, 20)} once.` : ''}
 Output ONLY the spoken text.`;
   const user = JSON.stringify({
@@ -171,7 +183,7 @@ Output ONLY the spoken text.`;
 /** The prompt of the rest's analysis (pure — tested). */
 export function buildDebriefPrompt(f) {
   const he = f.lang !== 'en';
-  const system = `${COACH_PERSONA(he)}
+  const system = `${COACH_PERSONA(he, f.style)}
 NOW: the REST between sets. You are the expert in the locker room analysing the set that just ended, for THIS trainee, from the measured log. Speak about 70–130 words, in flowing spoken sentences:
 ${f.prefetch ? '1. Do NOT open with the set in numbers (the coach says them first) and give frequencies in words ("in most passes", "in a few") — never as counts.' : '1. The set in numbers (reps / seconds, accuracy — if accuracy is null say nothing about it).'} "reps" are COUNTED reps — never call them clean, perfect or good unless "errors" is empty.
 2. The most important thing to fix (safety first, then what happened most): what happened, how often, the measured value vs. the target when given, WHY it matters biomechanically / for injury, and HOW to fix it — a precise, practical instruction or feel.
@@ -179,7 +191,7 @@ ${f.prefetch ? '1. Do NOT open with the set in numbers (the coach says them firs
 CONSISTENCY: "setProblems" is the truth of what was seen — never say a part was "not visible / unclear" when setProblems names a finding about it (e.g. the toes at the contact); drop any visual note that contradicts it. The card says exactly the same as the speech.
 "previousSet" (when given) = the problems of the PREVIOUS set of this exercise: compare explicitly — what IMPROVED (a problem gone, or fewer times) gets a genuine, specific praise for the progress; what persists is named as the focus; then where we are heading in the next set.
 4. What was good — ONLY items listed in "measuredClean". If "judgedNothing" is true, say honestly that this set's technique could not be measured clearly from the camera (and what would help) — NEVER call the set clean or perfect.
-5. ONE clear goal for the next set (or, if lastSet, what to take to next time).
+5. ONE clear goal for the next set (or, if lastSet, what to take to next time).${f.lastSet && f.notebook ? ' "lastWorkoutNotes" = your notes from the previous workout: if THIS exercise relates to them, say in ONE sentence how today compares (better / the same focus) — only from the facts.' : ''}
 If nothing was measured (attempts 0 and no errors) say honestly that you could not see the movement clearly and what to do so you can.
 "visualNotes" are what a vision model saw in single frames — weaker evidence than the measurement: use a note only if it agrees with the measured errors / clean items, never to contradict them, and never invent a number from it.
 "oneOffs" (owner, 2026-10-25) = single slips that happened ONCE in their block of reps and were NOT said during the set: mention the most relevant one in ONE short sentence — "I noticed in rep X you did Y — watch it in the next set" (in your own words).
@@ -206,6 +218,7 @@ Return ONLY JSON: {"speech":"<the spoken analysis>","card":[{"kind":"fix|good|fo
       fixedAfterStop: (f.previousSet.fixed || []).slice(0, 4).map(x => clip(x, 100)),
     } : null,
     judgedNothing: !!f.judgedNothing,
+    ...(f.lastSet && f.notebook ? { lastWorkoutNotes: clip(f.notebook, 400) } : {}),
   });
   return { system, user };
 }
@@ -258,10 +271,11 @@ export async function generateCue(facts, { timeoutMs = 3000, askFn = ask } = {})
   const prompt = buildCuePrompt(facts);
   for (const model of CUE_MODELS) {
     let raw;
-    try { raw = await hedged(() => askFn(model, prompt, facts.mode === 'stop' || facts.mode === 'pain' ? 220 : 80, facts.mode === 'stop' || facts.mode === 'pain' ? Math.max(timeoutMs, 8000) : timeoutMs, 'off'), facts.mode === 'stop' || facts.mode === 'pain' ? 4500 : CUE_HEDGE_MS); } catch (err) { if (isModelError(err)) continue; throw err; }
+    try { raw = await hedged(() => askFn(model, prompt, ['stop', 'pain', 'opening'].includes(facts.mode) ? 220 : 80, facts.mode === 'stop' || facts.mode === 'pain' ? Math.max(timeoutMs, 8000) : timeoutMs, 'off'), facts.mode === 'stop' || facts.mode === 'pain' ? 4500 : CUE_HEDGE_MS); } catch (err) { if (isModelError(err)) continue; throw err; }
     const text = String(raw || '').replace(/["“”«»]/g, '').replace(/\s+/g, ' ').trim();
-    if (!text || /^SKIP/i.test(text) || text.length > (facts.mode === 'stop' || facts.mode === 'pain' ? MAX_STOP_CHARS : MAX_CUE_CHARS) || !numbersGrounded(text, facts) || !directionsKept(text, facts)) return null;
+    if (!text || /^SKIP/i.test(text) || text.length > (['stop', 'pain', 'opening'].includes(facts.mode) ? MAX_STOP_CHARS : MAX_CUE_CHARS) || !numbersGrounded(text, facts) || !directionsKept(text, facts)) return null;
     if (!passWordsOk(text, facts)) return null;                                  // a pass is never a "kick" / "יפה"
+    if (facts.mode === 'opening' && facts.painArea && !text.includes(String(facts.painArea))) return null;   // the pain's own area, never another
     if ((facts.recent || []).some(r => r && r.trim() === text)) return null;   // never the same words twice
     if (wordCount(text) <= MAX_CUE_WORDS || facts.mode) return text;
     // too long (owner, 2026-10-21): the SAME instruction asked again, at most 6 words, whole (never a cut sentence)
@@ -447,6 +461,52 @@ export async function generateDebrief(facts, { timeoutMs = 25000, askFn = ask } 
     } catch (err) {
       // a model this key cannot use → the next one; anything else → the device's own analysis
       if (!isModelError(err)) throw err;
+    }
+  }
+  return null;
+}
+
+
+// ===================== THE COACH NOTEBOOK (Stage 3 #17, owner decision 2026-09-28; built 2026-11-01) =====================
+// After every workout the coach writes its own short notes (Opus): how it went, the pain reports, what to follow up.
+// The next workout opens with a personal line from them (mode 'opening'), and the last set's analysis may refer to them.
+export const NOTEBOOK_MODELS = DEBRIEF_MODELS;
+
+/** The notebook prompt (pure — tested). */
+export function buildNotebookPrompt(f) {
+  const he = f.lang !== 'en';
+  const system = `${COACH_PERSONA(he, f.style)}
+NOW: the workout ended. Write YOUR OWN short coach's notes about it — for yourself, to remember this trainee next time (a real coach's notebook). Only from the facts: never invent a number, an exercise, a feeling or an event. Write every exercise name EXACTLY as given (never change a word of it).
+Return ONLY JSON: {"summary":"<2–3 sentences: how the workout went>","performance":"<1 sentence: the strongest point and the main thing to improve, from the exercises>","pain":"<1 sentence about the pain reports (where, how strong, what was decided) or empty>","notable":"<1 short sentence or empty>","focusNext":"<the ONE focus for the next workout>","followUp":"<the ONE thing to ask about at the start of the next workout>"} — ${he ? 'natural Hebrew' : 'English'}, short.`;
+  const user = JSON.stringify({
+    exercise_results: (f.exercises || []).slice(0, 12).map(e => ({
+      name: clip(e?.name, 60), repsTarget: e?.repsTarget ?? null, repsDone: e?.repsActual ?? null,
+      setsTarget: e?.setsTarget ?? null, setsDone: e?.setsCompleted ?? null, score: e?.avgScore ?? null,
+    })),
+    painReports: (f.painReports || []).slice(0, 8).map(p => ({ level: p?.level ?? null, zone: clip(p?.zone, 20), exercise: clip(p?.exercise, 60), decision: clip(p?.choice || p?.action, 20) })),
+    status: clip(f.status, 20), minutes: f.minutes ?? null, readiness: f.readiness ?? null,
+    previousNotes: clip(f.previousNotes, 300), name: clip(f.name, 20), track: clip(f.track, 20), sport: clip(f.sport, 40),
+  });
+  return { system, user };
+}
+
+const NOTE_KEYS = ['summary', 'performance', 'pain', 'notable', 'focusNext', 'followUp'];
+export async function generateNotebook(facts, { timeoutMs = 30000, askFn = ask } = {}) {
+  if (!(facts?.exercises || []).length && !(facts?.painReports || []).length) return null;
+  const prompt = buildNotebookPrompt(facts);
+  for (const model of NOTEBOOK_MODELS) {
+    try {
+      const raw = await askFn(model, prompt, 900, timeoutMs, 'low');
+      const m = String(raw || '').match(/\{[\s\S]*\}/);
+      const j = m ? JSON.parse(m[0]) : null;
+      if (!j || typeof j.summary !== 'string' || j.summary.length < 10) return null;
+      const out = {};
+      for (const k of NOTE_KEYS) out[k] = typeof j[k] === 'string' ? clip(j[k].replace(/\s+/g, ' ').trim(), 300) : '';
+      // every note keeps to the facts' numbers
+      if (!numbersGrounded(NOTE_KEYS.map(k => out[k]).join(' '), facts)) return null;
+      return out;
+    } catch (err) {
+      if (!isModelError(err)) return null;
     }
   }
   return null;

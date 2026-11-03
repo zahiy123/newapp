@@ -20,9 +20,17 @@ function setAiStatus(s) {
   for (const fn of listeners) { try { fn(s); } catch { /* a listener's error never breaks the call */ } }
 }
 
+// The coach's style right now (Stage 3 #12): 'energetic' (the #74 coach) | 'balanced' | 'calm' — sent with every
+// AI call (the server adds the tone line; energetic = the prompt unchanged)
+let coachStyleNow = 'energetic';
+export function setCoachStyleAI(style) { coachStyleNow = style || 'energetic'; }
+// The coach notebook's last notes (Stage 3 #17): the last set's analysis may connect to them
+let notebookNow = '';
+export function setNotebookContext(text) { notebookNow = String(text || '').slice(0, 600); }
+
 async function post(path, body, timeoutMs, { background = false } = {}) {
   try {
-    const res = await fetchWithTimeout(apiUrl(path), { method: 'POST', body: JSON.stringify(body) }, timeoutMs);
+    const res = await fetchWithTimeout(apiUrl(path), { method: 'POST', body: JSON.stringify({ style: coachStyleNow, ...body }) }, timeoutMs);
     if (!res.ok) { if (++failsInRow >= 2) setAiStatus('unreachable'); return null; }
     const j = await res.json();
     // a SLOW background call (the briefing, prepared ahead) is not an outage: only a real failure shows the banner
@@ -45,7 +53,7 @@ export async function aiCue(facts) {
 
 /** The rest's analysis { speech, card: [{ kind, title, detail[] }] } by the AI, or null. */
 export async function aiDebrief(facts) {
-  const j = await post('/api/coach/set-debrief', facts, DEBRIEF_DEADLINE_MS);
+  const j = await post('/api/coach/set-debrief', notebookNow ? { notebook: notebookNow, ...facts } : facts, DEBRIEF_DEADLINE_MS);
   const d = j?.debrief;
   return d && typeof d.speech === 'string' && d.speech.length > 20 ? d : null;
 }
@@ -77,6 +85,19 @@ export async function aiPain(facts) {
   const j = await post('/api/coach/live-cue', { ...facts, mode: 'pain' }, 8500);
   const t = typeof j?.cue === 'string' ? j.cue.trim() : '';
   return t && t.length <= 240 ? t : null;
+}
+
+/** The coach's opening line of a workout, worded live from the last notebook entry, or null. */
+export async function aiOpening(facts) {
+  const j = await post('/api/coach/live-cue', { ...facts, mode: 'opening' }, 8500);
+  const t = typeof j?.cue === 'string' ? j.cue.trim() : '';
+  return t && t.length <= 240 ? t : null;
+}
+
+/** The coach's notebook notes about the workout that just ended (Opus), or null. */
+export async function aiNotebook(facts) {
+  const j = await post('/api/coach/notebook', facts, 35000, { background: true });
+  return j?.notebook && typeof j.notebook.summary === 'string' ? j.notebook : null;
 }
 
 /** A short coach line (positioning / start / ready / motivation) worded by the AI from the facts, or null. */

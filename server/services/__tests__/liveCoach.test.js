@@ -127,3 +127,31 @@ test('the pain traffic light: the prompt carries the device decision; a long cal
   assert.equal(await generateCue(f, { askFn: async () => line }), line);
   assert.equal(await generateCue(f, { askFn: async () => 'עוצרים, תנוח 5 דקות.' }), null);
 });
+
+test('coach styles: energetic keeps the #74 prompt exactly; calm / balanced add a tone line', async () => {
+  const { styleLine } = await import('../liveCoach.js');
+  const base = buildCuePrompt(cueFacts).system;
+  assert.equal(buildCuePrompt({ ...cueFacts, style: 'energetic' }).system, base);
+  assert.match(buildCuePrompt({ ...cueFacts, style: 'calm' }).system, /STYLE — CALM/);
+  assert.match(buildDebriefPrompt({ lang: 'he', style: 'balanced', exercise: 'x' }).system, /STYLE — BALANCED/);
+  assert.equal(styleLine(undefined), '');
+});
+
+test('the coach notebook: JSON notes from the facts; an invented number is rejected', async () => {
+  const { generateNotebook, buildNotebookPrompt } = await import('../liveCoach.js');
+  const f = { lang: 'he', exercises: [{ name: 'סקוואט', repsTarget: 10, repsActual: 10, setsTarget: 3, setsCompleted: 3, avgScore: 8 }], painReports: [{ level: 5, zone: 'knee', exercise: 'סקוואט', action: 'reduce' }] };
+  assert.match(buildNotebookPrompt(f).system, /coach's notes/);
+  const ok = JSON.stringify({ summary: 'אימון טוב, שלושה סטים מלאים בסקוואט.', performance: 'עומק טוב', pain: 'כאב 5 בברך — הורדנו עומס', notable: '', focusNext: 'יציבות הברך', followUp: 'איך הברך?' });
+  const n = await generateNotebook(f, { askFn: async () => ok });
+  assert.equal(n.followUp, 'איך הברך?');
+  const bad = JSON.stringify({ summary: 'עשית 40 חזרות מושלמות היום.', performance: '', pain: '', notable: '', focusNext: '', followUp: '' });
+  assert.equal(await generateNotebook(f, { askFn: async () => bad }), null);
+  assert.equal(await generateNotebook({ lang: 'he' }, { askFn: async () => ok }), null);
+});
+
+test('the opening line from the notebook uses the long-line limit', async () => {
+  const f = { lang: 'he', mode: 'opening', error: { what: 'לפני 2 ימים: כאב 5 בברך בסקוואט; המיקוד: יציבות הברך' } };
+  assert.match(buildCuePrompt(f).system, /YOUR OWN NOTES/);
+  const line = 'זהי, בפעם הקודמת הברך הציקה לך בסקוואט, ושמנו מיקוד על היציבות שלה. איך היא מרגישה היום?';
+  assert.equal(await generateCue(f, { askFn: async () => line }), line);
+});

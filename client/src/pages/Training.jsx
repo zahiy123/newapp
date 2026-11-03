@@ -26,7 +26,7 @@ import TrainingViewControls from '../components/TrainingViewControls';
 import CoachVoicePicker from '../components/CoachVoicePicker';
 import { pickCoachVoice } from '../engine/voicePick';
 import { coachMode, COACH_IDS } from '../engine/coachAvatar';
-import { setCoachVoice, setSpeechOpen, holdSpeech } from '../hooks/useSpeech';
+import { setCoachVoice, setSpeechOpen, holdSpeech, setSpeechRateFactor } from '../hooks/useSpeech';
 import { techniqueWhy } from '../utils/techniqueWhy';
 import { useVoiceCommand } from '../hooks/useVoiceCommand';
 import { READY_DRIVE, withDrive, splitLegOrder, legLabel, splitStartText, splitSwitchText, splitWorkingSide, setLegHalf, legSetStartText, legSetNextText, isStrikeMode } from '../engine/training/coachFlow';
@@ -44,7 +44,9 @@ import { useVoiceProsody } from '../hooks/useVoiceProsody';
 import { brainSummary, brainBall } from '../engine/coachBrain/brain';
 import { buildDebrief } from '../engine/coachBrain/debrief';
 import { debriefFacts, legacyCueFacts, bodyText } from '../engine/coachBrain/aiFacts';
-import { aiCue, aiDebrief, aiBriefing, aiLine, aiPain, getAiStatus, onAiStatus } from '../utils/aiCoach';
+import { aiCue, aiDebrief, aiBriefing, aiLine, aiPain, aiOpening, aiNotebook, setCoachStyleAI, setNotebookContext, getAiStatus, onAiStatus } from '../utils/aiCoach';
+import { defaultStyle, shouldSoften, effectiveStyle, rateFactor, isStyle } from '../engine/training/coachStyle';
+import { notebookFacts, worstPain, notesText, openingFacts, painToCheck } from '../engine/training/coachNotebook';
 import { painLight, painAction, reducedLoad, microLoad, canSafeMode, zonesFor, painEntry, painFacts, safeModeFacts, protectFromPain } from '../engine/training/painTrafficLight';
 import { kickingSide } from '../engine/incomingBall';
 import { ballModeFor, virtualBallWanted, handSide, ballLook, realBallInPlay } from '../engine/virtualBall';
@@ -64,7 +66,7 @@ import { estimateCalories } from '../utils/calorieEstimator';
 import ROMGauge from '../components/ROMGauge';
 import WorkoutSummary from '../components/WorkoutSummary';
 import { db } from '../services/firebase';
-import { doc, getDoc, addDoc, updateDoc, collection, Timestamp, getDocs, query, orderBy, limit } from 'firebase/firestore';
+import { doc, getDoc, addDoc, setDoc, updateDoc, collection, Timestamp, getDocs, query, orderBy, limit } from 'firebase/firestore';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { apiUrl, authFetch, fetchWithTimeout } from '../utils/api';
 import { markDayCompleted, sanitizePlan, saveActiveWorkout, loadActiveWorkout, clearActiveWorkout, queuePendingSession } from '../utils/workoutStorage';
@@ -677,6 +679,7 @@ export default function Training() {
   const sessionSavedRef = useRef(false);
   const rawExercisesRef = useRef([]);      // the day's exercises before the equipment fit
   const painHistoryRef = useRef([]);       // the trainee's recent pain log (protects the exercises that hurt)
+  const lastNoteRef = useRef(null);        // the coach notebook's last entry (Stage 3 #17)
   const aiSummaryRef = useRef(null);
 
   // Build the day's exercises from the plan for TODAY's reality (check-in answers; null = profile defaults)
@@ -715,6 +718,8 @@ export default function Training() {
     setCoachPicked(true);
     offerCoachVoice(status.coach);
     sessionDataRef.current.checkIn = status;
+    setCoachStyle(isStyle(status.coachStyle) ? status.coachStyle : defaultStyle(userProfile));
+    startOpening();
     if (typeof status.hasBall === 'boolean') setBallAnswer(status.hasBall);   // no separate ball question
     if (planSourceRef.current) setExercises(buildTodayExercises(planSourceRef.current, status));
     if (user?.uid) updateDoc(doc(db, 'users', user.uid), { lastCheckIn: status }).catch(err => console.error('[CheckIn] save failed:', err));
@@ -739,6 +744,15 @@ export default function Training() {
       const loadedExercises = buildTodayExercises(planSourceRef.current, null);
       setExercises(loadedExercises);
       resetVisionSession();
+
+      // The coach notebook: the last entry → the opening line, and the last set's analysis may refer to it
+      try {
+        const nbSnap = await getDocs(query(collection(db, 'users', user.uid, 'coachNotebook'), orderBy('date', 'desc'), limit(1)));
+        lastNoteRef.current = nbSnap.docs[0]?.data() || null;
+        setNotebookContext(lastNoteRef.current ? notesText(lastNoteRef.current, { isHe: (data.language || 'he') === 'he' }) : '');
+      } catch (err) {
+        console.warn('[Notebook] not loaded:', err.message);
+      }
 
       // The pain log (the last 14 days): an exercise that hurt (red, or yellow twice) runs lighter today
       try {
@@ -1239,6 +1253,7 @@ export default function Training() {
       set: currentSet, rep: displayReps, phase: pausedStateRef.current?.wasPhase || phase,
     });
     sessionDataRef.current.painReports = [...(sessionDataRef.current.painReports || []), entry];
+    setPainCount(n => n + 1);
     const logRef = user
       ? addDoc(collection(db, 'users', user.uid, 'painLog'), { ...entry, date: Timestamp.now(), sport: userProfile?.sport || '' })
         .catch(err => { console.warn('[Pain] the pain log was not saved:', err.message); return null; })
@@ -1284,6 +1299,71 @@ export default function Training() {
       });
   }
   useEffect(() => () => clearTimeout(painResumeTmRef.current), []);
+
+  // ---- ADAPTIVE COACH STYLES (Stage 3 #12): chosen in the check-in; softens to calm after pain 4+ / readiness 1–2 ----
+  const [coachStyle, setCoachStyle] = useState(() => defaultStyle(userProfile));
+  const [painCount, setPainCount] = useState(0);         // re-evaluates the softening after each report
+  const softened = shouldSoften({ painReports: sessionDataRef.current.painReports, readiness: readinessRating });
+  const styleNow = effectiveStyle(coachStyle, { softened });
+  useEffect(() => {
+    setCoachStyleAI(styleNow);
+    setSpeechRateFactor(rateFactor(styleNow));
+    if (softened) console.info(`[Coach] the style softens to calm (pain / readiness) — chosen: ${coachStyle}`);
+  }, [styleNow, softened, coachStyle, painCount]);
+  useEffect(() => () => { setCoachStyleAI('energetic'); setSpeechRateFactor(1); setNotebookContext(''); }, []);
+  // (a resumed workout has no check-in: the last chosen style, or the track's default)
+  useEffect(() => {
+    if (!userProfile || checkIn) return;
+    const last = userProfile.lastCheckIn?.coachStyle;
+    setCoachStyle(isStyle(last) ? last : defaultStyle(userProfile));
+  }, [userProfile, checkIn]);
+
+  // ---- THE COACH NOTEBOOK (Stage 3 #17): the opening line of the workout, live from the last notes ----
+  const [opening, setOpening] = useState(null);     // null | { line, pain: {level, zone, exercise}|null, stage: 'ask'|'level'|'done' }
+  function startOpening() {
+    const entry = lastNoteRef.current;
+    const facts = openingFacts(entry, { isHe });
+    if (!facts || opening) return;
+    const pain = painToCheck(entry);
+    aiOpening({ ...facts, lang: isHe ? 'he' : 'en', name: playerName, sport: userProfile?.sport || '' }).then((line) => {
+      if (!line && !pain) return;                        // nothing live to say → no stored sentence instead
+      setOpening({ line, pain, stage: 'ask' });
+      if (line) speakPriority(line, { rate: 1.1 });
+    });
+  }
+  function answerOpening(level) {
+    const o = opening;
+    if (!o?.pain) { setOpening(null); return; }
+    const entry = painEntry({ level, zone: o.pain.zone, exercise: 'opening', phase: 'opening' });
+    entry.about = o.pain.exercise || null;
+    sessionDataRef.current.painReports = [...(sessionDataRef.current.painReports || []), entry];
+    setPainCount(n => n + 1);
+    if (user) addDoc(collection(db, 'users', user.uid, 'painLog'), { ...entry, date: Timestamp.now(), sport: userProfile?.sport || '' })
+      .catch(err => console.warn('[Pain] the pain log was not saved:', err.message));
+    // still hurting (4+) → the exercise that hurt last time runs lighter today
+    if (level >= 4 && o.pain.exercise) {
+      const synthetic = [{ exercise: o.pain.exercise, level: Math.max(6, level), zone: o.pain.zone, at: Date.now() }];
+      painHistoryRef.current = [...painHistoryRef.current, ...synthetic];
+      setExercises(prev => protectFromPain(prev, synthetic));
+    }
+    setOpening({ ...o, stage: 'done', level });
+  }
+  async function writeNotebook(workoutId, data) {
+    try {
+      const notes = await aiNotebook(notebookFacts({
+        exercises: data.exercises || [], painReports: data.painReports || [], status: data.status,
+        durationSec: data.totalDuration, readiness: readinessRating, previous: lastNoteRef.current,
+        profile: userProfile, lang: isHe ? 'he' : 'en',
+      }));
+      if (!notes) { console.warn('[Notebook] no notes written (the AI did not answer)'); return; }
+      await setDoc(doc(db, 'users', user.uid, 'coachNotebook', workoutId), {
+        ...notes, worstPain: worstPain(data.painReports), workoutId, at: Date.now(), date: Timestamp.now(), lang: isHe ? 'he' : 'en',
+      });
+      console.info('[Notebook] the coach wrote its notes for', workoutId);
+    } catch (err) {
+      console.warn('[Notebook] not saved:', err.message);
+    }
+  }
 
   // SAFE MODE (owner, 2026-11-01): on red, the trainee may go on at a MINIMAL load instead of stopping —
   // only this set, a few more reps, very slow and small, the coach close by; re-checked at the set's end
@@ -2825,6 +2905,7 @@ export default function Training() {
       try {
         const ref = await addDoc(collection(db, 'users', user.uid, 'workouts'), data);
         saved = true;
+        writeNotebook(ref.id, data);
         // Mark day as completed in localStorage for Dashboard progress tracking
         if (status === 'completed') {
           const weekIdx = parseInt(searchParams.get('week') || '0');
@@ -4086,6 +4167,47 @@ export default function Training() {
         {phase === PHASE.IDLE && cameraActive && exercises.length > 0 && (checkIn || currentIdx > 0) && (
           <div className="absolute inset-0 flex items-center justify-center z-[6]">
             <div className="text-center space-y-4">
+              {/* THE COACH NOTEBOOK — the coach remembers the last workout (and checks a pain it noted) */}
+              {opening && (
+                <div dir={isHe ? 'rtl' : 'ltr'} className="bg-white/95 rounded-2xl shadow-xl px-4 py-3 max-w-sm mx-auto text-start space-y-2">
+                  <div className="text-xs font-semibold text-gray-500">{'🗒️'} {isHe ? 'מהאימון הקודם' : 'From last time'}</div>
+                  {opening.line && <div className="text-gray-900 font-semibold">{opening.line}</div>}
+                  {!opening.line && opening.pain && (
+                    <div className="text-gray-900 font-semibold">
+                      {(() => { const z = painZones.find(x => x.id === opening.pain.zone); return isHe
+                        ? `בפעם הקודמת דיווחת על כאב ${opening.pain.level}${z ? ` ב${z.he}` : ''}. איך זה היום?`
+                        : `Last time you reported pain ${opening.pain.level}${z ? ` (${z.en})` : ''}. How is it today?`; })()}
+                    </div>
+                  )}
+                  {opening.pain && opening.stage === 'ask' && (
+                    <div className="flex gap-2">
+                      <button onClick={() => answerOpening(0)} className="flex-1 py-2 rounded-xl bg-emerald-600 text-white font-bold text-sm">{isHe ? '✓ מרגיש טוב' : '✓ Feeling good'}</button>
+                      <button onClick={() => setOpening({ ...opening, stage: 'level' })} className="flex-1 py-2 rounded-xl bg-rose-600 text-white font-bold text-sm">{isHe ? '🚦 עדיין כואב' : '🚦 Still hurts'}</button>
+                    </div>
+                  )}
+                  {opening.pain && opening.stage === 'level' && (
+                    <div className="grid grid-cols-6 gap-1.5">
+                      {Array.from({ length: 10 }, (_, i) => i + 1).map(n => {
+                        const l = painLight(n);
+                        return (
+                          <button key={n} onClick={() => answerOpening(n)}
+                            className={`${l === 'green' ? 'bg-emerald-600' : l === 'yellow' ? 'bg-amber-500' : 'bg-red-600'} text-white font-bold rounded-lg py-1.5 tabular-nums`}>{n}</button>
+                        );
+                      })}
+                    </div>
+                  )}
+                  {opening.stage === 'done' && opening.pain && (
+                    <div className="text-sm text-gray-700">
+                      {opening.level >= 4
+                        ? (isHe ? 'רשמתי. התרגיל שכאב בפעם הקודמת יהיה היום בעומס מופחת, ואני אדבר רגוע יותר.' : 'Noted. The exercise that hurt last time runs lighter today, and I will speak more calmly.')
+                        : (isHe ? 'מעולה, רשמתי.' : 'Great, noted.')}
+                    </div>
+                  )}
+                  {(!opening.pain || opening.stage === 'done') && (
+                    <button onClick={() => setOpening(null)} className="text-xs text-gray-500 underline">{isHe ? 'סגור' : 'Close'}</button>
+                  )}
+                </div>
+              )}
               {/* Readiness Rating */}
               {!readinessApplied && (
                 <div className="bg-white/95 backdrop-blur rounded-2xl px-6 py-4 shadow-xl mb-2">

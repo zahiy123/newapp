@@ -5,6 +5,7 @@ import { useState } from 'react';
 import { CHECKIN_LOCATIONS, CHECKIN_MOBILITY, checkInQuestions, checkInDefaults, checkInComplete } from '../engine/training/dailyCheckIn';
 import { COACH_IDS, COACH_INFO } from '../engine/coachAvatar';
 import { CoachPreview } from './CoachAvatar';
+import { COACH_STYLES, defaultStyle, isStyle } from '../engine/training/coachStyle';
 
 /** The last coach choice (this device first, then the last saved check-in). */
 function lastCoach(profile) {
@@ -25,7 +26,10 @@ function Choice({ active, onClick, children }) {
 
 export default function DailyCheckIn({ profile, isHe, onDone }) {
   const q = checkInQuestions(profile);
-  const [status, setStatus] = useState(() => ({ ...checkInDefaults(profile), coach: lastCoach(profile) }));
+  const [status, setStatus] = useState(() => ({
+    ...checkInDefaults(profile), coach: lastCoach(profile),
+    coachStyle: isStyle(profile?.lastCheckIn?.coachStyle) ? profile.lastCheckIn.coachStyle : defaultStyle(profile),
+  }));
   const set = (k, v) => setStatus(s => ({ ...s, [k]: v }));
   const ready = checkInComplete(profile, status);
 
@@ -51,6 +55,18 @@ export default function DailyCheckIn({ profile, isHe, onDone }) {
             className={`flex-1 rounded-xl border-2 p-1.5 text-sm font-semibold transition ${status.coach === 'none' ? 'border-green-500 bg-green-50 text-green-800' : 'border-gray-200 bg-white text-gray-700'}`}>
             {isHe ? 'בלי דמות' : 'No character'}
           </button>
+        </div>
+      </div>
+
+      <div className="space-y-2">
+        <div className="text-sm font-semibold text-gray-700">{'🗣️'} {isHe ? 'איך המאמן ידבר היום?' : 'How should the coach talk today?'}</div>
+        <div className="flex gap-2">
+          {COACH_STYLES.map(s => (
+            <Choice key={s.id} active={status.coachStyle === s.id} onClick={() => set('coachStyle', s.id)}>
+              <span className="block">{isHe ? s.he : s.en}</span>
+              <span className="block text-[11px] font-normal text-gray-500">{isHe ? s.hintHe : s.hintEn}</span>
+            </Choice>
+          ))}
         </div>
       </div>
 

@@ -32,6 +32,9 @@ export function coachSaidRecently(re, ms = 5000) {
   const playing = typeof window !== 'undefined' && !!window.speechSynthesis?.speaking;
   return coachLines.some((l, i) => re.test(l.text) && (now - l.at <= ms || (playing && i === coachLines.length - 1)));
 }
+// the coach style's speech-rate factor (Stage 3 #12): 1 = the #74 coach; calm / balanced speak a little slower
+let speechRateFactor = 1;
+export function setSpeechRateFactor(f) { speechRateFactor = Number(f) > 0 ? Number(f) : 1; }
 export function getCoachVoice() { return coachVoice; }
 export function setCoachVoice(gender) { coachVoice = gender === 'male' || gender === 'female' ? gender : null; }
 /** The coach's chosen / best device voice (explicit — from getVoices()), and whether it is surely of its gender. */
@@ -190,6 +193,7 @@ export function useSpeech(lang = 'he-IL', age) {
     if (options.rate) {
       utterance.rate = Math.min(Math.max(options.rate, 0.8), 1.2);
     }
+    if (speechRateFactor !== 1) utterance.rate = Math.min(Math.max(utterance.rate * speechRateFactor, 0.75), 1.2);
     if (options.pitch) {
       utterance.pitch = options.pitch;
     }
