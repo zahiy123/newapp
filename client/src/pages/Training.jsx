@@ -690,6 +690,7 @@ export default function Training() {
   const loadStepRef = useRef({ step: 0, raised: false });   // the graded load step (rule 3)
   const autoLevelRef = useRef(0);          // today's lighter level (rules 1–2)
   const [loadRaised, setLoadRaised] = useState(false);
+  const [loadLowered, setLoadLowered] = useState(false);
   const aiSummaryRef = useRef(null);
 
   // Build the day's exercises from the plan for TODAY's reality (check-in answers; null = profile defaults)
@@ -798,7 +799,8 @@ export default function Training() {
         loadStepRef.current = decided;
         sessionDataRef.current.loadStep = decided.step;
         setLoadRaised(decided.raised);
-        if (decided.step > 0) {
+        setLoadLowered(decided.lowered);
+        if (decided.step !== 0) {
           console.info(`[Load] step ${decided.step}${decided.raised ? ' (raised today)' : ''}`);
           setExercises(prev => applyComplexityStep(prev, decided.step, limbProfile || {}, isHe));
         }
@@ -1281,11 +1283,14 @@ export default function Training() {
     console.info(`[Pain] level ${level} (${entry.light}) at ${zone || '—'} → ${action}`);
     let reduced = null;
     if (action === 'reduce' && currentExercise) {
-      reduced = reducedLoad({ reps: currentExercise.reps, sets: totalSets, currentSet });
+      // GRADED (owner, 2026-11-03): one level per yellow report on this exercise, from its ORIGINAL numbers
+      const base = currentExercise.painBase || { reps: currentExercise.reps, restSeconds: currentExercise.restSeconds };
+      const lvl = Math.min(2, (currentExercise.painLevel || 0) + 1);
+      reduced = { ...reducedLoad({ reps: base.reps, sets: totalSets, restSeconds: base.restSeconds, level: lvl }), level: lvl };
       // IN PLACE, on purpose: a new exercise object would re-run the exercise-setup effect and reset the set
       // in progress to zero; the count / the set's end read currentExercise.reps live
-      Object.assign(currentExercise, { reps: typeof currentExercise.reps === 'string' ? String(reduced.reps) : reduced.reps, sets: reduced.sets, painReduced: true });
-      setTotalSets(reduced.sets);
+      Object.assign(currentExercise, { reps: typeof base.reps === 'string' ? String(reduced.reps) : reduced.reps, restSeconds: reduced.restSeconds, painReduced: true, painLevel: lvl, painBase: base });
+      setRestDuration(reduced.restSeconds);
     }
     let stopSnap = null;
     if (action === 'stop') {
@@ -2960,6 +2965,7 @@ export default function Training() {
       accuracy: accs.length ? Math.round(accs.reduce((a, b) => a + b, 0) / accs.length) : null,
       name: currentExercise.name,
       ...(currentExercise.upgradedFrom ? { upgradedFrom: currentExercise.upgradedFrom } : {}),
+      ...(currentExercise.easedFrom ? { easedFrom: currentExercise.easedFrom } : {}),
       repsTarget: parseInt(currentExercise.reps) || 0,
       repsActual: displayReps,
       setsTarget: totalSets,
@@ -3919,6 +3925,11 @@ export default function Training() {
           <div className="absolute top-12 left-1/2 -translate-x-1/2 z-20 pointer-events-none rounded-2xl bg-sky-700/95 text-white text-xs font-bold px-3 py-1.5 shadow text-center max-w-[90%]" dir={isHe ? 'rtl' : 'ltr'}>
             {'🛡️'} {isHe ? 'מצב בטוח — לאט מאוד, טווח קטן ונוח. כואב יותר? לחץ "כואב לי"' : 'Safe mode — very slow, a small comfortable range. More pain? Tap "It hurts"'}
           </div>
+        ) : currentExercise?.easedFrom && !currentExercise?.autoLighter && [PHASE.BRIEFING, PHASE.CALIBRATING, PHASE.EXERCISING].includes(phase) ? (
+          <div className="absolute top-12 left-1/2 -translate-x-1/2 z-20 pointer-events-none rounded-full bg-slate-700/95 text-white text-xs font-bold px-3 py-1 shadow" dir={isHe ? 'rtl' : 'ltr'}>
+            {'📉'} {isHe ? 'הורדת רמת מורכבות התרגיל' : 'Exercise complexity down'}
+            {currentExercise.easedFrom.name !== currentExercise.name ? (isHe ? ` — במקום ${currentExercise.easedFrom.name}` : ` — instead of ${currentExercise.easedFrom.name}`) : ''}
+          </div>
         ) : currentExercise?.upgradedFrom && !currentExercise?.autoLighter && [PHASE.BRIEFING, PHASE.CALIBRATING, PHASE.EXERCISING].includes(phase) ? (
           <div className="absolute top-12 left-1/2 -translate-x-1/2 z-20 pointer-events-none rounded-full bg-emerald-700/95 text-white text-xs font-bold px-3 py-1 shadow" dir={isHe ? 'rtl' : 'ltr'}>
             {'📈'} {isHe ? 'העלאת רמת מורכבות התרגיל' : 'Exercise complexity up'}
@@ -4295,6 +4306,11 @@ export default function Training() {
               {loadRaised && (
                 <div dir={isHe ? 'rtl' : 'ltr'} className="bg-emerald-600 text-white rounded-2xl shadow-xl px-4 py-2.5 max-w-sm mx-auto text-sm font-semibold">
                   {'📈'} {isHe ? 'העלאת רמת מורכבות התרגיל — 2 אימונים ברצף בקלות ובדיוק מלא, היום גרסה מאתגרת יותר' : 'Exercise complexity up — 2 easy, fully accurate workouts in a row; a more demanding version today'}
+                </div>
+              )}
+              {loadLowered && (
+                <div dir={isHe ? 'rtl' : 'ltr'} className="bg-slate-700 text-white rounded-2xl shadow-xl px-4 py-2.5 max-w-sm mx-auto text-sm font-semibold">
+                  {'📉'} {isHe ? 'הורדת רמת מורכבות התרגיל בשלב אחד — 2 אימונים ברצף היו קשים מדי; היום גרסה מעט קלה יותר' : 'Exercise complexity down one step — 2 workouts in a row were too hard; a slightly easier version today'}
                 </div>
               )}
               {/* THE COACH NOTEBOOK — the coach remembers the last workout (and checks a pain it noted) */}

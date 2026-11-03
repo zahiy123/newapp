@@ -4,7 +4,9 @@
 // PURE. The trainee reports pain at any moment (a button on the screen, or by voice: "כואב לי").
 // The DEVICE decides what happens (safety never waits for the AI); the AI only words the coach's line.
 //   0–3  green  → continue, the coach keeps an eye on it
-//   4–5  yellow → continue with a LOWER load (fewer reps, one set less, no range challenge)
+//   4–5  yellow → continue at a GRADED lower load: one level per report (level 1: reps × 0.8 + 15 s rest;
+//                 a 2nd yellow on the same exercise: level 2 — × 0.65 + 30 s); the sets stay (owner, 2026-11-03:
+//                 every pain reduction gradual and controlled — never a sharp drop that breaks the rehab flow)
 //   6–10 red    → the exercise STOPS; the report goes into the injury log; next exercise or end the workout
 // Every report (any colour) is saved with the workout and in the trainee's pain log.
 // ============================================================
@@ -27,19 +29,19 @@ export function painAction(level) {
   return l === 'green' ? 'continue' : l === 'yellow' ? 'reduce' : l === 'red' ? 'stop' : null;
 }
 
-export const LOAD_REDUCTION = 0.6;   // yellow: the reps (or seconds) left = 60 % of the target
+export const PAIN_LEVELS = { 1: { reps: 0.8, rest: 15 }, 2: { reps: 0.65, rest: 30 } };
 export const MIN_REPS = 3;
 
 /**
- * The lower load for a yellow report: reps × 0.6 (at least 3, never above the target), one set less
- * (never below the set in progress). Returns { reps, sets } — unchanged numbers when nothing to lower.
+ * The GRADED lower load of a pain level, always from the exercise's ORIGINAL numbers (never compounding):
+ * level 1 = reps × 0.8 (+15 s rest), level 2 = reps × 0.65 (+30 s); at least 3 reps, never above the
+ * original; the sets stay. Returns { reps, sets, restSeconds }.
  */
-export function reducedLoad({ reps, sets, currentSet = 1 }) {
+export function reducedLoad({ reps, sets, restSeconds = 60, level = 1 }) {
+  const l = PAIN_LEVELS[Math.min(2, Math.max(1, level))];
   const r = parseInt(reps, 10);
-  const s = parseInt(sets, 10);
-  const newReps = Number.isFinite(r) && r > 0 ? Math.min(r, Math.max(MIN_REPS, Math.round(r * LOAD_REDUCTION))) : reps;
-  const newSets = Number.isFinite(s) && s > 0 ? Math.max(Math.min(s, currentSet), s - 1) : sets;
-  return { reps: newReps, sets: newSets };
+  const newReps = Number.isFinite(r) && r > 0 ? Math.min(r, Math.max(MIN_REPS, Math.round(r * l.reps))) : reps;
+  return { reps: newReps, sets, restSeconds: (parseInt(restSeconds, 10) || 60) + l.rest };
 }
 
 // SAFE MODE (owner, 2026-11-01): on a red report the trainee may choose to go on at a MINIMAL load instead
@@ -143,8 +145,8 @@ export function painFacts({ level, zone, exercise, isHe = true }) {
   const z = PAIN_ZONES.find(x => x.id === zone);
   const where = z ? (isHe ? z.he : z.en) : (isHe ? 'לא צוין' : 'not given');
   const what = isHe
-    ? `המתאמן דיווח על כאב ב${where}. ההחלטה: ${action === 'continue' ? 'ממשיכים כרגיל ושמים לב לכאב' : action === 'reduce' ? 'ממשיכים בעומס נמוך יותר — פחות חזרות וסט אחד פחות' : 'עוצרים את התרגיל עכשיו; הכאב נרשם ביומן'}`
-    : `The trainee reported pain in: ${where}. The decision: ${action === 'continue' ? 'continue as usual and watch the pain' : action === 'reduce' ? 'continue with a lower load — fewer reps and one set less' : 'stop the exercise now; the pain is logged'}`;
+    ? `המתאמן דיווח על כאב ב${where}. ההחלטה: ${action === 'continue' ? 'ממשיכים כרגיל ושמים לב לכאב' : action === 'reduce' ? 'ממשיכים בעומס מעט נמוך יותר — קצת פחות חזרות ויותר מנוחה' : 'עוצרים את התרגיל עכשיו; הכאב נרשם ביומן'}`
+    : `The trainee reported pain in: ${where}. The decision: ${action === 'continue' ? 'continue as usual and watch the pain' : action === 'reduce' ? 'continue at a slightly lower load — a few fewer reps and more rest' : 'stop the exercise now; the pain is logged'}`;
   return { mode: 'pain', light: painLight(level), action, zone: zone || null, exercise: exercise || '', error: { what } };
 }
 
@@ -191,7 +193,8 @@ export function protectFromPain(exercises, entries, opts) {
   return (exercises || []).map((ex) => {
     const p = prot.get(ex?.name);
     if (!p || ex.painProtected) return ex;
-    const r = reducedLoad({ reps: ex.reps, sets: ex.sets, currentSet: 1 });
-    return { ...ex, reps: typeof ex.reps === 'string' ? String(r.reps) : r.reps, sets: r.sets, painProtected: p };
+    // one graded level (never a sharp drop): × 0.8 reps, +15 s rest; and never a harder version (complexity.js)
+    const r = reducedLoad({ reps: ex.reps, sets: ex.sets, restSeconds: ex.restSeconds, level: 1 });
+    return { ...ex, reps: typeof ex.reps === 'string' ? String(r.reps) : r.reps, restSeconds: r.restSeconds, painProtected: p };
   });
 }

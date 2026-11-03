@@ -15,11 +15,11 @@ describe('Pain Traffic Light — the levels', () => {
 });
 
 describe('Pain Traffic Light — the lower load', () => {
-  it('reps × 0.6 (at least 3), one set less but never below the set in progress', () => {
-    expect(reducedLoad({ reps: 10, sets: 3, currentSet: 1 })).toEqual({ reps: 6, sets: 2 });
-    expect(reducedLoad({ reps: 4, sets: 3, currentSet: 3 })).toEqual({ reps: 3, sets: 3 });
-    expect(reducedLoad({ reps: 2, sets: 1, currentSet: 1 })).toEqual({ reps: 2, sets: 1 });
-    expect(reducedLoad({ reps: '12', sets: '4', currentSet: 2 })).toEqual({ reps: 7, sets: 3 });
+  it('graded: level 1 = reps × 0.8 + 15 s rest, level 2 = × 0.65 + 30 s — from the ORIGINAL numbers, the sets stay', () => {
+    expect(reducedLoad({ reps: 10, sets: 3, restSeconds: 60, level: 1 })).toEqual({ reps: 8, sets: 3, restSeconds: 75 });
+    expect(reducedLoad({ reps: 10, sets: 3, restSeconds: 60, level: 2 })).toEqual({ reps: 7, sets: 3, restSeconds: 90 });
+    expect(reducedLoad({ reps: 4, sets: 3, level: 2 })).toMatchObject({ reps: 3, sets: 3 });
+    expect(reducedLoad({ reps: 2, sets: 1, level: 1 })).toMatchObject({ reps: 2 });
   });
 });
 
@@ -80,10 +80,10 @@ describe('Pain Traffic Light — the next workouts are protected', () => {
     const out = protectFromPain([
       { name: 'סקוואט', reps: '10', sets: 3 }, { name: 'לאנג׳', reps: 8, sets: 3 }, { name: 'פלאנק', reps: 30, sets: 2 },
     ], log, { now });
-    expect(out[0]).toMatchObject({ reps: '6', sets: 2, painProtected: { level: 7, zone: 'knee' } });
-    expect(out[1]).toMatchObject({ reps: 5, sets: 2 });
+    expect(out[0]).toMatchObject({ reps: '8', sets: 3, painProtected: { level: 7, zone: 'knee' } });
+    expect(out[1]).toMatchObject({ reps: 6, sets: 3 });
     expect(out[2].painProtected).toBeUndefined();
-    expect(protectFromPain(out, log, { now })[0].reps).toBe('6');   // never lowered twice
+    expect(protectFromPain(out, log, { now })[0].reps).toBe('8');   // never lowered twice
   });
 });
 

@@ -85,8 +85,15 @@ export default function Progress() {
         const step = Number(last?.loadStep) || 0;
         return last ? (
           <div className="rounded-xl bg-white shadow px-4 py-3 text-sm text-gray-800">
-            {'📈'} {isHe ? 'רמת מורכבות התרגילים: ' : 'Exercise complexity: '}<span className="font-bold tabular-nums">{step > 0 ? (isHe ? `שלב ${step}` : `level ${step}`) : (isHe ? 'בסיס' : 'base')}</span>
-            <span className="text-gray-500"> · {isHe ? 'עולה לגרסה מאתגרת יותר של התרגיל אחרי 2 אימונים ברצף בקלות ובדיוק מלא (90%+, בלי כאב)' : 'moves to a more demanding version of each exercise after 2 easy, fully accurate workouts in a row (90%+, no pain)'}</span>
+            {'📈'} {isHe ? 'רמת מורכבות התרגילים: ' : 'Exercise complexity: '}<span className="font-bold tabular-nums">{step > 0 ? (isHe ? `שלב ${step}` : `level ${step}`) : step < 0 ? (isHe ? `שלב ${step} (גרסאות קלות יותר)` : `level ${step} (easier versions)`) : (isHe ? 'בסיס' : 'base')}</span>
+            <span className="text-gray-500"> · {isHe ? 'עולה שלב אחרי 2 אימונים ברצף בקלות ובדיוק מלא (90%+, בלי כאב); יורד שלב אחרי 2 אימונים ברצף שהיו קשים מדי (מתחת ל-65%) — תמיד שלב אחד בכל פעם' : 'one step up after 2 easy, fully accurate workouts in a row (90%+, no pain); one step down after 2 workouts in a row that were too hard (under 65%) — always one step at a time'}</span>
+            {(last.exercises || []).some(e => e.easedFrom) && (
+              <div className="mt-1 text-slate-700">
+                {(last.exercises || []).filter(e => e.easedFrom).map((e, i) => (
+                  <div key={i}>{'📉'} {isHe ? 'הורדת רמת מורכבות התרגיל: ' : 'Complexity down: '}{e.easedFrom.name !== e.name ? `${e.easedFrom.name} ← ${e.name}` : e.name}</div>
+                ))}
+              </div>
+            )}
             {(last.exercises || []).some(e => e.upgradedFrom) && (
               <div className="mt-1 text-emerald-800">
                 {(last.exercises || []).filter(e => e.upgradedFrom).map((e, i) => (

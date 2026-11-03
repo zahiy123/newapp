@@ -47,3 +47,23 @@ describe('Complexity — the next, harder version', () => {
     expect(applyComplexityStep(one, 1, ok)[0]).toBe(one[0]);
   });
 });
+
+describe('Complexity — the easier version (the exact inverse)', async () => {
+  const { easierId, applyComplexityStep: apply } = await import('../complexity.js');
+  it('slow tempo → standard; then the previous movement the body allows; then full → partial range', () => {
+    expect(easierId('pushUp|controlled|full|both|s3r12', ok)).toEqual({ id: 'pushUp|standard|full|both|s3r12', how: 'tempo' });
+    expect(easierId('squat|standard|full|both|s3r12', ok)?.id.split('|')[0]).toBe('miniSquat');
+    expect(easierId('miniSquat|standard|full|both|s3r12', ok)).toEqual({ id: 'miniSquat|standard|partial|both|s3r12', how: 'range' });
+    expect(easierId('miniSquat|standard|partial|both|s3r12', ok)).toBe(null);
+  });
+  it('step -1 eases every exercise one level (a pain-protected one too — easier is safe); +1 then -1 is symmetric', () => {
+    const base = ex('squat|standard|full|both|s3r12');
+    const down = apply([base, { ...ex('frontRaise|standard|full|both|s3r12'), painProtected: { level: 6 } }], -1, ok);
+    expect(down[0].catalogId.split('|')[0]).toBe('miniSquat');
+    expect(down[0].easedFrom).toMatchObject({ name: base.name, how: ['pattern'] });
+    expect(down[1].catalogId.split('|')[0]).toBe('rehabFrontRaise');
+    expect(down[1].painProtected).toEqual({ level: 6 });
+    const up = apply([ex('miniSquat|standard|full|both|s3r12')], 1, ok)[0];
+    expect(up.catalogId.split('|')[0]).toBe('squat');
+  });
+});

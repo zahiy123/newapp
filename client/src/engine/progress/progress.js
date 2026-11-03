@@ -36,7 +36,7 @@ export function workoutReport(w) {
       accuracy: typeof e.accuracy === 'number' ? e.accuracy : (accs.length ? Math.round(accs.reduce((a, b) => a + b, 0) / accs.length) : null),
       setAccuracy: accs, trend,
       problems: [...problems.values()].sort((a, b) => (b.critical - a.critical) || (b.times - a.times)),
-      fixed, safeMode: sets.some(s => s.safeMode), lighter: sets.some(s => s.lighter), upgradedFrom: e.upgradedFrom || null,
+      fixed, safeMode: sets.some(s => s.safeMode), lighter: sets.some(s => s.lighter), upgradedFrom: e.upgradedFrom || null, easedFrom: e.easedFrom || null,
       pain: (w?.painReports || []).filter(p => p.exercise === e.name),
       measured: sets.length > 0,
     };

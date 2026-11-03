@@ -19,6 +19,9 @@
 
 export const LIGHTER = { 1: { reps: 0.8, rest: 15 }, 2: { reps: 0.65, rest: 30 } };
 export const MAX_STEP = 5;
+export const MIN_STEP = -3;
+export const HARD_ACCURACY = 65;     // "struggling": under the 60–70 % band of the required accuracy …
+export const HARD_COMPLETION = 0.65; // … or under 65 % of the target reps done
 export const DROP_MIN = 15;          // points of accuracy lost over the exercise
 export const DROP_NOISE = 3;         // a set may rise this much and the fall still counts as steady
 export const EASY_ACCURACY = 90;
@@ -82,17 +85,37 @@ export function easyWorkout(w) {
 }
 
 /**
- * Rule 3: today's load step from the history (newest LAST). The step of the last workout carries on; it rises
- * by one when the last 2 workouts were both done at that step and both easy + fully accurate.
- * @returns {{ step, raised: boolean }}
+ * The symmetric rule (owner, 2026-11-03): did the trainee STRUGGLE in this workout? Over the measured exercises
+ * that pain did not touch (pain has its own, graded handling): the mean accuracy under 65 %, or under 65 % of
+ * the target reps done.
+ */
+export function hardWorkout(w) {
+  if (!w || w.dataVersion < 2) return false;
+  const painEx = new Set((w.painReports || []).filter(p => Number(p?.level) >= 4).map(p => p.exercise));
+  const ex = (w.exercises || []).filter(e => !painEx.has(e.name) && !(e.sets || []).some(s => s.safeMode));
+  const acc = ex.map(e => e.accuracy).filter(a => typeof a === 'number');
+  if (!acc.length) return false;                                   // nothing measured → never a reason to go down
+  const mean = acc.reduce((a, b) => a + b, 0) / acc.length;
+  const target = ex.reduce((s, e) => s + (num(e.repsTarget) || 0) * (num(e.setsTarget) || 1), 0);
+  const done = ex.reduce((s, e) => s + (Number(e.repsActual) || 0) * Math.max(1, Number(e.setsCompleted) || 0), 0);
+  return mean < HARD_ACCURACY || (target > 0 && done / target < HARD_COMPLETION);
+}
+
+/**
+ * Today's complexity step from the history (newest LAST) — SYMMETRIC and graded, one step at a time:
+ * the last 2 workouts both at the current step and both easy + fully accurate → one step UP;
+ * both a struggle → one step DOWN (never below MIN_STEP). The next move needs 2 NEW workouts at the new step.
+ * @returns {{ step, raised: boolean, lowered: boolean }}
  */
 export function decideLoadStep(history) {
   const ws = (history || []).filter(w => w && w.dataVersion >= 2);
   const last = ws[ws.length - 1];
   const step = Number(last?.loadStep) || 0;
-  if (ws.length < 2) return { step, raised: false };
+  const none = { step, raised: false, lowered: false };
+  if (ws.length < 2) return none;
   const pair = ws.slice(-2);
-  const sameStep = pair.every(w => (Number(w.loadStep) || 0) === step);
-  if (sameStep && pair.every(easyWorkout) && step < MAX_STEP) return { step: step + 1, raised: true };
-  return { step, raised: false };
+  if (!pair.every(w => (Number(w.loadStep) || 0) === step)) return none;
+  if (pair.every(easyWorkout) && step < MAX_STEP) return { step: step + 1, raised: true, lowered: false };
+  if (pair.every(hardWorkout) && step > MIN_STEP) return { step: step - 1, raised: false, lowered: true };
+  return none;
 }
