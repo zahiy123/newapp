@@ -12,12 +12,10 @@
 // Uses the browser's SpeechRecognition where it exists; elsewhere the on-screen button works.
 
 import { useEffect, useRef, useState } from 'react';
-import { isNextCommand, acceptCommand, ECHO_WINDOW_MS, COMMAND_ECHO_RE, parseVoiceCommand, isEchoOf } from '../engine/training/voiceCommands';
-import { coachSaidRecently, recentCoachLines } from './useSpeech';
-import { isPainReport, spokenLevel, spokenZone, PAIN_ECHO_RE } from '../engine/training/painTrafficLight';
+import { isNextCommand, stripCoachEcho, commandFromHeard } from '../engine/training/voiceCommands';
+import { recentCoachLines } from './useSpeech';
+import { isPainReport, spokenLevel, spokenZone } from '../engine/training/painTrafficLight';
 
-// the coach's own pain question names "0 to 10" — a number in its line may echo back as the trainee's level
-const LEVEL_ECHO_RE = /אפס|עשר|zero|ten|\d/i;
 
 const RESTART_MS = 300;
 
@@ -35,6 +33,7 @@ export function useVoiceCommand({ active, lang = 'he-IL', onNext, onPain, onComm
   useEffect(() => { amputeeRef.current = amputee; }, [amputee]);
   const [listening, setListening] = useState(false);
   const [status, setStatus] = useState('off');
+  const [heard, setHeard] = useState(null);     // { text, at } — the trainee's last words, shown on screen
   const armRef = useRef(null);                 // start from a user tap (set by the effect)
 
   useEffect(() => {
@@ -61,31 +60,34 @@ export function useVoiceCommand({ active, lang = 'he-IL', onNext, onPain, onComm
         r.onresult = (e) => {
           for (let i = e.resultIndex; i < e.results.length; i++) {
             const res = e.results[i];
-            if (res.isFinal !== false && onPainRef.current) {
-              const txt = Array.from(res).map(a => a.transcript).find(t => isPainReport(t)
-                || (awaitingPainRef?.current && (spokenLevel(t) != null || spokenZone(t, { amputee: amputeeRef.current }))));
-              if (txt != null) {
+            if (res.isFinal === false) continue;               // final results only
+            // ON A LAPTOP the mic also hears the coach from the speakers: one result = the coach's words + the
+            // trainee's (owner, 2026-11-03: "it does not hear me"). Cut the coach's part; act on the trainee's own words.
+            const coach = recentCoachLines(10000);
+            const alts = Array.from(res).map(a => a.transcript || '');
+            const owns = alts.map(t => stripCoachEcho(t, coach));
+            const own = owns.find(Boolean) || '';
+            console.info(`[Voice] heard: "${alts[0]}" → the trainee's part: "${own}"`);
+            if (own) { setHeard({ text: own, at: Date.now() }); }
+            if (!own) continue;                                 // only the coach's own words
+            // 1. pain ("כואב לי", or the level / the zone while the pain panel waits)
+            if (onPainRef.current) {
+              const txt = owns.find(t => t && (isPainReport(t)
+                || (awaitingPainRef?.current && (spokenLevel(t) != null || spokenZone(t, { amputee: amputeeRef.current })))));
+              if (txt) {
                 const report = isPainReport(txt);
-                if (report && coachSaidRecently(PAIN_ECHO_RE, ECHO_WINDOW_MS)) continue;   // the coach's own words
-                let level = spokenLevel(txt);
-                if (level != null && coachSaidRecently(LEVEL_ECHO_RE, 3000)) level = null;
+                const level = spokenLevel(txt);
                 const zone = spokenZone(txt, { amputee: amputeeRef.current });
                 if (report || level != null || zone) { onPainRef.current({ level, zone, report }); return; }
               }
             }
-            if (!Array.from(res).some(a => isNextCommand(a.transcript))) {
-              // the other commands / a question — final only, never the coach's own words heard back
-              if (res.isFinal === false || !onCommandRef.current) continue;
-              const said = res[0]?.transcript || '';
-              const cmd = parseVoiceCommand(said);
-              if (!cmd) continue;
-              if (isEchoOf(said, recentCoachLines(10000))) { console.info('[Voice] ignored — the coach\'s own words:', said); continue; }
-              onCommandRef.current(cmd);
-              return;
+            // 2. "תרגיל הבא"
+            if (owns.some(t => t && isNextCommand(t))) { onNextRef.current?.(); return; }
+            // 3. the other commands / a question
+            if (onCommandRef.current) {
+              const cmd = alts.map(t => commandFromHeard(t, coach)).find(Boolean);
+              if (cmd) { onCommandRef.current(cmd); return; }
             }
-            if (!acceptCommand({ isFinal: res.isFinal !== false, coachSaidCommandWord: coachSaidRecently(COMMAND_ECHO_RE, ECHO_WINDOW_MS) })) continue;
-            onNextRef.current?.();
-            return;
           }
         };
         r.onerror = (e) => {
@@ -133,5 +135,5 @@ export function useVoiceCommand({ active, lang = 'he-IL', onNext, onPain, onComm
     };
   }, [active, lang]);
 
-  return { listening: !!active && listening, status: active ? status : 'off', arm: () => armRef.current?.() };
+  return { listening: !!active && listening, status: active ? status : 'off', heard, arm: () => armRef.current?.() };
 }

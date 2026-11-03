@@ -101,3 +101,39 @@ export function commandAllowed(type, phase) {
     default: return false;
   }
 }
+
+/**
+ * THE TRAINEE'S OWN WORDS in one recognizer result (owner, 2026-11-03, on a LAPTOP: "I say it and it does not
+ * hear / does not react"). The laptop's mic also hears the coach from the speakers, so ONE result = the coach's
+ * words + the trainee's. The coach's part is cut off: everything up to the LAST pair of consecutive words that is
+ * a consecutive pair of one of the coach's recent lines. Returns the trainee's part ('' = only the coach).
+ */
+export function stripCoachEcho(text, coachLines) {
+  const words = norm(text).split(' ').filter(Boolean);
+  if (!words.length) return '';
+  const pairs = new Set();
+  for (const line of coachLines || []) {
+    const w = norm(line).split(' ').filter(Boolean);
+    for (let i = 1; i < w.length; i++) pairs.add(`${w[i - 1]} ${w[i]}`);
+  }
+  let cut = -1;
+  for (let i = words.length - 1; i >= 1; i--) {
+    if (pairs.has(`${words[i - 1]} ${words[i]}`)) { cut = i; break; }
+  }
+  return words.slice(cut + 1).join(' ');
+}
+
+/** The command in the trainee's own words (after the coach's echo is cut): parse, and find a question inside. */
+export function commandFromHeard(text, coachLines) {
+  const own = stripCoachEcho(text, coachLines);
+  if (!own) return null;
+  const direct = parseVoiceCommand(own);
+  if (direct) return direct;
+  // a question may follow a few leftover (misheard) coach words: start at its question word
+  const w = own.split(' ');
+  const q = w.findIndex(x => QUESTION_START.includes(x));
+  if (q > 0) return parseVoiceCommand(w.slice(q).join(' '));
+  // a short command after a few leftover words: its last 3 words
+  if (w.length > 3) return parseVoiceCommand(w.slice(-3).join(' ')) || parseVoiceCommand(w.slice(-2).join(' ')) || parseVoiceCommand(w.slice(-1).join(' '));
+  return null;
+}

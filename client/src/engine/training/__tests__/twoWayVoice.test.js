@@ -39,3 +39,26 @@ describe('Two-way voice — the commands', () => {
     expect(commandAllowed('question', 'resting')).toBe(true);
   });
 });
+
+describe('Two-way voice on a LAPTOP — the coach heard from the speakers + the trainee in one result', async () => {
+  const { stripCoachEcho, commandFromHeard } = await import('../voiceCommands.js');
+  const coach = ['רד לאט עם הגב ישר ותדחוף את הרצפה למטה'];
+  it('cuts the coach part, keeps the trainee', () => {
+    expect(stripCoachEcho('רד לאט עם הגב ישר ותדחוף את הרצפה למטה הפסקה', coach)).toBe('הפסקה');
+    expect(stripCoachEcho('הגב ישר ותדחוף את הרצפה', coach)).toBe('');
+    expect(stripCoachEcho('עוד אחת', coach)).toBe('עוד אחת');
+  });
+  it('every command works after the coach words', () => {
+    expect(commandFromHeard('רד לאט עם הגב ישר ותדחוף את הרצפה למטה עצור', coach)?.type).toBe('stop');
+    expect(commandFromHeard('את הרצפה למטה ממשיכים', coach)?.type).toBe('resume');
+    expect(commandFromHeard('ותדחוף את הרצפה למטה עוד אחת', coach)?.type).toBe('oneMore');
+    expect(commandFromHeard('הרצפה למטה תחזור', coach)?.type).toBe('repeat');
+    expect(commandFromHeard('ישר ותדחוף את הרצפה למטה למה צריך גב ישר', coach)?.type).toBe('question');
+    // a misheard coach word left before the command
+    expect(commandFromHeard('את הרצפה למתה רגע הפסקה', coach)?.type).toBe('pause');
+    expect(commandFromHeard('את הרצפה למטה תה עצור', coach)?.type).toBe('stop');
+  });
+  it('only the coach → nothing', () => {
+    expect(commandFromHeard('רד לאט עם הגב ישר ותדחוף את הרצפה למטה', coach)).toBe(null);
+  });
+});

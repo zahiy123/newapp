@@ -1485,6 +1485,15 @@ export default function Training() {
     },
   });
 
+  // what the mic heard (the trainee's own words) — shown for 5 s, so the trainee SEES that the coach hears them
+  const [heardShown, setHeardShown] = useState(null);
+  useEffect(() => {
+    if (!voiceNext.heard) return undefined;
+    setHeardShown(voiceNext.heard.text);
+    const tm = setTimeout(() => setHeardShown(null), 5000);
+    return () => clearTimeout(tm);
+  }, [voiceNext.heard]);
+
   // A new set / exercise counts from zero again
   useEffect(() => { if (displayReps === 0) spokenCountRef.current.n = 0; }, [displayReps, currentIdx, currentSet]);
 
@@ -3795,6 +3804,11 @@ export default function Training() {
         )}
         {(phase === PHASE.EXERCISING || phase === PHASE.CALIBRATING) && <ExecutionHud execution={execution} isHe={isHe} />}
         {/* the voice command's REAL state — the trainee sees whether "תרגיל הבא" is heard, and why not */}
+        {voiceNextAction && heardShown && (
+          <div className="absolute bottom-[6.75rem] left-2 z-[18] max-w-[70%] rounded-xl bg-black/75 text-white text-xs px-2.5 py-1 pointer-events-none" dir={isHe ? 'rtl' : 'ltr'}>
+            {'🎤'} {isHe ? 'שמעתי:' : 'Heard:'} "{heardShown}"
+          </div>
+        )}
         {voiceNextAction && voiceNext.status !== 'off' && (
           <div
             onClick={voiceNext.status === 'listening' ? undefined : () => voiceNext.arm()}
