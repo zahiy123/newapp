@@ -2647,11 +2647,10 @@ function getLocalFallbackSummary({ profile, sessionData }) {
   const exercises = sessionData?.exercises || [];
   const completedCount = exercises.filter(e => (e.setsCompleted || 0) >= (e.setsTarget || 1)).length;
   const totalCount = exercises.length;
-  const totalCal = sessionData?.totalCalories || 0;
   const duration = Math.floor((sessionData?.totalDuration || 0) / 60);
 
   if (completedCount === totalCount && totalCount > 0) {
-    return `${name}, כל הכבוד! סיימת את כל ${totalCount} התרגילים ב-${duration} דקות ושרפת ${totalCal} קלוריות. המשך כך!`;
+    return `${name}, כל הכבוד! סיימת את כל ${totalCount} התרגילים ב-${duration} דקות. המשך כך!`;
   } else if (completedCount > 0) {
     return `${name}, עבודה טובה! השלמת ${completedCount} מתוך ${totalCount} תרגילים. בפעם הבאה ננסה לסיים הכל!`;
   }
@@ -2968,7 +2967,7 @@ TIP3: [short actionable tip for next session, max 12 words]`;
   ).join('; ');
 
   const content = `Player: ${sanitizeInput(profile.name, 30)}, Age: ${Number(profile.age) || 25}, Sport: ${sanitizeInput(sessionData.sport, 30)}, Disability: ${sanitizeInput(profile.disability, 20) || 'none'}
-Session status: ${sessionData.status}, Duration: ${Math.floor((sessionData.totalDuration || 0) / 60)} min, Calories: ${sessionData.totalCalories || 0}
+Session status: ${sessionData.status}, Duration: ${Math.floor((sessionData.totalDuration || 0) / 60)} min (calories are NOT measured — never mention calories)
 Warm-up completed: ${sessionData.warmUpCompleted ? 'yes' : 'no'}
 Exercises: ${exerciseLines}
 Write a short, personal coaching summary for this session.`;

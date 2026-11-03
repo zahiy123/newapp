@@ -13,7 +13,8 @@ import { Line, Bar } from 'react-chartjs-2';
 ChartJS.register(CategoryScale, LinearScale, PointElement, LineElement, BarElement, Title, Tooltip, Legend, Filler);
 
 export default function Stats() {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
+  const isHe = String(i18n.language || 'he').startsWith('he');
   const { user } = useAuth();
   const [workouts, setWorkouts] = useState([]);
   const [games, setGames] = useState([]);
@@ -44,7 +45,6 @@ export default function Stats() {
 
     const completed = workouts.filter(w => w.status === 'completed').length;
     const partial = workouts.filter(w => w.status === 'partial').length;
-    const totalCalories = workouts.reduce((s, w) => s + (w.totalCalories || 0), 0);
     const totalDuration = workouts.reduce((s, w) => s + (w.totalDuration || 0), 0);
     const avgDuration = workouts.length > 0 ? Math.round(totalDuration / workouts.length / 60) : 0;
 
@@ -79,7 +79,7 @@ export default function Stats() {
       }
     }
 
-    return { completed, partial, total: workouts.length, totalCalories, avgDuration, streak };
+    return { completed, partial, total: workouts.length, avgDuration, streak };
   }, [workouts]);
 
   // === Personal Bests ===
@@ -124,16 +124,6 @@ export default function Stats() {
       backgroundColor: 'rgba(59, 130, 246, 0.1)',
       fill: true,
       tension: 0.3,
-    }]
-  };
-
-  const caloriesChartData = {
-    labels: dateLabels,
-    datasets: [{
-      label: t('stats.caloriesOverTime'),
-      data: chartWorkouts.map(w => w.totalCalories || 0),
-      backgroundColor: 'rgba(249, 115, 22, 0.7)',
-      borderRadius: 6,
     }]
   };
 
@@ -342,7 +332,10 @@ export default function Stats() {
           </div>
         </div>
         <div className="bg-white rounded-xl shadow p-4 text-center">
-          <div className="text-3xl font-bold text-orange-500">{stats.totalCalories.toLocaleString()}</div>
+          {/* CALORIES (owner, 2026-11-03): a camera cannot measure them — no estimated number; real heart-rate /
+              calorie data comes with a connected watch (planned for the mobile app, Stage 7) */}
+          <div className="text-2xl">{'⌚'}</div>
+          <div className="text-sm font-bold text-orange-600">{isHe ? 'דרוש חיבור לשעון' : 'A watch connection is needed'}</div>
           <div className="text-xs text-gray-500">{t('stats.totalCalories')}</div>
         </div>
         <div className="bg-white rounded-xl shadow p-4 text-center">
@@ -369,8 +362,10 @@ export default function Stats() {
         <div className="grid md:grid-cols-2 gap-4">
           <div className="bg-white rounded-xl shadow p-4">
             <h3 className="text-sm font-medium text-gray-600 mb-2">{t('stats.caloriesOverTime')}</h3>
-            <div style={{ height: 180 }}>
-              <Bar data={caloriesChartData} options={chartOptions} />
+            <div style={{ height: 180 }} className="flex flex-col items-center justify-center text-center gap-1">
+              <div className="text-3xl">{'⌚'}</div>
+              <div className="text-sm font-bold text-orange-600">{isHe ? 'דרוש חיבור לשעון' : 'A watch connection is needed'}</div>
+              <div className="text-xs text-gray-500 max-w-[16rem]">{isHe ? 'קלוריות ודופק אמיתיים יגיעו מחיבור שעון חכם — בקרוב' : 'Real calories and heart rate will come from a smart watch connection — coming later'}</div>
             </div>
           </div>
           <div className="bg-white rounded-xl shadow p-4">
@@ -440,7 +435,6 @@ export default function Stats() {
                   <p className="text-sm text-gray-700 leading-relaxed">{w.aiSummary}</p>
                   <div className="flex gap-3 mt-2 text-xs text-gray-400">
                     <span>{Math.round((w.totalDuration || 0) / 60)} {t('stats.minutes')}</span>
-                    <span>{w.totalCalories || 0} {t('stats.calories')}</span>
                     <span>{(w.exercises || []).length} {t('training.reps')}</span>
                   </div>
                 </div>

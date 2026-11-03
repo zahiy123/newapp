@@ -18,7 +18,6 @@ export default function WorkoutSummary({ sessionData, profile, sport, isHe, onBa
 
   const exercises = sessionData?.exerciseResults || [];
   const totalReps = exercises.reduce((s, e) => s + (e.repsActual || 0), 0);
-  const totalCalories = exercises.reduce((s, e) => s + (e.calories || 0), 0);
   const totalDuration = sessionData?.startTime
     ? Math.floor((Date.now() - sessionData.startTime) / 1000)
     : 0;
@@ -38,7 +37,7 @@ export default function WorkoutSummary({ sessionData, profile, sport, isHe, onBa
           method: 'POST',
           body: JSON.stringify({
             profile: { name: profile?.name, age: profile?.age, disability: profile?.disability },
-            sessionData: { sport, status: 'completed', totalDuration, totalCalories, warmUpCompleted: sessionData?.warmUpCompleted, exercises }
+            sessionData: { sport, status: 'completed', totalDuration, warmUpCompleted: sessionData?.warmUpCompleted, exercises }
           })
         });
         if (resp.ok) {
@@ -117,7 +116,8 @@ export default function WorkoutSummary({ sessionData, profile, sport, isHe, onBa
           <div className="text-xs text-gray-500">{isHe ? 'חזרות' : 'Reps'}</div>
         </div>
         <div className="bg-white rounded-xl shadow p-4 text-center">
-          <div className="text-2xl font-bold text-orange-500">{totalCalories}</div>
+          <div className="text-xl">{'⌚'}</div>
+          <div className="text-xs font-bold text-orange-600">{isHe ? 'דרוש חיבור לשעון' : 'A watch is needed'}</div>
           <div className="text-xs text-gray-500">{isHe ? 'קלוריות' : 'Calories'}</div>
         </div>
         <div className="bg-white rounded-xl shadow p-4 text-center">
