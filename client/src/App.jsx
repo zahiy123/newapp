@@ -11,6 +11,7 @@ import Goals from './pages/Goals';
 import Dashboard from './pages/Dashboard';
 import Training from './pages/Training';
 import Stats from './pages/Stats';
+import Progress from './pages/Progress';
 import GameMode from './pages/GameMode';
 import RehabSelection from './pages/RehabSelection';
 import AnatomicScan from './pages/AnatomicScan';
@@ -53,6 +54,7 @@ function App() {
               <Route path="/goals" element={<Goals />} />
               <Route path="/training" element={<Training />} />
               <Route path="/stats" element={<Stats />} />
+              <Route path="/progress" element={<Progress />} />
               <Route path="/game" element={<GameMode />} />
               <Route path="/scan" element={<AnatomicScan />} />
               <Route path="/validation" element={<ValidationReport />} />

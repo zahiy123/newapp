@@ -904,6 +904,11 @@ export default function Dashboard() {
         </div>
       )}
 
+      <Link to="/progress" className="block bg-white rounded-xl shadow p-6 hover:shadow-md transition">
+        <h2 className="font-semibold text-gray-800 mb-1">{'📈'} {isHe ? 'ההתקדמות שלי' : 'My progress'}</h2>
+        <div className="text-gray-500 text-sm">{isHe ? 'דיוק בכל תרגיל, מה תוקן, טווחי תנועה וכאב — לאורך זמן' : 'Accuracy per exercise, what was fixed, range of motion and pain — over time'}</div>
+      </Link>
+
       <Link to="/stats" className="block bg-white rounded-xl shadow p-6 hover:shadow-md transition">
         <h2 className="font-semibold text-gray-800 mb-3">{t('dashboard.stats')}</h2>
         <div className="text-3xl font-bold text-blue-600">{workoutCount}</div>

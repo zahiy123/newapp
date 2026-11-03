@@ -1,4 +1,6 @@
 import { useState, useEffect } from 'react';
+import { Link } from 'react-router-dom';
+import WorkoutReport from './progress/WorkoutReport';
 import {
   Chart as ChartJS,
   CategoryScale, LinearScale, BarElement,
@@ -136,6 +138,14 @@ export default function WorkoutSummary({ sessionData, profile, sport, isHe, onBa
         </div>
       )}
 
+      {/* THE WORKOUT REPORT (Stage 4): every set's accuracy, the problems, what was fixed, the pain */}
+      {exercises.some(ex => (ex.sets || []).length > 0) && (
+        <div className="bg-gray-50 rounded-xl shadow p-4 space-y-3">
+          <h3 className="text-sm font-semibold text-gray-600">{isHe ? 'דוח האימון' : 'Workout report'}</h3>
+          <WorkoutReport workout={{ exercises, painReports: sessionData?.painReports || [], dataVersion: 2 }} isHe={isHe} />
+        </div>
+      )}
+
       {/* Exercise breakdown */}
       <div className="bg-white rounded-xl shadow p-4">
         <h3 className="text-sm font-semibold text-gray-600 mb-3">
@@ -190,6 +200,10 @@ export default function WorkoutSummary({ sessionData, profile, sport, isHe, onBa
           </>
         )}
       </div>
+
+      <Link to="/progress" className="block w-full py-3 text-center bg-white border border-gray-300 text-gray-800 rounded-xl font-bold">
+        {'📈'} {isHe ? 'למסך ההתקדמות' : 'To my progress'}
+      </Link>
 
       {/* Back button */}
       <button

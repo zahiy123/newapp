@@ -71,6 +71,12 @@ export const PAIN_ZONES = [
   { id: 'other', he: 'מקום אחר', en: 'Somewhere else', words: [] },
 ];
 
+/** A zone's name for the screen. */
+export function zoneName(id, isHe = true) {
+  const z = PAIN_ZONES.find(x => x.id === id);
+  return z ? (isHe ? z.he : z.en) : (isHe ? 'לא צוין' : 'not given');
+}
+
 export function zonesFor({ amputee = false } = {}) {
   return PAIN_ZONES.filter(z => !z.amputeeOnly || amputee);
 }
