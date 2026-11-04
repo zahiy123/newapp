@@ -75,3 +75,14 @@ describe('The referee corrects', () => {
     expect(m.log).toHaveLength(1);
   });
 });
+
+describe('Amputee football — the WAFF extras', () => {
+  it('one time-out per team per half; at most 2 substitutes at once', () => {
+    let m = play(createMatch('footballAmputee'), [{ type: 'timeout', team: 'A' }, { type: 'timeout', team: 'A' }]);
+    expect(m.log[1].rejected).toBe('timeout_used');
+    m = play(m, [{ type: 'period_end' }, { type: 'timeout', team: 'A' }]);
+    expect(m.log[m.log.length - 1].rejected).toBeUndefined();
+    m = applyEvent(m, { type: 'substitution', team: 'B', count: 3 });
+    expect(m.log[m.log.length - 1].rejected).toBe('max_two_at_once');
+  });
+});

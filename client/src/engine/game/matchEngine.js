@@ -37,7 +37,7 @@ export function createMatch(sport, opts = {}) {
   return {
     ...base, period: 1, periods: opts.periods || def.periods, periodMin: opts.periodMin || def.periodMin, players: opts.players || def.players,
     score: { A: 0, B: 0 },
-    ...(def.family === 'football' ? { cards: [] } : {}),
+    ...(def.family === 'football' ? { cards: [], timeouts: {} } : {}),
     ...(def.family === 'basketball' ? { personalFouls: {}, teamFouls: { A: 0, B: 0 }, fouledOut: [] } : {}),
   };
 }
@@ -100,6 +100,15 @@ export function applyEvent(m, ev) {
       if (color === 'yellow' && prior >= 1) cards.push({ team, player: ev.player || null, color: 'red', secondYellow: true });
       next = { ...m, cards }; break;
     }
+    // WAFF Law 6: one time-out per team per half (≤ 1 min); Law 3: at most 2 substitutes enter at a time
+    case 'football:timeout': {
+      const key = `${m.period}:${team}`;
+      if (m.sport === 'footballAmputee' && (m.timeouts[key] || 0) >= 1) return { ...m, log: [...m.log, { ...ev, team, at: ev.at ?? Date.now(), rejected: 'timeout_used' }] };
+      next = { ...m, timeouts: { ...m.timeouts, [key]: (m.timeouts[key] || 0) + 1 } }; break;
+    }
+    case 'football:substitution':
+      if (m.sport === 'footballAmputee' && Number(ev.count || 1) > 2) return { ...m, log: [...m.log, { ...ev, team, at: ev.at ?? Date.now(), rejected: 'max_two_at_once' }] };
+      break;
     case 'basketball:score': {
       const v = [1, 2, 3].includes(Number(ev.value)) ? Number(ev.value) : 2;
       next = { ...m, score: { ...m.score, [team]: m.score[team] + v } }; break;
