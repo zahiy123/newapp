@@ -85,6 +85,14 @@ export default function WorkoutReport({ workout, isHe }) {
           ))}
         </div>
       )}
+      {(workout?.limitCrossings || []).length > 0 && (
+        <div className="bg-white rounded-xl border border-red-200 p-3 space-y-1 text-sm text-gray-800">
+          <div className="text-sm font-semibold text-red-800">{'⛔'} {isHe ? 'חציות של הגבול הקליני' : 'Clinical limit crossings'}</div>
+          {workout.limitCrossings.map((c, i) => (
+            <div key={i} className="tabular-nums">{c.exercise ? `${c.exercise} · ` : ''}{isHe ? `סט ${c.set}` : `set ${c.set}`} · {c.joint} {c.value}° / {c.limit}°</div>
+          ))}
+        </div>
+      )}
       {r.pain.length > 0 && (
         <div className="bg-white rounded-xl border border-gray-200 p-3 space-y-1.5">
           <div className="text-sm font-semibold text-gray-700">{'🚦'} {isHe ? 'דיווחי כאב באימון' : 'Pain reports'}</div>

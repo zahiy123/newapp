@@ -6,6 +6,7 @@ export default function FlagChips({ flags = [], isHe }) {
   const label = (f) => {
     const d = f.detail || {};
     switch (f.code) {
+      case 'locked': return isHe ? 'נעול — ממתין לאישורך' : 'Locked — waiting for your approval';
       case 'red_pain': return isHe ? `כאב אדום ${d.level}${d.zone ? ` ב${zoneName(d.zone, true)}` : ''}` : `Red pain ${d.level}${d.zone ? ` (${zoneName(d.zone, false)})` : ''}`;
       case 'repeated_yellow': return isHe ? `${d.count} כאבים צהובים השבוע` : `${d.count} yellow pains this week`;
       case 'safe_mode': return isHe ? 'מצב בטוח השבוע' : 'Safe mode this week';

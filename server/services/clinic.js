@@ -37,6 +37,25 @@ export const normalizeCode = (code) => String(code || '').toUpperCase().replace(
 export const inviteUsable = (inv, now) => !!inv && !inv.usedBy && Number(inv.expiresAt) > now;
 export const assignmentId = (clinicianId, traineeId) => `${clinicianId}_${traineeId}`;
 
+// THE CLINICAL LIMITS (step 4) — validated here: only known joints, sane numbers, short lists
+export const LIMIT_JOINTS = ['left_knee', 'right_knee', 'left_hip', 'right_hip', 'left_shoulder', 'right_shoulder', 'left_elbow', 'right_elbow'];
+export function cleanLimits(body = {}) {
+  const romLimits = {};
+  for (const [k, v] of Object.entries(body.romLimits || {})) {
+    const n = Math.round(Number(v));
+    if (!LIMIT_JOINTS.includes(k)) throw new ClinicError(400, 'bad_joint');
+    if (!(n >= 5 && n <= 180)) throw new ClinicError(400, 'bad_limit');
+    romLimits[k] = n;
+  }
+  const blockedJoints = [...new Set(body.blockedJoints || [])];
+  if (blockedJoints.some(k => !LIMIT_JOINTS.includes(k))) throw new ClinicError(400, 'bad_joint');
+  const blockedPatterns = [...new Set((body.blockedPatterns || []).map(x => String(x).slice(0, 40)))].slice(0, 60);
+  if (blockedPatterns.some(x => !/^[A-Za-z0-9_]+$/.test(x))) throw new ClinicError(400, 'bad_pattern');
+  const exp = body.expiresAt == null || body.expiresAt === '' ? null : Number(body.expiresAt);
+  if (exp != null && !(exp > 0)) throw new ClinicError(400, 'bad_expiry');
+  return { romLimits, blockedJoints, blockedPatterns, expiresAt: exp, note: String(body.note || '').slice(0, 300) };
+}
+
 /**
  * The portal's operations. `user` = { uid, email, role } from the VERIFIED token.
  * db: get(path) · set(path, data) · update(path, data) · add(collection, data) → id · where(collection, field, value) → [{id, ...}]
@@ -204,11 +223,13 @@ export function createClinic({ db, auth, env = process.env, now = () => Date.now
         const workouts = await db.list(`users/${a.traineeId}/workouts`, { orderBy: 'date', limit: 12 });
         const pains = await db.list(`users/${a.traineeId}/painLog`, { orderBy: 'date', limit: 30 });
         const last = workouts[0] || null;
+        const lock = await db.get(`users/${a.traineeId}/clinicalLocks/current`);
         out.push({
+          locked: !!lock?.locked,
           traineeId: a.traineeId, name: p?.name || '', sport: p?.sport || '', since: a.linkedAt,
           lastWorkoutAt: last ? (Number(last.at) || Number(last.date) || null) : null,
           workoutsThisWeek: workouts.filter(w => now() - (Number(w.at) || Number(w.date) || 0) <= 7 * 864e5).length,
-          flags: patientFlags({ workouts, pains, now: now() }),
+          flags: patientFlags({ workouts, pains, now: now(), locked: !!lock?.locked }),
         });
       }
       out.sort((x, y) => (y.flags.filter(f => f.severity === 'red').length - x.flags.filter(f => f.severity === 'red').length) || (y.flags.length - x.flags.length));
@@ -233,7 +254,46 @@ export function createClinic({ db, auth, env = process.env, now = () => Date.now
         db.list(`users/${traineeId}/painLog`, { orderBy: 'date', limit: 100 }),
         db.list(`users/${traineeId}/coachNotebook`, { orderBy: 'date', limit: 30 }),
       ]);
-      return { profile, workouts, pains, notebook, flags: patientFlags({ workouts, pains, now: now() }) };
+      const limits = await db.get(`users/${traineeId}/clinicalConstraints/current`);
+      const lock = await db.get(`users/${traineeId}/clinicalLocks/current`);
+      const violations = await db.list(`users/${traineeId}/limitViolations`, { orderBy: 'at', limit: 30 });
+      return { profile, workouts, pains, notebook, limits, lock, violations, flags: patientFlags({ workouts, pains, now: now(), locked: !!lock?.locked }) };
+    },
+
+    /** The clinician sets / replaces the patient's limits (the trainee can only read them — the rules). */
+    async setLimits(user, traineeId, body) {
+      const clean = cleanLimits(body);
+      await assertAccess(user, traineeId, 'set_limits');
+      const rec = await db.get(`clinicians/${user.uid}`);
+      await db.set(`users/${traineeId}/clinicalConstraints/current`, { ...clean, updatedAt: now(), by: user.uid, byName: rec?.name || '' });
+      return { ok: true, limits: clean };
+    },
+
+    /**
+     * THE LOCK (owner, 2026-11-04): the trainee's own app reports 3 crossings of a clinical limit in a set →
+     * the server locks the workouts until the clinician approves. Only the trainee themself, only under limits.
+     */
+    async lockSelf(user, body = {}) {
+      const limits = await db.get(`users/${user.uid}/clinicalConstraints/current`);
+      if (!limits) throw new ClinicError(409, 'no_limits');
+      const v = {
+        exercise: String(body.exercise || '').slice(0, 80), joint: LIMIT_JOINTS.includes(body.joint) ? body.joint : null,
+        value: Number(body.value) || null, limit: Number(body.limit) || null, crossings: Number(body.crossings) || null, at: now(),
+      };
+      await db.set(`users/${user.uid}/clinicalLocks/current`, { locked: true, ...v });
+      await db.add(`users/${user.uid}/limitViolations`, { ...v, locked: true });
+      await audit({ actorId: user.uid, actorRole: 'system', traineeId: user.uid, action: 'locked_by_limit', detail: v });
+      return { ok: true, locked: true };
+    },
+
+    /** Only the assigned clinician unlocks — "the patient is fit to continue" (audited). */
+    async unlock(user, traineeId, { note = '' } = {}) {
+      await assertAccess(user, traineeId, 'approve_continue');
+      const lock = await db.get(`users/${traineeId}/clinicalLocks/current`);
+      if (!lock?.locked) return { ok: true, locked: false };
+      const rec = await db.get(`clinicians/${user.uid}`);
+      await db.set(`users/${traineeId}/clinicalLocks/current`, { ...lock, locked: false, approvedAt: now(), approvedBy: user.uid, approvedByName: rec?.name || '', note: String(note).slice(0, 300) });
+      return { ok: true, locked: false };
     },
 
     /** The trainee's own access log: who viewed / changed their data, when. */

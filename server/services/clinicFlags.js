@@ -14,7 +14,7 @@
 const DAY = 864e5;
 const atOf = (x) => Number(x?.at) || Number(x?.date) || 0;
 
-export function patientFlags({ workouts = [], pains = [], now = Date.now() }) {
+export function patientFlags({ workouts = [], pains = [], now = Date.now(), locked = false }) {
   const ws = [...workouts].sort((a, b) => atOf(a) - atOf(b));                 // oldest first
   const recent = (x) => now - atOf(x) <= 7 * DAY;
   const allPain = [...pains, ...ws.flatMap(w => (w.painReports || []).map(p => ({ ...p, at: Number(p.at) || atOf(w) })))];
@@ -22,6 +22,7 @@ export function patientFlags({ workouts = [], pains = [], now = Date.now() }) {
   const seen = new Set();
   const painList = allPain.filter(p => { const k = `${p.at}|${p.level}|${p.zone}`; if (seen.has(k)) return false; seen.add(k); return true; });
   const flags = [];
+  if (locked) flags.push({ code: 'locked', severity: 'red', detail: {} });
   const reds = painList.filter(p => recent(p) && Number(p.level) >= 6);
   if (reds.length) flags.push({ code: 'red_pain', severity: 'red', detail: { level: Math.max(...reds.map(p => Number(p.level))), zone: reds[0].zone || null, count: reds.length } });
   const yellows = painList.filter(p => recent(p) && Number(p.level) >= 4 && Number(p.level) <= 5);

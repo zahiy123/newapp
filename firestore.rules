@@ -21,11 +21,12 @@ service cloud.firestore {
       match /clinicalConstraints/{doc=**} { allow read: if isOwner(uid); allow write: if false; }
       match /clinicianPlans/{doc=**} { allow read: if isOwner(uid); allow write: if false; }
       match /clinicalLocks/{doc=**} { allow read: if isOwner(uid); allow write: if false; }
+      match /limitViolations/{doc=**} { allow read: if isOwner(uid); allow write: if false; }
 
       // everything else the trainee's own app keeps (workouts, painLog, games, coachNotebook, anatomic_data …)
       match /{sub}/{doc=**} {
         allow read, write: if isOwner(uid)
-          && !(sub in ['clinicalConstraints', 'clinicianPlans', 'clinicalLocks']);
+          && !(sub in ['clinicalConstraints', 'clinicianPlans', 'clinicalLocks', 'limitViolations']);
       }
     }
 

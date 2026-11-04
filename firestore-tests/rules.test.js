@@ -51,6 +51,7 @@ test('what the clinician sets: the trainee reads it, never writes it', async () 
   await assertFails(setDoc(doc(db, 'users/alice/clinicalConstraints/c1'), { knee: 140 }));
   await assertFails(setDoc(doc(db, 'users/alice/clinicalLocks/l1'), { locked: false }));
   await assertFails(setDoc(doc(db, 'users/alice/clinicianPlans/p1'), { plan: 'mine' }));
+  await assertFails(setDoc(doc(db, 'users/alice/limitViolations/v1'), { erased: true }));
 });
 
 test('the portal collections are server-only — no client reads or writes, a self-made claim changes nothing', async () => {

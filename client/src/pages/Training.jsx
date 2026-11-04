@@ -51,6 +51,9 @@ import { notebookFacts, worstPain, notesText, openingFacts, painToCheck } from '
 import { measurableJoints, createRomTracker, addRomFrame, summarizeRom } from '../engine/progress/rom';
 import { startedTired, qualityDropped, lighterFrom, decideLoadStep } from '../engine/progress/loadAdaptation';
 import { applyComplexityStep } from '../engine/progress/complexity';
+import { activeConstraints, applyClinicalLimits, createLimitMonitor, LOCK_AFTER } from '../engine/clinical/clinicalLimits';
+import { ROM_JOINTS } from '../engine/progress/rom';
+import { clinic } from '../utils/clinicApi';
 import { painLight, painAction, reducedLoad, microLoad, canSafeMode, zonesFor, painEntry, painFacts, safeModeFacts, protectFromPain } from '../engine/training/painTrafficLight';
 import { kickingSide } from '../engine/incomingBall';
 import { ballModeFor, virtualBallWanted, handSide, ballLook, realBallInPlay } from '../engine/virtualBall';
@@ -688,6 +691,17 @@ export default function Training() {
   const setDetailsRef = useRef([]);        // [{ idx, set, reps, accuracy, problems:[{key,what,times,critical}], fixed:[{key,what}] }]
   const romTrackerRef = useRef(null);      // the session's joint angles (engine/progress/rom.js)
   const loadStepRef = useRef({ step: 0, raised: false });   // the graded load step (rule 3)
+  // STAGE 4B step 4 — the clinician's limits for this trainee (read-only here) and the lock
+  const clinicalRef = useRef(null);            // the constraints in force (or null)
+  const limitMonitorRef = useRef(null);        // the live monitor of the limited joints
+  const crossingsRef = useRef(0);              // crossings in the current set
+  const [clinicalLock, setClinicalLock] = useState(null);   // { locked, … } from users/{uid}/clinicalLocks/current
+  // the clinician's limits ALWAYS last: a pain protection / a harder version can never pass them
+  const clinicalFit = (list, lp, he) => {
+    const r = applyClinicalLimits(list, clinicalRef.current, lp, he);
+    if (r.changes.length) { sessionDataRef.current.clinicalChanges = r.changes; console.info('[Clinical] the plan under the clinician’s limits:', r.changes); }
+    return r.exercises;
+  };
   const autoLevelRef = useRef(0);          // today's lighter level (rules 1–2)
   const [loadRaised, setLoadRaised] = useState(false);
   const [loadLowered, setLoadLowered] = useState(false);
@@ -720,7 +734,7 @@ export default function Training() {
     }
     // HARD equipment fit: never offer an exercise the trainee can't do (e.g. a ball drill without a ball)
     rawExercisesRef.current = loaded;
-    return applyComplexityStep(protectFromPain(fitExercises(loaded, availableEquipment(eff, { hasBall: status?.hasBall })).exercises, painHistoryRef.current), loadStepRef.current.step, lp0, (data.language || 'he') === 'he');
+    return clinicalFit(applyComplexityStep(protectFromPain(fitExercises(loaded, availableEquipment(eff, { hasBall: status?.hasBall })).exercises, painHistoryRef.current), loadStepRef.current.step, lp0, (data.language || 'he') === 'he'), lp0, (data.language || 'he') === 'he');
   }
 
   // Check-in answered → rebuild today's workout from the answers, remember them for next time
@@ -756,6 +770,25 @@ export default function Training() {
       const loadedExercises = buildTodayExercises(planSourceRef.current, null);
       setExercises(loadedExercises);
       resetVisionSession();
+
+      // THE CLINICIAN'S LIMITS + THE LOCK (Stage 4B step 4): read-only for the trainee (the rules); the plan is
+      // fitted under them, the live monitor guards them; a lock blocks the workout until the clinician approves
+      try {
+        const [cDoc, lDoc] = await Promise.all([
+          getDoc(doc(db, 'users', user.uid, 'clinicalConstraints', 'current')),
+          getDoc(doc(db, 'users', user.uid, 'clinicalLocks', 'current')),
+        ]);
+        clinicalRef.current = activeConstraints(cDoc.exists() ? cDoc.data() : null);
+        limitMonitorRef.current = clinicalRef.current ? createLimitMonitor(clinicalRef.current) : null;
+        setClinicalLock(lDoc.exists() ? lDoc.data() : null);
+        if (clinicalRef.current) {
+          const lpNow = trainingLimbs(getLimbProfile(data), data.todayMobility);
+          setExercises(prev => clinicalFit(prev, lpNow, (data.language || 'he') === 'he'));
+          console.info('[Clinical] limits in force:', clinicalRef.current);
+        }
+      } catch (err) {
+        console.warn('[Clinical] the limits were not loaded:', err.message);
+      }
 
       // The coach notebook: the last entry → the opening line, and the last set's analysis may refer to it
       try {
@@ -802,7 +835,7 @@ export default function Training() {
         setLoadLowered(decided.lowered);
         if (decided.step !== 0) {
           console.info(`[Load] step ${decided.step}${decided.raised ? ' (raised today)' : ''}`);
-          setExercises(prev => applyComplexityStep(prev, decided.step, limbProfile || {}, isHe));
+          setExercises(prev => clinicalFit(applyComplexityStep(prev, decided.step, limbProfile || {}, isHe), limbProfile || {}, isHe));
         }
       } catch (err) {
         console.error('Failed to load exercise history:', err);
@@ -1390,6 +1423,34 @@ export default function Training() {
     }
   }
 
+  // ---- THE CLINICAL LIMIT, LIVE (Stage 4B step 4, owner 2026-11-04) ----
+  // every crossing → an immediate on-device safety alert (danger stays on the device); 3 in a set → the workout
+  // ends at once (like red pain) and the server locks it until the clinician approves
+  useEffect(() => { crossingsRef.current = 0; }, [currentIdx, currentSet]);
+  function onLimitCrossing(hit) {
+    if (clinicalLock?.locked) return;
+    crossingsRef.current += 1;
+    const n = crossingsRef.current;
+    const [side, j] = hit.joint.split('_');
+    const jName = ROM_JOINTS[j] ? (isHe ? `${ROM_JOINTS[j].he} ${side === 'left' ? 'שמאל' : 'ימין'}` : `${side} ${ROM_JOINTS[j].en.toLowerCase()}`) : hit.joint;
+    const entry = { ...hit, exercise: currentExercise?.name || null, set: currentSet, n, at: Date.now() };
+    sessionDataRef.current.limitCrossings = [...(sessionDataRef.current.limitCrossings || []), entry];
+    console.warn(`[Clinical] limit crossed ${n}/${LOCK_AFTER}: ${hit.joint} ${hit.value}° > ${hit.limit}°`);
+    setFeedback({ type: 'error', text: isHe ? `⛔ עברת את הגבול של ה${jName} (${hit.limit}°) — ${n}/${LOCK_AFTER}` : `⛔ Over the ${jName} limit (${hit.limit}°) — ${n}/${LOCK_AFTER}` });
+    if (n < LOCK_AFTER) {
+      speakCritical(isHe ? `עצור. עברת את הגבול שהפיזיותרפיסט קבע ל${jName}. תנועה קטנה יותר.` : `Stop. You passed the limit your physiotherapist set for the ${jName}. A smaller movement.`, { rate: 1.05 });
+      return;
+    }
+    // the third crossing: the workout ends now and is locked until the clinician approves
+    if (phase === PHASE.EXERCISING || phase === PHASE.WARM_UP) handlePauseExercise();
+    pausedStateRef.current = null; pausedWarmUpRef.current = null;
+    speakCritical(isHe ? `עוצרים את האימון. עברת שלוש פעמים את הגבול שהפיזיותרפיסט קבע. ממשיכים רק אחרי שהוא יאשר.` : 'We stop the workout. You crossed your physiotherapist’s limit three times. We continue only after they approve.', { rate: 1.0 });
+    const lock = { locked: true, exercise: currentExercise?.name || '', joint: hit.joint, value: hit.value, limit: hit.limit, crossings: n, at: Date.now() };
+    setClinicalLock(lock);
+    clinic('POST', '/lock', lock).then(r => { if (!r.ok) console.error('[Clinical] the lock was not saved on the server:', r.error); });
+    try { recordExerciseResult(); saveSession('partial'); } catch (err) { console.warn('[Clinical] the workout was not saved:', err.message); }
+  }
+
   // SAFE MODE (owner, 2026-11-01): on red, the trainee may go on at a MINIMAL load instead of stopping —
   // only this set, a few more reps, very slow and small, the coach close by; re-checked at the set's end
   function chooseSafeMode() {
@@ -1513,7 +1574,14 @@ export default function Training() {
   useEffect(() => {
     if (phase !== PHASE.EXERCISING && phase !== PHASE.WARM_UP) return undefined;
     if (!romTrackerRef.current) romTrackerRef.current = createRomTracker(measurableJoints(limbProfile || {}));
-    const id = setInterval(() => addRomFrame(romTrackerRef.current, poseLandmarksRef.current), 100);
+    const id = setInterval(() => {
+      addRomFrame(romTrackerRef.current, poseLandmarksRef.current);
+      const mon = limitMonitorRef.current;
+      if (mon?.active && phaseRef.current === PHASE.EXERCISING && !coachStopRef.current) {
+        const hit = mon.update(poseLandmarksRef.current, performance.now());
+        if (hit) onLimitCrossing(hit);
+      }
+    }, 100);
     return () => clearInterval(id);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [phase]);
@@ -2332,7 +2400,7 @@ export default function Training() {
     setShowBallQuestion(false);
     sessionDataRef.current.ballAvailable = hasBall;
     const fitted = fitExercises(rawExercisesRef.current, availableEquipment(userProfile, { hasBall }));
-    if (fitted.exercises.length) setExercises(applyComplexityStep(protectFromPain(fitted.exercises, painHistoryRef.current), loadStepRef.current.step, limbProfile || {}, isHe));
+    if (fitted.exercises.length) setExercises(clinicalFit(applyComplexityStep(protectFromPain(fitted.exercises, painHistoryRef.current), loadStepRef.current.step, limbProfile || {}, isHe), limbProfile || {}, isHe));
     if (fitted.substitutions.length) sessionDataRef.current.equipmentSubstitutions = fitted.substitutions;
     if (explicit && user?.uid) {
       updateDoc(doc(db, 'users', user.uid), { hasBall }).catch(err => console.error('[Ball] save failed:', err));
@@ -3008,6 +3076,8 @@ export default function Training() {
       readiness: readinessRating || null,
       loadStep: loadStepRef.current.step || 0,
       loadAdjustments: sessionDataRef.current.loadAdjustments || [],
+      limitCrossings: sessionDataRef.current.limitCrossings || [],
+      clinicalChanges: sessionDataRef.current.clinicalChanges || [],
       technicalQuality,
       personalBests: [],
       aiSummary: null,
@@ -3762,6 +3832,32 @@ export default function Training() {
   }
 
   const feedbackColor = { good: 'bg-green-500', count: 'bg-blue-600', info: 'bg-blue-500', warning: 'bg-orange-500' };
+
+  // THE CLINICAL LOCK (owner, 2026-11-04): 3 crossings of the clinician's limit in a set → no workout until the
+  // clinician approves in the portal. Only the clinician can unlock (the trainee cannot write the lock — the rules).
+  if (clinicalLock?.locked) {
+    const j = clinicalLock.joint ? clinicalLock.joint.split('_') : null;
+    const jName = j && ROM_JOINTS[j[1]] ? (isHe ? `${ROM_JOINTS[j[1]].he} ${j[0] === 'left' ? 'שמאל' : 'ימין'}` : `${j[0]} ${ROM_JOINTS[j[1]].en.toLowerCase()}`) : null;
+    return (
+      <div dir={isHe ? 'rtl' : 'ltr'} className="max-w-md mx-auto py-10 px-4">
+        <div className="bg-white rounded-2xl shadow-xl p-6 space-y-4 text-center">
+          <div className="text-5xl">{'🔒'}</div>
+          <h1 className="text-xl font-extrabold text-gray-900">{isHe ? 'האימון נעול עד אישור הפיזיותרפיסט' : 'Training is locked until your physiotherapist approves'}</h1>
+          <p className="text-gray-700 text-sm">
+            {isHe
+              ? `עברת ${clinicalLock.crossings || LOCK_AFTER} פעמים בסט את הגבול שהפיזיותרפיסט קבע${jName ? ` ל${jName}` : ''}${clinicalLock.limit ? ` (${clinicalLock.limit}°)` : ''}. כדי לשמור עליך, ממשיכים רק אחרי שהוא יבדוק ויאשר שאתה כשיר.`
+              : `You crossed your physiotherapist's limit${jName ? ` for the ${jName}` : ''}${clinicalLock.limit ? ` (${clinicalLock.limit}°)` : ''} ${clinicalLock.crossings || LOCK_AFTER} times in a set. To keep you safe, training continues only after they check and approve.`}
+          </p>
+          <p className="text-xs text-gray-500">{isHe ? 'הפיזיותרפיסט רואה את זה ברשימה שלו.' : 'Your physiotherapist sees this in their list.'}</p>
+          <div className="flex gap-2 justify-center">
+            <button onClick={async () => { try { const d = await getDoc(doc(db, 'users', user.uid, 'clinicalLocks', 'current')); setClinicalLock(d.exists() ? d.data() : null); } catch { /* offline */ } }}
+              className="px-4 py-2 rounded-lg border font-semibold">{isHe ? 'בדוק שוב' : 'Check again'}</button>
+            <button onClick={() => { handleStopCamera(); navigate('/'); }} className="px-4 py-2 rounded-lg bg-gray-900 text-white font-semibold">{isHe ? 'לדף הבית' : 'Home'}</button>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   if (workoutDone) {
     return (

@@ -43,6 +43,10 @@ router.post('/unlink', handle((c, u) => c.unlink(u)));
 router.post('/end', handle((c, u, req) => c.endPatient(u, String(req.body?.traineeId || ''))));
 router.get('/patients', handle((c, u) => c.patients(u)));
 router.get('/patients/:id', handle((c, u, req) => c.patientData(u, String(req.params.id || ''))));
+router.put('/patients/:id/limits', handle((c, u, req) => c.setLimits(u, String(req.params.id || ''), req.body || {})));
+router.post('/patients/:id/unlock', handle((c, u, req) => c.unlock(u, String(req.params.id || ''), req.body || {})));
+router.post('/lock', (req, res, next) => (limited(`lock-${req.uid}`, 20, 600000) ? res.status(429).json({ error: 'too_many' }) : next()),
+  handle((c, u, req) => c.lockSelf(u, req.body || {})));
 router.get('/my-audit', handle((c, u) => c.myAudit(u)));
 
 export default router;

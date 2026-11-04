@@ -152,3 +152,30 @@ test('the patient data: only through an active assignment, audited, never the co
   const list = await s.clinic.patients(pt);
   assert.equal(list[0].flags[0].code, 'red_pain');
 });
+
+test('the clinical limits: only the assigned clinician sets them (validated); 3 crossings lock; only the clinician unlocks', async () => {
+  const s = setup();
+  const pt = await approvedClinician(s);
+  const pt2 = await approvedClinician(s, 'PT2', 'רון');
+  const { code } = await s.clinic.createInvite(pt);
+  await s.clinic.link({ uid: 'T1' }, code, true);
+  await rejects(s.clinic.setLimits(pt2, 'T1', { romLimits: { left_knee: 90 } }), 'no_active_assignment');
+  await rejects(s.clinic.setLimits(pt, 'T1', { romLimits: { nose: 90 } }), 'bad_joint');
+  await rejects(s.clinic.setLimits(pt, 'T1', { romLimits: { left_knee: 900 } }), 'bad_limit');
+  // no limits yet → the trainee cannot lock (nothing to lock against)
+  await rejects(s.clinic.lockSelf({ uid: 'T1' }, {}), 'no_limits');
+  await s.clinic.setLimits(pt, 'T1', { romLimits: { left_knee: 90 }, blockedPatterns: ['jumpSquat'] });
+  assert.equal((await s.db.get('users/T1/clinicalConstraints/current')).romLimits.left_knee, 90);
+  await s.clinic.lockSelf({ uid: 'T1' }, { exercise: 'סקוואט', joint: 'left_knee', value: 104, limit: 90, crossings: 3 });
+  assert.equal((await s.db.get('users/T1/clinicalLocks/current')).locked, true);
+  assert.equal((await s.clinic.patients(pt))[0].flags[0].code, 'locked');
+  await rejects(s.clinic.unlock(pt2, 'T1'), 'no_active_assignment');
+  await s.clinic.unlock(pt, 'T1', { note: 'בדקתי, אפשר להמשיך' });
+  const lock = await s.db.get('users/T1/clinicalLocks/current');
+  assert.equal(lock.locked, false);
+  assert.equal(lock.approvedByName, 'דנה');
+  const d = await s.clinic.patientData(pt, 'T1');
+  assert.equal(d.violations.length, 1);
+  const actions = (await s.clinic.myAudit({ uid: 'T1' })).map(r => r.action);
+  for (const a of ['set_limits', 'locked_by_limit', 'approve_continue']) assert.ok(actions.includes(a), a);
+});
