@@ -45,7 +45,7 @@ import { useVoiceProsody } from '../hooks/useVoiceProsody';
 import { brainSummary, brainBall } from '../engine/coachBrain/brain';
 import { buildDebrief } from '../engine/coachBrain/debrief';
 import { debriefFacts, legacyCueFacts, bodyText } from '../engine/coachBrain/aiFacts';
-import { aiCue, aiDebrief, aiBriefing, aiLine, aiPain, aiOpening, aiAnswer, aiNotebook, setCoachStyleAI, setNotebookContext, getAiStatus, onAiStatus } from '../utils/aiCoach';
+import { aiCue, aiDebrief, aiBriefing, aiLine, aiPain, aiOpening, aiAnswer, aiNotebook, aiBodyVision, setCoachStyleAI, setNotebookContext, setClinicianFocus, getAiStatus, onAiStatus } from '../utils/aiCoach';
 import { defaultStyle, shouldSoften, effectiveStyle, rateFactor, isStyle } from '../engine/training/coachStyle';
 import { notebookFacts, worstPain, notesText, openingFacts, painToCheck } from '../engine/training/coachNotebook';
 import { measurableJoints, createRomTracker, addRomFrame, summarizeRom } from '../engine/progress/rom';
@@ -1438,6 +1438,50 @@ export default function Training() {
       console.warn('[Notebook] not saved:', err.message);
     }
   }
+
+  // ---- THE PHYSIOTHERAPIST'S INSTRUCTIONS → THE AI COACH (owner, 2026-11-04) ----
+  // a clinician's exercise (custom or chosen with a note): their steps / note / instructions travel with EVERY AI
+  // call of this exercise (the briefing, the live cues, the eyes, the rest analysis) — the coach coaches to them
+  const clinicianFocus = useMemo(() => {
+    const ex = currentExercise;
+    if (!ex?.byClinician) return null;
+    const items = [...(ex.customSteps || []), ex.clinicianNote, ex.custom && !ex.customSteps ? ex.description : null]
+      .map(x => String(x || '').trim()).filter(Boolean);
+    return items.length ? [...new Set(items)].slice(0, 8) : null;
+  }, [currentExercise]);
+  useEffect(() => { setClinicianFocus(clinicianFocus); }, [clinicianFocus]);
+  useEffect(() => () => setClinicianFocus(null), []);
+
+  // THE EYES SUPERVISE A MANUAL EXERCISE: nothing on the device measures it, so every 9 s one camera frame goes to
+  // the AI's eyes with the physiotherapist's instructions; a CLEAR deviation (major, confident) → ONE short
+  // correction in their terms (at most every 15 s, never over the coach's own speech)
+  useEffect(() => {
+    if (phase !== PHASE.EXERCISING || !currentExercise?.manual || !clinicianFocus) return undefined;
+    let busy = false;
+    let lastSaid = 0;
+    const said = [];
+    const id = setInterval(async () => {
+      if (busy || isSpeaking() || Date.now() - lastSaid < 15000) return;
+      busy = true;
+      try {
+        const frame = await bodyFrameRef.current?.();
+        if (!frame) return;
+        const v = await aiBodyVision({
+          frame, lang: isHe ? 'he' : 'en', exercise: currentExercise.name, body: bodyText(limbProfile || {}),
+          keyPoints: clinicianFocus, manualDrill: true, name: playerName, recent: said.slice(-4),
+        });
+        const f = (v?.findings || []).find(x => x.severity === 'major' && Number(x.confidence) >= 0.75 && x.cue);
+        if (f && phaseRef.current === PHASE.EXERCISING && !isSpeaking()) {
+          lastSaid = Date.now(); said.push(f.cue);
+          setFeedback({ type: 'warning', text: f.cue });
+          speakPriority(f.cue, { rate: 1.05 });
+          console.info('[Clinical] the eyes on a manual exercise:', f.code, f.cue);
+        }
+      } catch { /* the eyes are a helper — a miss never stops the exercise */ } finally { busy = false; }
+    }, 9000);
+    return () => clearInterval(id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [phase, currentExercise?.name, clinicianFocus]);
 
   // ---- THE CLINICAL LIMIT, LIVE (Stage 4B step 4, owner 2026-11-04) ----
   // every crossing → an immediate on-device safety alert (danger stays on the device); 3 in a set → the workout

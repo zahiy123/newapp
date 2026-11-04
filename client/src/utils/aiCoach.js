@@ -27,10 +27,13 @@ export function setCoachStyleAI(style) { coachStyleNow = style || 'energetic'; }
 // The coach notebook's last notes (Stage 3 #17): the last set's analysis may connect to them
 let notebookNow = '';
 export function setNotebookContext(text) { notebookNow = String(text || '').slice(0, 600); }
+// The physiotherapist's instructions for the CURRENT exercise (owner, 2026-11-04) — sent with every AI call
+let clinicianFocusNow = null;
+export function setClinicianFocus(items) { clinicianFocusNow = Array.isArray(items) && items.length ? items.slice(0, 8) : null; }
 
 async function post(path, body, timeoutMs, { background = false } = {}) {
   try {
-    const res = await fetchWithTimeout(apiUrl(path), { method: 'POST', body: JSON.stringify({ style: coachStyleNow, ...body }) }, timeoutMs);
+    const res = await fetchWithTimeout(apiUrl(path), { method: 'POST', body: JSON.stringify({ style: coachStyleNow, ...(clinicianFocusNow ? { clinicianFocus: clinicianFocusNow } : {}), ...body }) }, timeoutMs);
     if (!res.ok) { if (++failsInRow >= 2) setAiStatus('unreachable'); return null; }
     const j = await res.json();
     // a SLOW background call (the briefing, prepared ahead) is not an outage: only a real failure shows the banner

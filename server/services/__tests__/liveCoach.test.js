@@ -164,3 +164,21 @@ test('two-way voice: a question gets a live answer; an invented performance numb
   assert.equal(await generateCue(f, { askFn: async () => ok }), ok);
   assert.equal(await generateCue(f, { askFn: async () => 'עשית 7 מסירות טובות, הקרסול חשוב.' }), null);
 });
+
+test('the physiotherapist\'s instructions reach every coaching prompt (cue, briefing, rest analysis, the eyes)', async () => {
+  const { clinicianLine, buildBriefingPrompt, buildBodyVisionPrompt } = await import('../liveCoach.js');
+  const focus = ['הברך מעל הכף רגל', 'לרדת רק עד 60 מעלות'];
+  assert.equal(clinicianLine({}), '');
+  assert.match(clinicianLine({ clinicianFocus: focus }), /PHYSIOTHERAPIST/);
+  assert.match(buildCuePrompt({ ...cueFacts, clinicianFocus: focus }).system, /לרדת רק עד 60 מעלות/);
+  assert.match(buildCuePrompt({ lang: 'he', mode: 'motivate', clinicianFocus: focus, error: { what: 'x' } }).system, /PHYSIOTHERAPIST/);
+  assert.match(buildBriefingPrompt({ lang: 'he', exercise: 'x', steps: ['a'], clinicianFocus: focus }).system, /PHYSIOTHERAPIST/);
+  assert.match(buildDebriefPrompt({ lang: 'he', exercise: 'x', clinicianFocus: focus }).system, /PHYSIOTHERAPIST/);
+  const v = buildBodyVisionPrompt({ lang: 'he', exercise: 'מתיחת גדם', clinicianFocus: focus, manualDrill: true }).system;
+  assert.match(v, /PHYSIOTHERAPIST/);
+  assert.match(v, /NOT measured by the device/);
+  // a number from the physiotherapist's text is a grounded number (the guards allow it)
+  assert.equal(numbersGrounded('רד רק עד 60 מעלות', { clinicianFocus: focus }), true);
+  // without a focus the #74 prompts are unchanged
+  assert.equal(buildCuePrompt(cueFacts).system.includes('PHYSIOTHERAPIST'), false);
+});

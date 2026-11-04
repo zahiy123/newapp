@@ -94,6 +94,13 @@ export function styleLine(style) {
   if (style === 'balanced') return '\nSTYLE — BALANCED: supportive but demanding — warm, clear and confident, energy without shouting.';
   return '';
 }
+// THE PHYSIOTHERAPIST'S INSTRUCTIONS (owner, 2026-11-04): a clinician's exercise / note travels with every AI call
+// (clinicianFocus) — the coach reads it, coaches TO it and judges the execution against it, right after safety.
+export function clinicianLine(f) {
+  const items = (Array.isArray(f?.clinicianFocus) ? f.clinicianFocus : [f?.clinicianFocus]).map(x => clip(x, 200)).filter(Boolean).slice(0, 8);
+  if (!items.length) return '';
+  return `\nTHE PATIENT'S PHYSIOTHERAPIST wrote for THIS exercise (TOP PRIORITY, right after safety): «${items.join(' | ')}». Read it deeply and coach exactly to it: put what they emphasise first in what you say, use their terms, judge the execution against it, remind of it when the trainee drifts from it. Never contradict it, never add an instruction against it; if a measured fact conflicts with it, safety first and say it gently.`;
+}
 const COACH_PERSONA = (he, style = null) => `${COACH_PERSONA_BASE(he)}${styleLine(style)}`;
 const COACH_PERSONA_BASE = (he) => `You are the world's best ${he ? 'Israeli ' : ''}football / sports coach AND an expert sports physiotherapist, standing next to the trainee and watching THIS movement. You speak ${he ? 'natural spoken Hebrew (masculine singular, like a real Israeli coach on the sideline)' : 'natural spoken English'}.
 Ground rules — never break them:
@@ -132,7 +139,7 @@ export function buildCuePrompt(f) {
   const he = f.lang !== 'en';
   const moment = MOMENTS[f.mode];
   if (moment) {
-    const system = `${COACH_PERSONA(he, f.style)}
+    const system = `${COACH_PERSONA(he, f.style)}${clinicianLine(f)}
 ${isPassFacts(f) ? PASS_RULE + '\n' : ''}${moment} ${f.name ? `You may use the name ${clip(f.name, 20)} (not every time).` : ''}
 Do not repeat or paraphrase closely any of the recent lines listed. Output ONLY the spoken sentence.`;
     const user = JSON.stringify({
@@ -149,7 +156,7 @@ Do not repeat or paraphrase closely any of the recent lines listed. Output ONLY 
     });
     return { system, user };
   }
-  const system = `${COACH_PERSONA(he, f.style)}
+  const system = `${COACH_PERSONA(he, f.style)}${clinicianLine(f)}
 ${isPassFacts(f) ? PASS_RULE + '\n' : ''}NOW: the trainee is IN THE MIDDLE OF A SET. Give ONE immediate correction, like a shout from the sideline of the best professional coach: sharp, technical, specific to THIS rep — 3 to 5 words (never more than 6), ONE COMPLETE short sentence, NO name.
 WHOLE BODY, ONE CHAIN (owner, 2026-10-21): "error" is what the device MEASURED (the leg / the movement); "bodyNow" is what the coach's eyes see in the WHOLE body (chest, pelvis, posture, support leg). Treat them as ONE movement chain: when the body causes the leg error (e.g. the chest leaning back → the leg swings up; the pelvis open → the foot does not turn out), name the ROOT in the body and its effect on the leg in one instruction; otherwise give the single most important fix. Never generic, never filler, never a vague 'focus' — a concrete action a top coach would shout (it must be SAID in under 2 seconds, the next pass is coming; the deep why / how is said in the rest). It must tell them what to do on the very next rep — exactly the instruction of "what" / "how", nothing else.
 ${f.tone === 'calm' ? 'The trainee is tired / frustrated right now: say it calmly and supportively, one simple thing.' : ''}
@@ -172,7 +179,7 @@ Do not repeat or paraphrase closely any of the recent cues listed.${(f.previousF
 /** The prompt of the exercise briefing (pure — tested). */
 export function buildBriefingPrompt(f) {
   const he = f.lang !== 'en';
-  const system = `${COACH_PERSONA(he, f.style)}
+  const system = `${COACH_PERSONA(he, f.style)}${clinicianLine(f)}
 NOW: the exercise is about to begin. Introduce and TEACH it to THIS trainee like the best coach + physiotherapist: what the exercise is for, then the technique — ONLY the steps and the key point given, in your own fresh words, adapted to the trainee's body (a prosthesis / crutches as given) — and end with a short cue to get ready. About 45–75 words, flowing spoken sentences. ${f.name ? `Address the trainee as ${clip(f.name, 20)} once.` : ''}
 Output ONLY the spoken text.`;
   const user = JSON.stringify({
@@ -186,7 +193,7 @@ Output ONLY the spoken text.`;
 /** The prompt of the rest's analysis (pure — tested). */
 export function buildDebriefPrompt(f) {
   const he = f.lang !== 'en';
-  const system = `${COACH_PERSONA(he, f.style)}
+  const system = `${COACH_PERSONA(he, f.style)}${clinicianLine(f)}
 NOW: the REST between sets. You are the expert in the locker room analysing the set that just ended, for THIS trainee, from the measured log. Speak about 70–130 words, in flowing spoken sentences:
 ${f.prefetch ? '1. Do NOT open with the set in numbers (the coach says them first) and give frequencies in words ("in most passes", "in a few") — never as counts.' : '1. The set in numbers (reps / seconds, accuracy — if accuracy is null say nothing about it).'} "reps" are COUNTED reps — never call them clean, perfect or good unless "errors" is empty.
 2. The most important thing to fix (safety first, then what happened most): what happened, how often, the measured value vs. the target when given, WHY it matters biomechanically / for injury, and HOW to fix it — a precise, practical instruction or feel.
@@ -379,7 +386,7 @@ export async function generatePassVision(f, { timeoutMs = 5500, askFn = null } =
 export function buildBodyVisionPrompt(f) {
   const he = f.lang !== 'en';
   const system = `You are the world's best coach and sports physiotherapist watching ONE camera frame of a trainee in the middle of THIS exercise: "${clip(f.exercise, 80)}"${f.sport ? ` (${clip(f.sport, 40)})` : ''}. ${f.body ? `Body: ${clip(f.body, 120)} — respect it precisely, never ask a missing / prosthetic limb to do anything it cannot.` : ''}
-${(f.keyPoints || []).length ? `The exercise's correct technique: ${(f.keyPoints || []).slice(0, 6).map(x => clip(x, 120)).join(' | ')}.` : ''}
+${(f.keyPoints || []).length ? `The exercise's correct technique: ${(f.keyPoints || []).slice(0, 6).map(x => clip(x, 120)).join(' | ')}.` : ''}${clinicianLine(f)}${f.manualDrill ? '\nThis exercise is NOT measured by the device — you are the only supervisor: judge the frame against the physiotherapist\'s instructions above; a clear deviation from them is a "major" finding with its fix in their terms.' : ''}
 ${f.legsImage ? 'A second image is a close-up of the legs and feet of the same moment.' : ''}${f.composite ? 'The image has TWO panels of the same moment: LEFT = the whole body, RIGHT = a close-up of the legs and feet.' : ''}${f.isPass ? ` It is a SHADOW inside-foot pass (no real ball); the kicking leg is the ${f.side === 'left' ? 'LEFT' : f.side === 'right' ? 'RIGHT' : 'moving'} (anatomical) leg.` : ''}
 ${f.kickingProsthesis ? `The KICKING leg is the trainee's PROSTHESIS (the ${f.side === 'left' ? 'LEFT' : f.side === 'right' ? 'RIGHT' : ''} leg): its ankle is fixed — NEVER judge or mention the ankle lock, the toes or which surface of the foot meets the ball. Judge the prosthesis kick by its real technique: the swing driven from the HIP (not the knee), the leg turned out from the hip, the weight anchored on the sound support leg, the chest over the ball, the arms for balance.
 ` : ''}${f.isPass || f.kickingProsthesis || isPassFacts(f) ? 'The ball is VIRTUAL (drawn on the screen, not in the camera): never report a missing / unseen ball.\n' : ''}${f.isPass || f.kickingProsthesis ? 'This is a PASS: if it was executed like a POWER KICK (a big back-swing, a knee snap, the leg swinging high / hard) report it as a MAJOR finding "pass_like_kick" — a pass is short, controlled, from the hip.\n' : ''}${isPassFacts(f) ? PASS_RULE + '\n' : ''}${f.goal ? `Today's training goal: ${clip(f.goal, 80)}.\n` : ''}Never praise what was technically wrong.
@@ -478,7 +485,7 @@ export const NOTEBOOK_MODELS = DEBRIEF_MODELS;
 /** The notebook prompt (pure — tested). */
 export function buildNotebookPrompt(f) {
   const he = f.lang !== 'en';
-  const system = `${COACH_PERSONA(he, f.style)}
+  const system = `${COACH_PERSONA(he, f.style)}${clinicianLine(f)}
 NOW: the workout ended. Write YOUR OWN short coach's notes about it — for yourself, to remember this trainee next time (a real coach's notebook). Only from the facts: never invent a number, an exercise, a feeling or an event. Write every exercise name EXACTLY as given (never change a word of it).
 Return ONLY JSON: {"summary":"<2–3 sentences: how the workout went>","performance":"<1 sentence: the strongest point and the main thing to improve, from the exercises>","pain":"<1 sentence about the pain reports (where, how strong, what was decided) or empty>","notable":"<1 short sentence or empty>","focusNext":"<the ONE focus for the next workout>","followUp":"<the ONE thing to ask about at the start of the next workout>"} — ${he ? 'natural Hebrew' : 'English'}, short.`;
   const user = JSON.stringify({
