@@ -154,12 +154,12 @@ router.post('/analyze-game-frames', async (req, res) => {
 // === VAR SINGLE-FRAME ANALYSIS ===
 router.post('/analyze-var', async (req, res) => {
   try {
-    const { frame, sport, triggerReason, teamContext } = req.body;
+    const { frame, sport, triggerReason, teamContext, incident, offence } = req.body;
     if (!frame) {
       return res.status(400).json({ error: 'No frame provided' });
     }
     console.log(`VAR analysis: sport=${sport}, reason="${triggerReason}"`);
-    const result = await analyzeVARFrame({ frame, sport, triggerReason, teamContext });
+    const result = await analyzeVARFrame({ frame, sport, triggerReason, teamContext, incident: incident || null, offence: offence || null });
     console.log(`VAR result: isFoul=${result.isFoul}, reason="${result.reason}"`);
     res.json(result);
   } catch (error) {

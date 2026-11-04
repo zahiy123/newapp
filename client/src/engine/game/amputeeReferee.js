@@ -116,7 +116,7 @@ export function createAmputeeReferee({ pitch = AMPUTEE_PITCH, sides = { A: 'left
     return { tip: best, d: bd, speed, toward };
   }
 
-  function detectTouch(t) {
+  function detectTouch() {
     const h = ball.hist;
     if (h.length < 3) return null;
     const [a, b, c] = h.slice(-3);
@@ -220,7 +220,7 @@ export function createAmputeeReferee({ pitch = AMPUTEE_PITCH, sides = { A: 'left
         }
         // the touches: who played the ball, and how
         if (!ball.out) {
-          const touch = detectTouch(t);
+          const touch = detectTouch();
           if (touch && (!lastTouch || touch.t - lastTouch.t > 250)) {
             lastTouch = touch;
             if (touch.by === 'crutch') pending.push(touch);            // 7 — judged after the intent window

@@ -2,10 +2,12 @@ import { callClaudeVision, extractJSON } from './claude.js';
 
 // === VAR Single-Frame Analysis Prompts ===
 const VAR_PROMPTS = {
-  footballAmputee: `You are a VAR referee for an amputee football match.
-Players use forearm crutches with lower limb amputations. Losing balance on crutches is NORMAL and routine.
-Only flag: deliberate crutch-to-body strikes, tripping with crutch, handball by field player, or dangerous high crutch swing near opponent's head.
-Do NOT flag: routine falls, balance loss, shoulder contact, normal crutch placement.`,
+  footballAmputee: `You are a VAR referee for an amputee football match, by the WAFF Laws of the Game (FIFA laws with these amendments).
+Outfield players are leg amputees on forearm crutches (no prosthesis while playing); the goalkeeper is a single-arm amputee and must stay inside the goal area (10 m wide × 8 m deep). 60 × 40 m pitch, goals 5 × 2.2 m, NO OFFSIDE, kick-ins (kicked, not thrown).
+CRUTCHES ARE PART OF THE ARMS: INTENTIONALLY controlling / directing / blocking the ball with a crutch (or a residual limb) = a handling offence (a direct free kick; by a defender inside his own goal area = a PENALTY). INCIDENTAL contact (the ball hits a still crutch, no control) is NOT an offence.
+SLIDE TACKLES ARE NOT PERMITTED (a direct free kick + a yellow) — the goalkeeper may dive. A player who fell and plays the ball = an indirect free kick. Striking / tripping an opponent with a crutch = a foul (violent → red).
+The goalkeeper ACTIVELY playing outside the goal area: 1st time a yellow + a direct free kick, 2nd time a red; an inadvertent step out (momentum, after releasing the ball) is not penalised.
+Losing balance on crutches, falls and shoulder contact are ROUTINE — never a foul by themselves.`,
 
   football: `You are a VAR referee for a football (soccer) match.
 Shoulder-to-shoulder contact is LEGAL. Sliding tackles are legal if ball is played first.
@@ -134,7 +136,7 @@ function formatTimestamp(seconds) {
  * Called only when local trigger detects suspected foul.
  * @returns {{ isFoul: boolean, reason: string }}
  */
-export async function analyzeVARFrame({ frame, sport, triggerReason, teamContext }) {
+export async function analyzeVARFrame({ frame, sport, triggerReason, teamContext, incident = null, offence = null }) {
   const sportKey = sport || 'football';
   const sportLabel = {
     football: 'football (soccer)',
@@ -145,6 +147,16 @@ export async function analyzeVARFrame({ frame, sport, triggerReason, teamContext
 
   const system = VAR_PROMPTS[sportKey] || VAR_PROMPTS.football;
 
+  // the incident the assistant referee flagged (Stage 5): ask the VAR the RIGHT question for it
+  const QUESTIONS = {
+    goal: 'Did the WHOLE ball cross the goal line between the posts and under the crossbar? If the frame cannot show it, say so.',
+    crutch_handball: 'Was the crutch used INTENTIONALLY to control / direct / block the ball (an offence), or was it incidental contact with a still crutch (not an offence)?',
+    slide_tackle: 'Is this an outfield player SLIDING into a tackle (not permitted), or a fall / a loss of balance (routine)?',
+    crutch_strike: 'Did a crutch strike or trip an opponent (a foul), or was it normal crutch placement?',
+    gk_outside: 'Is the goalkeeper actively playing OUTSIDE the goal area (an offence), or an inadvertent step out?',
+    fallen_play: 'Is a player who is DOWN on the ground playing the ball (an indirect free kick)?',
+  };
+  const question = QUESTIONS[offence] || QUESTIONS[incident] || '';
   const teamInfo = teamContext
     ? `Team context: Player A is on team ${teamContext.playerA}, Player B is on team ${teamContext.playerB}.`
     : '';
@@ -160,7 +172,7 @@ export async function analyzeVARFrame({ frame, sport, triggerReason, teamContext
 A local detection system flagged a suspected incident: "${triggerReason}".
 ${teamInfo}
 
-Analyze this frame carefully. Remember: falls and physical contact are ROUTINE in this sport.
+${question ? `THE QUESTION: ${question}\n` : ''}Analyze this frame carefully. Remember: falls and physical contact are ROUTINE in this sport.
 Determine if this is truly an illegal foul or just clean/normal play.
 
 Return ONLY valid JSON (no markdown, no explanation):

@@ -15,6 +15,7 @@ import VideoAnalysisPlayer from '../components/VideoAnalysisPlayer';
 import { FieldAnchorTracker } from '../utils/fieldAnchor';
 import { TeamDetector } from '../utils/teamDetection';
 import { FoulTriggerEngine } from '../utils/foulTrigger';
+import AmputeeRefereeScreen from '../components/game/AmputeeRefereeScreen';
 
 const GAME_PHASE = {
   SETUP_SPORT: 'setup_sport',
@@ -28,6 +29,7 @@ const GAME_PHASE = {
   VIDEO_UPLOAD: 'video_upload',
   VIDEO_ANALYZING: 'video_analyzing',
   VIDEO_REVIEW: 'video_review',
+  ASSISTANT_REF: 'assistant_ref',       // Stage 5: the amputee-football assistant referee (WAFF laws)
 };
 
 export default function GameMode() {
@@ -573,6 +575,10 @@ export default function GameMode() {
     return types[type] || { color: '#6b7280', he: type, en: type };
   }
 
+  if (gamePhase === GAME_PHASE.ASSISTANT_REF) {
+    return <AmputeeRefereeScreen isHe={isHe} onExit={() => setGamePhase(GAME_PHASE.CHOOSE_MODE)} />;
+  }
+
   return (
     <div className="max-w-4xl mx-auto space-y-4">
       <div className="flex items-center justify-between">
@@ -633,6 +639,17 @@ export default function GameMode() {
               <p className="text-xs text-gray-500">{t('game.uploadVideoDesc')}</p>
             </button>
           </div>
+
+          {selectedSport.key === 'footballAmputee' && (
+            <button
+              onClick={() => setGamePhase(GAME_PHASE.ASSISTANT_REF)}
+              className="w-full p-5 rounded-xl border-2 border-emerald-600 bg-emerald-50 hover:bg-emerald-100 transition text-center space-y-1"
+            >
+              <div className="text-3xl">{'🧑‍⚖️'}</div>
+              <div className="font-bold text-emerald-900">{isHe ? 'שופט עזר חכם (חדש)' : 'Smart assistant referee (new)'}</div>
+              <p className="text-xs text-emerald-800">{isHe ? 'לפי חוקי WAFF: גולים, חוצים בבעיטה, קרנות ובעיטות שער, יד בקב, גלישות, שוער מחוץ לרחבה, פנדלים — אתה מאשר כל החלטה' : 'By the WAFF laws — you confirm every decision'}</p>
+            </button>
+          )}
 
           <button
             onClick={() => setGamePhase(GAME_PHASE.SETUP_SPORT)}
