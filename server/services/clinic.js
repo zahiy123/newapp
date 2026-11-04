@@ -14,6 +14,8 @@
 // The storage / auth are injected (db, auth) — the logic is tested with an in-memory store.
 // ============================================================
 
+import { patientFlags } from './clinicFlags.js';
+
 export class ClinicError extends Error {
   constructor(status, code, message) { super(message || code); this.status = status; this.code = code; }
 }
@@ -38,6 +40,7 @@ export const assignmentId = (clinicianId, traineeId) => `${clinicianId}_${traine
 /**
  * The portal's operations. `user` = { uid, email, role } from the VERIFIED token.
  * db: get(path) · set(path, data) · update(path, data) · add(collection, data) → id · where(collection, field, value) → [{id, ...}]
+ *     · list(collection, { orderBy, limit }) → [{id, ...}] newest first (Firestore timestamps as milliseconds)
  * auth: setClaims(uid, claims)
  */
 export function createClinic({ db, auth, env = process.env, now = () => Date.now(), rand = Math.random }) {
@@ -191,17 +194,46 @@ export function createClinic({ db, auth, env = process.env, now = () => Date.now
       return { ok: true };
     },
 
-    /** The clinician's own patients (names only here — the full data comes through assertAccess, audited). */
+    /** The clinician's own patients + each one's RED FLAGS and last workout (audited as a list view). */
     async patients(user) {
       await requireClinician(user);
       const list = (await db.where('assignments', 'clinicianId', user.uid)).filter(a => a.status === 'active');
       const out = [];
       for (const a of list) {
         const p = await db.get(`users/${a.traineeId}`);
-        out.push({ traineeId: a.traineeId, name: p?.name || '', sport: p?.sport || '', since: a.linkedAt });
+        const workouts = await db.list(`users/${a.traineeId}/workouts`, { orderBy: 'date', limit: 12 });
+        const pains = await db.list(`users/${a.traineeId}/painLog`, { orderBy: 'date', limit: 30 });
+        const last = workouts[0] || null;
+        out.push({
+          traineeId: a.traineeId, name: p?.name || '', sport: p?.sport || '', since: a.linkedAt,
+          lastWorkoutAt: last ? (Number(last.at) || Number(last.date) || null) : null,
+          workoutsThisWeek: workouts.filter(w => now() - (Number(w.at) || Number(w.date) || 0) <= 7 * 864e5).length,
+          flags: patientFlags({ workouts, pains, now: now() }),
+        });
       }
+      out.sort((x, y) => (y.flags.filter(f => f.severity === 'red').length - x.flags.filter(f => f.severity === 'red').length) || (y.flags.length - x.flags.length));
       if (out.length) await audit({ actorId: user.uid, actorRole: 'clinician', action: 'view_patient_list', traineeIds: out.map(x => x.traineeId) });
       return out;
+    },
+
+    /**
+     * ONE patient's full data for the clinician (zero trust: assertAccess = an active clinician + an active
+     * assignment for this exact pair, AUDITED). Only what the care needs — never the login / contact details.
+     */
+    async patientData(user, traineeId) {
+      await assertAccess(user, traineeId, 'view_patient_data');
+      const p = (await db.get(`users/${traineeId}`)) || {};
+      const profile = {
+        name: p.name || '', age: p.age ?? null, sport: p.sport || '', trainingTrack: p.trainingTrack || null,
+        disability: p.disability || null, amputationSide: p.amputationSide || null, amputationLevel: p.amputationLevel || null,
+        mobilityAid: p.mobilityAid || null, scanData: p.scanData ? { romBaseline: p.scanData.romBaseline || null } : null,
+      };
+      const [workouts, pains, notebook] = await Promise.all([
+        db.list(`users/${traineeId}/workouts`, { orderBy: 'date', limit: 60 }),
+        db.list(`users/${traineeId}/painLog`, { orderBy: 'date', limit: 100 }),
+        db.list(`users/${traineeId}/coachNotebook`, { orderBy: 'date', limit: 30 }),
+      ]);
+      return { profile, workouts, pains, notebook, flags: patientFlags({ workouts, pains, now: now() }) };
     },
 
     /** The trainee's own access log: who viewed / changed their data, when. */

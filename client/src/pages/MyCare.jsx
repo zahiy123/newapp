@@ -6,8 +6,8 @@ import { useLanguage } from '../context/LanguageContext';
 import { clinic, clinicError } from '../utils/clinicApi';
 
 const fmtTime = (ms, isHe) => (ms ? new Date(ms).toLocaleString(isHe ? 'he-IL' : 'en-GB', { day: 'numeric', month: 'numeric', hour: '2-digit', minute: '2-digit' }) : '');
-const ACTION_HE = { consent_link: 'התחברת למטפל', unlink: 'ניתקת את החיבור', view_patient_list: 'ראה אותך ברשימת המטופלים', end_care: 'סיים את הטיפול' };
-const ACTION_EN = { consent_link: 'You linked', unlink: 'You unlinked', view_patient_list: 'Saw you in the patient list', end_care: 'Ended the care' };
+const ACTION_HE = { consent_link: 'התחברת למטפל', admin_self_link: 'חיבור בדיקה (מנהל)', unlink: 'ניתקת את החיבור', view_patient_list: 'ראה אותך ברשימת המטופלים', view_patient_data: 'צפה בנתונים שלך', end_care: 'סיים את הטיפול' };
+const ACTION_EN = { consent_link: 'You linked', admin_self_link: 'A test link (admin)', unlink: 'You unlinked', view_patient_list: 'Saw you in the patient list', view_patient_data: 'Viewed your data', end_care: 'Ended the care' };
 const SHARED_HE = ['ההתקדמות שלך: דיוק בכל תרגיל ומה תוקן', 'טווחי התנועה', 'היסטוריית הכאב (כולל מצב בטוח)', 'דוחות האימונים והתאמות העומס', 'יומן המאמן'];
 const SHARED_EN = ['Your progress: accuracy per exercise and what was fixed', 'Range of motion', 'Pain history (incl. safe mode)', 'Workout reports and load adaptations', 'The coach notebook'];
 

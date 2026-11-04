@@ -74,15 +74,27 @@ export function requireAuthStrict(req, res, next) {
   return requireAuth(req, res, next);
 }
 
+// Firestore timestamps → milliseconds (the client gets plain JSON)
+function plain(v) {
+  if (v && typeof v.toMillis === 'function') return v.toMillis();
+  if (Array.isArray(v)) return v.map(plain);
+  if (v && typeof v === 'object') return Object.fromEntries(Object.entries(v).map(([k, x]) => [k, plain(x)]));
+  return v;
+}
+
 /** The clinic's storage adapter over Firestore (server-only collections; the Admin SDK bypasses the rules). */
 export function adminDb() {
   const fs = admin.firestore();
   return {
-    async get(p) { const d = await fs.doc(p).get(); return d.exists ? d.data() : null; },
+    async get(p) { const d = await fs.doc(p).get(); return d.exists ? plain(d.data()) : null; },
     async set(p, data) { await fs.doc(p).set(data); },
     async update(p, data) { await fs.doc(p).set(data, { merge: true }); },
     async add(c, data) { return (await fs.collection(c).add(data)).id; },
-    async where(c, field, value) { const q = await fs.collection(c).where(field, '==', value).limit(500).get(); return q.docs.map(d => ({ id: d.id, ...d.data() })); },
+    async where(c, field, value) { const q = await fs.collection(c).where(field, '==', value).limit(500).get(); return q.docs.map(d => ({ id: d.id, ...plain(d.data()) })); },
+    async list(c, { orderBy = 'date', limit = 50 } = {}) {
+      const q = await fs.collection(c).orderBy(orderBy, 'desc').limit(limit).get();
+      return q.docs.map(d => ({ id: d.id, ...plain(d.data()) }));
+    },
   };
 }
 export const adminAuth = () => ({ setClaims: (uid, claims) => admin.auth().setCustomUserClaims(uid, claims) });

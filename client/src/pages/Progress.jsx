@@ -16,7 +16,8 @@ import WorkoutReport from '../components/progress/WorkoutReport';
 
 ChartJS.register(CategoryScale, LinearScale, PointElement, LineElement, Tooltip, Filler);
 
-const atOf = (w) => Number(w?.at) || (w?.date?.toMillis ? w.date.toMillis() : 0);
+// (a workout from Firestore has a Timestamp; from the clinician's server a plain number)
+const atOf = (w) => Number(w?.at) || (w?.date?.toMillis ? w.date.toMillis() : Number(w?.date) || 0);
 const fmtDate = (ms, isHe) => (ms ? new Date(ms).toLocaleDateString(isHe ? 'he-IL' : 'en-GB', { day: 'numeric', month: 'numeric' }) : '');
 
 function Spark({ points, isHe, unit = '%', min = 0, max = 100, refLine = null }) {
@@ -40,7 +41,6 @@ export default function Progress() {
   const { lang } = useLanguage();
   const isHe = (lang || userProfile?.language || 'he') === 'he';
   const [workouts, setWorkouts] = useState(null);
-  const [open, setOpen] = useState(null);
 
   useEffect(() => {
     if (!user) return;
@@ -49,13 +49,18 @@ export default function Progress() {
       .catch(err => { console.error('[Progress] load failed:', err); setWorkouts([]); });
   }, [user]);
 
+  if (workouts === null) return <div className="text-center py-16 text-gray-500">{isHe ? 'טוען…' : 'Loading…'}</div>;
+  return <ProgressView workouts={workouts} scanData={userProfile?.scanData} isHe={isHe} />;
+}
+
+/** The progress view itself — the trainee's own page, and the clinician's patient page (Stage 4B) reuse it. */
+export function ProgressView({ workouts, scanData, isHe, forClinician = false }) {
+  const [open, setOpen] = useState(null);
   const oldestFirst = useMemo(() => [...(workouts || [])].sort((a, b) => atOf(a) - atOf(b)), [workouts]);
   const trends = useMemo(() => exerciseTrends(oldestFirst), [oldestFirst]);
-  const rom = useMemo(() => romProgress(userProfile?.scanData, oldestFirst.filter(w => w.rom && Object.keys(w.rom).length).map(w => ({ at: atOf(w), rom: w.rom }))), [userProfile, oldestFirst]);
+  const rom = useMemo(() => romProgress(scanData, oldestFirst.filter(w => w.rom && Object.keys(w.rom).length).map(w => ({ at: atOf(w), rom: w.rom }))), [scanData, oldestFirst]);
   const pains = useMemo(() => painHistory(workouts || []), [workouts]);
   const detailedCount = (workouts || []).filter(w => w.dataVersion >= 2).length;
-
-  if (workouts === null) return <div className="text-center py-16 text-gray-500">{isHe ? 'טוען…' : 'Loading…'}</div>;
 
   const sideName = (key) => {
     const [side, j] = key.split('_');
@@ -66,7 +71,7 @@ export default function Progress() {
   return (
     <div className="max-w-3xl mx-auto py-6 space-y-6" dir={isHe ? 'rtl' : 'ltr'}>
       <div>
-        <h1 className="text-2xl font-extrabold text-gray-900">{'📈'} {isHe ? 'ההתקדמות שלי' : 'My progress'}</h1>
+        <h1 className="text-2xl font-extrabold text-gray-900">{'📈'} {forClinician ? (isHe ? 'התקדמות' : 'Progress') : (isHe ? 'ההתקדמות שלי' : 'My progress')}</h1>
         <p className="text-sm text-gray-500">
           {isHe ? 'כל מספר כאן נמדד באימונים שלך — ומושווה רק אליך.' : 'Every number here was measured in your workouts — compared only with you.'}
         </p>
@@ -253,7 +258,7 @@ export default function Progress() {
         </div>
       </section>
 
-      <Link to="/" className="block text-center text-sm text-gray-500 underline">{isHe ? 'חזרה' : 'Back'}</Link>
+      {!forClinician && <Link to="/" className="block text-center text-sm text-gray-500 underline">{isHe ? 'חזרה' : 'Back'}</Link>}
     </div>
   );
 }

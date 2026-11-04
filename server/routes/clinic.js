@@ -42,6 +42,7 @@ router.post('/link', (req, res, next) => (limited(`link-${req.uid}`, 10, 600000)
 router.post('/unlink', handle((c, u) => c.unlink(u)));
 router.post('/end', handle((c, u, req) => c.endPatient(u, String(req.body?.traineeId || ''))));
 router.get('/patients', handle((c, u) => c.patients(u)));
+router.get('/patients/:id', handle((c, u, req) => c.patientData(u, String(req.params.id || ''))));
 router.get('/my-audit', handle((c, u) => c.myAudit(u)));
 
 export default router;

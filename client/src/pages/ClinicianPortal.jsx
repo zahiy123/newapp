@@ -6,6 +6,8 @@ import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { useLanguage } from '../context/LanguageContext';
 import { clinic, clinicError, setLoginAs } from '../utils/clinicApi';
+import PatientView from '../components/clinic/PatientView';
+import FlagChips from '../components/clinic/FlagChips';
 
 const fmt = (ms, isHe) => (ms ? new Date(ms).toLocaleDateString(isHe ? 'he-IL' : 'en-GB') : '');
 
@@ -38,6 +40,7 @@ export default function ClinicianPortal() {
   const [busy, setBusy] = useState(false);
   const [reqName, setReqName] = useState('');
   const [confirmEnd, setConfirmEnd] = useState(null);
+  const [selected, setSelected] = useState(null);       // the open patient (step 3)
 
   const active = portal?.role === 'clinician';
   useEffect(() => {
@@ -102,6 +105,10 @@ export default function ClinicianPortal() {
     );
   }
 
+  if (selected) {
+    return <Shell {...shellProps}><PatientView traineeId={selected} isHe={isHe} onBack={() => setSelected(null)} /></Shell>;
+  }
+
   return (
     <Shell {...shellProps}>
       <section className="bg-white rounded-xl shadow p-5 space-y-3">
@@ -124,10 +131,15 @@ export default function ClinicianPortal() {
         <div className="divide-y divide-gray-100">
           {(patients || []).map(p => (
             <div key={p.traineeId} className="py-3 flex items-center justify-between gap-3">
-              <div>
-                <div className="font-semibold text-gray-900">{p.name || (isHe ? 'ללא שם' : 'No name')}</div>
-                <div className="text-xs text-gray-500">{isHe ? `מחובר מ-${fmt(p.since, isHe)}` : `Linked since ${fmt(p.since, isHe)}`}{p.sport ? ` · ${p.sport}` : ''}</div>
-              </div>
+              <button onClick={() => setSelected(p.traineeId)} className="text-start flex-1 min-w-0 space-y-1">
+                <div className="font-semibold text-teal-900 underline-offset-2 hover:underline">{p.name || (isHe ? 'ללא שם' : 'No name')}</div>
+                <div className="text-xs text-gray-500">
+                  {p.lastWorkoutAt ? (isHe ? `אימון אחרון ${fmt(p.lastWorkoutAt, isHe)}` : `Last workout ${fmt(p.lastWorkoutAt, isHe)}`) : (isHe ? 'עוד לא התאמן' : 'No workout yet')}
+                  {' · '}{isHe ? `${p.workoutsThisWeek || 0} השבוע` : `${p.workoutsThisWeek || 0} this week`}
+                  {p.sport ? ` · ${p.sport}` : ''}
+                </div>
+                <FlagChips flags={p.flags || []} isHe={isHe} />
+              </button>
               {confirmEnd === p.traineeId ? (
                 <div className="flex items-center gap-2 text-sm">
                   <span className="text-gray-700">{isHe ? 'לסיים את הטיפול?' : 'End care?'}</span>
@@ -140,7 +152,7 @@ export default function ClinicianPortal() {
             </div>
           ))}
         </div>
-        <p className="text-xs text-gray-500">{isHe ? 'הדוחות המלאים, המגבלות הקליניות ובניית תוכנית יתווספו בשלבים הבאים.' : 'Full reports, clinical limits and plan building come in the next steps.'}</p>
+        <p className="text-xs text-gray-500">{isHe ? 'לחץ על מטופל לדוח המלא. המגבלות הקליניות ובניית תוכנית — בשלבים הבאים.' : 'Tap a patient for the full report. Clinical limits and plan building come next.'}</p>
       </section>
       {msg && <div className="text-sm text-rose-700">{msg}</div>}
     </Shell>

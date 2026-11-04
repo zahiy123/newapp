@@ -11,7 +11,7 @@
 
 export const FIXED_AFTER = 3;
 
-const atOf = (w) => Number(w?.at) || (w?.date?.toMillis ? w.date.toMillis() : (w?.date?.seconds ? w.date.seconds * 1000 : 0));
+const atOf = (w) => Number(w?.at) || (w?.date?.toMillis ? w.date.toMillis() : (w?.date?.seconds ? w.date.seconds * 1000 : Number(w?.date) || 0));
 
 /** One workout's report. */
 export function workoutReport(w) {

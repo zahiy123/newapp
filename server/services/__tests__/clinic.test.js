@@ -13,6 +13,11 @@ function memDb() {
     async update(p, d) { docs.set(p, { ...(docs.get(p) || {}), ...d }); },
     async add(c, d) { const id = `a${++n}`; docs.set(`${c}/${id}`, { ...d }); return id; },
     async where(c, f, v) { return [...docs.entries()].filter(([k, d]) => k.startsWith(`${c}/`) && k.split('/').length === 2 && d[f] === v).map(([k, d]) => ({ id: k.split('/')[1], ...d })); },
+    async list(c, { orderBy = 'date', limit = 50 } = {}) {
+      const depth = c.split('/').length + 1;
+      return [...docs.entries()].filter(([k]) => k.startsWith(`${c}/`) && k.split('/').length === depth)
+        .map(([k, d]) => ({ id: k.split('/').pop(), ...d })).sort((x, y) => (y[orderBy] || 0) - (x[orderBy] || 0)).slice(0, limit);
+    },
   };
 }
 const setup = () => {
@@ -124,4 +129,26 @@ test('the ADMIN exception: an admin links to itself (no 409) and re-links freely
   // a NON-admin clinician is still refused
   const self = await s.clinic.createInvite(pt);
   await rejects(s.clinic.link(pt, self.code, true), 'clinician_cannot_link');
+});
+
+test('the patient data: only through an active assignment, audited, never the contact details; the red flags', async () => {
+  const s = setup();
+  const pt = await approvedClinician(s);
+  const pt2 = await approvedClinician(s, 'PT2', 'רון');
+  const { code } = await s.clinic.createInvite(pt);
+  await s.clinic.link({ uid: 'T1' }, code, true);
+  await s.db.set('users/T1', { name: 'זהי', email: 'secret@x.com', phone: '050', sport: 'footballAmputee', scanData: { romBaseline: { arms: {} }, raw: 'x' } });
+  await s.db.set('users/T1/workouts/w1', { date: 900, at: 900, dataVersion: 2, exercises: [] });
+  await s.db.set('users/T1/painLog/p1', { date: 950, at: 950, level: 7, zone: 'stump' });
+  const d = await s.clinic.patientData(pt, 'T1');
+  assert.equal(d.profile.name, 'זהי');
+  assert.equal(d.profile.email, undefined);
+  assert.equal(d.profile.phone, undefined);
+  assert.deepEqual(Object.keys(d.profile.scanData), ['romBaseline']);
+  assert.equal(d.workouts.length, 1);
+  assert.equal(d.flags[0].code, 'red_pain');
+  await rejects(s.clinic.patientData(pt2, 'T1'), 'no_active_assignment');
+  assert.ok((await s.clinic.myAudit({ uid: 'T1' })).some(r => r.action === 'view_patient_data'));
+  const list = await s.clinic.patients(pt);
+  assert.equal(list[0].flags[0].code, 'red_pain');
 });
