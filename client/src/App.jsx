@@ -25,7 +25,8 @@ function PrivateRoute({ children }) {
   const { user, loading, authError, refreshProfile, portal } = useAuth();
   const location = useLocation();
   // a clinician (by the server's answer, or the clinician login) never lands in the trainee app
-  const clinicianSide = portal?.role === 'clinician' || getLoginAs() === 'clinician';
+  // (an ADMIN who is also a clinician moves between both sides — tests / management, owner 2026-11-04)
+  const clinicianSide = (portal?.role === 'clinician' && !portal?.isAdmin) || getLoginAs() === 'clinician';
   if (user && !loading && clinicianSide && !location.pathname.startsWith('/clinician')) return <Navigate to="/clinician" />;
   if (loading) return <div className="min-h-screen flex items-center justify-center text-gray-600">Loading...</div>;
   if (authError) return (

@@ -102,3 +102,26 @@ test('invite codes: 6 clear characters, normalized', () => {
   assert.match(c, /^[A-HJ-NP-Z2-9]{6}$/);
   assert.equal(normalizeCode(' ab-c1 2x '), 'ABC12X');
 });
+
+test('the ADMIN exception: an admin links to itself (no 409) and re-links freely; everyone else stays separated', async () => {
+  const s = setup();
+  // the admin is also an approved clinician
+  await s.clinic.requestClinician({ uid: 'ADM', email: 'owner@x.com' }, { name: 'זהי' });
+  await s.clinic.adminApprove(s.admin, 'ADM');
+  const adminAsClinician = { uid: 'ADM', email: 'owner@x.com', role: 'clinician' };
+  const own = await s.clinic.createInvite(adminAsClinician);
+  const r = await s.clinic.link(adminAsClinician, own.code, true);          // self-link + a clinician role: allowed
+  assert.equal(r.ok, true);
+  await s.clinic.assertAccess(adminAsClinician, 'ADM', 'view_progress');
+  assert.equal((await s.clinic.me(adminAsClinician)).myClinician.id, 'ADM');
+  // re-link to another clinician: the old link closes (never two active), no 409
+  const pt = await approvedClinician(s);
+  const other = await s.clinic.createInvite(pt);
+  await s.clinic.link(adminAsClinician, other.code, true);
+  await rejects(s.clinic.assertAccess(adminAsClinician, 'ADM', 'view'), 'no_active_assignment');
+  await s.clinic.assertAccess(pt, 'ADM', 'view');
+  assert.ok((await s.clinic.myAudit({ uid: 'ADM' })).some(x => x.action === 'admin_self_link'));
+  // a NON-admin clinician is still refused
+  const self = await s.clinic.createInvite(pt);
+  await rejects(s.clinic.link(pt, self.code, true), 'clinician_cannot_link');
+});

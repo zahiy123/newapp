@@ -9,7 +9,7 @@ import { clinic, clinicError, setLoginAs } from '../utils/clinicApi';
 
 const fmt = (ms, isHe) => (ms ? new Date(ms).toLocaleDateString(isHe ? 'he-IL' : 'en-GB') : '');
 
-function Shell({ isHe, email, onLogout, children }) {
+function Shell({ isHe, email, onLogout, onTraineeApp, children }) {
   return (
     <div dir={isHe ? 'rtl' : 'ltr'} className="min-h-screen bg-slate-50">
       <header className="bg-teal-800 text-white">
@@ -17,6 +17,7 @@ function Shell({ isHe, email, onLogout, children }) {
           <div className="font-bold">{'🩺'} {isHe ? 'פורטל המטפלים' : 'Clinician portal'}</div>
           <div className="flex items-center gap-3 text-sm">
             <span className="opacity-80 truncate max-w-[12rem]">{email}</span>
+            {onTraineeApp && <button onClick={onTraineeApp} className="underline">{isHe ? 'לאפליקציית האימון' : 'Training app'}</button>}
             <button onClick={onLogout} className="underline">{isHe ? 'יציאה' : 'Log out'}</button>
           </div>
         </div>
@@ -62,7 +63,7 @@ export default function ClinicianPortal() {
     if (r.ok) setPatients(p => p.filter(x => x.traineeId !== traineeId)); else setMsg(clinicError(r.error, isHe));
   }
   const toTraineeApp = () => { setLoginAs('trainee'); navigate('/'); };
-  const shellProps = { isHe, email: user?.email, onLogout: () => { setLoginAs('trainee'); logout(); } };
+  const shellProps = { isHe, email: user?.email, onLogout: () => { setLoginAs('trainee'); logout(); }, onTraineeApp: portal?.isAdmin ? toTraineeApp : null };
 
 
   if (!portal) return <Shell {...shellProps}><div className="text-gray-500">{isHe ? 'טוען…' : 'Loading…'}</div></Shell>;

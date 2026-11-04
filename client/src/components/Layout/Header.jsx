@@ -2,6 +2,7 @@ import { useTranslation } from 'react-i18next';
 import { useAuth } from '../../context/AuthContext';
 import { useLanguage } from '../../context/LanguageContext';
 import { Link, useNavigate } from 'react-router-dom';
+import { setLoginAs } from '../../utils/clinicApi';
 
 export default function Header() {
   const { t } = useTranslation();
@@ -41,6 +42,7 @@ export default function Header() {
                 <Link to="/progress" className="hover:text-blue-200 transition">{lang === 'he' ? 'התקדמות' : 'Progress'}</Link>
                 <Link to="/care" className="hover:text-blue-200 transition">{lang === 'he' ? 'המטפל שלי' : 'My clinician'}</Link>
                 {portal?.isAdmin && <Link to="/admin" className="hover:text-blue-200 transition">{lang === 'he' ? 'ניהול' : 'Admin'}</Link>}
+                {portal?.isAdmin && <Link to="/clinician" onClick={() => setLoginAs('clinician')} className="hover:text-blue-200 transition">{lang === 'he' ? 'פורטל המטפלים' : 'Clinician portal'}</Link>}
               </nav>
               <button
                 onClick={handleLogout}
@@ -63,6 +65,7 @@ export default function Header() {
           <Link to="/progress" className="hover:text-blue-200">{lang === 'he' ? 'התקדמות' : 'Progress'}</Link>
           <Link to="/care" className="hover:text-blue-200">{lang === 'he' ? 'המטפל שלי' : 'My clinician'}</Link>
           {portal?.isAdmin && <Link to="/admin" className="hover:text-blue-200">{lang === 'he' ? 'ניהול' : 'Admin'}</Link>}
+          {portal?.isAdmin && <Link to="/clinician" onClick={() => setLoginAs('clinician')} className="hover:text-blue-200">{lang === 'he' ? 'פורטל המטפלים' : 'Clinician portal'}</Link>}
         </nav>
       )}
     </header>

@@ -73,7 +73,8 @@ export function createClinic({ db, auth, env = process.env, now = () => Date.now
       const req = await db.get(`clinicianRequests/${user.uid}`);
       const clinician = user.role === 'clinician' && clin?.active;
       let myClinician = null;
-      if (!clinician) {
+      // (an admin may be BOTH — their own clinician for tests / management, owner 2026-11-04)
+      if (!clinician || isAdmin) {
         const a = await activeAssignmentOf(user.uid);
         if (a) { const c = await db.get(`clinicians/${a.clinicianId}`); myClinician = { id: a.clinicianId, name: c?.name || '', since: a.linkedAt }; }
       }
@@ -88,7 +89,7 @@ export function createClinic({ db, auth, env = process.env, now = () => Date.now
     async requestClinician(user, { name, licenseNo = '', phone = '' } = {}) {
       const n = String(name || '').trim().slice(0, 60);
       if (n.length < 2) throw new ClinicError(400, 'name_required');
-      if (await activeAssignmentOf(user.uid)) throw new ClinicError(409, 'linked_as_trainee');
+      if (!isAdminEmail(user.email, env) && await activeAssignmentOf(user.uid)) throw new ClinicError(409, 'linked_as_trainee');
       await db.set(`clinicianRequests/${user.uid}`, { uid: user.uid, email: user.email || '', name: n, licenseNo: String(licenseNo).slice(0, 30), phone: String(phone).slice(0, 20), status: 'pending', at: now() });
       return { status: 'pending' };
     },
@@ -149,18 +150,24 @@ export function createClinic({ db, auth, env = process.env, now = () => Date.now
     /** The trainee links with an invite code + explicit consent (one active clinician at a time). */
     async link(user, code, consent) {
       if (consent !== true) throw new ClinicError(400, 'consent_required');
-      if (user.role === 'clinician') throw new ClinicError(409, 'clinician_cannot_link');
+      // THE ADMIN EXCEPTION (owner, 2026-11-04): an ADMIN_EMAILS account may link to itself / be a clinician and a
+      // trainee at once — for tests and management. Every other account keeps all the separations below.
+      const admin = isAdminEmail(user.email, env);
+      if (user.role === 'clinician' && !admin) throw new ClinicError(409, 'clinician_cannot_link');
       const c = normalizeCode(code);
       const inv = await db.get(`invites/${c}`);
       if (!inviteUsable(inv, now())) throw new ClinicError(404, 'invite_invalid');
-      if (inv.clinicianId === user.uid) throw new ClinicError(409, 'self_link');
+      if (inv.clinicianId === user.uid && !admin) throw new ClinicError(409, 'self_link');
       const clin = await db.get(`clinicians/${inv.clinicianId}`);
       if (!clin?.active) throw new ClinicError(404, 'invite_invalid');
-      if (await activeAssignmentOf(user.uid)) throw new ClinicError(409, 'already_linked');
+      const existing = await activeAssignmentOf(user.uid);
+      if (existing && !admin) throw new ClinicError(409, 'already_linked');
+      // (the admin re-links freely: the previous link is closed, never two active clinicians)
+      if (existing) await db.update(`assignments/${existing.id}`, { status: 'revoked', revokedAt: now(), revokedBy: 'admin_relink' });
       const id = assignmentId(inv.clinicianId, user.uid);
       await db.set(`assignments/${id}`, { clinicianId: inv.clinicianId, traineeId: user.uid, status: 'active', consentAt: now(), linkedAt: now(), via: c });
       await db.update(`invites/${c}`, { usedBy: user.uid, usedAt: now() });
-      await audit({ actorId: user.uid, actorRole: 'trainee', traineeId: user.uid, action: 'consent_link', targetId: inv.clinicianId });
+      await audit({ actorId: user.uid, actorRole: 'trainee', traineeId: user.uid, action: inv.clinicianId === user.uid ? 'admin_self_link' : 'consent_link', targetId: inv.clinicianId });
       return { ok: true, clinicianName: clin.name };
     },
 
