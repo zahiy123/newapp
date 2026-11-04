@@ -52,6 +52,7 @@ import { measurableJoints, createRomTracker, addRomFrame, summarizeRom } from '.
 import { startedTired, qualityDropped, lighterFrom, decideLoadStep } from '../engine/progress/loadAdaptation';
 import { applyComplexityStep } from '../engine/progress/complexity';
 import { activeConstraints, applyClinicalLimits, createLimitMonitor, LOCK_AFTER } from '../engine/clinical/clinicalLimits';
+import { mergeClinicianPlan } from '../engine/clinical/clinicianPlan';
 import { ROM_JOINTS } from '../engine/progress/rom';
 import { clinic } from '../utils/clinicApi';
 import { painLight, painAction, reducedLoad, microLoad, canSafeMode, zonesFor, painEntry, painFacts, safeModeFacts, protectFromPain } from '../engine/training/painTrafficLight';
@@ -693,6 +694,7 @@ export default function Training() {
   const loadStepRef = useRef({ step: 0, raised: false });   // the graded load step (rule 3)
   // STAGE 4B step 4 — the clinician's limits for this trainee (read-only here) and the lock
   const clinicalRef = useRef(null);            // the constraints in force (or null)
+  const clinicianPlanRef = useRef(null);       // the clinician's own plan (step 5) — { mode, exercises }
   const limitMonitorRef = useRef(null);        // the live monitor of the limited joints
   const crossingsRef = useRef(0);              // crossings in the current set
   const [clinicalLock, setClinicalLock] = useState(null);   // { locked, … } from users/{uid}/clinicalLocks/current
@@ -734,7 +736,16 @@ export default function Training() {
     }
     // HARD equipment fit: never offer an exercise the trainee can't do (e.g. a ball drill without a ball)
     rawExercisesRef.current = loaded;
-    return clinicalFit(applyComplexityStep(protectFromPain(fitExercises(loaded, availableEquipment(eff, { hasBall: status?.hasBall })).exercises, painHistoryRef.current), loadStepRef.current.step, lp0, (data.language || 'he') === 'he'), lp0, (data.language || 'he') === 'he');
+    return finalizeToday(fitExercises(loaded, availableEquipment(eff, { hasBall: status?.hasBall })).exercises, lp0, (data.language || 'he') === 'he');
+  }
+
+  // today's exercises, in priority order: the automatic plan (pain protection → the complexity step) → the
+  // clinician's own plan (step 5) → pain protection on everything → the clinician's limits LAST
+  function finalizeToday(fittedAuto, lp, he) {
+    const auto = applyComplexityStep(protectFromPain(fittedAuto, painHistoryRef.current), loadStepRef.current.step, lp, he);
+    const merged = mergeClinicianPlan(auto, clinicianPlanRef.current, lp, he, clinicalRef.current);
+    if (merged !== auto) console.info(`[Clinical] the clinician's plan (${clinicianPlanRef.current?.mode}) — ${merged.filter(e => e.byClinician).length} of their exercises today`);
+    return clinicalFit(protectFromPain(merged, painHistoryRef.current), lp, he);
   }
 
   // Check-in answered → rebuild today's workout from the answers, remember them for next time
@@ -774,17 +785,19 @@ export default function Training() {
       // THE CLINICIAN'S LIMITS + THE LOCK (Stage 4B step 4): read-only for the trainee (the rules); the plan is
       // fitted under them, the live monitor guards them; a lock blocks the workout until the clinician approves
       try {
-        const [cDoc, lDoc] = await Promise.all([
+        const [cDoc, lDoc, pDoc] = await Promise.all([
           getDoc(doc(db, 'users', user.uid, 'clinicalConstraints', 'current')),
           getDoc(doc(db, 'users', user.uid, 'clinicalLocks', 'current')),
+          getDoc(doc(db, 'users', user.uid, 'clinicianPlans', 'current')),
         ]);
         clinicalRef.current = activeConstraints(cDoc.exists() ? cDoc.data() : null);
         limitMonitorRef.current = clinicalRef.current ? createLimitMonitor(clinicalRef.current) : null;
         setClinicalLock(lDoc.exists() ? lDoc.data() : null);
-        if (clinicalRef.current) {
-          const lpNow = trainingLimbs(getLimbProfile(data), data.todayMobility);
-          setExercises(prev => clinicalFit(prev, lpNow, (data.language || 'he') === 'he'));
-          console.info('[Clinical] limits in force:', clinicalRef.current);
+        clinicianPlanRef.current = pDoc.exists() ? pDoc.data() : null;
+        if (clinicalRef.current || (clinicianPlanRef.current && clinicianPlanRef.current.mode !== 'auto')) {
+          // today's workout again, now with the clinician's plan and limits
+          setExercises(buildTodayExercises(planSourceRef.current, sessionDataRef.current.checkIn || null));
+          console.info('[Clinical] limits:', clinicalRef.current, '· plan:', clinicianPlanRef.current?.mode);
         }
       } catch (err) {
         console.warn('[Clinical] the limits were not loaded:', err.message);
@@ -2400,7 +2413,7 @@ export default function Training() {
     setShowBallQuestion(false);
     sessionDataRef.current.ballAvailable = hasBall;
     const fitted = fitExercises(rawExercisesRef.current, availableEquipment(userProfile, { hasBall }));
-    if (fitted.exercises.length) setExercises(clinicalFit(applyComplexityStep(protectFromPain(fitted.exercises, painHistoryRef.current), loadStepRef.current.step, limbProfile || {}, isHe), limbProfile || {}, isHe));
+    if (fitted.exercises.length) setExercises(finalizeToday(fitted.exercises, limbProfile || {}, isHe));
     if (fitted.substitutions.length) sessionDataRef.current.equipmentSubstitutions = fitted.substitutions;
     if (explicit && user?.uid) {
       updateDoc(doc(db, 'users', user.uid), { hasBall }).catch(err => console.error('[Ball] save failed:', err));

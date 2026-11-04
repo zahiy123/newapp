@@ -130,7 +130,7 @@ export function upgradeExercise(ex, lp = {}, isHe = true) {
 export function applyComplexityStep(exercises, step, lp = {}, isHe = true) {
   if (!step) return exercises;
   return (exercises || []).map((ex) => {
-    if (ex.complexityStep) return ex;                        // never twice
+    if (ex.complexityStep || ex.byClinician) return ex;      // never twice; never the clinician's own choice
     let cur = ex;
     for (let i = 0; i < Math.abs(step); i++) {
       const next = step > 0 ? upgradeExercise(cur, lp, isHe) : easeExercise(cur, lp, isHe);

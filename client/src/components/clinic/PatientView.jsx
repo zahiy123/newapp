@@ -6,6 +6,7 @@ import { clinic, clinicError } from '../../utils/clinicApi';
 import { ProgressView } from '../../pages/Progress';
 import FlagChips from './FlagChips';
 import ClinicalLimitsEditor from './ClinicalLimitsEditor';
+import PlanBuilder from './PlanBuilder';
 import { ROM_JOINTS } from '../../engine/progress/rom';
 
 const fmt = (ms, isHe) => (ms ? new Date(ms).toLocaleDateString(isHe ? 'he-IL' : 'en-GB') : '');
@@ -68,6 +69,8 @@ export default function PatientView({ traineeId, isHe, onBack }) {
               )}
             </section>
           )}
+
+          <PlanBuilder key={JSON.stringify(d.limits || {})} traineeId={traineeId} plan={d.plan} limits={d.limits} profile={d.profile} isHe={isHe} onSaved={(plan) => setD(prev => ({ ...prev, plan }))} />
 
           <ClinicalLimitsEditor traineeId={traineeId} limits={d.limits} isHe={isHe} onSaved={(limits) => setD(prev => ({ ...prev, limits }))} />
 

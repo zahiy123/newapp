@@ -39,6 +39,25 @@ export const assignmentId = (clinicianId, traineeId) => `${clinicianId}_${traine
 
 // THE CLINICAL LIMITS (step 4) — validated here: only known joints, sane numbers, short lists
 export const LIMIT_JOINTS = ['left_knee', 'right_knee', 'left_hip', 'right_hip', 'left_shoulder', 'right_shoulder', 'left_elbow', 'right_elbow'];
+// THE CLINICIAN'S PLAN (step 5) — validated here (the app re-checks every choice against the body / limits)
+export const PLAN_MODES = ['auto', 'manual', 'manual_plus_auto'];
+export const PLAN_VARIATIONS = ['standard', 'partial', 'slow', 'slow_partial', 'explosive'];
+export function cleanPlan(body = {}) {
+  if (!PLAN_MODES.includes(body.mode)) throw new ClinicError(400, 'bad_mode');
+  const list = Array.isArray(body.exercises) ? body.exercises : [];
+  if (list.length > 20) throw new ClinicError(400, 'too_many_exercises');
+  const exercises = list.map((e) => {
+    const pattern = String(e?.pattern || '');
+    if (!/^[A-Za-z0-9_]{2,40}$/.test(pattern)) throw new ClinicError(400, 'bad_pattern');
+    const variation = PLAN_VARIATIONS.includes(e.variation) ? e.variation : 'standard';
+    const sets = Math.round(Number(e.sets)); const reps = Math.round(Number(e.reps)); const rest = Math.round(Number(e.rest ?? 60));
+    if (!(sets >= 1 && sets <= 10) || !(reps >= 1 && reps <= 300) || !(rest >= 0 && rest <= 600)) throw new ClinicError(400, 'bad_numbers');
+    return { pattern, variation, sets, reps, rest, note: String(e.note || '').slice(0, 200) };
+  });
+  if (body.mode !== 'auto' && !exercises.length) throw new ClinicError(400, 'empty_plan');
+  return { mode: body.mode, exercises };
+}
+
 export function cleanLimits(body = {}) {
   const romLimits = {};
   for (const [k, v] of Object.entries(body.romLimits || {})) {
@@ -257,7 +276,17 @@ export function createClinic({ db, auth, env = process.env, now = () => Date.now
       const limits = await db.get(`users/${traineeId}/clinicalConstraints/current`);
       const lock = await db.get(`users/${traineeId}/clinicalLocks/current`);
       const violations = await db.list(`users/${traineeId}/limitViolations`, { orderBy: 'at', limit: 30 });
-      return { profile, workouts, pains, notebook, limits, lock, violations, flags: patientFlags({ workouts, pains, now: now(), locked: !!lock?.locked }) };
+      const plan = await db.get(`users/${traineeId}/clinicianPlans/current`);
+      return { profile, workouts, pains, notebook, limits, lock, violations, plan, flags: patientFlags({ workouts, pains, now: now(), locked: !!lock?.locked }) };
+    },
+
+    /** The clinician sets / replaces the patient's training plan (the trainee reads only — the rules). */
+    async setPlan(user, traineeId, body) {
+      const clean = cleanPlan(body);
+      await assertAccess(user, traineeId, 'set_plan');
+      const rec = await db.get(`clinicians/${user.uid}`);
+      await db.set(`users/${traineeId}/clinicianPlans/current`, { ...clean, updatedAt: now(), by: user.uid, byName: rec?.name || '' });
+      return { ok: true, plan: clean };
     },
 
     /** The clinician sets / replaces the patient's limits (the trainee can only read them — the rules). */

@@ -179,3 +179,25 @@ test('the clinical limits: only the assigned clinician sets them (validated); 3 
   const actions = (await s.clinic.myAudit({ uid: 'T1' })).map(r => r.action);
   for (const a of ['set_limits', 'locked_by_limit', 'approve_continue']) assert.ok(actions.includes(a), a);
 });
+
+test('the clinician’s plan: only the assigned clinician; validated; audited; part of the patient data', async () => {
+  const s = setup();
+  const pt = await approvedClinician(s);
+  const pt2 = await approvedClinician(s, 'PT2', 'רון');
+  const { code } = await s.clinic.createInvite(pt);
+  await s.clinic.link({ uid: 'T1' }, code, true);
+  const good = { mode: 'manual', exercises: [{ pattern: 'squat', variation: 'partial', sets: 3, reps: 8, rest: 60, note: 'לאט' }] };
+  await rejects(s.clinic.setPlan(pt2, 'T1', good), 'no_active_assignment');
+  await rejects(s.clinic.setPlan(pt, 'T1', { mode: 'whatever' }), 'bad_mode');
+  await rejects(s.clinic.setPlan(pt, 'T1', { mode: 'manual', exercises: [] }), 'empty_plan');
+  await rejects(s.clinic.setPlan(pt, 'T1', { mode: 'manual', exercises: [{ pattern: 'squat', sets: 50, reps: 8 }] }), 'bad_numbers');
+  await rejects(s.clinic.setPlan(pt, 'T1', { mode: 'manual', exercises: [{ pattern: 'drop table', sets: 3, reps: 8 }] }), 'bad_pattern');
+  await s.clinic.setPlan(pt, 'T1', good);
+  const saved = await s.db.get('users/T1/clinicianPlans/current');
+  assert.equal(saved.mode, 'manual');
+  assert.equal(saved.exercises[0].variation, 'partial');
+  assert.equal(saved.byName, 'דנה');
+  assert.equal((await s.clinic.patientData(pt, 'T1')).plan.exercises.length, 1);
+  await s.clinic.setPlan(pt, 'T1', { mode: 'auto' });                         // back to the automatic plan
+  assert.ok((await s.clinic.myAudit({ uid: 'T1' })).some(r => r.action === 'set_plan'));
+});
