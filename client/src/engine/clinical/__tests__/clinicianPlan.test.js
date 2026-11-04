@@ -47,3 +47,26 @@ describe('The clinician’s plan — into the app', () => {
     expect(mergeClinicianPlan(auto, { mode: 'manual', exercises: [{ pattern: 'lunge' }] }, crutches)).toBe(auto);
   });
 });
+
+describe('The clinician’s own (custom) exercises', async () => {
+  const { buildCustomExercise, mergeClinicianPlan: merge } = await import('../clinicianPlan.js');
+  it('based on a catalog movement → measured (its Ghost / analyzer), the clinician’s name and instructions', () => {
+    const e = buildCustomExercise({ custom: true, name: 'סקוואט על כרית', instructions: 'עמוד על כרית רכה. רד לאט.', basedOn: 'miniSquat', variation: 'standard', sets: 3, reps: 10, rest: 60 }, {});
+    expect(e.name).toBe('סקוואט על כרית');
+    expect(e.catalogId.split('|')[0]).toBe('miniSquat');
+    expect(e.customSteps).toEqual(['עמוד על כרית רכה.', 'רד לאט.']);
+    expect(e.manual).toBeUndefined();
+  });
+  it('free → manual: no Ghost / counting (a "done" tap), seconds → a timer; never a body-unfit base', () => {
+    const m = buildCustomExercise({ custom: true, name: 'מתיחת גדם עם מגבת', instructions: 'משוך בעדינות.', unit: 'sec', sets: 2, reps: 30, rest: 30 }, {});
+    expect(m).toMatchObject({ manual: true, timed: true, reps: '30', sets: 2, byClinician: true });
+    expect(m.catalogId).toBeUndefined();
+    expect(buildCustomExercise({ custom: true, name: 'x' }, {})).toBe(null);                       // a name is needed
+    expect(buildCustomExercise({ custom: true, name: 'לאנג׳ קל', basedOn: 'lunge' }, { left_leg: { state: 'absent' }, crutches: true })).toBe(null);
+  });
+  it('custom exercises join the plan with the catalog choices, in order', () => {
+    const list = merge([], { mode: 'manual', exercises: [{ custom: true, name: 'הליכה על קו', unit: 'sec', sets: 2, reps: 45 }, { pattern: 'plank', variation: 'standard', sets: 3, reps: 30 }] }, {});
+    expect(list.map(e => e.name)).toEqual(['הליכה על קו', list[1].name]);
+    expect(list[0].manual).toBe(true);
+  });
+});

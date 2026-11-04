@@ -47,6 +47,21 @@ export function cleanPlan(body = {}) {
   const list = Array.isArray(body.exercises) ? body.exercises : [];
   if (list.length > 20) throw new ClinicError(400, 'too_many_exercises');
   const exercises = list.map((e) => {
+    if (e?.custom) {
+      // the clinician's own exercise (free text) — a name, optional instructions, a group, an optional base movement
+      const name = String(e.name || '').trim().slice(0, 60);
+      if (name.length < 2) throw new ClinicError(400, 'custom_name_required');
+      const basedOn = e.basedOn ? String(e.basedOn) : null;
+      if (basedOn && !/^[A-Za-z0-9_]{2,40}$/.test(basedOn)) throw new ClinicError(400, 'bad_pattern');
+      const sets = Math.round(Number(e.sets)); const reps = Math.round(Number(e.reps)); const rest = Math.round(Number(e.rest ?? 60));
+      if (!(sets >= 1 && sets <= 10) || !(reps >= 1 && reps <= 300) || !(rest >= 0 && rest <= 600)) throw new ClinicError(400, 'bad_numbers');
+      return {
+        custom: true, id: String(e.id || '').slice(0, 24) || `c${Math.abs(name.split('').reduce((h, ch) => (h * 31 + ch.charCodeAt(0)) | 0, 7))}`,
+        name, instructions: String(e.instructions || '').slice(0, 600), group: /^[a-z_]{2,20}$/.test(e.group || '') ? e.group : 'general',
+        basedOn, variation: PLAN_VARIATIONS.includes(e.variation) ? e.variation : 'standard', unit: e.unit === 'sec' ? 'sec' : 'reps',
+        sets, reps, rest, note: String(e.note || '').slice(0, 200),
+      };
+    }
     const pattern = String(e?.pattern || '');
     if (!/^[A-Za-z0-9_]{2,40}$/.test(pattern)) throw new ClinicError(400, 'bad_pattern');
     const variation = PLAN_VARIATIONS.includes(e.variation) ? e.variation : 'standard';

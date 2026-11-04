@@ -18,7 +18,13 @@ import { patternProfile, variationAxes, catalogItem, toExercise, sideFitsBody, c
 import { exerciseVerdict } from './clinicalLimits.js';
 
 export const PLAN_MODES = ['auto', 'manual', 'manual_plus_auto'];
+// CUSTOM EXERCISES (owner, 2026-11-04): the clinician writes their own exercise (free text) under a group or the
+// general area — { custom: true, id, name, instructions, group, basedOn: <pattern> | null, unit, sets, reps, rest }.
+//   basedOn a catalog movement → its Ghost + live measurement + coaching, under the clinician's name / instructions
+//   no basedOn               → MANUAL: no Ghost / counting / technique corrections (nothing measures it — never a
+//                              guess); the trainee follows the instructions and taps "done" (a timer for seconds)
 export const PLAN_GROUPS = [
+  { id: 'general', he: 'כללי', en: 'General' },
   { id: 'shoulder', he: 'כתף', en: 'Shoulder' },
   { id: 'elbow', he: 'מרפק', en: 'Elbow' },
   { id: 'hip', he: 'ירך / אגן', en: 'Hip / pelvis' },
@@ -82,11 +88,37 @@ export function planCatalog(lp = {}, constraints = null, isHe = true) {
       defaults: base ? { sets: Number(base.dose.sets), reps: Number(base.dose.reps), rest: Number(base.dose.rest) } : { sets: 3, reps: 10, rest: 60 },
     });
   }
-  return groups.filter(g => g.patterns.length);
+  return groups.filter(g => g.patterns.length || g.id === 'general');      // (the general area: custom exercises only)
+}
+
+const stepsOf = (text) => String(text || '').split(/\n+|(?<=[.!?])\s+/).map(s => s.trim()).filter(Boolean).slice(0, 6);
+
+/** A clinician's CUSTOM exercise → an exercise of the app (or null). */
+export function buildCustomExercise(choice, lp = {}, isHe = true, constraints = null) {
+  const name = String(choice?.name || '').trim().slice(0, 60);
+  if (name.length < 2) return null;
+  const sets = Math.min(10, Math.max(1, Number(choice.sets) || 3));
+  const reps = Math.min(300, Math.max(1, Number(choice.reps) || 10));
+  const rest = Math.min(600, Math.max(0, Number(choice.rest ?? 60)));
+  const instructions = String(choice.instructions || '').trim().slice(0, 600);
+  const steps = stepsOf(instructions);
+  const meta = { byClinician: true, custom: true, customGroup: choice.group || 'general', clinicianNote: String(choice.note || '').slice(0, 200) || null, ...(steps.length ? { customSteps: steps } : {}) };
+  if (choice.basedOn && PATTERNS[choice.basedOn]) {
+    // measured: the base movement's Ghost / analyzer / profile, the clinician's name and instructions
+    const base = buildManualExercise({ pattern: choice.basedOn, variation: choice.variation, sets, reps, rest }, lp, isHe, constraints);
+    if (!base) return null;
+    return { ...base, ...meta, name, nameEn: name, ...(instructions ? { description: instructions, descriptionEn: instructions } : {}) };
+  }
+  const sec = choice.unit === 'sec';
+  return {
+    name, nameEn: name, analyzerName: 'clinician-manual', description: instructions, descriptionEn: instructions,
+    sets, reps: String(reps), restSeconds: rest, timed: sec, manual: true, tips: instructions, ...meta,
+  };
 }
 
 /** One clinician's choice → an exercise of the app (or null when it cannot run for this body / limits). */
 export function buildManualExercise(choice, lp = {}, isHe = true, constraints = null) {
+  if (choice?.custom) return buildCustomExercise(choice, lp, isHe, constraints);
   if (!PATTERNS[choice?.pattern] || !patternFitsBody(PATTERNS[choice.pattern], lp)) return null;
   const id = choiceId(choice.pattern, choice.variation, lp);
   const item = catalogItem(id);

@@ -16,3 +16,11 @@ describe('The plan builder renders', () => {
     expect(html).not.toContain('The plan —');
   });
 });
+
+describe('The plan builder — custom exercises', () => {
+  it('a custom exercise is listed and edited under its group; the general area is open', () => {
+    const html = renderToString(<PlanBuilder isHe traineeId="T1" profile={{}} limits={null}
+      plan={{ mode: 'manual', exercises: [{ custom: true, id: 'c1', name: 'מתיחת גדם עם מגבת', instructions: 'משוך בעדינות.', group: 'general', unit: 'sec', sets: 2, reps: 30, rest: 30 }] }} />);
+    for (const s of ['✍️', 'מתיחת גדם עם מגבת', 'כללי', '+ תרגיל משלך', 'ללא — ביצוע ידני', 'סיימתי את הסט']) expect(html).toContain(s);
+  });
+});

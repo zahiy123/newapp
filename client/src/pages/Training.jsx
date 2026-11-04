@@ -924,6 +924,7 @@ export default function Training() {
   // required limbs in the frame, kinematic errors / danger, accuracy, and the Ghost of the same profile
   const exerciseKeyPoints = useMemo(() => {
     if (!currentExercise) return [];
+    if (currentExercise.customSteps) return currentExercise.customSteps.slice(0, 6);
     const instr = getExerciseInstruction(currentExercise.name, analyzerFor(currentExercise, !!limbProfile?.wheelchair)?.cueKey);
     return [...(instr?.steps || []), instr?.safety || currentExercise.tips || ''].filter(Boolean).slice(0, 6);
   }, [currentExercise?.name, limbProfile?.wheelchair]);
@@ -958,7 +959,8 @@ export default function Training() {
   const execution = useExpertExecution({
     // From the briefing on: the trainee may start working while the coach still explains —
     // the module counts silently and the exercise starts at once (early start, below)
-    enabled: FEATURES.EXPERT_PROFILE && earlyStartPhase,
+    // (a clinician's MANUAL exercise is never measured — no profile, no corrections, never a guess)
+    enabled: FEATURES.EXPERT_PROFILE && earlyStartPhase && !currentExercise?.manual,
     counting: earlyStartPhase,
     quiet: phase === PHASE.BRIEFING || phase === PHASE.CHECKING_EQUIPMENT,
     playerName,
@@ -1028,7 +1030,8 @@ export default function Training() {
     if (!demoGhostPhase) return null;
     // A catalog exercise always has its Ghost (its pattern × variation)
     const cid = currentExercise?.catalogId;
-    let spec = cid ? catalogGhostSpec(cid, demoProfile?.catalogId === cid ? demoProfile : null) : demoGhostFor(demoProfile, exerciseCueKey);
+    // (a clinician's manual exercise has no movement Ghost — only the standing guide figure)
+    let spec = currentExercise?.manual ? null : cid ? catalogGhostSpec(cid, demoProfile?.catalogId === cid ? demoProfile : null) : demoGhostFor(demoProfile, exerciseCueKey);
     if (spec?.profile && currentExercise?.sideSwitch) {
       // this half's working leg: the kicking leg (kicks) or the free leg while standing on the other
       spec = { ...spec, profile: { ...spec.profile, ghost: { ...spec.profile.ghost, workingSide: splitWorkingSide(limbProfile, splitHalf, currentExercise.splitMode) } } };
@@ -1779,6 +1782,7 @@ export default function Training() {
   // Core pose analysis - with posture gating (uses ref to avoid render loops)
   useEffect(() => {
     if (phase !== PHASE.EXERCISING || !landmarks || !analyzerRef.current) return;
+    if (currentExercise?.manual) return;      // a clinician's manual exercise: the trainee marks the set done
 
     // === KALMAN FILTER STABILIZATION ===
     // Smooth raw MediaPipe landmarks before any analysis
@@ -2192,7 +2196,7 @@ export default function Training() {
   const reExplainedRef = useRef(false);
 
   useEffect(() => {
-    if (phase !== PHASE.EXERCISING) return;
+    if (phase !== PHASE.EXERCISING || currentExercise?.manual) return;
     reExplainedRef.current = false;
 
     const inactivityCheck = setInterval(() => {
@@ -3215,8 +3219,9 @@ export default function Training() {
   // prepared as soon as the exercise is known, so it plays at once. The written explanation is said only
   // when the AI could not answer in time.
   function briefingFacts(exercise) {
-    const instr = getExerciseInstruction(exercise.name, analyzerFor(exercise, !!limbProfile?.wheelchair)?.cueKey);
-    const steps = instr ? instr.steps : [exercise.voicePrompt || exercise.description].filter(Boolean);
+    // a clinician's own exercise: THEIR instructions are the technique (never a built-in text of another exercise)
+    const instr = exercise.customSteps ? null : getExerciseInstruction(exercise.name, analyzerFor(exercise, !!limbProfile?.wheelchair)?.cueKey);
+    const steps = exercise.customSteps || (instr ? instr.steps : [exercise.voicePrompt || exercise.description].filter(Boolean));
     return {
       instr, steps, safety: instr?.safety || exercise.tips || '',
       facts: {
@@ -3437,9 +3442,17 @@ export default function Training() {
         : `Set ${currentSet}, ${finalReps} reps${typeof setAcc === 'number' ? `, ${Math.round(setAcc)}% accuracy` : ''}.`;
       speakPriority(nextLeg ? `${numbers} ${nextLeg}` : numbers, { rate: 1.05 });
     }
-    (usePre ? pre.promise : aiDebrief(facts)).then((ai) => {
+    // a clinician's MANUAL exercise was never measured — no technique analysis (never "I could not see"); the rest
+    // card shows the set and the clinician's note
+    const manualSet = !!currentExercise?.manual;
+    (manualSet ? Promise.resolve('manual') : usePre ? pre.promise : aiDebrief(facts)).then((ai) => {
       if (seq !== debriefSeqRef.current) return;                    // a newer set / exercise took over
       if (!inRestNow()) { debriefPendingRef.current = 0; }
+      if (ai === 'manual') {
+        debriefPendingRef.current = 0;
+        setRestDebrief({ items: [{ kind: 'note', title: isHe ? `סט ${currentSet} הושלם — ${currentExercise.name}` : `Set ${currentSet} done — ${currentExercise.name}`, detail: currentExercise.clinicianNote ? [currentExercise.clinicianNote] : [] }] });
+        return;
+      }
       // (the screen may still be switching to the rest when an instant answer arrives)
       const inRest = phaseRef.current === PHASE.RESTING || phaseRef.current === PHASE.EXERCISE_DONE || Date.now() - setEndedAt < 2000;
       if (!inRest) return;
@@ -4593,6 +4606,27 @@ export default function Training() {
               <div className="text-white/70 text-xs">
                 {isHe ? 'ממשיכים רק כשאתה מוכן' : 'We move on only when you are ready'}
                 {voiceNext.listening && (isHe ? ' — לחץ, או אמור "תרגיל הבא" 🎤' : ' — tap, or say "next exercise" 🎤')}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* A CLINICIAN'S MANUAL EXERCISE: their instructions on screen + the trainee marks the set done */}
+        {phase === PHASE.EXERCISING && currentExercise?.manual && (
+          <div className="absolute inset-x-3 bottom-[11rem] z-[19] flex justify-center" dir={isHe ? 'rtl' : 'ltr'}>
+            <div className="bg-white/95 rounded-2xl shadow-xl px-4 py-3 max-w-md w-full space-y-2">
+              <div className="text-xs font-semibold text-teal-800">{'🩺'} {isHe ? 'תרגיל מהפיזיותרפיסט שלך' : 'From your physiotherapist'}</div>
+              {(currentExercise.customSteps || []).length > 0 && (
+                <ol className="text-sm text-gray-800 list-decimal ps-5 space-y-0.5">{currentExercise.customSteps.map((s, i) => <li key={i}>{s}</li>)}</ol>
+              )}
+              {currentExercise.clinicianNote && <div className="text-xs text-gray-600">{currentExercise.clinicianNote}</div>}
+              <div className="flex items-center justify-between gap-3">
+                <span className="text-sm text-gray-700 tabular-nums">
+                  {currentExercise.timed ? (isHe ? `${formatTime(timer)} / ${currentExercise.reps} שניות` : `${formatTime(timer)} / ${currentExercise.reps} s`) : (isHe ? `${currentExercise.reps} חזרות` : `${currentExercise.reps} reps`)}
+                  {' · '}{isHe ? `סט ${currentSet}/${totalSets}` : `Set ${currentSet}/${totalSets}`}
+                </span>
+                <button onClick={() => { exerciseStateRef.current = { ...exerciseStateRef.current, reps: parseInt(currentExercise.reps, 10) || 0 }; setDisplayReps(parseInt(currentExercise.reps, 10) || 0); handleSetComplete(); }}
+                  className="px-4 py-2 rounded-xl bg-teal-700 text-white font-bold">{isHe ? '✓ סיימתי את הסט' : '✓ Set done'}</button>
               </div>
             </div>
           </div>

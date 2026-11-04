@@ -201,3 +201,20 @@ test('the clinician’s plan: only the assigned clinician; validated; audited; p
   await s.clinic.setPlan(pt, 'T1', { mode: 'auto' });                         // back to the automatic plan
   assert.ok((await s.clinic.myAudit({ uid: 'T1' })).some(r => r.action === 'set_plan'));
 });
+
+test('the clinician’s own (custom) exercise: saved with its text; a name is required; the numbers validated', async () => {
+  const s = setup();
+  const pt = await approvedClinician(s);
+  const { code } = await s.clinic.createInvite(pt);
+  await s.clinic.link({ uid: 'T1' }, code, true);
+  await rejects(s.clinic.setPlan(pt, 'T1', { mode: 'manual', exercises: [{ custom: true, name: 'x', sets: 3, reps: 10 }] }), 'custom_name_required');
+  await rejects(s.clinic.setPlan(pt, 'T1', { mode: 'manual', exercises: [{ custom: true, name: 'מתיחה', sets: 3, reps: 1000 }] }), 'bad_numbers');
+  await s.clinic.setPlan(pt, 'T1', { mode: 'manual_plus_auto', exercises: [
+    { custom: true, id: 'c1', name: 'מתיחת גדם עם מגבת', instructions: 'משוך בעדינות 30 שניות.', group: 'knee', unit: 'sec', sets: 2, reps: 30, rest: 30 },
+    { custom: true, name: 'סקוואט על כרית', basedOn: 'miniSquat', group: 'knee', sets: 3, reps: 10 },
+  ] });
+  const saved = await s.db.get('users/T1/clinicianPlans/current');
+  assert.equal(saved.exercises.length, 2);
+  assert.deepEqual([saved.exercises[0].unit, saved.exercises[0].group, saved.exercises[1].basedOn], ['sec', 'knee', 'miniSquat']);
+  assert.ok(saved.exercises[1].id);
+});
