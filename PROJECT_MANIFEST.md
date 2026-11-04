@@ -913,7 +913,7 @@ Production stays at the #74 coach (the owner: "the way it coached there was perf
 | 2 | Full two-way voice (Stage 3 #13) | **DROPPED by the owner (2026-11-03): only the coach speaks** — off behind `FEATURES.VOICE_COMMANDS` (#87) |
 | 3 | The Coach Notebook (#17) + adaptive coach styles (#12) | **Built — #84, awaiting the owner's check** |
 | 4 | Stage 4 — the progress screen + load adaptation | **Built — #88 + #89, awaiting the owner's check** (recovery scoring #5 not built) |
-| 5 | Stage 4B — the physio portal | **Steps 0–5 built (#93–#97) — awaiting the owner's check; the console rules still to publish** |
+| 5 | Stage 4B — the physio portal | **Steps 0–5 + custom exercises built (#93–#98) and VERIFIED by the owner (2026-11-04); the console rules still to publish (the owner pastes `firestore.rules`)** |
 | 6 | The pilot | Last |
 
 ## (Superseded) Next stage — proposal of 2026-11-01
@@ -2229,3 +2229,4 @@ Two critical corrections to the existing onboarding (Stages 1B/1C), completed **
 - **2026-11-04:** Stage 4B step 4: pushed `2f1c4e0` → deployed (bundle `index-Xi72XB5x.js`), verified in the served bundle. Restore point `checkpoint-2026-11-04-4b-limits` (#96).
 - **2026-11-04:** Stage 4B step 5: pushed `4396836` → deployed (bundle `index-Bmk4RXIp.js`), verified in the served bundle. Restore point `checkpoint-2026-11-04-4b-plan` (#97).
 - **2026-11-04:** The clinician's own exercises: pushed `0448201` → deployed, verified in the served bundle. Restore point `checkpoint-2026-11-04-custom-exercises` (#98).
+- **2026-11-04:** The owner verified Stage 4B (steps 0–5 + the custom exercises): 'checked, everything works, let's continue'. Remaining in 4B: publishing `firestore.rules` in the Firebase console (the owner pastes it; the old rules kept aside as a backup). Next: the pilot preparation — awaiting the owner's approval.
