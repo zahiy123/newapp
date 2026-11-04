@@ -1,4 +1,8 @@
-import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
+import { BrowserRouter, Routes, Route, Navigate, useLocation } from 'react-router-dom';
+import { getLoginAs } from './utils/clinicApi';
+import ClinicianPortal from './pages/ClinicianPortal';
+import AdminPage from './pages/AdminPage';
+import MyCare from './pages/MyCare';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { LanguageProvider } from './context/LanguageContext';
 import ErrorBoundary from './components/ErrorBoundary';
@@ -18,7 +22,11 @@ import AnatomicScan from './pages/AnatomicScan';
 import ValidationReport from './pages/ValidationReport';
 
 function PrivateRoute({ children }) {
-  const { user, loading, authError, refreshProfile } = useAuth();
+  const { user, loading, authError, refreshProfile, portal } = useAuth();
+  const location = useLocation();
+  // a clinician (by the server's answer, or the clinician login) never lands in the trainee app
+  const clinicianSide = portal?.role === 'clinician' || getLoginAs() === 'clinician';
+  if (user && !loading && clinicianSide && !location.pathname.startsWith('/clinician')) return <Navigate to="/clinician" />;
   if (loading) return <div className="min-h-screen flex items-center justify-center text-gray-600">Loading...</div>;
   if (authError) return (
     <div className="min-h-screen flex items-center justify-center" dir="rtl">
@@ -46,7 +54,10 @@ function App() {
         <LanguageProvider>
           <Routes>
             <Route path="/login" element={<PublicRoute><Login /></PublicRoute>} />
+            <Route path="/clinician" element={<PrivateRoute><ClinicianPortal /></PrivateRoute>} />
             <Route element={<PrivateRoute><Layout /></PrivateRoute>}>
+              <Route path="/admin" element={<AdminPage />} />
+              <Route path="/care" element={<MyCare />} />
               <Route path="/" element={<Dashboard />} />
               <Route path="/profile" element={<ProfileGate />} />
               <Route path="/sport-selection" element={<SportSelection />} />

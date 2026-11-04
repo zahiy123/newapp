@@ -2,7 +2,8 @@ import 'dotenv/config';
 import express from 'express';
 import cors from 'cors';
 import coachRoutes from './routes/coach.js';
-import { initFirebaseAdmin, requireAuth } from './services/firebaseAdmin.js';
+import clinicRoutes from './routes/clinic.js';
+import { initFirebaseAdmin, requireAuth, requireAuthStrict, adminReady } from './services/firebaseAdmin.js';
 
 // Initialize Firebase Admin (auth middleware active only when credentials are configured)
 initFirebaseAdmin();
@@ -34,6 +35,12 @@ app.use(cors({
 }));
 app.use(express.json({ limit: '10mb' }));
 
+// the wake-up ping is public (it only wakes the free server — no data, no AI)
+app.get('/api/coach/warm', (req, res) => res.json({ ok: true }));
+
+// THE PHYSIOTHERAPIST PORTAL (Stage 4B): STRICT auth — closed without the Admin SDK, a valid token always
+app.use('/api/clinic', requireAuthStrict, clinicRoutes);
+
 // Set 90s timeout for coach routes (AI generation can be slow)
 // requireAuth verifies Firebase ID token when credentials are configured
 app.use('/api/coach', (req, res, next) => {
@@ -43,7 +50,8 @@ app.use('/api/coach', (req, res, next) => {
 }, requireAuth, coachRoutes);
 
 app.get('/api/health', (req, res) => {
-  res.json({ status: 'ok' });
+  // authEnforced: the server verifies every token (needs FIREBASE_SERVICE_ACCOUNT on the host)
+  res.json({ status: 'ok', authEnforced: adminReady() });
 });
 
 app.get('/', (req, res) => {

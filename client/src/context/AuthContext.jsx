@@ -8,6 +8,7 @@ import {
   sendPasswordResetEmail
 } from 'firebase/auth';
 import { doc, getDoc } from 'firebase/firestore';
+import { clinic } from '../utils/clinicApi';
 
 const AuthContext = createContext();
 
@@ -22,6 +23,19 @@ export function AuthProvider({ children }) {
   const [userProfile, setUserProfile] = useState(null);
   const [loading, setLoading] = useState(true);
   const [authError, setAuthError] = useState(null);
+  // the portal role from the SERVER (Stage 4B): { role: 'trainee'|'clinician', isAdmin, clinicianStatus, myClinician }
+  // or { unavailable: true } — the screens follow it; the server still checks every request
+  const [portal, setPortal] = useState(null);
+
+  async function refreshPortal({ forceToken = false } = {}) {
+    try {
+      if (forceToken && auth.currentUser) await auth.currentUser.getIdToken(true);   // a new role claim is read
+    } catch { /* offline */ }
+    const r = await clinic('GET', '/me');
+    const p = r.ok ? r.data : { unavailable: true, error: r.error };
+    setPortal(p);
+    return p;
+  }
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
@@ -37,8 +51,10 @@ export function AuthProvider({ children }) {
           console.error('Failed to load profile:', err.message);
           setAuthError(err.message);
         }
+        refreshPortal();
       } else {
         setUserProfile(null);
+        setPortal(null);
       }
       setLoading(false);
     });
@@ -86,7 +102,9 @@ export function AuthProvider({ children }) {
     register,
     logout,
     resetPassword,
-    refreshProfile
+    refreshProfile,
+    portal,
+    refreshPortal,
   };
 
   return (

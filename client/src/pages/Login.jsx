@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next';
 import { useAuth } from '../context/AuthContext';
 import { useLanguage } from '../context/LanguageContext';
 import { useNavigate } from 'react-router-dom';
+import { clinic, setLoginAs, getLoginAs } from '../utils/clinicApi';
 
 const MAX_ATTEMPTS = 5;
 const LOCKOUT_MS = 60000; // 1 minute
@@ -14,6 +15,10 @@ export default function Login() {
   const navigate = useNavigate();
 
   const [isLogin, setIsLogin] = useState(true);
+  // Stage 4B: a SEPARATE entrance for trainees and for physiotherapists / clinicians
+  const [as, setAs] = useState(() => getLoginAs());
+  const [clinName, setClinName] = useState('');
+  const [clinLicense, setClinLicense] = useState('');
   const [showForgot, setShowForgot] = useState(false);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -40,15 +45,22 @@ export default function Login() {
       return;
     }
 
+    if (!isLogin && as === 'clinician' && clinName.trim().length < 2) {
+      setError(isRTL ? 'יש להזין שם מלא' : 'Enter your full name');
+      return;
+    }
     setLoading(true);
     try {
+      setLoginAs(as);
       if (isLogin) {
         await login(email, password);
         attemptsRef.current = 0;
       } else {
         await register(email, password);
+        // a clinician's account starts as a REQUEST — the admin approves it (the role is set only by the server)
+        if (as === 'clinician') await clinic('POST', '/request', { name: clinName.trim(), licenseNo: clinLicense.trim() });
       }
-      navigate('/');
+      navigate(as === 'clinician' ? '/clinician' : '/');
     } catch (err) {
       if (isLogin) {
         attemptsRef.current++;
@@ -96,6 +108,16 @@ export default function Login() {
         <h1 className="text-3xl font-bold text-center text-gray-800 mb-2">
           {t('app.title')}
         </h1>
+        {!showForgot && (
+          <div className="grid grid-cols-2 gap-2 mb-4" role="tablist">
+            {[['trainee', isRTL ? 'כניסה כמתאמן' : 'Trainee'], ['clinician', isRTL ? 'כניסה כפיזיותרפיסט / מטפל' : 'Physiotherapist / clinician']].map(([id, label]) => (
+              <button key={id} type="button" role="tab" aria-selected={as === id} onClick={() => setAs(id)}
+                className={`py-2.5 rounded-xl text-sm font-bold border-2 transition ${as === id ? (id === 'clinician' ? 'border-teal-600 bg-teal-50 text-teal-800' : 'border-blue-600 bg-blue-50 text-blue-800') : 'border-gray-200 text-gray-600'}`}>
+                {id === 'clinician' ? '🩺 ' : '🏃 '}{label}
+              </button>
+            ))}
+          </div>
+        )}
         <h2 className="text-lg text-center text-gray-500 mb-6">
           {showForgot ? (isRTL ? 'איפוס סיסמה' : 'Reset Password') : isLogin ? t('auth.login') : t('auth.register')}
         </h2>
@@ -187,6 +209,22 @@ export default function Login() {
                     className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none"
                   />
                 </div>
+              )}
+
+              {!isLogin && as === 'clinician' && (
+                <>
+                  <div>
+                    <label htmlFor="clin-name" className="block text-sm font-medium text-gray-700 mb-1">{isRTL ? 'שם מלא' : 'Full name'}</label>
+                    <input id="clin-name" value={clinName} onChange={(e) => setClinName(e.target.value)} required
+                      className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-teal-500 focus:border-transparent outline-none" />
+                  </div>
+                  <div>
+                    <label htmlFor="clin-license" className="block text-sm font-medium text-gray-700 mb-1">{isRTL ? 'מספר רישיון (לא חובה)' : 'License number (optional)'}</label>
+                    <input id="clin-license" value={clinLicense} onChange={(e) => setClinLicense(e.target.value)}
+                      className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-teal-500 focus:border-transparent outline-none" />
+                  </div>
+                  <div className="text-xs text-teal-800 bg-teal-50 rounded-lg px-3 py-2">{isRTL ? 'חשבון מטפל נפתח לאחר אישור של מנהל המערכת.' : 'A clinician account opens after the system admin approves it.'}</div>
+                </>
               )}
 
               <button

@@ -52,6 +52,7 @@ export function requireAuth(req, res, next) {
     .then(decoded => {
       req.uid = decoded.uid;
       req.userEmail = decoded.email;
+      req.userRole = decoded.role || null;          // a custom claim — set ONLY by the server (clinic.js)
       next();
     })
     .catch(err => {
@@ -59,3 +60,29 @@ export function requireAuth(req, res, next) {
       res.status(401).json({ error: 'Invalid or expired token' });
     });
 }
+
+
+/** Is the Admin SDK connected (the server can verify tokens)? Shown in /api/health. */
+export const adminReady = () => !!app;
+
+/**
+ * STRICT auth for the clinic portal (Stage 4B, zero trust): never a pass-through — without the Admin SDK the
+ * portal is closed (503), and every request must carry a valid token.
+ */
+export function requireAuthStrict(req, res, next) {
+  if (!app) return res.status(503).json({ error: 'auth_not_configured' });
+  return requireAuth(req, res, next);
+}
+
+/** The clinic's storage adapter over Firestore (server-only collections; the Admin SDK bypasses the rules). */
+export function adminDb() {
+  const fs = admin.firestore();
+  return {
+    async get(p) { const d = await fs.doc(p).get(); return d.exists ? d.data() : null; },
+    async set(p, data) { await fs.doc(p).set(data); },
+    async update(p, data) { await fs.doc(p).set(data, { merge: true }); },
+    async add(c, data) { return (await fs.collection(c).add(data)).id; },
+    async where(c, field, value) { const q = await fs.collection(c).where(field, '==', value).limit(500).get(); return q.docs.map(d => ({ id: d.id, ...d.data() })); },
+  };
+}
+export const adminAuth = () => ({ setClaims: (uid, claims) => admin.auth().setCustomUserClaims(uid, claims) });

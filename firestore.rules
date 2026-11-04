@@ -1,0 +1,35 @@
+rules_version = '2';
+// ============================================================
+// Firestore security rules — as code (Stage 4B step 0, 2026-11-04). Tested in firestore-tests/ on the emulator.
+// ZERO TRUST:
+//   • every user reads / writes ONLY their own users/{uid} tree (the profile, workouts, painLog, games,
+//     coachNotebook, anatomic_data, validationReps …);
+//   • what a clinician sets for a trainee (clinicalConstraints, clinicianPlans, clinicalLocks) the trainee can
+//     READ but never write — only the server writes it, after its own checks;
+//   • the portal's collections (clinicianRequests, clinicians, invites, assignments, auditLog) are server-only:
+//     no client reads or writes them, ever. Clinicians reach trainee data ONLY through the server (audited).
+//   • everything else: denied.
+// ============================================================
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function isOwner(uid) { return request.auth != null && request.auth.uid == uid; }
+
+    match /users/{uid} {
+      allow read, write: if isOwner(uid);
+
+      // set by the clinician through the server — the trainee reads, never writes
+      match /clinicalConstraints/{doc=**} { allow read: if isOwner(uid); allow write: if false; }
+      match /clinicianPlans/{doc=**} { allow read: if isOwner(uid); allow write: if false; }
+      match /clinicalLocks/{doc=**} { allow read: if isOwner(uid); allow write: if false; }
+
+      // everything else the trainee's own app keeps (workouts, painLog, games, coachNotebook, anatomic_data …)
+      match /{sub}/{doc=**} {
+        allow read, write: if isOwner(uid)
+          && !(sub in ['clinicalConstraints', 'clinicianPlans', 'clinicalLocks']);
+      }
+    }
+
+    // the portal — server only (the Admin SDK); never a client
+    match /{document=**} { allow read, write: if false; }
+  }
+}

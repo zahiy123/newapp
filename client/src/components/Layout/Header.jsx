@@ -5,7 +5,7 @@ import { Link, useNavigate } from 'react-router-dom';
 
 export default function Header() {
   const { t } = useTranslation();
-  const { user, logout } = useAuth();
+  const { user, logout, portal } = useAuth();
   const { lang, toggleLanguage } = useLanguage();
   const navigate = useNavigate();
 
@@ -39,6 +39,8 @@ export default function Header() {
                 <Link to="/training" className="hover:text-blue-200 transition">{t('nav.training')}</Link>
                 <Link to="/stats" className="hover:text-blue-200 transition">{t('nav.stats')}</Link>
                 <Link to="/progress" className="hover:text-blue-200 transition">{lang === 'he' ? 'התקדמות' : 'Progress'}</Link>
+                <Link to="/care" className="hover:text-blue-200 transition">{lang === 'he' ? 'המטפל שלי' : 'My clinician'}</Link>
+                {portal?.isAdmin && <Link to="/admin" className="hover:text-blue-200 transition">{lang === 'he' ? 'ניהול' : 'Admin'}</Link>}
               </nav>
               <button
                 onClick={handleLogout}
@@ -59,6 +61,8 @@ export default function Header() {
           <Link to="/training" className="hover:text-blue-200">{t('nav.training')}</Link>
           <Link to="/stats" className="hover:text-blue-200">{t('nav.stats')}</Link>
           <Link to="/progress" className="hover:text-blue-200">{lang === 'he' ? 'התקדמות' : 'Progress'}</Link>
+          <Link to="/care" className="hover:text-blue-200">{lang === 'he' ? 'המטפל שלי' : 'My clinician'}</Link>
+          {portal?.isAdmin && <Link to="/admin" className="hover:text-blue-200">{lang === 'he' ? 'ניהול' : 'Admin'}</Link>}
         </nav>
       )}
     </header>
