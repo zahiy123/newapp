@@ -1,8 +1,15 @@
 import { useRef, useState, useCallback, useEffect } from 'react';
+import { isRfdetr, rfdetrInput, decodeRfdetr } from '../engine/detection/rfdetrDecode';
 
-// Equipment model: 16 classes trained on adaptive sports gear
-const EQUIPMENT_MODEL_PATH = '/models/equipment_yolov8n_q.onnx';
-const INPUT_SIZE = 640;
+// Equipment model: 16 classes trained on adaptive sports gear.
+// THE LICENCE (owner, 2026-11-04): the RF-DETR model (Apache 2.0) is tried FIRST; the old Ultralytics model (AGPL)
+// is only the fallback until the RF-DETR file is deployed — it must not ship in the commercial pilot.
+const MODEL_CANDIDATES = [
+  { path: '/models/equipment_rfdetr_q.onnx', kind: 'rfdetr', size: 384, budgetMs: 150 },
+  { path: '/models/equipment_yolov8n_q.onnx', kind: 'yolo', size: 640, budgetMs: 40 },
+];
+const EQUIPMENT_MODEL_PATH = MODEL_CANDIDATES[1].path;
+const INPUT_SIZE = 640;      // (the YOLO model's input; the active model's own size is in sizeRef)
 const CONFIDENCE_THRESHOLD = 0.4;
 const NMS_IOU_THRESHOLD = 0.5;
 
@@ -198,6 +205,8 @@ function nms(boxes, scores, classIds, iouThreshold) {
 
 export function useEquipmentDetection(sport = 'football') {
   const sessionRef = useRef(null);
+  const kindRef = useRef('yolo');           // the active model's format: 'rfdetr' (Apache 2.0) | 'yolo' (the AGPL fallback)
+  const sizeRef = useRef(INPUT_SIZE);       // its square input size
   const animFrameRef = useRef(null);
   const frameCountRef = useRef(0);
   const canvasRef = useRef(null);
@@ -228,53 +237,40 @@ export function useEquipmentDetection(sport = 'football') {
       }
       const ort = ortModule;
 
-      canvasRef.current = document.createElement('canvas');
-      canvasRef.current.width = INPUT_SIZE;
-      canvasRef.current.height = INPUT_SIZE;
-
-      // Check if equipment model exists
-      try {
-        const probe = await fetch(EQUIPMENT_MODEL_PATH, { method: 'HEAD' });
-        if (!probe.ok) {
-          console.log('[Equipment] Model not found, falling back to ball-only detection');
+      // the candidates in order: the first that exists and is fast enough on this device
+      for (const cand of MODEL_CANDIDATES) {
+        if (cancelled) return;
+        try {
+          const probe = await fetch(cand.path, { method: 'HEAD' });
+          if (!probe.ok || (probe.headers.get('content-type') || '').includes('text/html')) continue;
+        } catch { continue; }
+        try {
+          // (an RF-DETR transformer: WebGPU where the browser has it, else WASM; the YOLO model: WebGL / WASM)
+          const providers = cand.kind === 'rfdetr' ? ['webgpu', 'wasm'] : ['webgl', 'wasm'];
+          const session = await ort.InferenceSession.create(cand.path, { executionProviders: providers });
+          const size = cand.size;
+          const tensor = new ort.Tensor('float32', new Float32Array(3 * size * size), [1, 3, size, size]);
+          const start = performance.now();
+          await session.run({ [session.inputNames[0]]: tensor });
+          const elapsed = performance.now() - start;
+          if (cancelled) { session.release(); return; }
+          if (elapsed > cand.budgetMs) {
+            console.warn(`[Equipment] ${cand.path} too slow here (${elapsed.toFixed(0)}ms > ${cand.budgetMs}ms) — next candidate`);
+            session.release();
+            continue;
+          }
+          kindRef.current = isRfdetr(session.outputNames) ? 'rfdetr' : 'yolo';
+          sizeRef.current = size;
+          canvasRef.current = document.createElement('canvas');
+          canvasRef.current.width = size;
+          canvasRef.current.height = size;
+          sessionRef.current = session;
+          console.log(`[Equipment] Ready: ${cand.path} (${kindRef.current}, ${elapsed.toFixed(0)}ms, ${CLASS_LABELS.length} classes)`);
+          setReady(true);
           return;
-        }
-        const contentType = probe.headers.get('content-type') || '';
-        if (contentType.includes('text/html')) return;
-      } catch {
-        return;
+        } catch { /* the next candidate */ }
       }
-
-      if (cancelled) return;
-
-      try {
-        const session = await ort.InferenceSession.create(EQUIPMENT_MODEL_PATH, {
-          executionProviders: ['webgl', 'wasm'],
-        });
-
-        // Warmup benchmark
-        const dummyInput = new Float32Array(1 * 3 * INPUT_SIZE * INPUT_SIZE);
-        const tensor = new ort.Tensor('float32', dummyInput, [1, 3, INPUT_SIZE, INPUT_SIZE]);
-        const inputName = session.inputNames[0];
-        const start = performance.now();
-        await session.run({ [inputName]: tensor });
-        const elapsed = performance.now() - start;
-
-        if (cancelled) { session.release(); return; }
-
-        // If too slow (>40ms), fall back to ball-only model
-        if (elapsed > 40) {
-          console.warn(`[Equipment] Model too slow (${elapsed.toFixed(0)}ms), falling back`);
-          session.release();
-          return;
-        }
-
-        sessionRef.current = session;
-        console.log(`[Equipment] Ready: ${EQUIPMENT_MODEL_PATH} (${elapsed.toFixed(0)}ms, ${CLASS_LABELS.length} classes)`);
-        setReady(true);
-      } catch {
-        // Silent failure
-      }
+      console.log('[Equipment] no equipment model on this device — ball-only detection');
     }
 
     init();
@@ -286,9 +282,10 @@ export function useEquipmentDetection(sport = 'football') {
     const canvas = canvasRef.current;
     if (!canvas || !ortModule) return null;
     const ctx = canvas.getContext('2d', { willReadFrequently: true });
-    ctx.drawImage(videoEl, 0, 0, INPUT_SIZE, INPUT_SIZE);
-    const imageData = ctx.getImageData(0, 0, INPUT_SIZE, INPUT_SIZE);
-    const { data } = imageData;
+    const S = sizeRef.current;
+    ctx.drawImage(videoEl, 0, 0, S, S);
+    const { data } = ctx.getImageData(0, 0, S, S);
+    if (kindRef.current === 'rfdetr') return new ortModule.Tensor('float32', rfdetrInput(data, S), [1, 3, S, S]);
 
     const float32 = new Float32Array(3 * INPUT_SIZE * INPUT_SIZE);
     const area = INPUT_SIZE * INPUT_SIZE;
@@ -385,8 +382,14 @@ export function useEquipmentDetection(sport = 'football') {
 
       const inputName = sessionRef.current.inputNames[0];
       const results = await sessionRef.current.run({ [inputName]: inputTensor });
-      const outputName = sessionRef.current.outputNames[0];
-      const detections = postprocess(results[outputName]);
+      let detections;
+      if (kindRef.current === 'rfdetr') {
+        const dets = results.dets; const labels = results.labels;
+        detections = decodeRfdetr(dets.data, labels.data, { queries: dets.dims[1], numClasses: CLASS_LABELS.length, threshold: CONFIDENCE_THRESHOLD })
+          .map(d => ({ classId: d.classId, className: CLASS_LABELS[d.classId] || `class_${d.classId}`, confidence: d.score, x: d.x, y: d.y, w: d.w, h: d.h }));
+      } else {
+        detections = postprocess(results[sessionRef.current.outputNames[0]]);
+      }
 
       // Update tracker
       const tracked = trackerRef.current.update(detections);
